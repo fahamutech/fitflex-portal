@@ -1,0 +1,185 @@
+@import "tailwindcss";
+
+/*
+ * FitFlex Af — design tokens aligned with Untitled UI React design system.
+ * Colour palette from Untitled UI brand green scale.
+ * Keep in sync with fitflexmobile/lib/shared/design_tokens.dart.
+ */
+@theme {
+  /* ── Brand (green) ── */
+  --color-brand-25:   #f6fef9;
+  --color-brand-50:   #edfdf3;
+  --color-brand-100:  #d3fae5;
+  --color-brand-200:  #aaf4cf;
+  --color-brand-300:  #75e7b3;
+  --color-brand-400:  #3dd98e;
+  --color-brand-500:  #17b26a;
+  --color-brand-600:  #079455;
+  --color-brand-700:  #067647;
+  --color-brand-800:  #085d3a;
+  --color-brand-900:  #074d31;
+  --color-brand-950:  #053321;
+
+  /* ── Neutrals (gray-900 based — Untitled UI style) ── */
+  --color-gray-25:   #fcfcfd;
+  --color-gray-50:   #f9fafb;
+  --color-gray-100:  #f2f4f7;
+  --color-gray-200:  #eaecf0;
+  --color-gray-300:  #d0d5dd;
+  --color-gray-400:  #98a2b3;
+  --color-gray-500:  #667085;
+  --color-gray-600:  #475467;
+  --color-gray-700:  #344054;
+  --color-gray-800:  #1d2939;
+  --color-gray-900:  #101828;
+  --color-gray-950:  #0c111d;
+
+  /* ── Semantic ── */
+  --color-error-25:   #fffbfa;
+  --color-error-50:   #fef3f2;
+  --color-error-100:  #fee4e2;
+  --color-error-200:  #fecdca;
+  --color-error-300:  #fda29b;
+  --color-error-500:  #f04438;
+  --color-error-600:  #d92d20;
+  --color-error-700:  #b42318;
+  --color-error-800:  #912018;
+
+  --color-warning-25:  #fffcf5;
+  --color-warning-50:  #fffaeb;
+  --color-warning-100: #fef0c7;
+  --color-warning-200: #fedf89;
+  --color-warning-300: #fec84b;
+  --color-warning-500: #f79009;
+  --color-warning-600: #dc6803;
+  --color-warning-700: #b54708;
+  --color-warning-800: #93370d;
+
+  --color-success-25:  #f6fef9;
+  --color-success-50:  #ecfdf3;
+  --color-success-100: #dcfae6;
+  --color-success-200: #abefc6;
+  --color-success-300: #6ce9a6;
+  --color-success-500: #17b26a;
+  --color-success-600: #079455;
+  --color-success-700: #067647;
+  --color-success-800: #085d3a;
+
+  /* ── Aliases (used in components) ── */
+  --color-fg-primary:    var(--color-gray-900);
+  --color-fg-secondary:  var(--color-gray-700);
+  --color-fg-tertiary:   var(--color-gray-600);
+  --color-fg-quaternary: var(--color-gray-500);
+  --color-fg-disabled:   var(--color-gray-400);
+  --color-fg-brand:      var(--color-brand-700);
+
+  --color-bg-primary:    #ffffff;
+  --color-bg-secondary:  var(--color-gray-50);
+  --color-bg-tertiary:   var(--color-gray-100);
+
+  --color-border-primary:   var(--color-gray-300);
+  --color-border-secondary: var(--color-gray-200);
+
+  /* ── Sidebar ── */
+  --color-sidebar-bg:     var(--color-gray-900);
+  --color-sidebar-hover:  var(--color-gray-800);
+  --color-sidebar-active: var(--color-gray-700);
+  --color-sidebar-text:   var(--color-gray-400);
+  --color-sidebar-text-active: #ffffff;
+
+  /* ── Radius (Untitled UI uses 6px / 8px / 12px / 16px pattern) ── */
+  --radius-xs: 0.25rem;
+  --radius-sm: 0.375rem;
+  --radius-md: 0.5rem;
+  --radius-lg: 0.625rem;
+  --radius-xl: 0.75rem;
+  --radius-2xl: 1rem;
+  --radius-full: 9999px;
+
+  /* ── Typography ── */
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
+
+  /* ── Shadows (Untitled UI shadow-xs / shadow-sm) ── */
+  --shadow-xs: 0px 1px 2px rgba(16,24,40,0.05);
+  --shadow-sm: 0px 1px 2px rgba(16,24,40,0.06), 0px 1px 3px rgba(16,24,40,0.1);
+  --shadow-md: 0px 4px 6px -2px rgba(16,24,40,0.03), 0px 12px 16px -4px rgba(16,24,40,0.08);
+  --shadow-lg: 0px 12px 16px -4px rgba(16,24,40,0.08), 0px 4px 6px -2px rgba(16,24,40,0.03);
+  --shadow-xl: 0px 20px 24px -4px rgba(16,24,40,0.08), 0px 8px 8px -4px rgba(16,24,40,0.03);
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html, body { height: 100%; margin: 0; }
+
+body {
+  background: var(--color-bg-secondary);
+  color: var(--color-fg-primary);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ── Untitled UI input base ── */
+.ui-input {
+  width: 100%;
+  border: 1px solid var(--color-border-primary);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-primary);
+  padding: 0.625rem 0.875rem;
+  font-size: 0.875rem;
+  line-height: 1.5rem;
+  color: var(--color-fg-primary);
+  outline: none;
+  box-shadow: var(--shadow-xs);
+  transition: border-color 0.1s ease, box-shadow 0.1s ease;
+}
+
+.ui-input::placeholder {
+  color: var(--color-fg-quaternary);
+}
+
+.ui-input:focus {
+  border-color: var(--color-brand-300);
+  box-shadow: 0 0 0 4px rgba(23,178,106,0.12), var(--shadow-xs);
+}
+
+.ui-input:disabled {
+  background: var(--color-bg-tertiary);
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+/* ── Data table ── */
+.ui-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.875rem;
+}
+
+.ui-table thead tr {
+  background: var(--color-gray-50);
+  border-bottom: 1px solid var(--color-border-secondary);
+}
+
+.ui-table th {
+  padding: 0.75rem 1rem;
+  text-align: left;
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--color-fg-tertiary);
+  white-space: nowrap;
+}
+
+.ui-table td {
+  padding: 0.875rem 1rem;
+  color: var(--color-fg-secondary);
+  border-bottom: 1px solid var(--color-border-secondary);
+}
+
+.ui-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.ui-table tbody tr:hover td {
+  background: var(--color-gray-25);
+}

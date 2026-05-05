@@ -1,0 +1,441 @@
+// Thin client for the bfast-functions backend.
+
+const BASE = process.env.NEXT_PUBLIC_API_BASE || 'http://localhost:3000';
+
+export class ApiError extends Error {
+  status: number;
+  body: unknown;
+  constructor(status: number, body: unknown) {
+    super(`API ${status}`);
+    this.status = status;
+    this.body = body;
+  }
+}
+
+let _onUnauthorized: (() => void) | null = null;
+
+/** Register a callback invoked when any API call returns 401. */
+export function setOnUnauthorized(cb: (() => void) | null) {
+  _onUnauthorized = cb;
+}
+
+async function request<T>(path: string, opts: RequestInit = {}, token?: string): Promise<T> {
+  const res = await fetch(`${BASE}${path}`, {
+    ...opts,
+    headers: {
+      'content-type': 'application/json',
+      ...(token ? { authorization: `Bearer ${token}` } : {}),
+      ...(opts.headers || {})
+    }
+  });
+  const body = res.status === 204 ? null : await res.json().catch(() => null);
+  if (!res.ok) {
+    if (res.status === 401 && _onUnauthorized) {
+      _onUnauthorized();
+    }
+    throw new ApiError(res.status, body);
+  }
+  return body as T;
+}
+
+export const api = {
+  firebaseSession: (idToken: string, requestedRole: 'member' | 'trainer' | 'gym_owner' | 'gym_operator' | 'admin' = 'gym_operator') =>
+    request<{ token: string; user: { id: string; userType: string; gymId?: string; email?: string } }>(
+      '/auth/firebase/session', { method: 'POST', body: JSON.stringify({ idToken, requestedRole }) }
+    ),
+  login: (email: string, password: string) =>
+    request<{ token: string; user: { id: string; userType: string; gymId?: string } }>(
+      '/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) }
+    ),
+  dashboard: (token: string) => request<DashboardResponse>('/operator/dashboard', {}, token),
+  recentCheckIns: (token: string) => request<CheckIn[]>('/operator/checkins', {}, token),
+  checkIn: (token: string, qrToken: string) =>
+    request<CheckInResult>('/operator/checkins', { method: 'POST', body: JSON.stringify({ qrToken }) }, token),
+  adminGyms: (token: string) => request<Gym[]>('/admin/gyms', {}, token),
+  saveGym: (token: string, gym: Partial<Gym>) =>
+    request<Gym>('/admin/gyms', { method: 'POST', body: JSON.stringify(gym) }, token),
+  deleteGym: (token: string, id: string) =>
+    request<{ ok: boolean; gym: Gym }>(`/admin/gyms/${id}`, { method: 'DELETE' }, token),
+  gymOwners: (token: string) => request<GymOwner[]>('/admin/gym-owners', {}, token),
+  saveGymOwner: (token: string, owner: Partial<GymOwner>) =>
+    request<GymOwner>('/admin/gym-owners', { method: 'POST', body: JSON.stringify(owner) }, token),
+  deleteGymOwner: (token: string, id: string) =>
+    request<{ ok: boolean; owner: GymOwner }>(`/admin/gym-owners/${id}`, { method: 'DELETE' }, token),
+  adminTrainers: (token: string) => request<TrainerProfile[]>('/admin/trainers', {}, token),
+  saveTrainer: (token: string, trainer: Partial<TrainerProfile>) =>
+    request<TrainerProfile>('/admin/trainers', { method: 'POST', body: JSON.stringify(trainer) }, token),
+  deleteTrainer: (token: string, id: string) =>
+    request<{ ok: boolean; trainer: TrainerProfile }>(`/admin/trainers/${id}`, { method: 'DELETE' }, token),
+  trainerBookings: (token: string) => request<TrainerBooking[]>('/admin/trainer-bookings', {}, token),
+  updateTrainerBooking: (token: string, id: string, status: 'confirmed' | 'completed' | 'cancelled') =>
+    request<TrainerBooking>(`/admin/trainer-bookings/${id}`, { method: 'POST', body: JSON.stringify({ status }) }, token),
+  paymentRequests: (token: string) => request<PaymentRequest[]>('/admin/payment-requests', {}, token),
+  decidePayment: (token: string, id: string, decision: 'approve' | 'reject', reference?: string, note?: string) =>
+    request<PaymentRequest>(`/admin/payment-requests/${id}/decision`, {
+      method: 'POST',
+      body: JSON.stringify({ decision, reference, note })
+    }, token),
+  updatePayment: (token: string, id: string, patch: Pick<Partial<PaymentRequest>, 'status' | 'reference' | 'note'>) =>
+    request<PaymentRequest>(`/admin/payment-requests/${id}`, { method: 'POST', body: JSON.stringify(patch) }, token),
+  members: (token: string) => request<MemberSummary[]>('/admin/members', {}, token),
+  saveMember: (token: string, member: Partial<MemberSummary>) =>
+    request<MemberSummary>('/admin/members', { method: 'POST', body: JSON.stringify(member) }, token),
+  setMemberStatus: (token: string, id: string, status: 'active' | 'suspended') =>
+    request<MemberSummary>(`/admin/members/${id}/status`, { method: 'POST', body: JSON.stringify({ status }) }, token),
+  memberPayments: (token: string, memberId: string) =>
+    request<PaymentRequest[]>(`/admin/members/${memberId}/payments`, {}, token),
+  adminMemberCheckins: (token: string, memberId: string, from?: string, to?: string) => {
+    const qs = new URLSearchParams();
+    if (from) qs.set('from', from);
+    if (to) qs.set('to', to);
+    const q = qs.toString();
+    return request<MemberCheckinRecord[]>(`/admin/members/${memberId}/checkins${q ? '?' + q : ''}`, {}, token);
+  },
+  roleApprovals: (token: string) => request<RoleApproval[]>('/admin/role-approvals?status=all', {}, token),
+  decideRoleApproval: (token: string, id: string, decision: 'approve' | 'reject', note?: string) =>
+    request<RoleApproval>(`/admin/role-approvals/${id}/decision`, {
+      method: 'POST',
+      body: JSON.stringify({ decision, note })
+    }, token),
+  gymUsageSummary: (token: string) => request<GymUsageSummary[]>('/admin/gym-usage', {}, token),
+  gymVisitDetails: (token: string, gymId: string) => request<GymVisitRecord[]>(`/admin/gym-usage/${gymId}/visits`, {}, token),
+  bookKeeping: (token: string) => request<BookKeepingEntry[]>('/admin/book-keeping', {}, token),
+  listInvoices: (token: string, params?: { gymId?: string; status?: string; ownerId?: string }) => {
+    const qs = new URLSearchParams();
+    if (params?.gymId) qs.set('gymId', params.gymId);
+    if (params?.status) qs.set('status', params.status);
+    if (params?.ownerId) qs.set('ownerId', params.ownerId);
+    const q = qs.toString();
+    return request<Invoice[]>(`/admin/invoices${q ? '?' + q : ''}`, {}, token);
+  },
+  createInvoice: (token: string, data: { gymId: string; amount: number; note?: string; periodStart?: string; periodEnd?: string }) =>
+    request<Invoice>('/admin/invoices', { method: 'POST', body: JSON.stringify(data) }, token),
+  updateInvoice: (token: string, id: string, data: { receiptUrl?: string; paymentReference?: string; status?: string; note?: string }) =>
+    request<Invoice>(`/admin/invoices/${id}`, { method: 'PUT', body: JSON.stringify(data) }, token),
+  periodDistribution: (token: string) => request<PeriodDistribution[]>('/admin/distributions/periods', {}, token),
+  getSettings: (token: string) => request<PlatformSettings>('/admin/settings', {}, token),
+  updateSettings: (token: string, data: Partial<PlatformSettings>) =>
+    request<PlatformSettings>('/admin/settings', { method: 'PUT', body: JSON.stringify(data) }, token),
+
+  // ─── Owner/Operator role ───
+  ownerGyms: (token: string) => request<Gym[]>('/owner/gyms', {}, token),
+  ownerInvoices: (token: string) => request<Invoice[]>('/owner/invoices', {}, token),
+  ownerEarnings: (token: string) => request<OwnerEarnings>('/owner/earnings', {}, token),
+  ownerGymCheckins: (token: string, gymId: string) => request<CheckIn[]>(`/owner/gyms/${gymId}/checkins`, {}, token),
+
+  // ─── Trainer role ───
+  trainerProfile: (token: string) => request<TrainerProfile>('/trainer/me', {}, token),
+  trainerUpdateProfile: (token: string, data: Partial<TrainerProfile>) =>
+    request<TrainerProfile>('/trainer/me', { method: 'PUT', body: JSON.stringify(data) }, token),
+  trainerMyBookings: (token: string) => request<TrainerBooking[]>('/trainer/bookings', {}, token),
+  trainerCompleteBooking: (token: string, id: string) =>
+    request<TrainerBooking>(`/trainer/bookings/${id}/complete`, { method: 'POST' }, token),
+
+  // ─── Member role ───
+  memberMe: (token: string) => request<MemberMeResponse>('/me', {}, token),
+  memberProfile: (token: string, data: Partial<MemberProfile>) =>
+    request<{ user: MemberSummary }>('/me/profile', { method: 'POST', body: JSON.stringify(data) }, token),
+  memberCheckins: (token: string) => request<CheckIn[]>('/me/checkins', {}, token),
+  memberBookings: (token: string) => request<TrainerBooking[]>('/me/trainer-bookings', {}, token),
+  memberCreateBooking: (token: string, data: { trainerId: string; gymId: string; date: string; slot: string }) =>
+    request<{ booking: TrainerBooking; trainer: TrainerProfile }>('/me/trainer-bookings', { method: 'POST', body: JSON.stringify(data) }, token),
+  memberMyPayments: (token: string) => request<PaymentRequest[]>('/me/payments', {}, token),
+  memberSubscribe: (token: string, data: { tier: string; type?: string; homeGymId?: string }) =>
+    request<{ subscription: any; paymentRequest: PaymentRequest | null }>('/me/subscribe', { method: 'POST', body: JSON.stringify(data) }, token),
+  memberQr: (token: string) => request<{ token: string; expiresAt: string }>('/me/qr', {}, token),
+
+  // ─── Public ───
+  publicGyms: () => request<Gym[]>('/gyms'),
+  publicTrainers: (q?: string, specialty?: string) => {
+    const qs = new URLSearchParams();
+    if (q) qs.set('q', q);
+    if (specialty) qs.set('specialty', specialty);
+    const s = qs.toString();
+    return request<TrainerProfile[]>(`/trainers${s ? '?' + s : ''}`);
+  },
+  publicPasses: () => request<any[]>('/passes'),
+};
+
+export interface DashboardResponse {
+  gym: { id: string; name: string; tier: string; perVisitRate: number };
+  todayCount: number;
+  monthVisits: number;
+  payout: { band: number; commissionPct?: number; net?: number; flatFee?: boolean; payoutDelayDays?: number };
+}
+
+export interface CheckIn {
+  id: string;
+  memberId: string;
+  memberPhone: string | null;
+  memberEmail?: string | null;
+  timestamp: string;
+  passTier: string | null;
+  visitNumberInCycle: number | null;
+  gymTier: string;
+}
+
+export interface CheckInResult {
+  ok: boolean;
+  failure?: string;
+  checkin?: CheckIn;
+  visitNumberInCycle?: number;
+}
+
+export interface Gym {
+  id: string;
+  name: string;
+  tier: string;
+  location: string;
+  perVisitRate: number;
+  ratePerDay?: number;
+  ratePerWeek?: number;
+  ratePerMonth?: number;
+  commissionRate: number;
+  status: string;
+  accessMode?: 'free_online' | 'paid_visit';
+  venueType?: 'physical';
+  coordinates?: { lat: number | null; lng: number | null };
+  images?: string[];
+  amenities?: string[];
+  equipment?: string[];
+}
+
+export interface GymVisitRecord {
+  gymId: string;
+  gymName: string;
+  memberId: string;
+  memberName?: string;
+  memberEmail?: string;
+  date: string;
+  billingType: 'day' | 'week' | 'month';
+  rate: number;
+}
+
+export interface GymUsageSummary {
+  gymId: string;
+  gymName: string;
+  location: string;
+  totalVisits: number;
+  uniqueMembers: number;
+  dayVisits: number;
+  weekVisits: number;
+  monthVisits: number;
+  totalOwed: number;
+  totalPaid: number;
+  balance: number;
+}
+
+export interface BookKeepingEntry {
+  id: string;
+  date: string;
+  type: 'income' | 'expense';
+  category: string;
+  description: string;
+  amount: number;
+  reference?: string;
+  gymId?: string;
+  memberId?: string;
+}
+
+export interface SubscriptionTierConfig {
+  key: string;
+  label: string;
+  monthlyPrice: number;
+  visits: number;
+  gymAccess: string;
+}
+
+export interface PayoutBandConfig {
+  key: string;
+  label: string;
+  minVisits: number;
+  maxVisits: number;
+  payoutTiming: 'daily' | 'weekly' | 'biweekly' | 'monthly';
+  commissionPct: number;
+}
+
+export interface PlatformSettings {
+  id: string;
+  subscriptionTiers: SubscriptionTierConfig[];
+  payoutBands: PayoutBandConfig[];
+  paymentPeriodDays: number;
+  payoutModel: 'commission' | 'discounted_rate';
+  currency: string;
+  updatedAt: string;
+}
+
+export interface PeriodMemberDetail {
+  memberId: string;
+  memberName: string;
+  visitCount: number;
+  billingType: string;
+  amount: number;
+}
+
+export interface PeriodGymBreakdown {
+  gymId: string;
+  gymName: string;
+  location: string;
+  totalVisits: number;
+  uniqueMembers: number;
+  totalOwed: number;
+  totalPaid: number;
+  balance: number;
+  members: PeriodMemberDetail[];
+  invoice: Invoice | null;
+}
+
+export interface PeriodDistribution {
+  periodStart: string;
+  periodEnd: string;
+  periodDays: number;
+  gyms: PeriodGymBreakdown[];
+  totalOwed: number;
+  totalPaid: number;
+  balance: number;
+}
+
+export interface Invoice {
+  id: string;
+  gymId: string;
+  gymName: string;
+  ownerId: string | null;
+  ownerName: string | null;
+  amount: number;
+  status: 'unpaid' | 'paid';
+  note: string | null;
+  periodStart: string | null;
+  periodEnd: string | null;
+  receiptUrl: string | null;
+  paymentReference: string | null;
+  createdAt: string;
+  createdBy: string;
+  paidAt: string | null;
+}
+
+export interface PaymentRequest {
+  id: string;
+  memberId: string;
+  subscriptionId: string;
+  tier: string;
+  amountTzs: number;
+  status: string;
+  provider: string;
+  reference: string | null;
+  note?: string | null;
+  requestedAt: string;
+  decidedAt: string | null;
+  member?: { email?: string | null; phone?: string | null; displayName?: string | null };
+  subscription?: { tier?: string | null; status: string; renewsAt?: string } | null;
+}
+
+export interface MemberProfile {
+  fitnessGoal?: string | null;
+  fitnessLevel?: string | null;
+  heightCm?: number | null;
+  weightKg?: number | null;
+  dateOfBirth?: string | null;
+  gender?: string | null;
+  preferredWorkoutTimes?: string[];
+}
+
+export interface MemberSummary {
+  id: string;
+  email?: string | null;
+  phone?: string | null;
+  displayName?: string | null;
+  photoUrl?: string | null;
+  userType: string;
+  accountStatus?: 'active' | 'suspended';
+  memberProfile?: MemberProfile | null;
+  subscription?: { tier?: string | null; status: string; renewsAt: string } | null;
+  pendingPayment?: PaymentRequest | null;
+}
+
+export interface RoleApproval {
+  id: string;
+  email?: string | null;
+  displayName?: string | null;
+  photoUrl?: string | null;
+  userType: 'gym_operator' | 'trainer';
+  approvalStatus?: 'pending_approval' | 'approved' | 'rejected';
+  approvalNote?: string | null;
+  createdAt?: string;
+}
+
+export interface GymOwner {
+  id: string;
+  email?: string | null;
+  displayName?: string | null;
+  photoUrl?: string | null;
+  userType: 'gym_operator';
+  gymId?: string | null;
+  gymIds?: string[];
+  gym?: Gym | null;
+  gyms?: Gym[];
+  accountStatus?: 'active' | 'suspended';
+  approvalStatus?: 'pending_approval' | 'approved' | 'rejected';
+}
+
+export interface TrainerProfile {
+  id: string;
+  userId?: string | null;
+  email?: string | null;
+  displayName: string;
+  photoUrl?: string | null;
+  specialties: string[];
+  bio?: string;
+  rating?: number;
+  reviewCount?: number;
+  hourlyRateTzs: number;
+  experienceYears?: number;
+  gymIds: string[];
+  gyms?: Gym[];
+  status: 'active' | 'suspended';
+  approvalStatus?: 'pending_approval' | 'approved' | 'rejected';
+  availability?: Array<{ day?: string; date?: string; gymId?: string; gymName?: string; slots: string[] }>;
+}
+
+export interface TrainerBooking {
+  id: string;
+  memberId: string;
+  trainerId: string;
+  gymId: string;
+  date: string;
+  slot: string;
+  amountTzs: number;
+  status: 'confirmed' | 'completed' | 'cancelled';
+  createdAt?: string;
+  member?: { email?: string | null; phone?: string | null; displayName?: string | null } | null;
+  trainer?: TrainerProfile | null;
+  gym?: Gym | null;
+}
+
+export interface OwnerEarnings {
+  totalPaid: number;
+  totalPending: number;
+  paidCount: number;
+  pendingCount: number;
+}
+
+export interface MemberCheckinRecord {
+  id: string;
+  memberId: string;
+  gymId: string;
+  timestamp: string;
+  method: string;
+  subscriptionType: string;
+  passTier: string | null;
+  visitNumberInCycle: number | null;
+  gymTier: string;
+  visitConsumed: boolean;
+  gym: Gym | null;
+}
+
+export interface MemberMeResponse {
+  user: MemberSummary;
+  subscription: { id: string; type: string; tier: string | null; status: string; renewsAt: string; expiresAt: string } | null;
+  pendingPayment: PaymentRequest | null;
+  visitsUsed: number;
+  visitCap: number | null;
+}
