@@ -115,8 +115,13 @@ export default function MembersPage() {
       }
       setDialogOpen(false);
       await load();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Save failed');
+    } catch (e: any) {
+      const msg = e?.body?.error || (e instanceof Error ? e.message : 'Save failed');
+      if (e?.status === 409) {
+        setFormErrors({ email: msg === 'email_already_used' ? 'This email is already in use by another user' : msg });
+      } else {
+        setError(msg);
+      }
     } finally {
       setBusy(false);
     }
@@ -175,7 +180,7 @@ export default function MembersPage() {
     setQrError(null);
     // Check if member has active subscription
     if (!member.subscription || member.subscription.status !== 'active') {
-      setQrError('admin.member.qrNoPass');
+      setQrError('Member has no active pass. QR code cannot be generated.');
       return;
     }
     setLoadingQr(true);
@@ -362,11 +367,33 @@ export default function MembersPage() {
             </Field>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <Field label="Fitness goal">
-              <select className="ui-input" value={draft.memberProfile?.fitnessGoal || ''} onChange={e => setDraft({ ...draft, memberProfile: { ...draft.memberProfile, fitnessGoal: e.target.value } })}>
-                <option value="">Select goal</option>
-                {FITNESS_GOALS.map(g => <option key={g} value={g}>{g.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}</option>)}
-              </select>
+            <Field label="Fitness goals" hint="Select all that apply.">
+              <div className="flex flex-wrap gap-2">
+                {FITNESS_GOALS.map(g => {
+                  const raw = draft.memberProfile?.fitnessGoal || '';
+                  const goals = typeof raw === 'string'
+                    ? raw.split(',').map(s => s.trim()).filter(Boolean)
+                    : Array.isArray(raw) ? (raw as unknown as string[]) : [];
+                  const selected = goals.includes(g);
+                  return (
+                    <button
+                      key={g}
+                      type="button"
+                      onClick={() => {
+                        const next = selected ? goals.filter(x => x !== g) : [...goals, g];
+                        setDraft({ ...draft, memberProfile: { ...draft.memberProfile, fitnessGoal: next.join(',') } });
+                      }}
+                      className={`px-3 py-1.5 text-xs rounded-[var(--radius-full)] font-medium transition-colors border ${
+                        selected
+                          ? 'bg-[var(--color-brand-50)] text-[var(--color-brand-700)] border-[var(--color-brand-200)]'
+                          : 'text-[var(--color-fg-tertiary)] border-[var(--color-border-secondary)] hover:bg-[var(--color-bg-tertiary)]'
+                      }`}
+                    >
+                      {g.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}
+                    </button>
+                  );
+                })}
+              </div>
             </Field>
             <Field label="Fitness level">
               <select className="ui-input" value={draft.memberProfile?.fitnessLevel || ''} onChange={e => setDraft({ ...draft, memberProfile: { ...draft.memberProfile, fitnessLevel: e.target.value } })}>
@@ -536,7 +563,7 @@ export default function MembersPage() {
         {loadingQr ? (
           <div className="flex h-32 items-center justify-center"><Spinner className="h-6 w-6" /></div>
         ) : qrError ? (
-          <Alert tone="warning">{qrError.includes('.') ? qrError : 'Member has no active pass. QR cannot be generated.'}</Alert>
+          <Alert tone="warning">{qrError}</Alert>
         ) : qrValue ? (
           <div className="flex flex-col items-center gap-4 py-4">
             <div className="bg-white p-4 rounded-xl border border-[var(--color-border-secondary)]">

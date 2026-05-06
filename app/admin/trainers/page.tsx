@@ -2,17 +2,20 @@
 import { useEffect, useState, useMemo } from 'react';
 import { Plus, Pencil, Trash2, RefreshCw, X } from 'lucide-react';
 import { useApp } from '../../providers';
-import { api, Gym, TrainerProfile } from '@/lib/api';
+import { api, Gym, GymOwner, TrainerProfile } from '@/lib/api';
 import { Badge, Button, PageHeader, Alert, Spinner, Card, Field } from '@/components/shared';
 import { DataTable, ColumnDef } from '@/components/data-table';
 import { Dialog, DialogFooter, ConfirmDialog } from '@/components/dialog';
 import { SearchableSelect, SelectOption } from '@/components/searchable-select';
 import { statusTone, statusLabel, money } from '@/lib/admin-utils';
+import { GymCreateForm, GymDraft, BLANK_GYM_DRAFT, validateGymDraft } from '@/components/gym-create-form';
+import { OwnerInlineForm, OwnerFormDraft, BLANK_OWNER_DRAFT, validateOwnerDraft } from '@/components/owner-inline-form';
 
 export default function TrainersPage() {
   const { token, user } = useApp();
   const [trainers, setTrainers] = useState<TrainerProfile[]>([]);
   const [gyms, setGyms]         = useState<Gym[]>([]);
+  const [owners, setOwners]     = useState<GymOwner[]>([]);
   const [loading, setLoading]   = useState(true);
   const [error, setError]       = useState<string | null>(null);
   const [busy, setBusy]         = useState(false);
@@ -22,11 +25,17 @@ export default function TrainersPage() {
   const [draftGymIds, setDraftGymIds] = useState<string[]>([]);
   const [deleteTarget, setDeleteTarget] = useState<TrainerProfile | null>(null);
   const [gymDialogOpen, setGymDialogOpen] = useState(false);
-  const [newGym, setNewGym]     = useState({ name: '', location: '', tier: 'standard' });
+  const [newGym, setNewGym]     = useState<GymDraft>({ ...BLANK_GYM_DRAFT });
+  const [gymOwnerId, setGymOwnerId] = useState<string>('');
+  const [ownerDialogOpen, setOwnerDialogOpen] = useState(false);
+  const [newOwner, setNewOwner] = useState<OwnerFormDraft>({ ...BLANK_OWNER_DRAFT });
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
   const [gymFormErrors, setGymFormErrors] = useState<Record<string, string>>({});
+  const [ownerFormErrors, setOwnerFormErrors] = useState<Record<string, string>>({});
   const [filterGymId, setFilterGymId] = useState<string | null>(null);
-  const [draftAvailability, setDraftAvailability] = useState<{ day: string; gymId: string; slots: string[] }[]>([]);
+  const [draftAvailability, setDraftAvailability] = useState<{ days: string[]; gymId: string; slots: string[] }[]>([]);
+  const [specialtiesInput, setSpecialtiesInput] = useState('');
+  const [rateInput, setRateInput] = useState('');
 
   const DAYS_OF_WEEK = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
   const TIME_SLOTS = ['06:00', '07:00', '08:00', '09:00', '10:00', '11:00', '12:00', '13:00', '14:00', '15:00', '16:00', '17:00', '18:00', '19:00', '20:00', '21:00'];
@@ -35,8 +44,8 @@ export default function TrainersPage() {
     if (!token) return;
     setLoading(true);
     try {
-      const [t, g] = await Promise.all([api.adminTrainers(token), api.adminGyms(token)]);
-      setTrainers(t); setGyms(g);
+      const [t, g, o] = await Promise.all([api.adminTrainers(token), api.adminGyms(token), api.gymOwners(token)]);
+      setTrainers(t); setGyms(g); setOwners(o);
       setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load');
@@ -53,11 +62,18 @@ export default function TrainersPage() {
     [gyms]
   );
 
+  const ownerOptions: SelectOption[] = useMemo(() =>
+    owners.map(o => ({ value: o.id, label: o.displayName || o.email || o.id, sub: o.email || undefined })),
+    [owners]
+  );
+
   function openCreate() {
     setEditing(null);
     setDraft({ displayName: '', specialties: [], hourlyRateTzs: 0, status: 'active', gymIds: [] });
     setDraftGymIds([]);
     setDraftAvailability([]);
+    setSpecialtiesInput('');
+    setRateInput('');
     setFormErrors({});
     setDialogOpen(true);
   }
@@ -67,12 +83,14 @@ export default function TrainersPage() {
     setDraft({ ...trainer });
     setDraftGymIds(trainer.gymIds || []);
     setDraftAvailability(
-      (trainer.availability as { day?: string; date?: string; gymId?: string; slots?: string[] }[] || []).map(a => ({
-        day: a.day || a.date || 'monday',
+      (trainer.availability as { day?: string; days?: string[]; date?: string; gymId?: string; slots?: string[] }[] || []).map(a => ({
+        days: a.days || (a.day ? [a.day] : a.date ? [a.date] : ['monday']),
         gymId: a.gymId || '',
         slots: a.slots || [],
       }))
     );
+    setSpecialtiesInput((trainer.specialties || []).join(', '));
+    setRateInput(String(trainer.hourlyRateTzs || ''));
     setFormErrors({});
     setDialogOpen(true);
   }
@@ -81,17 +99,17 @@ export default function TrainersPage() {
     const errs: Record<string, string> = {};
     if (!draft.displayName?.trim()) errs.displayName = 'Display name is required';
     if (!draft.email?.trim()) errs.email = 'Email is required';
-    if (!draft.specialties || draft.specialties.length === 0) errs.specialties = 'At least one specialty is required';
-    if (draft.hourlyRateTzs == null || draft.hourlyRateTzs <= 0) errs.hourlyRateTzs = 'Hourly rate is required';
+    const specs = specialtiesInput.split(',').map(s => s.trim()).filter(Boolean);
+    if (specs.length === 0) errs.specialties = 'At least one specialty is required';
+    const rate = Number(rateInput);
+    if (!rate || rate <= 0) errs.hourlyRateTzs = 'Per session rate is required';
     if (draftGymIds.length === 0) errs.gyms = 'At least one gym is required';
     if (!draft.status) errs.status = 'Status is required';
     return errs;
   }
 
   function validateGymForm(): Record<string, string> {
-    const errs: Record<string, string> = {};
-    if (!newGym.name?.trim()) errs.name = 'Gym name is required';
-    return errs;
+    return validateGymDraft(newGym);
   }
 
   async function handleSave() {
@@ -101,7 +119,13 @@ export default function TrainersPage() {
     setFormErrors({});
     setBusy(true);
     try {
-      const payload = { ...draft, gymIds: draftGymIds, availability: draftAvailability.filter(a => a.slots.length > 0) };
+      const specialties = specialtiesInput.split(',').map(s => s.trim()).filter(Boolean);
+      const hourlyRateTzs = Number(rateInput) || 0;
+      // Flatten multi-day entries into individual day entries for backend
+      const availability = draftAvailability
+        .filter(a => a.slots.length > 0 && a.days.length > 0)
+        .flatMap(a => a.days.map(day => ({ day, gymId: a.gymId || undefined, slots: a.slots })));
+      const payload = { ...draft, specialties, hourlyRateTzs, gymIds: draftGymIds, availability };
       if (editing) {
         await api.saveTrainer(token, { ...payload, id: editing.id });
       } else {
@@ -109,8 +133,13 @@ export default function TrainersPage() {
       }
       setDialogOpen(false);
       await load();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Save failed');
+    } catch (e: any) {
+      const msg = e?.body?.error || (e instanceof Error ? e.message : 'Save failed');
+      if (e?.status === 409) {
+        setFormErrors({ email: msg === 'email_already_used' ? 'This email is already in use' : msg });
+      } else {
+        setError(msg);
+      }
     } finally {
       setBusy(false);
     }
@@ -151,18 +180,51 @@ export default function TrainersPage() {
         name: newGym.name,
         location: newGym.location,
         tier: newGym.tier,
-        perVisitRate: 5000,
-        commissionRate: 12,
-        status: 'active',
+        ratePerDay: newGym.ratePerDay,
+        ratePerWeek: newGym.ratePerWeek,
+        ratePerMonth: newGym.ratePerMonth,
+        perVisitRate: newGym.ratePerDay,
+        commissionRate: newGym.commissionRate,
+        status: newGym.status,
         venueType: 'physical',
         accessMode: 'paid_visit',
+        coordinates: newGym.coordinates.lat != null ? newGym.coordinates as any : undefined,
+        images: newGym.images.length > 0 ? newGym.images : undefined,
       });
+      // Assign owner to the new gym if selected
+      if (gymOwnerId) {
+        await api.saveGymOwner(token, { id: gymOwnerId, gymId: created.id });
+      }
       setGyms(prev => [...prev, created]);
       setDraftGymIds(prev => [...prev, created.id]);
       setGymDialogOpen(false);
-      setNewGym({ name: '', location: '', tier: 'standard' });
+      setNewGym({ ...BLANK_GYM_DRAFT });
+      setGymOwnerId('');
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to create gym');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleCreateOwnerInline() {
+    if (!token) return;
+    const errs = validateOwnerDraft(newOwner);
+    if (Object.keys(errs).length > 0) { setOwnerFormErrors(errs); return; }
+    setOwnerFormErrors({});
+    setBusy(true);
+    try {
+      const created = await api.saveGymOwner(token, { displayName: newOwner.displayName, email: newOwner.email, accountStatus: newOwner.accountStatus as 'active' | 'suspended' });
+      setOwners(prev => [...prev, created]);
+      setGymOwnerId(created.id);
+      setOwnerDialogOpen(false);
+      setNewOwner({ ...BLANK_OWNER_DRAFT });
+    } catch (e: any) {
+      if (e?.status === 409) {
+        setOwnerFormErrors({ email: 'This email is already in use' });
+      } else {
+        setError(e instanceof Error ? e.message : 'Failed to create owner');
+      }
     } finally {
       setBusy(false);
     }
@@ -187,7 +249,7 @@ export default function TrainersPage() {
       ),
     },
     { key: 'specialties', header: 'Specialties', cell: (t) => <span className="text-xs">{(t.specialties || []).join(', ') || '—'}</span> },
-    { key: 'hourlyRateTzs', header: 'Rate', sortable: true, align: 'right', cell: (t) => <span className="tabular-nums">{money(t.hourlyRateTzs)}</span> },
+    { key: 'hourlyRateTzs', header: 'Session Rate', sortable: true, align: 'right', cell: (t) => <span className="tabular-nums">{money(t.hourlyRateTzs)}</span> },
     {
       key: 'gymIds', header: 'Gym', sortable: false,
       cell: (t) => (
@@ -287,10 +349,10 @@ export default function TrainersPage() {
             <input className="ui-input" type="email" value={draft.email || ''} onChange={e => { setDraft({ ...draft, email: e.target.value }); setFormErrors(prev => { const { email, ...rest } = prev; return rest; }); }} />
           </Field>
           <Field label="Specialties (comma-separated)" error={formErrors.specialties}>
-            <input className="ui-input" value={(draft.specialties || []).join(', ')} onChange={e => { setDraft({ ...draft, specialties: e.target.value.split(',').map(s => s.trim()).filter(Boolean) }); setFormErrors(prev => { const { specialties, ...rest } = prev; return rest; }); }} />
+            <input className="ui-input" value={specialtiesInput} onChange={e => { setSpecialtiesInput(e.target.value); setFormErrors(prev => { const { specialties, ...rest } = prev; return rest; }); }} placeholder="e.g. Yoga, Weight Training, Cardio" />
           </Field>
-          <Field label="Hourly rate (TZS)" error={formErrors.hourlyRateTzs}>
-            <input className="ui-input" type="number" value={draft.hourlyRateTzs || 0} onChange={e => { setDraft({ ...draft, hourlyRateTzs: Number(e.target.value) }); setFormErrors(prev => { const { hourlyRateTzs, ...rest } = prev; return rest; }); }} />
+          <Field label="Per session rate (TZS)" error={formErrors.hourlyRateTzs}>
+            <input className="ui-input" type="number" value={rateInput} onChange={e => { setRateInput(e.target.value); setFormErrors(prev => { const { hourlyRateTzs, ...rest } = prev; return rest; }); }} placeholder="e.g. 15000" />
           </Field>
           <Field label="Gyms" hint="Select one or more gyms for this trainer." error={formErrors.gyms}>
             <SearchableSelect
@@ -311,17 +373,6 @@ export default function TrainersPage() {
                   <div className="flex gap-2 items-center">
                     <select
                       className="ui-input flex-1"
-                      value={entry.day}
-                      onChange={e => {
-                        const next = [...draftAvailability];
-                        next[i] = { ...next[i], day: e.target.value };
-                        setDraftAvailability(next);
-                      }}
-                    >
-                      {DAYS_OF_WEEK.map(d => <option key={d} value={d}>{d.charAt(0).toUpperCase() + d.slice(1)}</option>)}
-                    </select>
-                    <select
-                      className="ui-input flex-1"
                       value={entry.gymId}
                       onChange={e => {
                         const next = [...draftAvailability];
@@ -339,6 +390,29 @@ export default function TrainersPage() {
                     >
                       <X className="h-4 w-4" />
                     </button>
+                  </div>
+                  <div className="flex flex-wrap gap-1 mb-1">
+                    {DAYS_OF_WEEK.map(d => {
+                      const active = entry.days.includes(d);
+                      return (
+                        <button
+                          key={d}
+                          type="button"
+                          onClick={() => {
+                            const next = [...draftAvailability];
+                            next[i] = { ...next[i], days: active ? entry.days.filter(x => x !== d) : [...entry.days, d] };
+                            setDraftAvailability(next);
+                          }}
+                          className={`px-2.5 py-1 text-xs rounded-[var(--radius-full)] font-medium border transition-colors ${
+                            active
+                              ? 'bg-[var(--color-brand-600)] text-white border-[var(--color-brand-600)]'
+                              : 'text-[var(--color-fg-tertiary)] border-[var(--color-border-secondary)] hover:bg-[var(--color-bg-tertiary)]'
+                          }`}
+                        >
+                          {d.slice(0, 3).charAt(0).toUpperCase() + d.slice(1, 3)}
+                        </button>
+                      );
+                    })}
                   </div>
                   <div className="flex flex-wrap gap-1">
                     {TIME_SLOTS.map(slot => {
@@ -365,7 +439,7 @@ export default function TrainersPage() {
                   </div>
                 </div>
               ))}
-              <Button variant="secondary" size="sm" onClick={() => setDraftAvailability(prev => [...prev, { day: 'monday', gymId: '', slots: [] }])}>
+              <Button variant="secondary" size="sm" onClick={() => setDraftAvailability(prev => [...prev, { days: [], gymId: '', slots: [] }])}>
                 <Plus className="h-3.5 w-3.5" /> Add slot
               </Button>
             </div>
@@ -383,27 +457,48 @@ export default function TrainersPage() {
         </DialogFooter>
       </Dialog>
 
-      {/* Create Gym Inline Dialog */}
-      <Dialog open={gymDialogOpen} onClose={() => setGymDialogOpen(false)} title="Create new gym" description="Quickly create a gym to assign to this trainer." size="sm">
-        <div className="space-y-4">
-          <Field label="Gym name" error={gymFormErrors.name}>
-            <input className="ui-input" value={newGym.name} onChange={e => { setNewGym({ ...newGym, name: e.target.value }); setGymFormErrors(prev => { const { name, ...rest } = prev; return rest; }); }} />
-          </Field>
-          <Field label="Location">
-            <input className="ui-input" value={newGym.location} onChange={e => setNewGym({ ...newGym, location: e.target.value })} />
-          </Field>
-          <Field label="Tier">
-            <select className="ui-input" value={newGym.tier} onChange={e => setNewGym({ ...newGym, tier: e.target.value })}>
-              {['standard', 'midtier', 'premium', 'luxury_executive'].map(t => (
-                <option key={t} value={t}>{t}</option>
-              ))}
-            </select>
-          </Field>
-        </div>
+      {/* Create Gym Inline Dialog — same form as Gyms page, trainer select omitted (auto-assigned) */}
+      <Dialog open={gymDialogOpen} onClose={() => setGymDialogOpen(false)} title="Create new gym" description="This gym will be automatically assigned to the trainer you are editing." size="lg">
+        <GymCreateForm
+          draft={newGym}
+          onChange={setNewGym}
+          errors={gymFormErrors}
+          onClearError={(k) => setGymFormErrors(prev => { const { [k]: _, ...rest } = prev; return rest; })}
+          extraFields={
+            <Field label="Owner" hint="Select an owner for this gym (optional).">
+              <SearchableSelect
+                options={ownerOptions}
+                value={gymOwnerId}
+                onChange={(v) => setGymOwnerId(v as string)}
+                placeholder="Search or select owner..."
+                allowCreate
+                createLabel="Create new owner"
+                onCreateNew={() => setOwnerDialogOpen(true)}
+              />
+            </Field>
+          }
+        />
         <DialogFooter>
           <Button variant="secondary" size="md" onClick={() => setGymDialogOpen(false)} disabled={busy}>Cancel</Button>
           <Button variant="primary" size="md" onClick={handleCreateGym} disabled={busy}>
             {busy ? 'Creating...' : 'Create gym'}
+          </Button>
+        </DialogFooter>
+      </Dialog>
+
+      {/* Create Owner Inline — same form as Owners page, gym select omitted (auto-assigned) */}
+      <Dialog open={ownerDialogOpen} onClose={() => setOwnerDialogOpen(false)} title="Create new owner" description="This owner will be assigned to the gym you are creating." size="md">
+        <OwnerInlineForm
+          draft={newOwner}
+          onChange={setNewOwner}
+          errors={ownerFormErrors}
+          onClearError={(k) => setOwnerFormErrors(prev => { const { [k]: _, ...rest } = prev; return rest; })}
+          hideGymSelect
+        />
+        <DialogFooter>
+          <Button variant="secondary" size="md" onClick={() => setOwnerDialogOpen(false)} disabled={busy}>Cancel</Button>
+          <Button variant="primary" size="md" onClick={handleCreateOwnerInline} disabled={busy}>
+            {busy ? 'Creating...' : 'Create owner'}
           </Button>
         </DialogFooter>
       </Dialog>

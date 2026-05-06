@@ -2,15 +2,19 @@
 import { useEffect, useState, useMemo } from 'react';
 import { Plus, Pencil, Trash2, RefreshCw, ChevronLeft, ChevronRight as ChevronRightIcon, Eye } from 'lucide-react';
 import { useApp } from '../../providers';
-import { api, Gym, GymOwner } from '@/lib/api';
+import { api, Gym, GymOwner, TrainerProfile } from '@/lib/api';
 import { Badge, Button, PageHeader, Alert, Spinner, Card, Field } from '@/components/shared';
 import { DataTable, ColumnDef } from '@/components/data-table';
 import { Dialog, DialogFooter } from '@/components/dialog';
 import { ConfirmDialog } from '@/components/dialog';
 import { SearchableSelect, SelectOption } from '@/components/searchable-select';
 import { ImageUpload } from '@/components/image-upload';
+import dynamic from 'next/dynamic';
+const LocationPicker = dynamic(() => import('@/components/location-picker').then(m => ({ default: m.LocationPicker })), { ssr: false, loading: () => <div className="h-[260px] rounded-xl bg-[var(--color-bg-tertiary)] flex items-center justify-center text-xs text-[var(--color-fg-quaternary)]">Loading map...</div> });
 import { GymScoringRubric, RubricData, RubricResult, EMPTY_RUBRIC } from '@/components/gym-scoring-rubric';
 import { statusTone, statusLabel, money } from '@/lib/admin-utils';
+import { OwnerInlineForm, OwnerFormDraft, BLANK_OWNER_DRAFT, validateOwnerDraft } from '@/components/owner-inline-form';
+import { TrainerInlineForm, TrainerFormDraft, BLANK_TRAINER_DRAFT, validateTrainerDraft } from '@/components/trainer-inline-form';
 
 const TIERS = ['standard', 'midtier', 'premium', 'luxury_executive'];
 const STATUS_OPTIONS: { value: string; label: string; tone: 'success' | 'danger' | 'gray' }[] = [
@@ -31,6 +35,7 @@ export default function GymsPage() {
   const { token, user } = useApp();
   const [gyms, setGyms]         = useState<Gym[]>([]);
   const [owners, setOwners]     = useState<GymOwner[]>([]);
+  const [trainers, setTrainers] = useState<TrainerProfile[]>([]);
   const [loading, setLoading]   = useState(true);
   const [error, setError]       = useState<string | null>(null);
   const [busy, setBusy]         = useState(false);
@@ -42,9 +47,13 @@ export default function GymsPage() {
   const [detailGym, setDetailGym] = useState<Gym | null>(null);
   const [slideIndex, setSlideIndex] = useState(0);
   const [ownerDialogOpen, setOwnerDialogOpen] = useState(false);
-  const [newOwner, setNewOwner] = useState({ displayName: '', email: '' });
+  const [newOwner, setNewOwner] = useState<OwnerFormDraft>({ ...BLANK_OWNER_DRAFT });
+  const [draftTrainerIds, setDraftTrainerIds] = useState<string[]>([]);
+  const [trainerDialogOpen, setTrainerDialogOpen] = useState(false);
+  const [newTrainer, setNewTrainer] = useState<TrainerFormDraft>({ ...BLANK_TRAINER_DRAFT });
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
   const [ownerFormErrors, setOwnerFormErrors] = useState<Record<string, string>>({});
+  const [trainerFormErrors, setTrainerFormErrors] = useState<Record<string, string>>({});
   const [step, setStep] = useState<1 | 2>(1);
   const [rubricData, setRubricData] = useState<RubricData>(EMPTY_RUBRIC);
   const [rubricResult, setRubricResult] = useState<RubricResult | null>(null);
@@ -53,9 +62,10 @@ export default function GymsPage() {
     if (!token) return;
     setLoading(true);
     try {
-      const [g, o] = await Promise.all([api.adminGyms(token), api.gymOwners(token)]);
+      const [g, o, t] = await Promise.all([api.adminGyms(token), api.gymOwners(token), api.adminTrainers(token)]);
       setGyms(g);
       setOwners(o);
+      setTrainers(t);
       setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load');
@@ -77,6 +87,11 @@ export default function GymsPage() {
     [owners]
   );
 
+  const trainerOptions: SelectOption[] = useMemo(() =>
+    trainers.map(t => ({ value: t.id, label: t.displayName || t.email || t.id, sub: t.email || undefined })),
+    [trainers]
+  );
+
   const gymOwnerMap = useMemo(() => {
     const map: Record<string, GymOwner> = {};
     owners.forEach(o => { if (o.gymId) map[o.gymId] = o; });
@@ -87,6 +102,7 @@ export default function GymsPage() {
     setEditing(null);
     setDraft({ ...BLANK_GYM });
     setDraftOwnerId('');
+    setDraftTrainerIds([]);
     setFormErrors({});
     setStep(1);
     setRubricData(EMPTY_RUBRIC);
@@ -99,6 +115,7 @@ export default function GymsPage() {
     setDraft({ ...gym });
     const owner = gymOwnerMap[gym.id];
     setDraftOwnerId(owner?.id || '');
+    setDraftTrainerIds(trainers.filter(t => t.gymIds?.includes(gym.id)).map(t => t.id));
     setFormErrors({});
     setStep(1);
     setRubricData(EMPTY_RUBRIC);
@@ -116,7 +133,7 @@ export default function GymsPage() {
     if (draft.commissionRate == null || draft.commissionRate < 0) errs.commissionRate = 'Commission rate is required';
     if (!draft.images || draft.images.length === 0) errs.images = 'At least one image is required';
     if (!draftOwnerId) errs.owner = 'Owner is required';
-    if (draft.coordinates?.lat == null || draft.coordinates?.lat === 0) errs.lat = 'Latitude is required';
+    if (draft.coordinates?.lat == null) errs.lat = 'Location is required — use the map to set it';
     return errs;
   }
 
@@ -148,12 +165,37 @@ export default function GymsPage() {
     setDraft(prev => ({ ...prev, tier: r.backendTier, amenities: amenityList, equipment: equipmentList }));
   }
 
-  function validateOwnerForm(): Record<string, string> {
-    const errs: Record<string, string> = {};
-    if (!newOwner.email?.trim()) errs.email = 'Email is required';
-    if (!newOwner.displayName?.trim()) errs.displayName = 'Display name is required';
-    return errs;
+  async function handleCreateTrainerInline() {
+    if (!token) return;
+    const errs = validateTrainerDraft(newTrainer);
+    if (Object.keys(errs).length > 0) { setTrainerFormErrors(errs); return; }
+    setTrainerFormErrors({});
+    setBusy(true);
+    try {
+      const specialties = newTrainer.specialties.split(',').map(s => s.trim()).filter(Boolean);
+      const created = await api.saveTrainer(token, {
+        displayName: newTrainer.displayName,
+        email: newTrainer.email,
+        specialties,
+        hourlyRateTzs: Number(newTrainer.hourlyRateTzs) || 0,
+        gymIds: [],
+        status: newTrainer.status as 'active' | 'suspended',
+      });
+      setTrainers(prev => [...prev, created]);
+      setDraftTrainerIds(prev => [...prev, created.id]);
+      setTrainerDialogOpen(false);
+      setNewTrainer({ ...BLANK_TRAINER_DRAFT });
+    } catch (e: any) {
+      if (e?.status === 409) {
+        setTrainerFormErrors({ email: 'This email is already in use' });
+      } else {
+        setError(e instanceof Error ? e.message : 'Failed to create trainer');
+      }
+    } finally {
+      setBusy(false);
+    }
   }
+
 
   async function handleSave() {
     if (!token) return;
@@ -172,6 +214,23 @@ export default function GymsPage() {
       if (draftOwnerId) {
         await api.saveGymOwner(token, { id: draftOwnerId, gymId: savedGym.id });
       }
+      // Assign selected trainers to this gym
+      for (const tId of draftTrainerIds) {
+        const trainer = trainers.find(t => t.id === tId);
+        const currentGymIds = trainer?.gymIds || [];
+        if (!currentGymIds.includes(savedGym.id)) {
+          await api.saveTrainer(token, { id: tId, gymIds: [...currentGymIds, savedGym.id] });
+        }
+      }
+      // Remove gym from trainers that were de-selected
+      const prevTrainerIds = trainers.filter(t => t.gymIds?.includes(savedGym.id)).map(t => t.id);
+      for (const tId of prevTrainerIds) {
+        if (!draftTrainerIds.includes(tId)) {
+          const trainer = trainers.find(t => t.id === tId);
+          const updated = (trainer?.gymIds || []).filter(gid => gid !== savedGym.id);
+          await api.saveTrainer(token, { id: tId, gymIds: updated });
+        }
+      }
       setDialogOpen(false);
       await load();
     } catch (e) {
@@ -188,8 +247,18 @@ export default function GymsPage() {
       await api.deleteGym(token, deleteTarget.id);
       setDeleteTarget(null);
       await load();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Delete failed');
+    } catch (e: any) {
+      const body = e?.body;
+      let msg = 'Delete failed';
+      if (e?.status === 409) {
+        msg = body?.error === 'gym_has_activity_or_operator'
+          ? `Cannot delete "${deleteTarget.name}" — it has an assigned operator or check-in activity. Remove the operator and check-ins first.`
+          : (body?.error || 'Gym has existing activity and cannot be deleted.');
+      } else if (e instanceof Error) {
+        msg = e.message;
+      }
+      setError(msg);
+      setDeleteTarget(null);
     } finally {
       setBusy(false);
     }
@@ -207,18 +276,22 @@ export default function GymsPage() {
 
   async function handleCreateOwner() {
     if (!token) return;
-    const errs = validateOwnerForm();
+    const errs = validateOwnerDraft(newOwner);
     if (Object.keys(errs).length > 0) { setOwnerFormErrors(errs); return; }
     setOwnerFormErrors({});
     setBusy(true);
     try {
-      const created = await api.saveGymOwner(token, { displayName: newOwner.displayName, email: newOwner.email, accountStatus: 'active' });
+      const created = await api.saveGymOwner(token, { displayName: newOwner.displayName, email: newOwner.email, accountStatus: newOwner.accountStatus as 'active' | 'suspended' });
       setOwners(prev => [...prev, created]);
       setDraftOwnerId(created.id);
       setOwnerDialogOpen(false);
-      setNewOwner({ displayName: '', email: '' });
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to create owner');
+      setNewOwner({ ...BLANK_OWNER_DRAFT });
+    } catch (e: any) {
+      if (e?.status === 409) {
+        setOwnerFormErrors({ email: 'This email is already in use' });
+      } else {
+        setError(e instanceof Error ? e.message : 'Failed to create owner');
+      }
     } finally {
       setBusy(false);
     }
@@ -385,14 +458,28 @@ export default function GymsPage() {
                   onCreateNew={() => setOwnerDialogOpen(true)}
                 />
               </Field>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <Field label="Latitude" error={formErrors.lat}>
-                  <input className="ui-input" type="number" step="0.0001" value={draft.coordinates?.lat || 0} onChange={e => { setDraft({ ...draft, coordinates: { ...(draft.coordinates || { lat: 0, lng: 0 }), lat: Number(e.target.value) } }); setFormErrors(prev => { const { lat, ...rest } = prev; return rest; }); }} />
-                </Field>
-                <Field label="Longitude">
-                  <input className="ui-input" type="number" step="0.0001" value={draft.coordinates?.lng || 0} onChange={e => setDraft({ ...draft, coordinates: { ...(draft.coordinates || { lat: 0, lng: 0 }), lng: Number(e.target.value) } })} />
-                </Field>
-              </div>
+              <Field label="Trainers" hint="Select trainers for this gym.">
+                <SearchableSelect
+                  options={trainerOptions}
+                  value={draftTrainerIds}
+                  onChange={(v) => setDraftTrainerIds(v as string[])}
+                  placeholder="Search trainers..."
+                  multiple
+                  allowCreate
+                  createLabel="Create new trainer"
+                  onCreateNew={() => setTrainerDialogOpen(true)}
+                />
+              </Field>
+              <Field label="Location on map" hint="Click the map or search to set the gym location." error={formErrors.lat}>
+                <LocationPicker
+                  lat={draft.coordinates?.lat ?? null}
+                  lng={draft.coordinates?.lng ?? null}
+                  onChange={(lat, lng) => {
+                    setDraft({ ...draft, coordinates: { lat, lng } });
+                    setFormErrors(prev => { const { lat: _, ...rest } = prev; return rest; });
+                  }}
+                />
+              </Field>
               <Field label="Gym images" hint="Upload gym photos. PNG, JPG, or WEBP." error={formErrors.images}>
                 <ImageUpload
                   value={draft.images || []}
@@ -463,26 +550,49 @@ export default function GymsPage() {
         )}
       </Dialog>
 
-      {/* Create Owner Inline Dialog */}
+      {/* Create Owner Inline Dialog — same form as Owners page, gym select omitted (auto-assigned) */}
       <Dialog
         open={ownerDialogOpen}
         onClose={() => setOwnerDialogOpen(false)}
         title="Create new owner"
-        description="Quickly create a gym owner to assign to this gym."
-        size="sm"
+        description="This owner will be automatically assigned to the gym you are creating."
+        size="md"
       >
-        <div className="space-y-4">
-          <Field label="Display name" error={ownerFormErrors.displayName}>
-            <input className="ui-input" value={newOwner.displayName} onChange={e => { setNewOwner({ ...newOwner, displayName: e.target.value }); setOwnerFormErrors(prev => { const { displayName, ...rest } = prev; return rest; }); }} />
-          </Field>
-          <Field label="Email" error={ownerFormErrors.email}>
-            <input className="ui-input" type="email" value={newOwner.email} onChange={e => { setNewOwner({ ...newOwner, email: e.target.value }); setOwnerFormErrors(prev => { const { email, ...rest } = prev; return rest; }); }} />
-          </Field>
-        </div>
+        <OwnerInlineForm
+          draft={newOwner}
+          onChange={setNewOwner}
+          errors={ownerFormErrors}
+          onClearError={(k) => setOwnerFormErrors(prev => { const { [k]: _, ...rest } = prev; return rest; })}
+          hideGymSelect
+        />
         <DialogFooter>
           <Button variant="secondary" size="md" onClick={() => setOwnerDialogOpen(false)} disabled={busy}>Cancel</Button>
           <Button variant="primary" size="md" onClick={handleCreateOwner} disabled={busy}>
             {busy ? 'Creating...' : 'Create owner'}
+          </Button>
+        </DialogFooter>
+      </Dialog>
+
+      {/* Create Trainer Inline Dialog — same form as Trainers page, gym select omitted (auto-assigned) */}
+      <Dialog
+        open={trainerDialogOpen}
+        onClose={() => setTrainerDialogOpen(false)}
+        title="Create new trainer"
+        description="This trainer will be automatically assigned to the gym you are creating."
+        size="md"
+      >
+        <TrainerInlineForm
+          draft={newTrainer}
+          onChange={setNewTrainer}
+          errors={trainerFormErrors}
+          onClearError={(k) => setTrainerFormErrors(prev => { const { [k]: _, ...rest } = prev; return rest; })}
+          hideGymSelect
+          gyms={gyms}
+        />
+        <DialogFooter>
+          <Button variant="secondary" size="md" onClick={() => setTrainerDialogOpen(false)} disabled={busy}>Cancel</Button>
+          <Button variant="primary" size="md" onClick={handleCreateTrainerInline} disabled={busy}>
+            {busy ? 'Creating...' : 'Create trainer'}
           </Button>
         </DialogFooter>
       </Dialog>

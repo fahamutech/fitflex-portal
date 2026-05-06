@@ -2,17 +2,20 @@
 import { useEffect, useState, useMemo } from 'react';
 import { Plus, Pencil, Trash2, RefreshCw, X } from 'lucide-react';
 import { useApp } from '../../providers';
-import { api, Gym, GymOwner } from '@/lib/api';
+import { api, Gym, GymOwner, TrainerProfile } from '@/lib/api';
 import { Badge, Button, PageHeader, Alert, Spinner, Card, Field } from '@/components/shared';
 import { DataTable, ColumnDef } from '@/components/data-table';
 import { Dialog, DialogFooter, ConfirmDialog } from '@/components/dialog';
 import { SearchableSelect, SelectOption } from '@/components/searchable-select';
 import { statusTone, statusLabel } from '@/lib/admin-utils';
+import { GymCreateForm, GymDraft, BLANK_GYM_DRAFT, validateGymDraft } from '@/components/gym-create-form';
+import { TrainerInlineForm, TrainerFormDraft, BLANK_TRAINER_DRAFT, validateTrainerDraft } from '@/components/trainer-inline-form';
 
 export default function OwnersPage() {
   const { token, user } = useApp();
   const [owners, setOwners]     = useState<GymOwner[]>([]);
   const [gyms, setGyms]         = useState<Gym[]>([]);
+  const [trainers, setTrainers] = useState<TrainerProfile[]>([]);
   const [loading, setLoading]   = useState(true);
   const [error, setError]       = useState<string | null>(null);
   const [busy, setBusy]         = useState(false);
@@ -22,17 +25,21 @@ export default function OwnersPage() {
   const [draftGymIds, setDraftGymIds] = useState<string[]>([]);
   const [deleteTarget, setDeleteTarget] = useState<GymOwner | null>(null);
   const [gymDialogOpen, setGymDialogOpen] = useState(false);
-  const [newGym, setNewGym]     = useState({ name: '', location: '', tier: 'standard' });
+  const [newGym, setNewGym]     = useState<GymDraft>({ ...BLANK_GYM_DRAFT });
+  const [gymTrainerIds, setGymTrainerIds] = useState<string[]>([]);
+  const [trainerDialogOpen, setTrainerDialogOpen] = useState(false);
+  const [newTrainer, setNewTrainer] = useState<TrainerFormDraft>({ ...BLANK_TRAINER_DRAFT });
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
   const [gymFormErrors, setGymFormErrors] = useState<Record<string, string>>({});
+  const [trainerFormErrors, setTrainerFormErrors] = useState<Record<string, string>>({});
   const [filterGymId, setFilterGymId] = useState<string | null>(null);
 
   const load = async () => {
     if (!token) return;
     setLoading(true);
     try {
-      const [o, g] = await Promise.all([api.gymOwners(token), api.adminGyms(token)]);
-      setOwners(o); setGyms(g);
+      const [o, g, t] = await Promise.all([api.gymOwners(token), api.adminGyms(token), api.adminTrainers(token)]);
+      setOwners(o); setGyms(g); setTrainers(t);
       setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load');
@@ -47,6 +54,11 @@ export default function OwnersPage() {
   const gymOptions: SelectOption[] = useMemo(() =>
     gyms.map(g => ({ value: g.id, label: g.name, sub: g.location })),
     [gyms]
+  );
+
+  const trainerOptions: SelectOption[] = useMemo(() =>
+    trainers.map(t => ({ value: t.id, label: t.displayName || t.email || t.id, sub: t.email || undefined })),
+    [trainers]
   );
 
   function openCreate() {
@@ -76,9 +88,7 @@ export default function OwnersPage() {
   }
 
   function validateGymForm(): Record<string, string> {
-    const errs: Record<string, string> = {};
-    if (!newGym.name?.trim()) errs.name = 'Gym name is required';
-    return errs;
+    return validateGymDraft(newGym);
   }
 
   async function handleSave() {
@@ -100,8 +110,13 @@ export default function OwnersPage() {
       }
       setDialogOpen(false);
       await load();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Save failed');
+    } catch (e: any) {
+      const msg = e?.body?.error || (e instanceof Error ? e.message : 'Save failed');
+      if (e?.status === 409) {
+        setFormErrors({ email: msg === 'email_already_used' ? 'This email is already in use' : msg });
+      } else {
+        setError(msg);
+      }
     } finally {
       setBusy(false);
     }
@@ -142,18 +157,63 @@ export default function OwnersPage() {
         name: newGym.name,
         location: newGym.location,
         tier: newGym.tier,
-        perVisitRate: 5000,
-        commissionRate: 12,
-        status: 'active',
+        ratePerDay: newGym.ratePerDay,
+        ratePerWeek: newGym.ratePerWeek,
+        ratePerMonth: newGym.ratePerMonth,
+        perVisitRate: newGym.ratePerDay,
+        commissionRate: newGym.commissionRate,
+        status: newGym.status,
         venueType: 'physical',
         accessMode: 'paid_visit',
+        coordinates: newGym.coordinates.lat != null ? newGym.coordinates as any : undefined,
+        images: newGym.images.length > 0 ? newGym.images : undefined,
       });
+      // Assign selected trainers to the new gym
+      for (const tId of gymTrainerIds) {
+        const trainer = trainers.find(t => t.id === tId);
+        const currentGymIds = trainer?.gymIds || [];
+        if (!currentGymIds.includes(created.id)) {
+          await api.saveTrainer(token, { id: tId, gymIds: [...currentGymIds, created.id] });
+        }
+      }
       setGyms(prev => [...prev, created]);
       setDraftGymIds(prev => [...prev, created.id]);
       setGymDialogOpen(false);
-      setNewGym({ name: '', location: '', tier: 'standard' });
+      setNewGym({ ...BLANK_GYM_DRAFT });
+      setGymTrainerIds([]);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to create gym');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleCreateTrainerInline() {
+    if (!token) return;
+    const errs = validateTrainerDraft(newTrainer);
+    if (Object.keys(errs).length > 0) { setTrainerFormErrors(errs); return; }
+    setTrainerFormErrors({});
+    setBusy(true);
+    try {
+      const specialties = newTrainer.specialties.split(',').map(s => s.trim()).filter(Boolean);
+      const created = await api.saveTrainer(token, {
+        displayName: newTrainer.displayName,
+        email: newTrainer.email,
+        specialties,
+        hourlyRateTzs: Number(newTrainer.hourlyRateTzs) || 0,
+        gymIds: [],
+        status: newTrainer.status as 'active' | 'suspended',
+      });
+      setTrainers(prev => [...prev, created]);
+      setGymTrainerIds(prev => [...prev, created.id]);
+      setTrainerDialogOpen(false);
+      setNewTrainer({ ...BLANK_TRAINER_DRAFT });
+    } catch (e: any) {
+      if (e?.status === 409) {
+        setTrainerFormErrors({ email: 'This email is already in use' });
+      } else {
+        setError(e instanceof Error ? e.message : 'Failed to create trainer');
+      }
     } finally {
       setBusy(false);
     }
@@ -308,27 +368,50 @@ export default function OwnersPage() {
         </DialogFooter>
       </Dialog>
 
-      {/* Create Gym Inline Dialog */}
-      <Dialog open={gymDialogOpen} onClose={() => setGymDialogOpen(false)} title="Create new gym" description="Quickly create a gym to assign to this owner." size="sm">
-        <div className="space-y-4">
-          <Field label="Gym name" error={gymFormErrors.name}>
-            <input className="ui-input" value={newGym.name} onChange={e => { setNewGym({ ...newGym, name: e.target.value }); setGymFormErrors(prev => { const { name, ...rest } = prev; return rest; }); }} />
-          </Field>
-          <Field label="Location">
-            <input className="ui-input" value={newGym.location} onChange={e => setNewGym({ ...newGym, location: e.target.value })} />
-          </Field>
-          <Field label="Tier">
-            <select className="ui-input" value={newGym.tier} onChange={e => setNewGym({ ...newGym, tier: e.target.value })}>
-              {['standard', 'midtier', 'premium', 'luxury_executive'].map(t => (
-                <option key={t} value={t}>{t}</option>
-              ))}
-            </select>
-          </Field>
-        </div>
+      {/* Create Gym Inline Dialog — same form as Gyms page, owner select omitted (auto-assigned) */}
+      <Dialog open={gymDialogOpen} onClose={() => setGymDialogOpen(false)} title="Create new gym" description="This gym will be automatically assigned to the owner you are editing." size="lg">
+        <GymCreateForm
+          draft={newGym}
+          onChange={setNewGym}
+          errors={gymFormErrors}
+          onClearError={(k) => setGymFormErrors(prev => { const { [k]: _, ...rest } = prev; return rest; })}
+          extraFields={
+            <Field label="Trainers" hint="Select trainers for this gym (optional).">
+              <SearchableSelect
+                options={trainerOptions}
+                value={gymTrainerIds}
+                onChange={(v) => setGymTrainerIds(v as string[])}
+                placeholder="Search trainers..."
+                multiple
+                allowCreate
+                createLabel="Create new trainer"
+                onCreateNew={() => setTrainerDialogOpen(true)}
+              />
+            </Field>
+          }
+        />
         <DialogFooter>
           <Button variant="secondary" size="md" onClick={() => setGymDialogOpen(false)} disabled={busy}>Cancel</Button>
           <Button variant="primary" size="md" onClick={handleCreateGym} disabled={busy}>
             {busy ? 'Creating...' : 'Create gym'}
+          </Button>
+        </DialogFooter>
+      </Dialog>
+
+      {/* Create Trainer Inline — same form as Trainers page, gym select omitted (auto-assigned) */}
+      <Dialog open={trainerDialogOpen} onClose={() => setTrainerDialogOpen(false)} title="Create new trainer" description="This trainer will be assigned to the gym you are creating." size="md">
+        <TrainerInlineForm
+          draft={newTrainer}
+          onChange={setNewTrainer}
+          errors={trainerFormErrors}
+          onClearError={(k) => setTrainerFormErrors(prev => { const { [k]: _, ...rest } = prev; return rest; })}
+          hideGymSelect
+          gyms={gyms}
+        />
+        <DialogFooter>
+          <Button variant="secondary" size="md" onClick={() => setTrainerDialogOpen(false)} disabled={busy}>Cancel</Button>
+          <Button variant="primary" size="md" onClick={handleCreateTrainerInline} disabled={busy}>
+            {busy ? 'Creating...' : 'Create trainer'}
           </Button>
         </DialogFooter>
       </Dialog>
