@@ -25,6 +25,7 @@ export function ImageUpload({
     if (!files || disabled) return;
     const remaining = maxFiles - value.length;
     const toProcess = Array.from(files).slice(0, remaining);
+    const next = [...value];
 
     toProcess.forEach((file) => {
       if (!file.type.startsWith('image/')) return;
@@ -32,7 +33,8 @@ export function ImageUpload({
       reader.onload = (e) => {
         const dataUrl = e.target?.result as string;
         if (dataUrl) {
-          onChange([...value, dataUrl]);
+          next.push(dataUrl);
+          onChange(next.slice(0, maxFiles));
         }
       };
       reader.readAsDataURL(file);

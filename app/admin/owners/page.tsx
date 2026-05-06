@@ -199,6 +199,7 @@ export default function OwnersPage() {
       const created = await api.saveTrainer(token, {
         displayName: newTrainer.displayName,
         email: newTrainer.email,
+        photoUrl: newTrainer.photoUrl || undefined,
         specialties,
         hourlyRateTzs: Number(newTrainer.hourlyRateTzs) || 0,
         gymIds: [],

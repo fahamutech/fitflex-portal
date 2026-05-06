@@ -29,6 +29,10 @@ export interface GymDraft {
   status: string;
   coordinates: { lat: number | null; lng: number | null };
   images: string[];
+  paymentBank: string;
+  paymentNumber: string;
+  paymentNotes: string;
+  tinNumber: string;
 }
 
 export const BLANK_GYM_DRAFT: GymDraft = {
@@ -42,6 +46,10 @@ export const BLANK_GYM_DRAFT: GymDraft = {
   status: 'active',
   coordinates: { lat: -6.7924, lng: 39.2083 },
   images: [],
+  paymentBank: '',
+  paymentNumber: '',
+  paymentNotes: '',
+  tinNumber: '',
 };
 
 interface GymCreateFormProps {
@@ -167,6 +175,44 @@ export function GymCreateForm({ draft, onChange, errors, onClearError, extraFiel
           maxFiles={5}
         />
       </Field>
+
+      <h3 className="text-sm font-semibold text-[var(--color-fg-secondary)] pt-4">Payment & KYC details</h3>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <Field label="Bank / FSP">
+          <input
+            className="ui-input"
+            value={draft.paymentBank}
+            onChange={e => set('paymentBank', e.target.value)}
+            placeholder="e.g. CRDB, NMB, M-Pesa"
+          />
+        </Field>
+        <Field label="Payment number">
+          <input
+            className="ui-input"
+            value={draft.paymentNumber}
+            onChange={e => set('paymentNumber', e.target.value)}
+            placeholder="Account or mobile number"
+          />
+        </Field>
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <Field label="Payment notes">
+          <input
+            className="ui-input"
+            value={draft.paymentNotes}
+            onChange={e => set('paymentNotes', e.target.value)}
+            placeholder="Any notes for payment"
+          />
+        </Field>
+        <Field label="TIN number">
+          <input
+            className="ui-input"
+            value={draft.tinNumber}
+            onChange={e => set('tinNumber', e.target.value)}
+            placeholder="Tax ID (if registered)"
+          />
+        </Field>
+      </div>
 
       {extraFields}
     </div>

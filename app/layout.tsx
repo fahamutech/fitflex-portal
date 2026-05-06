@@ -2,7 +2,15 @@ import './globals.css';
 import { Providers } from './providers';
 import { Shell } from '../src/components/Shell';
 
-export const metadata = { title: 'FitFlex Af — Operator Portal' };
+export const metadata = {
+  title: 'FitFlex Af — Operator Portal',
+  icons: {
+    icon: [
+      { url: '/icon.svg', type: 'image/svg+xml' },
+      { url: '/favicon.png', sizes: '32x32', type: 'image/png' },
+    ],
+  },
+};
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (

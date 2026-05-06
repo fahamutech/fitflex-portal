@@ -1,6 +1,7 @@
 'use client';
 import { Plus, X } from 'lucide-react';
 import { Field, Button } from '@/components/shared';
+import { ImageUpload } from '@/components/image-upload';
 import { SearchableSelect, SelectOption } from '@/components/searchable-select';
 import { Gym } from '@/lib/api';
 
@@ -16,6 +17,7 @@ export interface AvailabilityEntry {
 export interface TrainerFormDraft {
   displayName: string;
   email: string;
+  photoUrl: string;
   specialties: string;
   hourlyRateTzs: string;
   status: string;
@@ -26,6 +28,7 @@ export interface TrainerFormDraft {
 export const BLANK_TRAINER_DRAFT: TrainerFormDraft = {
   displayName: '',
   email: '',
+  photoUrl: '',
   specialties: '',
   hourlyRateTzs: '',
   status: 'active',
@@ -79,6 +82,13 @@ export function TrainerInlineForm({
           type="email"
           value={draft.email}
           onChange={e => { onChange({ ...draft, email: e.target.value }); onClearError('email'); }}
+        />
+      </Field>
+      <Field label="Trainer image" hint="Upload a profile photo. PNG, JPG, or WEBP.">
+        <ImageUpload
+          value={draft.photoUrl ? [draft.photoUrl] : []}
+          onChange={(imgs) => onChange({ ...draft, photoUrl: imgs[0] || '' })}
+          maxFiles={1}
         />
       </Field>
       <Field label="Specialties (comma-separated)" error={errors.specialties}>

@@ -24,6 +24,7 @@ import {
 import { useApp } from '../../app/providers';
 import { cn } from '@/lib/cn';
 import { Avatar, Badge } from './shared';
+import { BrandLogo } from './brand-logo';
 
 /* ── Nav definitions ─────────────────────────────────────── */
 type NavItem = {
@@ -106,9 +107,7 @@ function SidebarContent({
     <div className="flex h-full flex-col">
       {/* Logo */}
       <div className="flex h-16 shrink-0 items-center gap-3 px-4 border-b border-[var(--color-gray-800)]">
-        <div className="flex h-8 w-8 items-center justify-center rounded-[var(--radius-md)] bg-[var(--color-brand-600)]">
-          <span className="text-white font-bold text-sm">FF</span>
-        </div>
+        <BrandLogo className="h-8 w-8 rounded-[var(--radius-md)]" />
         <div className="flex-1 min-w-0">
           <p className="truncate text-sm font-semibold text-white">FitFlex Af</p>
           <p className="truncate text-xs text-[var(--color-gray-500)]">
@@ -219,9 +218,7 @@ export function Shell({ children }: { children: ReactNode }) {
         {/* Minimal top bar for login */}
         <header className="h-16 flex items-center justify-center border-b border-[var(--color-border-secondary)] bg-[var(--color-bg-primary)]">
           <div className="flex items-center gap-2.5">
-            <div className="flex h-7 w-7 items-center justify-center rounded-[var(--radius-md)] bg-[var(--color-brand-600)]">
-              <span className="text-white font-bold text-xs">FF</span>
-            </div>
+            <BrandLogo className="h-7 w-7 rounded-[var(--radius-md)]" />
             <span className="text-sm font-semibold text-[var(--color-fg-primary)]">FitFlex Af</span>
           </div>
         </header>

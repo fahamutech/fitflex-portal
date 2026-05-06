@@ -94,7 +94,10 @@ export default function GymsPage() {
 
   const gymOwnerMap = useMemo(() => {
     const map: Record<string, GymOwner> = {};
-    owners.forEach(o => { if (o.gymId) map[o.gymId] = o; });
+    owners.forEach(o => {
+      const ids = o.gymIds || (o.gymId ? [o.gymId] : []);
+      ids.forEach((gId: string) => { map[gId] = o; });
+    });
     return map;
   }, [owners]);
 
@@ -176,6 +179,7 @@ export default function GymsPage() {
       const created = await api.saveTrainer(token, {
         displayName: newTrainer.displayName,
         email: newTrainer.email,
+        photoUrl: newTrainer.photoUrl || undefined,
         specialties,
         hourlyRateTzs: Number(newTrainer.hourlyRateTzs) || 0,
         gymIds: [],

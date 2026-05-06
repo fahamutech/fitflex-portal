@@ -6,6 +6,7 @@ import { api, Gym, GymOwner, TrainerProfile } from '@/lib/api';
 import { Badge, Button, PageHeader, Alert, Spinner, Card, Field } from '@/components/shared';
 import { DataTable, ColumnDef } from '@/components/data-table';
 import { Dialog, DialogFooter, ConfirmDialog } from '@/components/dialog';
+import { ImageUpload } from '@/components/image-upload';
 import { SearchableSelect, SelectOption } from '@/components/searchable-select';
 import { statusTone, statusLabel, money } from '@/lib/admin-utils';
 import { GymCreateForm, GymDraft, BLANK_GYM_DRAFT, validateGymDraft } from '@/components/gym-create-form';
@@ -69,7 +70,7 @@ export default function TrainersPage() {
 
   function openCreate() {
     setEditing(null);
-    setDraft({ displayName: '', specialties: [], hourlyRateTzs: 0, status: 'active', gymIds: [] });
+    setDraft({ displayName: '', email: '', photoUrl: null, specialties: [], hourlyRateTzs: 0, status: 'active', gymIds: [] });
     setDraftGymIds([]);
     setDraftAvailability([]);
     setSpecialtiesInput('');
@@ -347,6 +348,13 @@ export default function TrainersPage() {
           </Field>
           <Field label="Email" error={formErrors.email}>
             <input className="ui-input" type="email" value={draft.email || ''} onChange={e => { setDraft({ ...draft, email: e.target.value }); setFormErrors(prev => { const { email, ...rest } = prev; return rest; }); }} />
+          </Field>
+          <Field label="Trainer image" hint="Upload a profile photo. PNG, JPG, or WEBP.">
+            <ImageUpload
+              value={draft.photoUrl ? [draft.photoUrl] : []}
+              onChange={(imgs) => setDraft({ ...draft, photoUrl: imgs[0] || null })}
+              maxFiles={1}
+            />
           </Field>
           <Field label="Specialties (comma-separated)" error={formErrors.specialties}>
             <input className="ui-input" value={specialtiesInput} onChange={e => { setSpecialtiesInput(e.target.value); setFormErrors(prev => { const { specialties, ...rest } = prev; return rest; }); }} placeholder="e.g. Yoga, Weight Training, Cardio" />
