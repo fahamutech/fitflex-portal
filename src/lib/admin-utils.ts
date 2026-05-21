@@ -1,7 +1,7 @@
 export type BadgeTone = 'default' | 'success' | 'danger' | 'warning' | 'brand' | 'gray';
 
-export function money(value: number | null | undefined) {
-  return `TZS ${new Intl.NumberFormat('en-US').format(Number(value || 0))}`;
+export function money(value: number | null | undefined, currency = 'TZS') {
+  return `${currency} ${new Intl.NumberFormat('en-US').format(Number(value || 0))}`;
 }
 
 export function formatDateTime(value: string | null | undefined) {

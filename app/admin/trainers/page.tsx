@@ -261,7 +261,7 @@ export default function TrainersPage() {
       ),
     },
     { key: 'specialties', header: 'Specialties', cell: (t) => <span className="text-xs">{(t.specialties || []).join(', ') || '—'}</span> },
-    { key: 'hourlyRateTzs', header: 'Session Rate', sortable: true, align: 'right', cell: (t) => <span className="tabular-nums">{money(t.hourlyRateTzs)}</span> },
+    { key: 'hourlyRateTzs', header: 'Session Rate', sortable: true, align: 'right', cell: (t) => <span className="tabular-nums">{money(t.hourlyRateTzs, t.sessionRateCurrency || 'TZS')}</span> },
     {
       key: 'gymIds', header: 'Gym', sortable: false,
       cell: (t) => (
