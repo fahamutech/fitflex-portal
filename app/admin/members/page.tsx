@@ -53,6 +53,7 @@ export default function MembersPage() {
   const [qrDialogOpen, setQrDialogOpen] = useState(false);
   const [qrTarget, setQrTarget] = useState<MemberSummary | null>(null);
   const [qrValue, setQrValue] = useState<string | null>(null);
+  const [qrExpiresAt, setQrExpiresAt] = useState<string | null>(null);
   const [qrError, setQrError] = useState<string | null>(null);
   const [loadingQr, setLoadingQr] = useState(false);
 
@@ -71,6 +72,43 @@ export default function MembersPage() {
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { load(); }, [token]);
+
+  useEffect(() => {
+    if (!qrDialogOpen || !qrTarget || !token) return;
+    if (!qrTarget.subscription || qrTarget.subscription.status !== 'active') return;
+
+    let cancelled = false;
+    let firstLoad = true;
+
+    async function refreshPortalQr() {
+      if (!token || !qrTarget) return;
+      if (firstLoad) setLoadingQr(true);
+      try {
+        const qr = await api.adminMemberQr(token, qrTarget.id);
+        if (cancelled) return;
+        setQrValue(qr.token);
+        setQrExpiresAt(qr.expiresAt);
+        setQrError(null);
+      } catch (e: any) {
+        if (cancelled) return;
+        setQrValue(null);
+        setQrExpiresAt(null);
+        setQrError(e?.body?.error || (e instanceof Error ? e.message : 'Failed to refresh QR code.'));
+      } finally {
+        if (!cancelled) {
+          setLoadingQr(false);
+          firstLoad = false;
+        }
+      }
+    }
+
+    refreshPortalQr();
+    const timer = window.setInterval(refreshPortalQr, 30_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [qrDialogOpen, qrTarget, token]);
 
   const filtered = (() => {
     if (filter === 'all') return members;
@@ -177,6 +215,7 @@ export default function MembersPage() {
     setQrTarget(member);
     setQrDialogOpen(true);
     setQrValue(null);
+    setQrExpiresAt(null);
     setQrError(null);
     // Check if member has active subscription
     if (!member.subscription || member.subscription.status !== 'active') {
@@ -184,13 +223,6 @@ export default function MembersPage() {
       return;
     }
     setLoadingQr(true);
-    try {
-      // Generate a simple QR payload: member ID + timestamp
-      const payload = `fitflex:member:${member.id}:${Date.now()}`;
-      setQrValue(payload);
-    } finally {
-      setLoadingQr(false);
-    }
   }
 
   async function openPayments(member: MemberSummary) {
@@ -578,7 +610,8 @@ export default function MembersPage() {
             </div>
             <p className="text-xs text-[var(--color-fg-quaternary)] text-center">
               Show this QR at the gym for check-in.<br />
-              Member: {qrTarget?.displayName || qrTarget?.email}
+              Member: {qrTarget?.displayName || qrTarget?.email}<br />
+              Auto-refreshes every 30 seconds{qrExpiresAt ? ` • Expires ${formatDateTime(qrExpiresAt)}` : ''}
             </p>
             <div className="text-xs font-mono text-[var(--color-fg-quaternary)] break-all text-center">{qrValue}</div>
           </div>

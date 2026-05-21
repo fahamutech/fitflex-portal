@@ -20,6 +20,7 @@ import {
   ShieldCheck,
   BarChart3,
   BookOpen,
+  UserCog,
 } from 'lucide-react';
 import { useApp } from '../../app/providers';
 import { cn } from '@/lib/cn';
@@ -32,6 +33,7 @@ type NavItem = {
   labelKey: string;
   icon: React.ElementType;
   groupKey?: string;
+  aclScope?: string; // required ACL scope for portal staff; undefined = super-admin only
 };
 
 const OPERATOR_NAV: NavItem[] = [
@@ -41,16 +43,17 @@ const OPERATOR_NAV: NavItem[] = [
 ];
 
 const ADMIN_NAV: NavItem[] = [
-  { href: '/admin',              labelKey: 'admin.nav.overview',      icon: LayoutDashboard, groupKey: 'nav.group.platform' },
-  { href: '/admin/gyms',         labelKey: 'admin.nav.gyms',          icon: Building2,       groupKey: 'nav.group.platform' },
-  { href: '/admin/owners',       labelKey: 'admin.nav.owners',        icon: UserCheck,       groupKey: 'nav.group.platform' },
-  { href: '/admin/members',      labelKey: 'admin.nav.members',       icon: Users,           groupKey: 'nav.group.platform' },
-  { href: '/admin/trainers',     labelKey: 'admin.nav.trainers',      icon: Dumbbell,        groupKey: 'nav.group.platform' },
-  { href: '/admin/distributions', labelKey: 'admin.nav.distributions', icon: BarChart3,       groupKey: 'nav.group.finance' },
-  { href: '/admin/book-keeping',  labelKey: 'admin.nav.bookkeeping',   icon: BookOpen,        groupKey: 'nav.group.finance' },
-  { href: '/admin/payments',     labelKey: 'admin.nav.payments',      icon: CreditCard,      groupKey: 'nav.group.operations' },
-  { href: '/admin/approvals',    labelKey: 'admin.nav.approvals',     icon: ShieldCheck,     groupKey: 'nav.group.operations' },
-  { href: '/admin/settings',     labelKey: 'admin.nav.settings',      icon: Settings,        groupKey: 'nav.group.system' },
+  { href: '/admin',               labelKey: 'admin.nav.overview',       icon: LayoutDashboard, groupKey: 'nav.group.platform' },
+  { href: '/admin/gyms',          labelKey: 'admin.nav.gyms',           icon: Building2,       groupKey: 'nav.group.platform', aclScope: 'gyms' },
+  { href: '/admin/owners',        labelKey: 'admin.nav.owners',         icon: UserCheck,       groupKey: 'nav.group.platform', aclScope: 'owners' },
+  { href: '/admin/members',       labelKey: 'admin.nav.members',        icon: Users,           groupKey: 'nav.group.platform', aclScope: 'members' },
+  { href: '/admin/trainers',      labelKey: 'admin.nav.trainers',       icon: Dumbbell,        groupKey: 'nav.group.platform', aclScope: 'trainers' },
+  { href: '/admin/distributions', labelKey: 'admin.nav.distributions',  icon: BarChart3,       groupKey: 'nav.group.finance',  aclScope: 'payments' },
+  { href: '/admin/book-keeping',  labelKey: 'admin.nav.bookkeeping',    icon: BookOpen,        groupKey: 'nav.group.finance',  aclScope: 'payments' },
+  { href: '/admin/payments',      labelKey: 'admin.nav.payments',       icon: CreditCard,      groupKey: 'nav.group.operations', aclScope: 'payments' },
+  { href: '/admin/approvals',     labelKey: 'admin.nav.approvals',      icon: ShieldCheck,     groupKey: 'nav.group.operations', aclScope: 'approvals' },
+  { href: '/admin/settings',      labelKey: 'admin.nav.settings',       icon: Settings,        groupKey: 'nav.group.system',   aclScope: 'settings' },
+  { href: '/admin/users',         labelKey: 'admin.nav.users',          icon: UserCog,         groupKey: 'nav.group.system',   aclScope: 'users' },
 ];
 
 /* ── SidebarLink ─────────────────────────────────────────── */
@@ -172,10 +175,10 @@ function SidebarContent({
 
         {/* User row + sign out */}
         <div className="flex items-center gap-3 rounded-[var(--radius-md)] px-3 py-2">
-          <Avatar name={user?.id ?? 'User'} size="sm" />
+          <Avatar name={(user as any)?.displayName || user?.email || user?.id || 'User'} size="sm" />
           <div className="flex-1 min-w-0">
-            <p className="truncate text-xs font-medium text-white">{user?.id ?? '—'}</p>
-            <p className="truncate text-xs text-[var(--color-gray-500)] capitalize">{user?.userType}</p>
+            <p className="truncate text-xs font-medium text-white">{(user as any)?.displayName || user?.email || user?.id || '—'}</p>
+            <p className="truncate text-xs text-[var(--color-gray-500)] capitalize">{user?.userType}{user?.portalUser ? ' · staff' : ''}</p>
           </div>
           <button
             onClick={() => { signOut(); router.replace('/login'); }}
@@ -192,24 +195,51 @@ function SidebarContent({
 
 /* ── Shell ───────────────────────────────────────────────── */
 export function Shell({ children }: { children: ReactNode }) {
-  const { ready, token, user } = useApp();
+  const { ready, token, user, hasPermission } = useApp();
   const pathname = usePathname();
   const router = useRouter();
   const [mobileOpen, setMobileOpen] = useState(false);
 
+  const isAdminUser   = token && user?.userType === 'admin';
+  const isPortalStaff = isAdminUser && user?.portalUser === true;
+
+  // Build the visible nav — portal staff only see items their ACL permits.
+  // Overview (/admin) is always visible to all admin users.
+  const visibleNav = isAdminUser
+    ? ADMIN_NAV.filter(item => {
+        if (!item.aclScope) return true;             // no scope = super-admin only (overview)
+        if (!isPortalStaff) return true;             // super-admin sees everything
+        return hasPermission(item.aclScope);         // portal staff: check ACL
+      })
+    : OPERATOR_NAV;
+
   useEffect(() => {
     if (!ready) return;
     if (!token && pathname !== '/login' && pathname !== '/') router.replace('/login');
+
+    // Block non-admin users from admin routes
     if (token && user?.userType !== 'admin' && pathname.startsWith('/admin')) router.replace('/dashboard');
+
+    // All admin users (including portal staff) go to /admin, not operator pages
     if (token && user?.userType === 'admin' && ['/dashboard', '/scan', '/checkins'].includes(pathname)) router.replace('/admin');
-  }, [ready, token, user, pathname, router]);
+
+    // Portal staff: redirect away from pages outside their ACL
+    if (token && isPortalStaff && pathname.startsWith('/admin')) {
+      const matchedItem = ADMIN_NAV.find(item =>
+        item.href === '/admin' ? pathname === '/admin' : pathname.startsWith(item.href)
+      );
+      if (matchedItem?.aclScope && !hasPermission(matchedItem.aclScope)) {
+        // Redirect to the first permitted page, or just /admin overview
+        const firstAllowed = ADMIN_NAV.find(i => !i.aclScope || hasPermission(i.aclScope));
+        router.replace(firstAllowed?.href ?? '/admin');
+      }
+    }
+  }, [ready, token, user, isPortalStaff, pathname, router, hasPermission]);
 
   /* Close mobile drawer on route change */
   useEffect(() => { setMobileOpen(false); }, [pathname]);
 
-  const isLoginPage  = pathname === '/login' || !token;
-  const isAdminUser  = token && user?.userType === 'admin';
-  const nav          = isAdminUser ? ADMIN_NAV : OPERATOR_NAV;
+  const isLoginPage = pathname === '/login' || !token;
 
   /* Public / login layout — no sidebar */
   if (isLoginPage) {
@@ -232,7 +262,7 @@ export function Shell({ children }: { children: ReactNode }) {
 
       {/* ── Desktop sidebar ── */}
       <aside className="hidden lg:flex lg:w-64 lg:flex-col lg:shrink-0 bg-[var(--color-sidebar-bg)]">
-        <SidebarContent nav={nav} />
+        <SidebarContent nav={visibleNav} />
       </aside>
 
       {/* ── Mobile sidebar overlay ── */}
@@ -245,7 +275,7 @@ export function Shell({ children }: { children: ReactNode }) {
         'fixed inset-y-0 left-0 z-50 w-72 bg-[var(--color-sidebar-bg)] transition-transform duration-200 lg:hidden',
         mobileOpen ? 'translate-x-0' : '-translate-x-full',
       )}>
-        <SidebarContent nav={nav} onLinkClick={() => setMobileOpen(false)} />
+        <SidebarContent nav={visibleNav} onLinkClick={() => setMobileOpen(false)} />
       </aside>
 
       {/* ── Main area ── */}

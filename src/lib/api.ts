@@ -40,13 +40,21 @@ async function request<T>(path: string, opts: RequestInit = {}, token?: string):
 
 export const api = {
   firebaseSession: (idToken: string, requestedRole: 'member' | 'trainer' | 'gym_owner' | 'gym_operator' | 'admin' = 'gym_operator') =>
-    request<{ token: string; user: { id: string; userType: string; gymId?: string; email?: string } }>(
+    request<{ token: string; user: { id: string; userType: string; gymId?: string; email?: string; portalUser?: boolean; aclPermissions?: string[] } }>(
       '/auth/firebase/session', { method: 'POST', body: JSON.stringify({ idToken, requestedRole }) }
     ),
   login: (email: string, password: string) =>
-    request<{ token: string; user: { id: string; userType: string; gymId?: string } }>(
+    request<{ token: string; user: { id: string; userType: string; gymId?: string; portalUser?: boolean; aclPermissions?: string[] } }>(
       '/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) }
     ),
+  // ─── Portal user management (admin only) ───
+  listPortalUsers: (token: string) => request<PortalUser[]>('/admin/portal-users', {}, token),
+  createPortalUser: (token: string, data: { email: string; password: string; displayName?: string; aclPermissions: string[] }) =>
+    request<PortalUser>('/admin/portal-users', { method: 'POST', body: JSON.stringify(data) }, token),
+  updatePortalUser: (token: string, id: string, data: { aclPermissions?: string[]; accountStatus?: string; displayName?: string; portalUser?: boolean }) =>
+    request<PortalUser>(`/admin/portal-users/${id}`, { method: 'PUT', body: JSON.stringify(data) }, token),
+  deletePortalUser: (token: string, id: string) =>
+    request<{ ok: boolean }>(`/admin/portal-users/${id}`, { method: 'DELETE' }, token),
   dashboard: (token: string) => request<DashboardResponse>('/operator/dashboard', {}, token),
   recentCheckIns: (token: string) => request<CheckIn[]>('/operator/checkins', {}, token),
   checkIn: (token: string, qrToken: string) =>
@@ -84,6 +92,8 @@ export const api = {
     request<MemberSummary>(`/admin/members/${id}/status`, { method: 'POST', body: JSON.stringify({ status }) }, token),
   memberPayments: (token: string, memberId: string) =>
     request<PaymentRequest[]>(`/admin/members/${memberId}/payments`, {}, token),
+  adminMemberQr: (token: string, memberId: string) =>
+    request<{ token: string; expiresAt: string; rotatesEverySeconds: number }>(`/admin/members/${memberId}/qr`, {}, token),
   adminMemberCheckins: (token: string, memberId: string, from?: string, to?: string) => {
     const qs = new URLSearchParams();
     if (from) qs.set('from', from);
@@ -116,12 +126,20 @@ export const api = {
   getSettings: (token: string) => request<PlatformSettings>('/admin/settings', {}, token),
   updateSettings: (token: string, data: Partial<PlatformSettings>) =>
     request<PlatformSettings>('/admin/settings', { method: 'PUT', body: JSON.stringify(data) }, token),
+  getSpecialties: () => request<string[]>('/settings/specialties'),
+  adminGetSpecialties: (token: string) => request<string[]>('/admin/settings/specialties', {}, token),
+  adminSaveSpecialty: (token: string, name: string) =>
+    request<string[]>('/admin/settings/specialties', { method: 'POST', body: JSON.stringify({ name }) }, token),
+  adminDeleteSpecialty: (token: string, name: string) =>
+    request<string[]>(`/admin/settings/specialties/${encodeURIComponent(name)}`, { method: 'DELETE' }, token),
 
   // ─── Owner/Operator role ───
   ownerGyms: (token: string) => request<Gym[]>('/owner/gyms', {}, token),
   ownerInvoices: (token: string) => request<Invoice[]>('/owner/invoices', {}, token),
   ownerEarnings: (token: string) => request<OwnerEarnings>('/owner/earnings', {}, token),
   ownerGymCheckins: (token: string, gymId: string) => request<CheckIn[]>(`/owner/gyms/${gymId}/checkins`, {}, token),
+  ownerCreateMember: (token: string, data: { displayName: string; email?: string; phone?: string; gymId?: string; paidAmount?: number; durationUnit: 'D' | 'W' | 'M'; startDate: string; endDate: string; tier?: string }) =>
+    request<{ member: any; subscription: any }>('/owner/members', { method: 'POST', body: JSON.stringify(data) }, token),
 
   // ─── Trainer role ───
   trainerProfile: (token: string) => request<TrainerProfile>('/trainer/me', {}, token),
@@ -155,6 +173,18 @@ export const api = {
   },
   publicPasses: () => request<any[]>('/passes'),
 };
+
+export interface PortalUser {
+  id: string;
+  email: string | null;
+  displayName: string | null;
+  userType: string;
+  accountStatus: 'active' | 'suspended';
+  portalUser: boolean;
+  aclPermissions: string[];
+  createdAt?: string;
+  isEnvAdmin?: boolean;
+}
 
 export interface DashboardResponse {
   gym: { id: string; name: string; tier: string; perVisitRate: number };
@@ -391,7 +421,8 @@ export interface TrainerProfile {
   experienceYears?: number;
   gymIds: string[];
   gyms?: Gym[];
-  status: 'active' | 'suspended';
+  status: 'active' | 'inactive' | 'suspended';
+  sessionRateCurrency?: 'TZS' | 'USD';
   approvalStatus?: 'pending_approval' | 'approved' | 'rejected';
   availability?: Array<{ day?: string; date?: string; gymId?: string; gymName?: string; slots: string[] }>;
 }

@@ -25,7 +25,7 @@ const DANGER  = '#d92d20';
 const GRAY    = '#98a2b3';
 
 export default function AdminOverviewPage() {
-  const { token, user } = useApp();
+  const { token, user, hasPermission } = useApp();
   const [gyms, setGyms]           = useState<Gym[]>([]);
   const [owners, setOwners]       = useState<GymOwner[]>([]);
   const [payments, setPayments]   = useState<PaymentRequest[]>([]);
@@ -39,13 +39,17 @@ export default function AdminOverviewPage() {
     if (!token || user?.userType !== 'admin') return;
     setLoading(true);
     try {
+      // Only fetch data the current user is permitted to see
+      const safe = <T,>(p: Promise<T>, fallback: T): Promise<T> =>
+        p.catch(e => (e?.status === 403 || (e as any)?.body?.error === 'acl_forbidden') ? fallback : Promise.reject(e));
+
       const [g, o, p, m, tr, a] = await Promise.all([
-        api.adminGyms(token),
-        api.gymOwners(token),
-        api.paymentRequests(token),
-        api.members(token),
-        api.adminTrainers(token),
-        api.roleApprovals(token),
+        hasPermission('gyms')      ? safe(api.adminGyms(token), [])       : Promise.resolve([] as Gym[]),
+        hasPermission('owners')    ? safe(api.gymOwners(token), [])        : Promise.resolve([] as GymOwner[]),
+        hasPermission('payments')  ? safe(api.paymentRequests(token), [])  : Promise.resolve([] as PaymentRequest[]),
+        hasPermission('members')   ? safe(api.members(token), [])          : Promise.resolve([] as MemberSummary[]),
+        hasPermission('trainers')  ? safe(api.adminTrainers(token), [])    : Promise.resolve([] as TrainerProfile[]),
+        hasPermission('approvals') ? safe(api.roleApprovals(token), [])    : Promise.resolve([] as RoleApproval[]),
       ]);
       setGyms(g); setOwners(o); setPayments(p);
       setMembers(m); setTrainers(tr); setApprovals(a);
@@ -125,20 +129,21 @@ export default function AdminOverviewPage() {
       ) : (
         <>
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            <MetricCard label="Gyms" value={gyms.length} icon={<Building2 className="h-5 w-5" />} sub={`${metrics.physicalGyms} physical \u00b7 ${metrics.onlineGyms} online`} />
-            <MetricCard label="Members" value={members.length} icon={<Users className="h-5 w-5" />} sub={`${metrics.activeMembers} active \u00b7 ${metrics.suspendedMembers} suspended`} />
-            <MetricCard label="Approved value" value={money(metrics.approvedValue)} icon={<CreditCard className="h-5 w-5" />} sub={`${metrics.pendingPayments} payments pending`} />
-            <MetricCard label="Pending approvals" value={metrics.pendingApprovals} icon={<ShieldCheck className="h-5 w-5" />} sub="Role & gym owner requests" />
+            {hasPermission('gyms')      && <MetricCard label="Gyms" value={gyms.length} icon={<Building2 className="h-5 w-5" />} sub={`${metrics.physicalGyms} physical \u00b7 ${metrics.onlineGyms} online`} />}
+            {hasPermission('members')   && <MetricCard label="Members" value={members.length} icon={<Users className="h-5 w-5" />} sub={`${metrics.activeMembers} active \u00b7 ${metrics.suspendedMembers} suspended`} />}
+            {hasPermission('payments')  && <MetricCard label="Approved value" value={money(metrics.approvedValue)} icon={<CreditCard className="h-5 w-5" />} sub={`${metrics.pendingPayments} payments pending`} />}
+            {hasPermission('approvals') && <MetricCard label="Pending approvals" value={metrics.pendingApprovals} icon={<ShieldCheck className="h-5 w-5" />} sub="Role & gym owner requests" />}
           </div>
 
           <div className="grid gap-4 sm:grid-cols-3">
-            <MetricCard label="Gym owners" value={owners.length} icon={<UserCheck className="h-5 w-5" />} />
-            <MetricCard label="Trainers" value={trainers.length} icon={<Dumbbell className="h-5 w-5" />} />
-            <MetricCard label="Total payments" value={payments.length} icon={<TrendingUp className="h-5 w-5" />} sub={`${metrics.approvedPayments} approved`} />
+            {hasPermission('owners')   && <MetricCard label="Gym owners" value={owners.length} icon={<UserCheck className="h-5 w-5" />} />}
+            {hasPermission('trainers') && <MetricCard label="Trainers" value={trainers.length} icon={<Dumbbell className="h-5 w-5" />} />}
+            {hasPermission('payments') && <MetricCard label="Total payments" value={payments.length} icon={<TrendingUp className="h-5 w-5" />} sub={`${metrics.approvedPayments} approved`} />}
           </div>
 
+          {(hasPermission('payments') || hasPermission('members') || hasPermission('gyms')) && (
           <div className="grid gap-4 lg:grid-cols-3">
-            <Card>
+            {hasPermission('payments') && <Card>
               <CardHeader><span className="text-sm font-semibold">Payment status</span></CardHeader>
               <CardContent>
                 {paymentStatusData.length === 0 ? (
@@ -161,9 +166,9 @@ export default function AdminOverviewPage() {
                   ))}
                 </div>
               </CardContent>
-            </Card>
+            </Card>}
 
-            <Card>
+            {hasPermission('members') && <Card>
               <CardHeader><span className="text-sm font-semibold">Member status</span></CardHeader>
               <CardContent>
                 {memberStatusData.length === 0 ? (
@@ -186,9 +191,9 @@ export default function AdminOverviewPage() {
                   ))}
                 </div>
               </CardContent>
-            </Card>
+            </Card>}
 
-            <Card>
+            {hasPermission('gyms') && <Card>
               <CardHeader><span className="text-sm font-semibold">Gyms by venue</span></CardHeader>
               <CardContent>
                 <ResponsiveContainer width="100%" height={220}>
@@ -201,10 +206,11 @@ export default function AdminOverviewPage() {
                   </BarChart>
                 </ResponsiveContainer>
               </CardContent>
-            </Card>
+            </Card>}
           </div>
+          )}
 
-          {gymTierData.length > 0 && (
+          {hasPermission('gyms') && gymTierData.length > 0 && (
             <Card>
               <CardHeader><span className="text-sm font-semibold">Gym tier distribution</span></CardHeader>
               <CardContent>
@@ -227,7 +233,7 @@ export default function AdminOverviewPage() {
             </Card>
           )}
 
-          <Card>
+          {hasPermission('payments') && <Card>
             <CardHeader>
               <span className="text-sm font-semibold">Recent payment requests</span>
               <Link href="/admin/payments">
@@ -257,15 +263,15 @@ export default function AdminOverviewPage() {
                 </table>
               )}
             </div>
-          </Card>
+          </Card>}
 
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             {([
-              { href: '/admin/gyms',      label: 'Manage Gyms',    Icon: Building2,   count: gyms.length,              alert: false },
-              { href: '/admin/members',   label: 'Manage Members', Icon: Users,       count: members.length,           alert: false },
-              { href: '/admin/payments',  label: 'Payment Queue',  Icon: CreditCard,  count: metrics.pendingPayments,  alert: metrics.pendingPayments > 0 },
-              { href: '/admin/approvals', label: 'Role Approvals', Icon: ShieldCheck, count: metrics.pendingApprovals, alert: metrics.pendingApprovals > 0 },
-            ] as const).map(item => (
+              { href: '/admin/gyms',      label: 'Manage Gyms',    Icon: Building2,   count: gyms.length,              alert: false,                              scope: 'gyms' },
+              { href: '/admin/members',   label: 'Manage Members', Icon: Users,       count: members.length,           alert: false,                              scope: 'members' },
+              { href: '/admin/payments',  label: 'Payment Queue',  Icon: CreditCard,  count: metrics.pendingPayments,  alert: metrics.pendingPayments > 0,        scope: 'payments' },
+              { href: '/admin/approvals', label: 'Role Approvals', Icon: ShieldCheck, count: metrics.pendingApprovals, alert: metrics.pendingApprovals > 0,        scope: 'approvals' },
+            ] as const).filter(item => hasPermission(item.scope)).map(item => (
               <Link key={item.href} href={item.href} className="block">
                 <div className="flex items-center gap-4 rounded-[var(--radius-xl)] border border-[var(--color-border-secondary)] bg-[var(--color-bg-primary)] p-4 hover:border-[var(--color-brand-300)] hover:shadow-[var(--shadow-md)] transition-all cursor-pointer group">
                   <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-[var(--radius-xl)] border ${item.alert ? 'bg-[var(--color-warning-50)] border-[var(--color-warning-200)] text-[var(--color-warning-700)]' : 'bg-[var(--color-brand-50)] border-[var(--color-brand-200)] text-[var(--color-brand-700)]'}`}>

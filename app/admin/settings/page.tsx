@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useState } from 'react';
-import { RefreshCw, Save, Plus, Trash2 } from 'lucide-react';
+import { RefreshCw, Save, Plus, Trash2, X } from 'lucide-react';
 import { useApp } from '../../providers';
 import { api, PlatformSettings, SubscriptionTierConfig, PayoutBandConfig } from '@/lib/api';
 import { Button, PageHeader, Alert, Spinner, Card, Field } from '@/components/shared';
@@ -31,6 +31,9 @@ export default function SettingsPage() {
   const [period, setPeriod] = useState(14);
   const [model, setModel]   = useState<'commission' | 'discounted_rate'>('commission');
   const [currency, setCurrency] = useState('TZS');
+  const [specialties, setSpecialties] = useState<string[]>([]);
+  const [newSpecialty, setNewSpecialty] = useState('');
+  const [specialtySaving, setSpecialtySaving] = useState(false);
 
   const load = async () => {
     if (!token) return;
@@ -44,6 +47,7 @@ export default function SettingsPage() {
       setModel(s.payoutModel);
       setCurrency(s.currency);
       setError(null);
+      try { const sp = await api.adminGetSpecialties(token); setSpecialties(sp); } catch { /* non-fatal */ }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load settings');
     } finally {
@@ -82,6 +86,31 @@ export default function SettingsPage() {
 
   function updateBand(idx: number, field: keyof PayoutBandConfig, value: string | number) {
     setBands(prev => prev.map((b, i) => i === idx ? { ...b, [field]: value } : b));
+  }
+
+  async function handleAddSpecialty() {
+    if (!token || !newSpecialty.trim()) return;
+    setSpecialtySaving(true);
+    try {
+      const updated = await api.adminSaveSpecialty(token, newSpecialty.trim());
+      setSpecialties(updated);
+      setNewSpecialty('');
+    } catch (e: any) {
+      if (e?.status === 409) setError('Specialty already exists');
+      else setError(e instanceof Error ? e.message : 'Failed to add specialty');
+    } finally {
+      setSpecialtySaving(false);
+    }
+  }
+
+  async function handleDeleteSpecialty(name: string) {
+    if (!token) return;
+    try {
+      const updated = await api.adminDeleteSpecialty(token, name);
+      setSpecialties(updated);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to delete specialty');
+    }
   }
 
   if (!token || user?.userType !== 'admin') return null;
@@ -268,6 +297,38 @@ export default function SettingsPage() {
               ))}
             </div>
           )}
+        </div>
+      </Card>
+
+      {/* Trainer Specialties */}
+      <Card>
+        <div className="p-5 space-y-4">
+          <h3 className="text-sm font-semibold text-[var(--color-fg-primary)]">Trainer Specialties</h3>
+          <p className="text-xs text-[var(--color-fg-quaternary)]">These specialties appear as selectable chips when creating or editing a trainer profile.</p>
+          <div className="flex flex-wrap gap-2">
+            {specialties.map(sp => (
+              <span key={sp} className="inline-flex items-center gap-1 px-2.5 py-1 rounded-[var(--radius-full)] text-xs font-medium bg-[var(--color-brand-50)] text-[var(--color-brand-700)] border border-[var(--color-brand-200)]">
+                {sp}
+                <button type="button" onClick={() => handleDeleteSpecialty(sp)} className="hover:text-[var(--color-error-600)] transition-colors">
+                  <X className="h-3 w-3" />
+                </button>
+              </span>
+            ))}
+          </div>
+          <div className="flex gap-2 items-end">
+            <Field label="Add specialty">
+              <input
+                className="ui-input"
+                value={newSpecialty}
+                onChange={e => setNewSpecialty(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleAddSpecialty(); }}}
+                placeholder="e.g. Pilates, HIIT"
+              />
+            </Field>
+            <Button variant="secondary" size="sm" onClick={handleAddSpecialty} disabled={specialtySaving || !newSpecialty.trim()}>
+              <Plus className="h-3.5 w-3.5" /> Add
+            </Button>
+          </div>
         </div>
       </Card>
 

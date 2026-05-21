@@ -1,5 +1,5 @@
 import { initializeApp, getApps } from 'firebase/app';
-import { getAuth, GoogleAuthProvider, signInWithPopup } from 'firebase/auth';
+import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithEmailAndPassword } from 'firebase/auth';
 
 function firebaseConfig() {
   const cfg = {
@@ -20,5 +20,12 @@ export async function signInWithGoogleIdToken() {
   const provider = new GoogleAuthProvider();
   provider.setCustomParameters({ prompt: 'select_account' });
   const credential = await signInWithPopup(auth, provider);
+  return credential.user.getIdToken();
+}
+
+export async function signInWithEmailPasswordIdToken(email: string, password: string) {
+  const app = getApps().length ? getApps()[0] : initializeApp(firebaseConfig());
+  const auth = getAuth(app);
+  const credential = await signInWithEmailAndPassword(auth, email, password);
   return credential.user.getIdToken();
 }

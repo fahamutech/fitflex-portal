@@ -3,15 +3,25 @@ import { createContext, ReactNode, useCallback, useContext, useEffect, useState 
 import { Locale, MessageKey, t as translate } from '@/lib/i18n';
 import { setOnUnauthorized } from '@/lib/api';
 
+export interface PortalAppUser {
+  id: string;
+  userType: string;
+  gymId?: string;
+  email?: string;
+  portalUser?: boolean;
+  aclPermissions?: string[];
+}
+
 interface AppCtx {
   ready: boolean;
   locale: Locale;
   setLocale: (l: Locale) => void;
   t: (key: MessageKey) => string;
   token: string | null;
-  user: { id: string; userType: string; gymId?: string } | null;
-  signIn: (token: string, user: AppCtx['user']) => void;
+  user: PortalAppUser | null;
+  signIn: (token: string, user: PortalAppUser) => void;
   signOut: () => void;
+  hasPermission: (scope: string) => boolean;
 }
 
 const Ctx = createContext<AppCtx | null>(null);
@@ -48,6 +58,14 @@ export function Providers({ children }: { children: ReactNode }) {
     setToken(null); setUser(null);
   }, []);
 
+  // Super-admins (no portalUser flag or empty aclPermissions) can access everything.
+  // Portal staff users with aclPermissions have granular access.
+  const hasPermission = useCallback((scope: string): boolean => {
+    if (!user) return false;
+    if (user.userType === 'admin' && !user.portalUser) return true;
+    return (user.aclPermissions ?? []).includes(scope);
+  }, [user]);
+
   // Auto-logout on 401 from any API call
   useEffect(() => {
     setOnUnauthorized(signOut);
@@ -55,7 +73,7 @@ export function Providers({ children }: { children: ReactNode }) {
   }, [signOut]);
 
   return (
-    <Ctx.Provider value={{ ready, locale, setLocale, t: (k) => translate(locale, k), token, user, signIn, signOut }}>
+    <Ctx.Provider value={{ ready, locale, setLocale, t: (k) => translate(locale, k), token, user, signIn, signOut, hasPermission }}>
       {children}
     </Ctx.Provider>
   );

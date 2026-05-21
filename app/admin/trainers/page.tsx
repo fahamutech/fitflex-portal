@@ -37,6 +37,8 @@ export default function TrainersPage() {
   const [draftAvailability, setDraftAvailability] = useState<{ days: string[]; gymId: string; slots: string[] }[]>([]);
   const [specialtiesInput, setSpecialtiesInput] = useState('');
   const [rateInput, setRateInput] = useState('');
+  const [sessionCurrency, setSessionCurrency] = useState<'TZS' | 'USD'>('TZS');
+  const [availableSpecialties, setAvailableSpecialties] = useState<string[]>([]);
 
   const DAYS_OF_WEEK = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
   const TIME_SLOTS = ['06:00', '07:00', '08:00', '09:00', '10:00', '11:00', '12:00', '13:00', '14:00', '15:00', '16:00', '17:00', '18:00', '19:00', '20:00', '21:00'];
@@ -45,8 +47,8 @@ export default function TrainersPage() {
     if (!token) return;
     setLoading(true);
     try {
-      const [t, g, o] = await Promise.all([api.adminTrainers(token), api.adminGyms(token), api.gymOwners(token)]);
-      setTrainers(t); setGyms(g); setOwners(o);
+      const [t, g, o, specs] = await Promise.all([api.adminTrainers(token), api.adminGyms(token), api.gymOwners(token), api.adminGetSpecialties(token)]);
+      setTrainers(t); setGyms(g); setOwners(o); setAvailableSpecialties(specs);
       setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load');
@@ -70,11 +72,12 @@ export default function TrainersPage() {
 
   function openCreate() {
     setEditing(null);
-    setDraft({ displayName: '', email: '', photoUrl: null, specialties: [], hourlyRateTzs: 0, status: 'active', gymIds: [] });
+    setDraft({ displayName: '', email: '', photoUrl: null, specialties: [], hourlyRateTzs: 0, sessionRateCurrency: 'TZS', status: 'active', gymIds: [] });
     setDraftGymIds([]);
     setDraftAvailability([]);
     setSpecialtiesInput('');
     setRateInput('');
+    setSessionCurrency('TZS');
     setFormErrors({});
     setDialogOpen(true);
   }
@@ -90,8 +93,9 @@ export default function TrainersPage() {
         slots: a.slots || [],
       }))
     );
-    setSpecialtiesInput((trainer.specialties || []).join(', '));
+    setSpecialtiesInput((trainer.specialties || []).join(','));
     setRateInput(String(trainer.hourlyRateTzs || ''));
+    setSessionCurrency((trainer.sessionRateCurrency as 'TZS' | 'USD') || 'TZS');
     setFormErrors({});
     setDialogOpen(true);
   }
@@ -109,6 +113,13 @@ export default function TrainersPage() {
     return errs;
   }
 
+  function toggleSpecialty(spec: string) {
+    const current = specialtiesInput ? specialtiesInput.split(',').map(s => s.trim()).filter(Boolean) : [];
+    const next = current.includes(spec) ? current.filter(s => s !== spec) : [...current, spec];
+    setSpecialtiesInput(next.join(','));
+    setFormErrors(prev => { const { specialties: _, ...rest } = prev; return rest; });
+  }
+
   function validateGymForm(): Record<string, string> {
     return validateGymDraft(newGym);
   }
@@ -116,8 +127,8 @@ export default function TrainersPage() {
   async function handleSave() {
     if (!token) return;
     const errs = validateTrainerForm();
-    if (Object.keys(errs).length > 0) { setFormErrors(errs); return; }
-    setFormErrors({});
+    setFormErrors(errs);
+    if (Object.keys(errs).length > 0) return;
     setBusy(true);
     try {
       const specialties = specialtiesInput.split(',').map(s => s.trim()).filter(Boolean);
@@ -126,7 +137,7 @@ export default function TrainersPage() {
       const availability = draftAvailability
         .filter(a => a.slots.length > 0 && a.days.length > 0)
         .flatMap(a => a.days.map(day => ({ day, gymId: a.gymId || undefined, slots: a.slots })));
-      const payload = { ...draft, specialties, hourlyRateTzs, gymIds: draftGymIds, availability };
+      const payload = { ...draft, specialties, hourlyRateTzs, sessionRateCurrency: sessionCurrency, gymIds: draftGymIds, availability };
       if (editing) {
         await api.saveTrainer(token, { ...payload, id: editing.id });
       } else {
@@ -160,7 +171,7 @@ export default function TrainersPage() {
     }
   }
 
-  async function handleStatusChange(trainer: TrainerProfile, newStatus: 'active' | 'suspended') {
+  async function handleStatusChange(trainer: TrainerProfile, newStatus: 'active' | 'inactive' | 'suspended') {
     if (!token) return;
     try {
       await api.saveTrainer(token, { id: trainer.id, status: newStatus });
@@ -273,11 +284,12 @@ export default function TrainersPage() {
       cell: (t) => (
         <select
           value={t.status}
-          onChange={(e) => handleStatusChange(t, e.target.value as 'active' | 'suspended')}
+          onChange={(e) => handleStatusChange(t, e.target.value as 'active' | 'inactive' | 'suspended')}
           className="appearance-none bg-transparent border-none text-xs font-medium cursor-pointer focus:outline-none"
-          style={{ color: t.status === 'active' ? 'var(--color-success-700)' : 'var(--color-error-700)' }}
+          style={{ color: t.status === 'active' ? 'var(--color-success-700)' : t.status === 'inactive' ? 'var(--color-warning-700)' : 'var(--color-error-700)' }}
         >
           <option value="active">Active</option>
+          <option value="inactive">Inactive</option>
           <option value="suspended">Suspended</option>
         </select>
       ),
@@ -356,12 +368,38 @@ export default function TrainersPage() {
               maxFiles={1}
             />
           </Field>
-          <Field label="Specialties (comma-separated)" error={formErrors.specialties}>
-            <input className="ui-input" value={specialtiesInput} onChange={e => { setSpecialtiesInput(e.target.value); setFormErrors(prev => { const { specialties, ...rest } = prev; return rest; }); }} placeholder="e.g. Yoga, Weight Training, Cardio" />
+          <Field label="Specialties" hint="Select all that apply." error={formErrors.specialties}>
+            <div className="flex flex-wrap gap-1.5 mt-1">
+              {(availableSpecialties.length > 0 ? availableSpecialties : ['Yoga','Cardio','Weight Training','Aerobics','Weight Loss','Muscle Gain','Dance','Physiotherapy','Women Only','Boxing','Pilates','CrossFit','Swimming','Nutrition','HIIT','Stretching']).map(spec => {
+                const selected = specialtiesInput.split(',').map(s => s.trim()).filter(Boolean).includes(spec);
+                return (
+                  <button
+                    key={spec}
+                    type="button"
+                    onClick={() => toggleSpecialty(spec)}
+                    className={`px-2.5 py-1 text-xs rounded-[var(--radius-full)] font-medium border transition-colors ${
+                      selected
+                        ? 'bg-[var(--color-brand-600)] text-white border-[var(--color-brand-600)]'
+                        : 'text-[var(--color-fg-tertiary)] border-[var(--color-border-secondary)] hover:bg-[var(--color-bg-tertiary)]'
+                    }`}
+                  >
+                    {spec}
+                  </button>
+                );
+              })}
+            </div>
           </Field>
-          <Field label="Per session rate (TZS)" error={formErrors.hourlyRateTzs}>
-            <input className="ui-input" type="number" value={rateInput} onChange={e => { setRateInput(e.target.value); setFormErrors(prev => { const { hourlyRateTzs, ...rest } = prev; return rest; }); }} placeholder="e.g. 15000" />
-          </Field>
+          <div className="flex gap-3">
+            <Field label="Currency" error={undefined}>
+              <select className="ui-input" value={sessionCurrency} onChange={e => setSessionCurrency(e.target.value as 'TZS' | 'USD')}>
+                <option value="TZS">TZS</option>
+                <option value="USD">USD</option>
+              </select>
+            </Field>
+            <Field label="Per session rate" error={formErrors.hourlyRateTzs}>
+              <input className="ui-input" type="number" value={rateInput} onChange={e => { setRateInput(e.target.value); setFormErrors(prev => { const { hourlyRateTzs, ...rest } = prev; return rest; }); }} placeholder={sessionCurrency === 'USD' ? 'e.g. 30' : 'e.g. 15000'} />
+            </Field>
+          </div>
           <Field label="Gyms" hint="Select one or more gyms for this trainer." error={formErrors.gyms}>
             <SearchableSelect
               options={gymOptions}
@@ -453,8 +491,9 @@ export default function TrainersPage() {
             </div>
           </Field>
           <Field label="Status" error={formErrors.status}>
-            <select className="ui-input" value={draft.status || 'active'} onChange={e => { setDraft({ ...draft, status: e.target.value as 'active' | 'suspended' }); setFormErrors(prev => { const { status, ...rest } = prev; return rest; }); }}>
+            <select className="ui-input" value={draft.status || 'active'} onChange={e => { setDraft({ ...draft, status: e.target.value as 'active' | 'inactive' | 'suspended' }); setFormErrors(prev => { const { status, ...rest } = prev; return rest; }); }}>
               <option value="active">Active</option>
+              <option value="inactive">Inactive</option>
               <option value="suspended">Suspended</option>
             </select>
           </Field>
