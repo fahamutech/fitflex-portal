@@ -81,7 +81,7 @@ export default function CheckinsPage() {
                       {new Date(r.timestamp).toLocaleString()}
                     </td>
                     <td className="font-medium text-[var(--color-fg-primary)]">
-                      {r.memberPhone ?? r.memberEmail ?? r.memberId}
+                      {r.memberPublicId ?? r.memberId}
                     </td>
                     <td>
                       <Badge tone={passTierTone(r.passTier)}>

@@ -69,6 +69,7 @@ export default function ScanPage() {
     try {
       const r = await api.checkIn(token, qrToken);
       setLast(r);
+      if (r.ok) stopCamera();
     } catch (e) {
       if (e instanceof ApiError && (e.body as CheckInResult)?.failure) setLast(e.body as CheckInResult);
       else setLast({ ok: false, failure: 'invalid_or_expired_qr' });
@@ -190,7 +191,7 @@ export default function ScanPage() {
                   </div>
                   <div className="flex items-center gap-1.5">
                     <User className="h-3.5 w-3.5 opacity-60" />
-                    {last.checkin.memberPhone ?? last.checkin.memberEmail ?? last.checkin.memberId}
+                    {last.checkin.memberPublicId ?? last.checkin.memberId}
                   </div>
                 </div>
               )}

@@ -26,17 +26,24 @@ export default function DashboardPage() {
   const [data, setData] = useState<DashboardResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [gymId, setGymId] = useState('');
+  const [memberType, setMemberType] = useState<'all' | 'direct' | 'fitflex'>('all');
+  const [periodStart, setPeriodStart] = useState(() => {
+    const now = new Date();
+    return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)).toISOString().slice(0, 10);
+  });
+  const [periodEnd, setPeriodEnd] = useState(() => new Date().toISOString().slice(0, 10));
 
   const load = () => {
     if (!token) return;
     setLoading(true);
-    api.dashboard(token)
+    api.dashboard(token, { gymId, periodStart, periodEnd, memberType })
       .then(setData)
       .catch((e) => setError(String(e)))
       .finally(() => setLoading(false));
   };
 
-  useEffect(() => { load(); }, [token]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { load(); }, [token, gymId, periodStart, periodEnd, memberType]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!token) return null;
 
@@ -56,6 +63,13 @@ export default function DashboardPage() {
     : `${data.payout.commissionPct ?? 0}% commission · ${
         data.payout.payoutDelayDays === 0 ? 'instant' : `T+${data.payout.payoutDelayDays}d`
       }`;
+  const activeMemberType = data.memberType ?? memberType;
+  const activeMemberTypeLabel =
+    activeMemberType === 'direct'
+      ? t('dash.memberType.direct')
+      : activeMemberType === 'fitflex'
+        ? t('dash.memberType.fitflex')
+        : t('dash.memberType.all');
 
   return (
     <div className="space-y-6">
@@ -86,27 +100,109 @@ export default function DashboardPage() {
         </CardContent>
       </Card>
 
+      <Card>
+        <CardHeader>
+          <h2 className="text-sm font-semibold text-[var(--color-fg-primary)]">{t('dash.periodSettings')}</h2>
+        </CardHeader>
+        <CardContent className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <label className="space-y-1">
+            <span className="text-xs font-medium text-[var(--color-fg-secondary)]">{t('dash.gym')}</span>
+            <select className="ui-input" value={gymId} onChange={e => setGymId(e.target.value)}>
+              <option value="">{t('dash.allGyms')}</option>
+              {(data.gyms || [data.gym]).map(g => (
+                <option key={g.id} value={g.id}>{g.name}</option>
+              ))}
+            </select>
+          </label>
+          <label className="space-y-1">
+            <span className="text-xs font-medium text-[var(--color-fg-secondary)]">{t('dash.periodStart')}</span>
+            <input className="ui-input" type="date" value={periodStart} onChange={e => setPeriodStart(e.target.value)} />
+          </label>
+          <label className="space-y-1">
+            <span className="text-xs font-medium text-[var(--color-fg-secondary)]">{t('dash.periodEnd')}</span>
+            <input className="ui-input" type="date" value={periodEnd} onChange={e => setPeriodEnd(e.target.value)} />
+          </label>
+          <label className="space-y-1">
+            <span className="text-xs font-medium text-[var(--color-fg-secondary)]">{t('dash.memberType')}</span>
+            <select className="ui-input" value={memberType} onChange={e => setMemberType(e.target.value as 'all' | 'direct' | 'fitflex')}>
+              <option value="all">{t('dash.memberType.all')}</option>
+              <option value="direct">{t('dash.memberType.direct')}</option>
+              <option value="fitflex">{t('dash.memberType.fitflex')}</option>
+            </select>
+          </label>
+        </CardContent>
+      </Card>
+
       {/* Metric grid */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         <MetricCard
           label={t('dash.today')}
           value={data.todayCount}
           icon={<CalendarCheck className="h-5 w-5" />}
-          sub="check-ins today"
+          sub={t('dash.today.sub')}
         />
         <MetricCard
           label={t('dash.month')}
           value={data.monthVisits}
           icon={<Users className="h-5 w-5" />}
-          sub="Platform Pass visits"
+          sub={t('dash.month.sub')}
         />
         <MetricCard
           label={t('dash.band')}
           value={`Band ${data.payout.band}`}
           icon={<TrendingUp className="h-5 w-5" />}
-          sub={payoutLabel}
+          sub={`${t('dash.band.sub')} · ${payoutLabel}`}
         />
       </div>
+
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <MetricCard
+          label={t('dash.periodVisits')}
+          value={data.periodVisits ?? 0}
+          icon={<CalendarCheck className="h-5 w-5" />}
+          sub={`${data.periodStart ?? periodStart} - ${data.periodEnd ?? periodEnd}`}
+        />
+        <MetricCard
+          label={t('dash.periodMembers')}
+          value={data.periodMembers ?? 0}
+          icon={<Users className="h-5 w-5" />}
+          sub={activeMemberTypeLabel}
+        />
+        <MetricCard
+          label={t('dash.directMembers')}
+          value={data.directMembers ?? 0}
+          icon={<Users className="h-5 w-5" />}
+          sub={`${data.directVisits ?? 0} ${t('dash.visits')}`}
+        />
+        <MetricCard
+          label={t('dash.fitflexMembers')}
+          value={data.fitflexMembers ?? 0}
+          icon={<TrendingUp className="h-5 w-5" />}
+          sub={`${data.fitflexVisits ?? 0} ${t('dash.visits')}`}
+        />
+      </div>
+
+      {data.overall && (
+        <Card>
+          <CardHeader>
+            <h2 className="text-sm font-semibold text-[var(--color-fg-primary)]">{t('dash.overallPerformance')}</h2>
+          </CardHeader>
+          <CardContent className="grid gap-y-3 sm:grid-cols-3 text-sm">
+            <div>
+              <dt className="text-[var(--color-fg-quaternary)]">{t('dash.gyms')}</dt>
+              <dd className="mt-0.5 font-medium text-[var(--color-fg-primary)]">{data.overall.gymCount}</dd>
+            </div>
+            <div>
+              <dt className="text-[var(--color-fg-quaternary)]">{t('dash.totalVisits')}</dt>
+              <dd className="mt-0.5 font-medium text-[var(--color-fg-primary)]">{data.overall.totalVisits}</dd>
+            </div>
+            <div>
+              <dt className="text-[var(--color-fg-quaternary)]">{t('dash.uniqueMembers')}</dt>
+              <dd className="mt-0.5 font-medium text-[var(--color-fg-primary)]">{data.overall.uniqueMembers}</dd>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Estimated payout card */}
       {!data.payout.flatFee && data.payout.net != null && (

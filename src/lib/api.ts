@@ -55,7 +55,15 @@ export const api = {
     request<PortalUser>(`/admin/portal-users/${id}`, { method: 'PUT', body: JSON.stringify(data) }, token),
   deletePortalUser: (token: string, id: string) =>
     request<{ ok: boolean }>(`/admin/portal-users/${id}`, { method: 'DELETE' }, token),
-  dashboard: (token: string) => request<DashboardResponse>('/operator/dashboard', {}, token),
+  dashboard: (token: string, filters?: { gymId?: string; periodStart?: string; periodEnd?: string; memberType?: 'all' | 'direct' | 'fitflex' }) => {
+    const q = new URLSearchParams();
+    if (filters?.gymId) q.set('gymId', filters.gymId);
+    if (filters?.periodStart) q.set('periodStart', filters.periodStart);
+    if (filters?.periodEnd) q.set('periodEnd', filters.periodEnd);
+    if (filters?.memberType) q.set('memberType', filters.memberType);
+    const s = q.toString();
+    return request<DashboardResponse>(`/operator/dashboard${s ? '?' + s : ''}`, {}, token);
+  },
   recentCheckIns: (token: string) => request<CheckIn[]>('/operator/checkins', {}, token),
   checkIn: (token: string, qrToken: string) =>
     request<CheckInResult>('/operator/checkins', { method: 'POST', body: JSON.stringify({ qrToken }) }, token),
@@ -188,14 +196,45 @@ export interface PortalUser {
 
 export interface DashboardResponse {
   gym: { id: string; name: string; tier: string; perVisitRate: number };
+  gyms?: Array<{ id: string; name: string; tier: string; perVisitRate: number }>;
   todayCount: number;
   monthVisits: number;
+  periodStart?: string;
+  periodEnd?: string;
+  memberType?: 'all' | 'direct' | 'fitflex';
+  periodVisits?: number;
+  periodMembers?: number;
+  directVisits?: number;
+  directMembers?: number;
+  fitflexVisits?: number;
+  fitflexMembers?: number;
+  overall?: {
+    gymCount: number;
+    totalVisits: number;
+    uniqueMembers: number;
+    directVisits: number;
+    directMembers: number;
+    fitflexVisits: number;
+    fitflexMembers: number;
+  };
+  gymSummaries?: Array<{
+    gymId: string;
+    gymName: string;
+    tier: string;
+    totalVisits: number;
+    uniqueMembers: number;
+    directVisits: number;
+    directMembers: number;
+    fitflexVisits: number;
+    fitflexMembers: number;
+  }>;
   payout: { band: number; commissionPct?: number; net?: number; flatFee?: boolean; payoutDelayDays?: number };
 }
 
 export interface CheckIn {
   id: string;
   memberId: string;
+  memberPublicId?: string;
   memberPhone: string | null;
   memberEmail?: string | null;
   timestamp: string;
