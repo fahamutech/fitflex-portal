@@ -2,6 +2,7 @@
 import { createContext, ReactNode, useCallback, useContext, useEffect, useState } from 'react';
 import { Locale, MessageKey, t as translate } from '@/lib/i18n';
 import { setOnUnauthorized } from '@/lib/api';
+import { PwaRegistration } from '@/components/pwa-registration';
 
 export interface PortalAppUser {
   id: string;
@@ -74,6 +75,7 @@ export function Providers({ children }: { children: ReactNode }) {
 
   return (
     <Ctx.Provider value={{ ready, locale, setLocale, t: (k) => translate(locale, k), token, user, signIn, signOut, hasPermission }}>
+      <PwaRegistration />
       {children}
     </Ctx.Provider>
   );
