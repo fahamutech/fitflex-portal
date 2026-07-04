@@ -29,6 +29,7 @@ export interface GymDraft {
   status: string;
   coordinates: { lat: number | null; lng: number | null };
   images: string[];
+  thumbnails: string[];
   paymentBank: string;
   paymentNumber: string;
   paymentNotes: string;
@@ -46,6 +47,7 @@ export const BLANK_GYM_DRAFT: GymDraft = {
   status: 'active',
   coordinates: { lat: -6.7924, lng: 39.2083 },
   images: [],
+  thumbnails: [],
   paymentBank: '',
   paymentNumber: '',
   paymentNotes: '',
@@ -168,8 +170,9 @@ export function GymCreateForm({ draft, onChange, errors, onClearError, extraFiel
       <Field label="Gym images" hint="Upload gym photos. PNG, JPG, or WEBP." error={errors.images}>
         <ImageUpload
           value={draft.images}
-          onChange={(imgs) => {
-            onChange({ ...draft, images: imgs });
+          thumbnails={draft.thumbnails}
+          onChange={(images, thumbnails) => {
+            onChange({ ...draft, images, thumbnails });
             onClearError('images');
           }}
           maxFiles={5}

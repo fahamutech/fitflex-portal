@@ -265,6 +265,8 @@ export interface Gym {
   venueType?: 'physical';
   coordinates?: { lat: number | null; lng: number | null };
   images?: string[];
+  /** Small WebP previews, parallel to `images` (same index = same photo). */
+  thumbnails?: string[];
   amenities?: string[];
   equipment?: string[];
 }

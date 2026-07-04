@@ -202,6 +202,7 @@ export default function TrainersPage() {
         accessMode: 'paid_visit',
         coordinates: newGym.coordinates.lat != null ? newGym.coordinates as any : undefined,
         images: newGym.images.length > 0 ? newGym.images : undefined,
+        thumbnails: newGym.thumbnails.length > 0 ? newGym.thumbnails : undefined,
       });
       // Assign owner to the new gym if selected
       if (gymOwnerId) {
@@ -364,6 +365,7 @@ export default function TrainersPage() {
           <Field label="Trainer image" hint="Upload a profile photo. PNG, JPG, or WEBP.">
             <ImageUpload
               value={draft.photoUrl ? [draft.photoUrl] : []}
+              thumbnails={[]}
               onChange={(imgs) => setDraft({ ...draft, photoUrl: imgs[0] || null })}
               maxFiles={1}
             />

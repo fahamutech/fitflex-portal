@@ -167,6 +167,7 @@ export default function OwnersPage() {
         accessMode: 'paid_visit',
         coordinates: newGym.coordinates.lat != null ? newGym.coordinates as any : undefined,
         images: newGym.images.length > 0 ? newGym.images : undefined,
+        thumbnails: newGym.thumbnails.length > 0 ? newGym.thumbnails : undefined,
       });
       // Assign selected trainers to the new gym
       for (const tId of gymTrainerIds) {

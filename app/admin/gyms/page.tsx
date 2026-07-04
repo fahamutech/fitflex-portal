@@ -28,7 +28,7 @@ const BLANK_GYM: Partial<Gym> = {
   ratePerDay: 5000, ratePerWeek: 25000, ratePerMonth: 80000,
   perVisitRate: 5000, commissionRate: 12, status: 'active',
   venueType: 'physical', accessMode: 'paid_visit',
-  coordinates: { lat: -6.7924, lng: 39.2083 }, images: [],
+  coordinates: { lat: -6.7924, lng: 39.2083 }, images: [], thumbnails: [],
 };
 
 export default function GymsPage() {
@@ -309,7 +309,7 @@ export default function GymsPage() {
       cell: (gym) => (
         <button onClick={(e) => { e.stopPropagation(); openDetail(gym); }} className="flex items-center gap-3 text-left group">
           <div className="h-10 w-14 overflow-hidden rounded-[var(--radius-md)] bg-[var(--color-bg-tertiary)]">
-            {gym.images?.[0] ? <img src={gym.images[0]} alt={gym.name} className="h-full w-full object-cover" /> : null}
+            {(gym.thumbnails?.[0] || gym.images?.[0]) ? <img src={gym.thumbnails?.[0] || gym.images![0]} alt={gym.name} className="h-full w-full object-cover" /> : null}
           </div>
           <div>
             <div className="font-medium text-[var(--color-fg-primary)] group-hover:text-[var(--color-brand-700)] transition-colors">{gym.name}</div>
@@ -487,7 +487,8 @@ export default function GymsPage() {
               <Field label="Gym images" hint="Upload gym photos. PNG, JPG, or WEBP." error={formErrors.images}>
                 <ImageUpload
                   value={draft.images || []}
-                  onChange={(imgs) => { setDraft({ ...draft, images: imgs }); setFormErrors(prev => { const { images, ...rest } = prev; return rest; }); }}
+                  thumbnails={draft.thumbnails || []}
+                  onChange={(images, thumbnails) => { setDraft({ ...draft, images, thumbnails }); setFormErrors(prev => { const { images: _i, ...rest } = prev; return rest; }); }}
                   maxFiles={5}
                 />
               </Field>

@@ -87,6 +87,7 @@ export function TrainerInlineForm({
       <Field label="Trainer image" hint="Upload a profile photo. PNG, JPG, or WEBP.">
         <ImageUpload
           value={draft.photoUrl ? [draft.photoUrl] : []}
+          thumbnails={[]}
           onChange={(imgs) => onChange({ ...draft, photoUrl: imgs[0] || '' })}
           maxFiles={1}
         />

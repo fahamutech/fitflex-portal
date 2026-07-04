@@ -4,15 +4,71 @@ import { Upload, X, ImageIcon } from 'lucide-react';
 import { cn } from '@/lib/cn';
 
 interface ImageUploadProps {
+  /** Full-size images (parallel to `thumbnails`, same index = same photo). */
   value: string[];
-  onChange: (urls: string[]) => void;
+  /** Small preview images (parallel to `value`). */
+  thumbnails: string[];
+  onChange: (images: string[], thumbnails: string[]) => void;
   maxFiles?: number;
   disabled?: boolean;
   className?: string;
 }
 
+const FULL_MAX_DIMENSION = 1280;
+const FULL_WEBP_QUALITY = 0.8;
+const THUMB_MAX_DIMENSION = 320;
+const THUMB_WEBP_QUALITY = 0.7;
+const WEBP_MIME = 'image/webp';
+
+function loadImage(file: File): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const objectUrl = URL.createObjectURL(file);
+    img.onload = () => {
+      URL.revokeObjectURL(objectUrl);
+      resolve(img);
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      reject(new Error('Failed to load image'));
+    };
+    img.src = objectUrl;
+  });
+}
+
+function drawToWebp(img: HTMLImageElement, maxDimension: number, quality: number): string {
+  const scale = Math.min(1, maxDimension / Math.max(img.width, img.height));
+  const width = Math.max(1, Math.round(img.width * scale));
+  const height = Math.max(1, Math.round(img.height * scale));
+
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) throw new Error('Canvas 2D context unavailable');
+  ctx.drawImage(img, 0, 0, width, height);
+  return canvas.toDataURL(WEBP_MIME, quality);
+}
+
+/**
+ * Downscales and re-encodes an uploaded image as WebP, producing both a
+ * full-size copy and a small thumbnail. Raw camera photos can be several MB;
+ * the API stores images inline (no object storage yet), so every
+ * uncompressed byte here is shipped in full on every GET /gyms response.
+ * WebP + downscaling keeps gym payloads small, and the thumbnail lets list
+ * views avoid loading full-resolution images at all.
+ */
+async function compressImage(file: File): Promise<{ full: string; thumbnail: string }> {
+  const img = await loadImage(file);
+  return {
+    full: drawToWebp(img, FULL_MAX_DIMENSION, FULL_WEBP_QUALITY),
+    thumbnail: drawToWebp(img, THUMB_MAX_DIMENSION, THUMB_WEBP_QUALITY),
+  };
+}
+
 export function ImageUpload({
   value = [],
+  thumbnails = [],
   onChange,
   maxFiles = 5,
   disabled = false,
@@ -25,19 +81,30 @@ export function ImageUpload({
     if (!files || disabled) return;
     const remaining = maxFiles - value.length;
     const toProcess = Array.from(files).slice(0, remaining);
-    const next = [...value];
+    const nextImages = [...value];
+    const nextThumbnails = [...thumbnails];
 
     toProcess.forEach((file) => {
       if (!file.type.startsWith('image/')) return;
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        const dataUrl = e.target?.result as string;
-        if (dataUrl) {
-          next.push(dataUrl);
-          onChange(next.slice(0, maxFiles));
-        }
-      };
-      reader.readAsDataURL(file);
+      compressImage(file)
+        .then(({ full, thumbnail }) => {
+          nextImages.push(full);
+          nextThumbnails.push(thumbnail);
+          onChange(nextImages.slice(0, maxFiles), nextThumbnails.slice(0, maxFiles));
+        })
+        .catch(() => {
+          // Fall back to the original file if compression fails (e.g. unsupported format).
+          const reader = new FileReader();
+          reader.onload = (e) => {
+            const dataUrl = e.target?.result as string;
+            if (dataUrl) {
+              nextImages.push(dataUrl);
+              nextThumbnails.push(dataUrl);
+              onChange(nextImages.slice(0, maxFiles), nextThumbnails.slice(0, maxFiles));
+            }
+          };
+          reader.readAsDataURL(file);
+        });
     });
   }
 
@@ -62,7 +129,10 @@ export function ImageUpload({
   }
 
   function removeImage(index: number) {
-    onChange(value.filter((_, i) => i !== index));
+    onChange(
+      value.filter((_, i) => i !== index),
+      thumbnails.filter((_, i) => i !== index)
+    );
   }
 
   return (
@@ -75,7 +145,7 @@ export function ImageUpload({
               key={i}
               className="relative group h-20 w-20 rounded-[var(--radius-lg)] overflow-hidden border border-[var(--color-border-secondary)] bg-[var(--color-bg-tertiary)]"
             >
-              <img src={url} alt={`Upload ${i + 1}`} className="h-full w-full object-cover" />
+              <img src={thumbnails[i] ?? url} alt={`Upload ${i + 1}`} className="h-full w-full object-cover" />
               {!disabled && (
                 <button
                   type="button"
@@ -112,7 +182,7 @@ export function ImageUpload({
               Click to upload <span className="text-[var(--color-fg-quaternary)] font-normal">or drag and drop</span>
             </p>
             <p className="text-xs text-[var(--color-fg-quaternary)] mt-1">
-              PNG, JPG, WEBP up to 5MB
+              PNG, JPG, WEBP up to 5MB &mdash; converted to WebP automatically
             </p>
           </div>
         </div>
