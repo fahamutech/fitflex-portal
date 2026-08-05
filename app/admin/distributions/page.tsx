@@ -309,6 +309,7 @@ export default function DistributionsPage() {
           </Field>
           <Field label="Receipt image" hint="Upload a photo of the payment receipt.">
             <ImageUpload
+              token={token}
               value={receiptImages}
               thumbnails={[]}
               onChange={(images) => setReceiptImages(images)}

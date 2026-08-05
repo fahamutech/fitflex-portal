@@ -37,6 +37,8 @@ export const BLANK_TRAINER_DRAFT: TrainerFormDraft = {
 };
 
 interface TrainerInlineFormProps {
+  /** Auth token — passed through to `ImageUpload` for the Zebra storage proxy. */
+  token: string;
   draft: TrainerFormDraft;
   onChange: (draft: TrainerFormDraft) => void;
   errors: Record<string, string>;
@@ -52,6 +54,7 @@ interface TrainerInlineFormProps {
 }
 
 export function TrainerInlineForm({
+  token,
   draft,
   onChange,
   errors,
@@ -86,6 +89,7 @@ export function TrainerInlineForm({
       </Field>
       <Field label="Trainer image" hint="Upload a profile photo. PNG, JPG, or WEBP.">
         <ImageUpload
+          token={token}
           value={draft.photoUrl ? [draft.photoUrl] : []}
           thumbnails={[]}
           onChange={(imgs) => onChange({ ...draft, photoUrl: imgs[0] || '' })}

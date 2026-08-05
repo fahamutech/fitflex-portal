@@ -373,6 +373,7 @@ export default function OwnersPage() {
       {/* Create Gym Inline Dialog — same form as Gyms page, owner select omitted (auto-assigned) */}
       <Dialog open={gymDialogOpen} onClose={() => setGymDialogOpen(false)} title="Create new gym" description="This gym will be automatically assigned to the owner you are editing." size="lg">
         <GymCreateForm
+          token={token}
           draft={newGym}
           onChange={setNewGym}
           errors={gymFormErrors}
@@ -403,6 +404,7 @@ export default function OwnersPage() {
       {/* Create Trainer Inline — same form as Trainers page, gym select omitted (auto-assigned) */}
       <Dialog open={trainerDialogOpen} onClose={() => setTrainerDialogOpen(false)} title="Create new trainer" description="This trainer will be assigned to the gym you are creating." size="md">
         <TrainerInlineForm
+          token={token}
           draft={newTrainer}
           onChange={setNewTrainer}
           errors={trainerFormErrors}

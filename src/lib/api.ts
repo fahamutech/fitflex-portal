@@ -67,17 +67,24 @@ export const api = {
   recentCheckIns: (token: string) => request<CheckIn[]>('/operator/checkins', {}, token),
   checkIn: (token: string, qrToken: string) =>
     request<CheckInResult>('/operator/checkins', { method: 'POST', body: JSON.stringify({ qrToken }) }, token),
+  /** Slimmed list — no `images`/`thumbnails` arrays, only a single `thumbnail` field. */
   adminGyms: (token: string) => request<Gym[]>('/admin/gyms', {}, token),
+  /** Full gym record (with `images`/`thumbnails`) — fetch on demand for the detail/edit views. */
+  getGym: (id: string) => request<Gym>(`/gyms/${id}`),
   saveGym: (token: string, gym: Partial<Gym>) =>
     request<Gym>('/admin/gyms', { method: 'POST', body: JSON.stringify(gym) }, token),
   deleteGym: (token: string, id: string) =>
     request<{ ok: boolean; gym: Gym }>(`/admin/gyms/${id}`, { method: 'DELETE' }, token),
   gymOwners: (token: string) => request<GymOwner[]>('/admin/gym-owners', {}, token),
+  /** Lightweight owner refs (id/displayName/email/gymIds) — use for owner-name lookups instead of the full gymOwners() list. */
+  gymOwnerRefs: (token: string) => request<GymOwnerRef[]>('/admin/gym-owners?refs=true', {}, token),
   saveGymOwner: (token: string, owner: Partial<GymOwner>) =>
     request<GymOwner>('/admin/gym-owners', { method: 'POST', body: JSON.stringify(owner) }, token),
   deleteGymOwner: (token: string, id: string) =>
     request<{ ok: boolean; owner: GymOwner }>(`/admin/gym-owners/${id}`, { method: 'DELETE' }, token),
   adminTrainers: (token: string) => request<TrainerProfile[]>('/admin/trainers', {}, token),
+  /** Lightweight trainer refs (id/displayName/email/gymIds) — use for trainer-name/assignment lookups instead of the full adminTrainers() list. */
+  adminTrainerRefs: (token: string) => request<TrainerRef[]>('/admin/trainers?refs=true', {}, token),
   saveTrainer: (token: string, trainer: Partial<TrainerProfile>) =>
     request<TrainerProfile>('/admin/trainers', { method: 'POST', body: JSON.stringify(trainer) }, token),
   deleteTrainer: (token: string, id: string) =>
@@ -180,7 +187,38 @@ export const api = {
     return request<TrainerProfile[]>(`/trainers${s ? '?' + s : ''}`);
   },
   publicPasses: () => request<any[]>('/passes'),
+
+  /**
+   * Uploads a single file (image) to the Zebra storage service via the
+   * backend's multipart proxy (`POST /storage`). Returns the persisted URL
+   * to store in place of a base64 data URL.
+   */
+  uploadFile: async (token: string, file: Blob, filename: string): Promise<UploadedFile> => {
+    const form = new FormData();
+    form.append('file', file, filename);
+    const res = await fetch(`${BASE}/storage/upload`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${token}` },
+      body: form
+    });
+    const body = await res.json().catch(() => null);
+    if (!res.ok) throw new ApiError(res.status, body);
+    // `url`/`thumbnailUrl` from the backend are root-relative to the API
+    // server (e.g. `/storage/<cid>/<filename>`), not the portal's own
+    // origin — resolve them against the API base so <img src> works from
+    // the portal domain.
+    return { ...body, url: `${BASE}${body.url}`, thumbnailUrl: `${BASE}${body.thumbnailUrl}` } as UploadedFile;
+  },
 };
+
+export interface UploadedFile {
+  cid: string | null;
+  filename: string | null;
+  url: string;
+  thumbnailCid: string | null;
+  thumbnailFilename: string | null;
+  thumbnailUrl: string;
+}
 
 export interface PortalUser {
   id: string;
@@ -264,9 +302,12 @@ export interface Gym {
   accessMode?: 'free_online' | 'paid_visit';
   venueType?: 'physical';
   coordinates?: { lat: number | null; lng: number | null };
+  /** Only present on the full record (GET /gyms/:id or ?full=true) — absent from the slimmed admin list. */
   images?: string[];
-  /** Small WebP previews, parallel to `images` (same index = same photo). */
+  /** Small WebP previews, parallel to `images` (same index = same photo). Only present on the full record. */
   thumbnails?: string[];
+  /** Single pre-generated thumbnail for list rows — present on the slimmed admin list response. */
+  thumbnail?: string | null;
   amenities?: string[];
   equipment?: string[];
 }
@@ -466,6 +507,23 @@ export interface TrainerProfile {
   sessionRateCurrency?: 'TZS' | 'USD';
   approvalStatus?: 'pending_approval' | 'approved' | 'rejected';
   availability?: Array<{ day?: string; date?: string; gymId?: string; gymName?: string; slots: string[] }>;
+}
+
+/** Lightweight owner projection (id/displayName/email/gymIds) for pages that only need owner names, e.g. the gyms table's owner column and owner-select dropdown. */
+export interface GymOwnerRef {
+  id: string;
+  displayName?: string | null;
+  email?: string | null;
+  gymId?: string | null;
+  gymIds?: string[];
+}
+
+/** Lightweight trainer projection (id/displayName/email/gymIds) for pages that only need trainer names and gym links, e.g. the gyms table's trainer-select dropdown. */
+export interface TrainerRef {
+  id: string;
+  displayName?: string | null;
+  email?: string | null;
+  gymIds?: string[];
 }
 
 export interface TrainerBooking {

@@ -1,12 +1,15 @@
 'use client';
 import { useState, useRef, DragEvent, ChangeEvent } from 'react';
-import { Upload, X, ImageIcon } from 'lucide-react';
+import { Upload, X, ImageIcon, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/cn';
+import { api } from '@/lib/api';
 
 interface ImageUploadProps {
-  /** Full-size images (parallel to `thumbnails`, same index = same photo). */
+  /** Auth token — required to upload to the Zebra storage proxy (`POST /storage`). */
+  token: string;
+  /** Full-size image URLs (parallel to `thumbnails`, same index = same photo). */
   value: string[];
-  /** Small preview images (parallel to `value`). */
+  /** Small preview image URLs (parallel to `value`). */
   thumbnails: string[];
   onChange: (images: string[], thumbnails: string[]) => void;
   maxFiles?: number;
@@ -14,10 +17,8 @@ interface ImageUploadProps {
   className?: string;
 }
 
-const FULL_MAX_DIMENSION = 1280;
-const FULL_WEBP_QUALITY = 0.8;
-const THUMB_MAX_DIMENSION = 320;
-const THUMB_WEBP_QUALITY = 0.7;
+const CLIENT_MAX_DIMENSION = 1280;
+const CLIENT_WEBP_QUALITY = 0.85;
 const WEBP_MIME = 'image/webp';
 
 function loadImage(file: File): Promise<HTMLImageElement> {
@@ -36,8 +37,18 @@ function loadImage(file: File): Promise<HTMLImageElement> {
   });
 }
 
-function drawToWebp(img: HTMLImageElement, maxDimension: number, quality: number): string {
-  const scale = Math.min(1, maxDimension / Math.max(img.width, img.height));
+/**
+ * Downscales and re-encodes the image as WebP client-side before it ever
+ * leaves the browser. Raw camera photos can be several MB; shrinking to
+ * `CLIENT_MAX_DIMENSION` here cuts upload bandwidth substantially, on top of
+ * whatever additional normalization the backend applies. Falls back to the
+ * original file (e.g. unsupported format, canvas errors) so uploads never
+ * hard-fail on this optimization — the backend still enforces image-only
+ * and re-normalizes regardless.
+ */
+async function compressClientSide(file: File): Promise<File> {
+  const img = await loadImage(file);
+  const scale = Math.min(1, CLIENT_MAX_DIMENSION / Math.max(img.width, img.height));
   const width = Math.max(1, Math.round(img.width * scale));
   const height = Math.max(1, Math.round(img.height * scale));
 
@@ -47,26 +58,29 @@ function drawToWebp(img: HTMLImageElement, maxDimension: number, quality: number
   const ctx = canvas.getContext('2d');
   if (!ctx) throw new Error('Canvas 2D context unavailable');
   ctx.drawImage(img, 0, 0, width, height);
-  return canvas.toDataURL(WEBP_MIME, quality);
+
+  const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, WEBP_MIME, CLIENT_WEBP_QUALITY));
+  if (!blob) throw new Error('Canvas toBlob failed');
+
+  const baseName = file.name.replace(/\.[^.]+$/, '') || 'image';
+  return new File([blob], `${baseName}.webp`, { type: WEBP_MIME });
 }
 
 /**
- * Downscales and re-encodes an uploaded image as WebP, producing both a
- * full-size copy and a small thumbnail. Raw camera photos can be several MB;
- * the API stores images inline (no object storage yet), so every
- * uncompressed byte here is shipped in full on every GET /gyms response.
- * WebP + downscaling keeps gym payloads small, and the thumbnail lets list
- * views avoid loading full-resolution images at all.
+ * Uploads to the backend's `/storage/upload` proxy. The backend rejects
+ * non-image files, always normalizes the image to WebP (converting if
+ * needed), and generates a WebP thumbnail server-side — so gym/trainer
+ * records store Zebra URLs rather than base64 data URLs, and list views can
+ * load the (much smaller) thumbnail instead of the full-size image.
  */
-async function compressImage(file: File): Promise<{ full: string; thumbnail: string }> {
-  const img = await loadImage(file);
-  return {
-    full: drawToWebp(img, FULL_MAX_DIMENSION, FULL_WEBP_QUALITY),
-    thumbnail: drawToWebp(img, THUMB_MAX_DIMENSION, THUMB_WEBP_QUALITY),
-  };
+async function uploadImage(file: File, token: string): Promise<{ full: string; thumbnail: string }> {
+  const toUpload = await compressClientSide(file).catch(() => file);
+  const uploaded = await api.uploadFile(token, toUpload, toUpload.name);
+  return { full: uploaded.url, thumbnail: uploaded.thumbnailUrl };
 }
 
 export function ImageUpload({
+  token,
   value = [],
   thumbnails = [],
   onChange,
@@ -75,36 +89,29 @@ export function ImageUpload({
   className,
 }: ImageUploadProps) {
   const [dragOver, setDragOver] = useState(false);
+  const [uploading, setUploading] = useState(0);
+  const [uploadError, setUploadError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   function handleFiles(files: FileList | null) {
     if (!files || disabled) return;
     const remaining = maxFiles - value.length;
-    const toProcess = Array.from(files).slice(0, remaining);
-    const nextImages = [...value];
-    const nextThumbnails = [...thumbnails];
+    const toProcess = Array.from(files).slice(0, remaining).filter((f) => f.type.startsWith('image/'));
+    if (!toProcess.length) return;
+    setUploadError(null);
 
     toProcess.forEach((file) => {
-      if (!file.type.startsWith('image/')) return;
-      compressImage(file)
+      setUploading((n) => n + 1);
+      uploadImage(file, token)
         .then(({ full, thumbnail }) => {
-          nextImages.push(full);
-          nextThumbnails.push(thumbnail);
-          onChange(nextImages.slice(0, maxFiles), nextThumbnails.slice(0, maxFiles));
+          const nextImages = [...value, full].slice(0, maxFiles);
+          const nextThumbnails = [...thumbnails, thumbnail].slice(0, maxFiles);
+          onChange(nextImages, nextThumbnails);
         })
-        .catch(() => {
-          // Fall back to the original file if compression fails (e.g. unsupported format).
-          const reader = new FileReader();
-          reader.onload = (e) => {
-            const dataUrl = e.target?.result as string;
-            if (dataUrl) {
-              nextImages.push(dataUrl);
-              nextThumbnails.push(dataUrl);
-              onChange(nextImages.slice(0, maxFiles), nextThumbnails.slice(0, maxFiles));
-            }
-          };
-          reader.readAsDataURL(file);
-        });
+        .catch((e) => {
+          setUploadError(e instanceof Error ? e.message : 'Upload failed');
+        })
+        .finally(() => setUploading((n) => Math.max(0, n - 1)));
     });
   }
 
@@ -166,26 +173,39 @@ export function ImageUpload({
           onDrop={handleDrop}
           onDragOver={handleDragOver}
           onDragLeave={handleDragLeave}
-          onClick={() => inputRef.current?.click()}
+          onClick={() => !uploading && inputRef.current?.click()}
           className={cn(
             'flex flex-col items-center justify-center gap-2 rounded-[var(--radius-lg)] border-2 border-dashed p-6 cursor-pointer transition-colors',
+            uploading && 'pointer-events-none opacity-70',
             dragOver
               ? 'border-[var(--color-brand-400)] bg-[var(--color-brand-50)]'
               : 'border-[var(--color-border-secondary)] hover:border-[var(--color-brand-300)] hover:bg-[var(--color-bg-tertiary)]'
           )}
         >
           <div className="flex h-10 w-10 items-center justify-center rounded-full border border-[var(--color-border-secondary)] bg-[var(--color-bg-secondary)]">
-            <Upload className="h-4 w-4 text-[var(--color-fg-quaternary)]" />
+            {uploading > 0 ? (
+              <Loader2 className="h-4 w-4 text-[var(--color-fg-quaternary)] animate-spin" />
+            ) : (
+              <Upload className="h-4 w-4 text-[var(--color-fg-quaternary)]" />
+            )}
           </div>
           <div className="text-center">
             <p className="text-sm font-medium text-[var(--color-brand-700)]">
-              Click to upload <span className="text-[var(--color-fg-quaternary)] font-normal">or drag and drop</span>
+              {uploading > 0 ? (
+                `Uploading ${uploading} image${uploading > 1 ? 's' : ''}...`
+              ) : (
+                <>Click to upload <span className="text-[var(--color-fg-quaternary)] font-normal">or drag and drop</span></>
+              )}
             </p>
             <p className="text-xs text-[var(--color-fg-quaternary)] mt-1">
-              PNG, JPG, WEBP up to 5MB &mdash; converted to WebP automatically
+              PNG, JPG, WEBP up to 5MB &mdash; converted to WebP and uploaded automatically
             </p>
           </div>
         </div>
+      )}
+
+      {uploadError && (
+        <p className="text-xs text-[var(--color-error-600)]">{uploadError}</p>
       )}
 
       <input

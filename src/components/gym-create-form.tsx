@@ -55,6 +55,8 @@ export const BLANK_GYM_DRAFT: GymDraft = {
 };
 
 interface GymCreateFormProps {
+  /** Auth token — passed through to `ImageUpload` for the Zebra storage proxy. */
+  token: string;
   draft: GymDraft;
   onChange: (draft: GymDraft) => void;
   errors: Record<string, string>;
@@ -63,7 +65,7 @@ interface GymCreateFormProps {
   extraFields?: React.ReactNode;
 }
 
-export function GymCreateForm({ draft, onChange, errors, onClearError, extraFields }: GymCreateFormProps) {
+export function GymCreateForm({ token, draft, onChange, errors, onClearError, extraFields }: GymCreateFormProps) {
   function set<K extends keyof GymDraft>(key: K, value: GymDraft[K]) {
     onChange({ ...draft, [key]: value });
     onClearError(key);
@@ -169,6 +171,7 @@ export function GymCreateForm({ draft, onChange, errors, onClearError, extraFiel
 
       <Field label="Gym images" hint="Upload gym photos. PNG, JPG, or WEBP." error={errors.images}>
         <ImageUpload
+          token={token}
           value={draft.images}
           thumbnails={draft.thumbnails}
           onChange={(images, thumbnails) => {

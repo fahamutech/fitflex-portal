@@ -2,7 +2,7 @@
 import { useEffect, useState, useMemo } from 'react';
 import { Plus, Pencil, Trash2, RefreshCw, ChevronLeft, ChevronRight as ChevronRightIcon, Eye } from 'lucide-react';
 import { useApp } from '../../providers';
-import { api, Gym, GymOwner, TrainerProfile } from '@/lib/api';
+import { api, Gym, GymOwnerRef, TrainerRef } from '@/lib/api';
 import { Badge, Button, PageHeader, Alert, Spinner, Card, Field } from '@/components/shared';
 import { DataTable, ColumnDef } from '@/components/data-table';
 import { Dialog, DialogFooter } from '@/components/dialog';
@@ -34,8 +34,8 @@ const BLANK_GYM: Partial<Gym> = {
 export default function GymsPage() {
   const { token, user } = useApp();
   const [gyms, setGyms]         = useState<Gym[]>([]);
-  const [owners, setOwners]     = useState<GymOwner[]>([]);
-  const [trainers, setTrainers] = useState<TrainerProfile[]>([]);
+  const [owners, setOwners]     = useState<GymOwnerRef[]>([]);
+  const [trainers, setTrainers] = useState<TrainerRef[]>([]);
   const [loading, setLoading]   = useState(true);
   const [error, setError]       = useState<string | null>(null);
   const [busy, setBusy]         = useState(false);
@@ -45,6 +45,8 @@ export default function GymsPage() {
   const [draftOwnerId, setDraftOwnerId] = useState<string>('');
   const [deleteTarget, setDeleteTarget] = useState<Gym | null>(null);
   const [detailGym, setDetailGym] = useState<Gym | null>(null);
+  const [detailImagesLoading, setDetailImagesLoading] = useState(false);
+  const [editLoading, setEditLoading] = useState(false);
   const [slideIndex, setSlideIndex] = useState(0);
   const [ownerDialogOpen, setOwnerDialogOpen] = useState(false);
   const [newOwner, setNewOwner] = useState<OwnerFormDraft>({ ...BLANK_OWNER_DRAFT });
@@ -62,7 +64,7 @@ export default function GymsPage() {
     if (!token) return;
     setLoading(true);
     try {
-      const [g, o, t] = await Promise.all([api.adminGyms(token), api.gymOwners(token), api.adminTrainers(token)]);
+      const [g, o, t] = await Promise.all([api.adminGyms(token), api.gymOwnerRefs(token), api.adminTrainerRefs(token)]);
       setGyms(g);
       setOwners(o);
       setTrainers(t);
@@ -78,8 +80,16 @@ export default function GymsPage() {
   useEffect(() => { load(); }, [token]);
 
   function openDetail(gym: Gym) {
+    // The list row only carries a single `thumbnail` — show everything else
+    // immediately, then lazily fetch the full record (with `images`) for the
+    // carousel so the admin list stays small for every other row.
     setDetailGym(gym);
     setSlideIndex(0);
+    setDetailImagesLoading(true);
+    api.getGym(gym.id)
+      .then(full => setDetailGym(current => (current && current.id === gym.id ? { ...current, ...full } : current)))
+      .catch(() => {})
+      .finally(() => setDetailImagesLoading(false));
   }
 
   const ownerOptions: SelectOption[] = useMemo(() =>
@@ -93,7 +103,7 @@ export default function GymsPage() {
   );
 
   const gymOwnerMap = useMemo(() => {
-    const map: Record<string, GymOwner> = {};
+    const map: Record<string, GymOwnerRef> = {};
     owners.forEach(o => {
       const ids = o.gymIds || (o.gymId ? [o.gymId] : []);
       ids.forEach((gId: string) => { map[gId] = o; });
@@ -113,9 +123,20 @@ export default function GymsPage() {
     setDialogOpen(true);
   }
 
-  function openEdit(gym: Gym) {
-    setEditing(gym);
-    setDraft({ ...gym });
+  async function openEdit(gym: Gym) {
+    // The list row is slimmed (no `images`/`thumbnails`) — fetch the full
+    // record before opening the form so existing photos aren't lost on save.
+    setEditLoading(true);
+    let full: Gym = gym;
+    try {
+      full = await api.getGym(gym.id);
+    } catch {
+      // fall back to the slim row; the ImageUpload will just start empty
+    } finally {
+      setEditLoading(false);
+    }
+    setEditing(full);
+    setDraft({ ...full });
     const owner = gymOwnerMap[gym.id];
     setDraftOwnerId(owner?.id || '');
     setDraftTrainerIds(trainers.filter(t => t.gymIds?.includes(gym.id)).map(t => t.id));
@@ -309,7 +330,7 @@ export default function GymsPage() {
       cell: (gym) => (
         <button onClick={(e) => { e.stopPropagation(); openDetail(gym); }} className="flex items-center gap-3 text-left group">
           <div className="h-10 w-14 overflow-hidden rounded-[var(--radius-md)] bg-[var(--color-bg-tertiary)]">
-            {(gym.thumbnails?.[0] || gym.images?.[0]) ? <img src={gym.thumbnails?.[0] || gym.images![0]} alt={gym.name} className="h-full w-full object-cover" /> : null}
+            {gym.thumbnail ? <img src={gym.thumbnail} alt={gym.name} className="h-full w-full object-cover" /> : null}
           </div>
           <div>
             <div className="font-medium text-[var(--color-fg-primary)] group-hover:text-[var(--color-brand-700)] transition-colors">{gym.name}</div>
@@ -385,7 +406,7 @@ export default function GymsPage() {
                   <Button variant="ghost" size="sm" onClick={(e) => { e.stopPropagation(); openDetail(gym); }} title="View details">
                     <Eye className="h-3.5 w-3.5" />
                   </Button>
-                  <Button variant="ghost" size="sm" onClick={(e) => { e.stopPropagation(); openEdit(gym); }}>
+                  <Button variant="ghost" size="sm" disabled={editLoading} onClick={(e) => { e.stopPropagation(); openEdit(gym); }} title="Edit gym">
                     <Pencil className="h-3.5 w-3.5" />
                   </Button>
                   <Button variant="ghost" size="sm" onClick={(e) => { e.stopPropagation(); setDeleteTarget(gym); }}>
@@ -486,6 +507,7 @@ export default function GymsPage() {
               </Field>
               <Field label="Gym images" hint="Upload gym photos. PNG, JPG, or WEBP." error={formErrors.images}>
                 <ImageUpload
+                  token={token}
                   value={draft.images || []}
                   thumbnails={draft.thumbnails || []}
                   onChange={(images, thumbnails) => { setDraft({ ...draft, images, thumbnails }); setFormErrors(prev => { const { images: _i, ...rest } = prev; return rest; }); }}
@@ -587,6 +609,7 @@ export default function GymsPage() {
         size="md"
       >
         <TrainerInlineForm
+          token={token}
           draft={newTrainer}
           onChange={setNewTrainer}
           errors={trainerFormErrors}
@@ -625,8 +648,12 @@ export default function GymsPage() {
       >
         {detailGym && (
           <div className="space-y-5">
-            {/* Image slider */}
-            {detailGym.images && detailGym.images.length > 0 ? (
+            {/* Image slider — images are fetched lazily on open (see openDetail), not part of the admin list row */}
+            {detailImagesLoading && !detailGym.images ? (
+              <div className="aspect-[16/9] w-full rounded-[var(--radius-xl)] bg-[var(--color-bg-tertiary)] flex items-center justify-center">
+                <Spinner />
+              </div>
+            ) : detailGym.images && detailGym.images.length > 0 ? (
               <div className="relative">
                 <div className="aspect-[16/9] w-full overflow-hidden rounded-[var(--radius-xl)] bg-[var(--color-bg-tertiary)]">
                   <img

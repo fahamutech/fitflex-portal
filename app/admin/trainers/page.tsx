@@ -364,6 +364,7 @@ export default function TrainersPage() {
           </Field>
           <Field label="Trainer image" hint="Upload a profile photo. PNG, JPG, or WEBP.">
             <ImageUpload
+              token={token}
               value={draft.photoUrl ? [draft.photoUrl] : []}
               thumbnails={[]}
               onChange={(imgs) => setDraft({ ...draft, photoUrl: imgs[0] || null })}
@@ -509,6 +510,7 @@ export default function TrainersPage() {
       {/* Create Gym Inline Dialog — same form as Gyms page, trainer select omitted (auto-assigned) */}
       <Dialog open={gymDialogOpen} onClose={() => setGymDialogOpen(false)} title="Create new gym" description="This gym will be automatically assigned to the trainer you are editing." size="lg">
         <GymCreateForm
+          token={token}
           draft={newGym}
           onChange={setNewGym}
           errors={gymFormErrors}
