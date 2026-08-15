@@ -153,8 +153,20 @@ export const api = {
   ownerInvoices: (token: string) => request<Invoice[]>('/owner/invoices', {}, token),
   ownerEarnings: (token: string) => request<OwnerEarnings>('/owner/earnings', {}, token),
   ownerGymCheckins: (token: string, gymId: string) => request<CheckIn[]>(`/owner/gyms/${gymId}/checkins`, {}, token),
-  ownerCreateMember: (token: string, data: { displayName: string; email?: string; phone?: string; gymId?: string; paidAmount?: number; durationUnit: 'D' | 'W' | 'M'; startDate: string; endDate: string; tier?: string }) =>
+  ownerUpdateGym: (token: string, gymId: string, data: Partial<Gym>) =>
+    request<Gym>(`/owner/gyms/${gymId}`, { method: 'PUT', body: JSON.stringify(data) }, token),
+  ownerMembers: (token: string, gymId?: string) =>
+    request<{ members: any[]; stats: Record<string, number> }>(`/owner/members${gymId ? `?gymId=${encodeURIComponent(gymId)}` : ''}`, {}, token),
+  ownerCreateMember: (token: string, data: { displayName: string; email?: string; phone?: string; initialPassword?: string; gymId?: string; paidAmount?: number; durationUnit: 'D' | 'W' | 'M'; startDate: string; endDate: string; tier?: string }) =>
     request<{ member: any; subscription: any }>('/owner/members', { method: 'POST', body: JSON.stringify(data) }, token),
+  ownerStaff: (token: string) => request<any[]>('/owner/staff', {}, token),
+  ownerCreateStaff: (token: string, data: { displayName: string; email: string; initialPassword: string; gymIds: string[]; aclPermissions: string[] }) =>
+    request<any>('/owner/staff', { method: 'POST', body: JSON.stringify(data) }, token),
+  ownerTrainers: (token: string, gymId?: string) =>
+    request<TrainerProfile[]>(`/owner/trainers${gymId ? `?gymId=${encodeURIComponent(gymId)}` : ''}`, {}, token),
+  ownerPendingTrainers: (token: string) => request<TrainerProfile[]>('/owner/trainers/pending', {}, token),
+  ownerDecideTrainer: (token: string, trainerId: string, gymId: string, decision: 'approve' | 'reject') =>
+    request<TrainerProfile>(`/owner/trainers/${trainerId}/decision`, { method: 'POST', body: JSON.stringify({ gymId, decision }) }, token),
 
   // ─── Trainer role ───
   trainerProfile: (token: string) => request<TrainerProfile>('/trainer/me', {}, token),
@@ -310,6 +322,7 @@ export interface Gym {
   thumbnail?: string | null;
   amenities?: string[];
   equipment?: string[];
+  verified?: boolean;
 }
 
 export interface GymVisitRecord {
@@ -471,6 +484,7 @@ export interface RoleApproval {
   photoUrl?: string | null;
   userType: 'gym_operator' | 'trainer';
   approvalStatus?: 'pending_approval' | 'approved' | 'rejected';
+  verified?: boolean;
   approvalNote?: string | null;
   createdAt?: string;
 }
@@ -506,6 +520,7 @@ export interface TrainerProfile {
   status: 'active' | 'inactive' | 'suspended';
   sessionRateCurrency?: 'TZS' | 'USD';
   approvalStatus?: 'pending_approval' | 'approved' | 'rejected';
+  verified?: boolean;
   availability?: Array<{ day?: string; date?: string; gymId?: string; gymName?: string; slots: string[] }>;
 }
 

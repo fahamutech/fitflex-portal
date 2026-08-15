@@ -253,7 +253,7 @@ export default function AdminOverviewPage() {
                           <div className="font-medium text-[var(--color-fg-primary)] text-sm">{p.member?.displayName || p.member?.email || p.memberId}</div>
                           <div className="text-xs text-[var(--color-fg-quaternary)] font-mono">{p.id.slice(0, 22)}{'\u2026'}</div>
                         </td>
-                        <td><Badge tone="brand">{p.tier.toUpperCase()}</Badge></td>
+                        <td><Badge tone="brand">{(p.tier ?? '—').toUpperCase()}</Badge></td>
                         <td className="font-medium tabular-nums">{money(p.amountTzs)}</td>
                         <td className="text-xs tabular-nums whitespace-nowrap">{p.requestedAt ? new Date(p.requestedAt).toLocaleDateString() : '\u2014'}</td>
                         <td><Badge tone={statusTone(p.status)}>{statusLabel(p.status)}</Badge></td>

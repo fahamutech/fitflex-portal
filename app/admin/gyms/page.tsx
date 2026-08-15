@@ -458,6 +458,15 @@ export default function GymsPage() {
                   <option value="suspended">Suspended</option>
                 </select>
               </Field>
+              <label className="flex items-center gap-3 rounded-[var(--radius-lg)] border border-[var(--color-border-secondary)] p-3 text-sm text-[var(--color-fg-primary)]">
+                <input
+                  aria-label="Verified gym"
+                  type="checkbox"
+                  checked={draft.verified === true}
+                  onChange={e => setDraft({ ...draft, verified: e.target.checked })}
+                />
+                Verified gym — show the verified badge to members
+              </label>
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 <Field label="Rate per day (TZS)" error={formErrors.ratePerDay}>
                   <input className="ui-input" type="number" value={draft.ratePerDay || ''} placeholder="0" onChange={e => { const v = e.target.value === '' ? 0 : Number(e.target.value); setDraft({ ...draft, ratePerDay: v, perVisitRate: v }); setFormErrors(prev => { const { ratePerDay, ...rest } = prev; return rest; }); }} />
@@ -560,6 +569,24 @@ export default function GymsPage() {
                     <p className="text-xs text-[var(--color-fg-quaternary)]">Score</p>
                     <p className="text-lg font-bold font-mono tabular-nums text-[var(--color-brand-600)]">{rubricResult.finalScore.toFixed(2)}</p>
                   </div>
+                </div>
+              )}
+
+              {editing && ((draft.amenities?.length ?? 0) > 0 || (draft.equipment?.length ?? 0) > 0) && (
+                <div className="rounded-[var(--radius-lg)] border border-[var(--color-border-secondary)] bg-[var(--color-bg-secondary)] p-4 space-y-3">
+                  <p className="text-sm font-semibold text-[var(--color-fg-primary)]">Previously saved verification details</p>
+                  {(draft.amenities?.length ?? 0) > 0 && (
+                    <div>
+                      <p className="mb-1.5 text-xs text-[var(--color-fg-quaternary)]">Amenities</p>
+                      <div className="flex flex-wrap gap-1.5">{draft.amenities!.map(item => <Badge key={item} tone="brand">{item}</Badge>)}</div>
+                    </div>
+                  )}
+                  {(draft.equipment?.length ?? 0) > 0 && (
+                    <div>
+                      <p className="mb-1.5 text-xs text-[var(--color-fg-quaternary)]">Equipment</p>
+                      <div className="flex flex-wrap gap-1.5">{draft.equipment!.map(item => <Badge key={item} tone="gray">{item}</Badge>)}</div>
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -703,6 +730,10 @@ export default function GymsPage() {
               <div>
                 <p className="text-xs text-[var(--color-fg-quaternary)] mb-0.5">Status</p>
                 <Badge tone={statusTone(detailGym.status)}>{statusLabel(detailGym.status)}</Badge>
+              </div>
+              <div>
+                <p className="text-xs text-[var(--color-fg-quaternary)] mb-0.5">Verification</p>
+                <Badge tone={detailGym.verified ? 'success' : 'gray'}>{detailGym.verified ? 'Verified' : 'Unverified'}</Badge>
               </div>
               <div>
                 <p className="text-xs text-[var(--color-fg-quaternary)] mb-0.5">Commission</p>

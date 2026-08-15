@@ -503,7 +503,7 @@ export default function MembersPage() {
                 {memberPayments.map(p => (
                   <tr key={p.id} className="border-b border-[var(--color-border-secondary)] last:border-0">
                     <td className="py-2 px-3 font-mono text-xs">{p.id.slice(0, 12)}…</td>
-                    <td className="py-2 px-3"><Badge tone="brand">{p.tier.toUpperCase()}</Badge></td>
+                    <td className="py-2 px-3"><Badge tone="brand">{(p.tier ?? '—').toUpperCase()}</Badge></td>
                     <td className="py-2 px-3 text-right tabular-nums">{money(p.amountTzs)}</td>
                     <td className="py-2 px-3"><Badge tone={statusTone(p.status)}>{statusLabel(p.status)}</Badge></td>
                     <td className="py-2 px-3 text-xs whitespace-nowrap">{formatDateTime(p.requestedAt)}</td>

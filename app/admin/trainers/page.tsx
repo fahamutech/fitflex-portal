@@ -500,6 +500,15 @@ export default function TrainersPage() {
               <option value="suspended">Suspended</option>
             </select>
           </Field>
+          <label className="flex items-center gap-3 rounded-[var(--radius-lg)] border border-[var(--color-border-secondary)] p-3 text-sm text-[var(--color-fg-primary)]">
+            <input
+              aria-label="Verified trainer"
+              type="checkbox"
+              checked={draft.verified === true}
+              onChange={e => setDraft({ ...draft, verified: e.target.checked })}
+            />
+            Verified trainer — show the verified badge to members
+          </label>
         </div>
         <DialogFooter>
           <Button variant="secondary" size="md" onClick={() => setDialogOpen(false)} disabled={busy}>Cancel</Button>

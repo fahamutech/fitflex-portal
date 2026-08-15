@@ -79,7 +79,7 @@ export default function PaymentsPage() {
         </div>
       ),
     },
-    { key: 'tier', header: 'Tier', sortable: true, cell: (p) => <Badge tone="brand">{p.tier.toUpperCase()}</Badge> },
+    { key: 'tier', header: 'Tier', sortable: true, cell: (p) => <Badge tone="brand">{(p.tier ?? '—').toUpperCase()}</Badge> },
     { key: 'amountTzs', header: 'Amount', sortable: true, align: 'right', cell: (p) => <span className="tabular-nums font-medium">{money(p.amountTzs)}</span> },
     { key: 'requestedAt', header: 'Date', sortable: true, cell: (p) => <span className="text-xs tabular-nums whitespace-nowrap">{formatDateTime(p.requestedAt)}</span> },
     { key: 'status', header: 'Status', sortable: true, cell: (p) => <Badge tone={statusTone(p.status)}>{statusLabel(p.status)}</Badge> },

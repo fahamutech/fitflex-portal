@@ -304,6 +304,7 @@ export function Alert({
 export function Avatar({ name, src, size = 'md' }: { name?: string | null; src?: string | null; size?: 'sm' | 'md' | 'lg' }) {
   const initials = (name ?? '?')
     .split(' ')
+    .filter(w => w.length > 0)
     .map(w => w[0])
     .slice(0, 2)
     .join('')

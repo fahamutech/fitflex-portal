@@ -21,6 +21,7 @@ import {
   BarChart3,
   BookOpen,
   UserCog,
+  BriefcaseBusiness,
 } from 'lucide-react';
 import { useApp } from '../../app/providers';
 import { cn } from '@/lib/cn';
@@ -40,6 +41,7 @@ const OPERATOR_NAV: NavItem[] = [
   { href: '/dashboard', labelKey: 'nav.dashboard',  icon: LayoutDashboard },
   { href: '/scan',      labelKey: 'nav.scan',       icon: QrCode },
   { href: '/checkins',  labelKey: 'nav.checkins',   icon: ClipboardList },
+  { href: '/owner/manage', labelKey: 'nav.manageGym', icon: BriefcaseBusiness },
 ];
 
 const ADMIN_NAV: NavItem[] = [
@@ -195,7 +197,7 @@ function SidebarContent({
 
 /* ── Shell ───────────────────────────────────────────────── */
 export function Shell({ children }: { children: ReactNode }) {
-  const { ready, token, user, hasPermission } = useApp();
+  const { ready, token, user, hasPermission, locale, setLocale } = useApp();
   const pathname = usePathname();
   const router = useRouter();
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -246,11 +248,22 @@ export function Shell({ children }: { children: ReactNode }) {
     return (
       <div className="min-h-screen bg-[var(--color-bg-secondary)] flex flex-col">
         {/* Minimal top bar for login */}
-        <header className="h-16 flex items-center justify-center border-b border-[var(--color-border-secondary)] bg-[var(--color-bg-primary)]">
+        <header className="h-16 flex items-center justify-between px-4 border-b border-[var(--color-border-secondary)] bg-[var(--color-bg-primary)]">
+          <div className="w-24" />
           <div className="flex items-center gap-2.5">
             <BrandLogo className="h-7 w-7 rounded-[var(--radius-md)]" />
             <span className="text-sm font-semibold text-[var(--color-fg-primary)]">FitFlex Af</span>
           </div>
+          <select
+            data-testid="locale-select"
+            aria-label="Language"
+            value={locale}
+            onChange={e => setLocale(e.target.value as 'en' | 'sw')}
+            className="ui-input w-24 text-xs"
+          >
+            <option value="en">English</option>
+            <option value="sw">Kiswahili</option>
+          </select>
         </header>
         <main className="flex-1">{children}</main>
       </div>

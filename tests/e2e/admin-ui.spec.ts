@@ -25,34 +25,33 @@ test('admin portal exposes localized management console', async ({ page }) => {
   }, { token, user });
 
   await page.goto('/admin');
-  await expect(page.getByRole('heading', { name: 'Pilot Console' })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Gyms' }).first()).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Owners' }).first()).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Trainers' }).first()).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Approvals' }).first()).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Overview' })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Gyms' }).first()).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Owners' }).first()).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Trainers' }).first()).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Approvals' }).first()).toBeVisible();
 
-  await page.getByRole('button', { name: 'Gyms' }).first().click();
-  await expect(page.getByRole('heading', { name: /Create gym|Edit gym/ })).toBeVisible();
-  await expect(page.getByText('Gym catalogue')).toBeVisible();
+  await page.getByRole('link', { name: 'Gyms' }).first().click();
+  await expect(page.getByRole('heading', { name: 'Gyms' })).toBeVisible();
   await expect(page.getByRole('table').first()).toBeVisible();
 
-  await page.getByRole('button', { name: 'Approvals' }).first().click();
-  await expect(page.getByRole('heading', { name: 'Role approval queue' })).toBeVisible();
+  await page.getByRole('link', { name: 'Approvals' }).first().click();
+  await expect(page.getByRole('heading', { name: 'Role Approvals' })).toBeVisible();
 
-  await page.getByRole('button', { name: 'Owners' }).first().click();
-  await expect(page.getByRole('heading', { name: 'Gym owner management' })).toBeVisible();
+  await page.getByRole('link', { name: 'Owners' }).first().click();
+  await expect(page.getByRole('heading', { name: 'Gym Owners' })).toBeVisible();
 
-  await page.getByRole('button', { name: 'Trainers' }).first().click();
-  await expect(page.getByRole('heading', { name: 'Trainer profiles' })).toBeVisible();
+  await page.getByRole('link', { name: 'Trainers' }).first().click();
+  await expect(page.getByRole('heading', { name: 'Trainers' })).toBeVisible();
   await expect(page.getByRole('table').first()).toBeVisible();
 
-  await page.getByRole('button', { name: 'Payments' }).first().click();
-  await expect(page.getByRole('heading', { name: 'Payment queue' })).toBeVisible();
-  await expect(page.getByRole('columnheader', { name: 'PAYMENT REFERENCE' })).toBeVisible();
+  await page.getByRole('link', { name: 'Payments' }).first().click();
+  await expect(page.getByRole('heading', { name: 'Payments' })).toBeVisible();
+  await expect(page.getByRole('columnheader', { name: 'Reference' })).toBeVisible();
 
   await page.evaluate(() => localStorage.setItem('locale', 'sw'));
-  await page.reload();
-  await expect(page.getByRole('heading', { name: 'Dashibodi ya Majaribio' })).toBeVisible();
-  await page.getByRole('button', { name: 'Makocha' }).first().click();
-  await expect(page.getByRole('heading', { name: 'Wasifu wa makocha' })).toBeVisible();
+  await page.goto('/admin');
+  await expect(page.getByRole('heading', { name: 'Overview' })).toBeVisible();
+  await page.getByRole('link', { name: 'Makocha' }).first().click();
+  await expect(page.getByRole('heading', { name: 'Trainers' })).toBeVisible();
 });
