@@ -45,7 +45,7 @@ export const api = {
     ),
   login: (email: string, password: string) =>
     request<{ token: string; user: { id: string; userType: string; gymId?: string; portalUser?: boolean; aclPermissions?: string[] } }>(
-      '/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) }
+      '/auth/login', { method: 'POST', body: JSON.stringify({ email, password, requestedRole: 'admin' }) }
     ),
   // ─── Portal user management (admin only) ───
   listPortalUsers: (token: string) => request<PortalUser[]>('/admin/portal-users', {}, token),
@@ -89,6 +89,9 @@ export const api = {
     request<TrainerProfile>('/admin/trainers', { method: 'POST', body: JSON.stringify(trainer) }, token),
   deleteTrainer: (token: string, id: string) =>
     request<{ ok: boolean; trainer: TrainerProfile }>(`/admin/trainers/${id}`, { method: 'DELETE' }, token),
+  adminProducts: (token: string) => request<ShopProduct[]>('/admin/products', {}, token),
+  updateProductListing: (token: string, id: string, listing: { homepageVisible: boolean; homepagePriority: number; approvalStatus?: 'pending' | 'approved' | 'rejected' }) =>
+    request<ShopProduct>(`/admin/products/${id}/listing`, { method: 'PUT', body: JSON.stringify(listing) }, token),
   trainerBookings: (token: string) => request<TrainerBooking[]>('/admin/trainer-bookings', {}, token),
   updateTrainerBooking: (token: string, id: string, status: 'confirmed' | 'completed' | 'cancelled') =>
     request<TrainerBooking>(`/admin/trainer-bookings/${id}`, { method: 'POST', body: JSON.stringify({ status }) }, token),
@@ -323,6 +326,8 @@ export interface Gym {
   amenities?: string[];
   equipment?: string[];
   verified?: boolean;
+  homepageVisible?: boolean;
+  homepagePriority?: number;
 }
 
 export interface GymVisitRecord {
@@ -442,7 +447,7 @@ export interface PaymentRequest {
   id: string;
   memberId: string;
   subscriptionId: string;
-  tier: string;
+  tier: string | null;
   amountTzs: number;
   status: string;
   provider: string;
@@ -509,6 +514,8 @@ export interface TrainerProfile {
   email?: string | null;
   displayName: string;
   photoUrl?: string | null;
+  images?: string[];
+  imageThumbnails?: string[];
   specialties: string[];
   bio?: string;
   rating?: number;
@@ -521,7 +528,26 @@ export interface TrainerProfile {
   sessionRateCurrency?: 'TZS' | 'USD';
   approvalStatus?: 'pending_approval' | 'approved' | 'rejected';
   verified?: boolean;
+  homepageVisible?: boolean;
+  homepagePriority?: number;
   availability?: Array<{ day?: string; date?: string; gymId?: string; gymName?: string; slots: string[] }>;
+}
+
+export interface ShopProduct {
+  id: string;
+  vendorId: string;
+  name: string;
+  description?: string | null;
+  category?: string | null;
+  brand?: string | null;
+  priceTzs: number;
+  discountPriceTzs?: number | null;
+  stock: number;
+  images?: string[];
+  status: 'active' | 'paused' | 'archived';
+  approvalStatus?: 'pending' | 'approved' | 'rejected';
+  homepageVisible?: boolean;
+  homepagePriority?: number;
 }
 
 /** Lightweight owner projection (id/displayName/email/gymIds) for pages that only need owner names, e.g. the gyms table's owner column and owner-select dropdown. */

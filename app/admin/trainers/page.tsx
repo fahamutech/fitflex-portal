@@ -13,7 +13,7 @@ import { GymCreateForm, GymDraft, BLANK_GYM_DRAFT, validateGymDraft } from '@/co
 import { OwnerInlineForm, OwnerFormDraft, BLANK_OWNER_DRAFT, validateOwnerDraft } from '@/components/owner-inline-form';
 
 export default function TrainersPage() {
-  const { token, user } = useApp();
+  const { token, user, t } = useApp();
   const [trainers, setTrainers] = useState<TrainerProfile[]>([]);
   const [gyms, setGyms]         = useState<Gym[]>([]);
   const [owners, setOwners]     = useState<GymOwner[]>([]);
@@ -41,7 +41,7 @@ export default function TrainersPage() {
   const [availableSpecialties, setAvailableSpecialties] = useState<string[]>([]);
 
   const DAYS_OF_WEEK = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
-  const TIME_SLOTS = ['06:00', '07:00', '08:00', '09:00', '10:00', '11:00', '12:00', '13:00', '14:00', '15:00', '16:00', '17:00', '18:00', '19:00', '20:00', '21:00'];
+  const TIME_SLOTS = ['06:00', '07:00', '08:00', '09:00', '10:00', '11:00', '12:00', '13:00', '14:00', '15:00', '16:00', '17:00', '18:00', '19:00', '20:00', '21:00', '22:00', '23:00', '00:00'];
 
   const load = async () => {
     if (!token) return;
@@ -72,7 +72,7 @@ export default function TrainersPage() {
 
   function openCreate() {
     setEditing(null);
-    setDraft({ displayName: '', email: '', photoUrl: null, specialties: [], hourlyRateTzs: 0, sessionRateCurrency: 'TZS', status: 'active', gymIds: [] });
+    setDraft({ displayName: '', email: '', photoUrl: null, images: [], imageThumbnails: [], specialties: [], hourlyRateTzs: 0, sessionRateCurrency: 'TZS', status: 'active', gymIds: [], homepageVisible: true, homepagePriority: 0 });
     setDraftGymIds([]);
     setDraftAvailability([]);
     setSpecialtiesInput('');
@@ -84,7 +84,11 @@ export default function TrainersPage() {
 
   function openEdit(trainer: TrainerProfile) {
     setEditing(trainer);
-    setDraft({ ...trainer });
+    setDraft({
+      ...trainer,
+      images: trainer.images?.length ? trainer.images : (trainer.photoUrl ? [trainer.photoUrl] : []),
+      imageThumbnails: trainer.imageThumbnails || [],
+    });
     setDraftGymIds(trainer.gymIds || []);
     setDraftAvailability(
       (trainer.availability as { day?: string; days?: string[]; date?: string; gymId?: string; slots?: string[] }[] || []).map(a => ({
@@ -108,7 +112,6 @@ export default function TrainersPage() {
     if (specs.length === 0) errs.specialties = 'At least one specialty is required';
     const rate = Number(rateInput);
     if (!rate || rate <= 0) errs.hourlyRateTzs = 'Per session rate is required';
-    if (draftGymIds.length === 0) errs.gyms = 'At least one gym is required';
     if (!draft.status) errs.status = 'Status is required';
     return errs;
   }
@@ -137,7 +140,18 @@ export default function TrainersPage() {
       const availability = draftAvailability
         .filter(a => a.slots.length > 0 && a.days.length > 0)
         .flatMap(a => a.days.map(day => ({ day, gymId: a.gymId || undefined, slots: a.slots })));
-      const payload = { ...draft, specialties, hourlyRateTzs, sessionRateCurrency: sessionCurrency, gymIds: draftGymIds, availability };
+      const images = draft.images || [];
+      const payload = {
+        ...draft,
+        photoUrl: images[0] || draft.photoUrl || null,
+        images,
+        imageThumbnails: draft.imageThumbnails || [],
+        specialties,
+        hourlyRateTzs,
+        sessionRateCurrency: sessionCurrency,
+        gymIds: draftGymIds,
+        availability,
+      };
       if (editing) {
         await api.saveTrainer(token, { ...payload, id: editing.id });
       } else {
@@ -295,6 +309,10 @@ export default function TrainersPage() {
         </select>
       ),
     },
+    {
+      key: 'homepagePriority', header: t('listing.priority'), sortable: true,
+      cell: (trainer) => <span className="tabular-nums text-sm">{trainer.homepageVisible === false ? '—' : trainer.homepagePriority || 0}</span>,
+    },
   ];
 
   return (
@@ -362,13 +380,18 @@ export default function TrainersPage() {
           <Field label="Email" error={formErrors.email}>
             <input className="ui-input" type="email" value={draft.email || ''} onChange={e => { setDraft({ ...draft, email: e.target.value }); setFormErrors(prev => { const { email, ...rest } = prev; return rest; }); }} />
           </Field>
-          <Field label="Trainer image" hint="Upload a profile photo. PNG, JPG, or WEBP.">
+          <Field label="Trainer images" hint="Upload up to five profile and portfolio photos. PNG, JPG, or WEBP.">
             <ImageUpload
               token={token}
-              value={draft.photoUrl ? [draft.photoUrl] : []}
-              thumbnails={[]}
-              onChange={(imgs) => setDraft({ ...draft, photoUrl: imgs[0] || null })}
-              maxFiles={1}
+              value={draft.images || []}
+              thumbnails={draft.imageThumbnails || []}
+              onChange={(images, imageThumbnails) => setDraft({
+                ...draft,
+                photoUrl: images[0] || null,
+                images,
+                imageThumbnails,
+              })}
+              maxFiles={5}
             />
           </Field>
           <Field label="Specialties" hint="Select all that apply." error={formErrors.specialties}>
@@ -403,7 +426,7 @@ export default function TrainersPage() {
               <input className="ui-input" type="number" value={rateInput} onChange={e => { setRateInput(e.target.value); setFormErrors(prev => { const { hourlyRateTzs, ...rest } = prev; return rest; }); }} placeholder={sessionCurrency === 'USD' ? 'e.g. 30' : 'e.g. 15000'} />
             </Field>
           </div>
-          <Field label="Gyms" hint="Select one or more gyms for this trainer." error={formErrors.gyms}>
+          <Field label="Gyms" hint="Optional. Leave empty for an independent trainer." error={formErrors.gyms}>
             <SearchableSelect
               options={gymOptions}
               value={draftGymIds}
@@ -509,6 +532,27 @@ export default function TrainersPage() {
             />
             Verified trainer — show the verified badge to members
           </label>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <label className="flex items-center gap-3 rounded-[var(--radius-lg)] border border-[var(--color-border-secondary)] p-3 text-sm text-[var(--color-fg-primary)]">
+              <input
+                aria-label={t('listing.visible')}
+                type="checkbox"
+                checked={draft.homepageVisible !== false}
+                onChange={e => setDraft({ ...draft, homepageVisible: e.target.checked })}
+              />
+              {t('listing.visible')}
+            </label>
+            <Field label={t('listing.priority')} hint={t('listing.priorityHint')}>
+              <input
+                aria-label={t('listing.priority')}
+                className="ui-input"
+                type="number"
+                min="0"
+                value={draft.homepagePriority ?? 0}
+                onChange={e => setDraft({ ...draft, homepagePriority: Number(e.target.value) || 0 })}
+              />
+            </Field>
+          </div>
         </div>
         <DialogFooter>
           <Button variant="secondary" size="md" onClick={() => setDialogOpen(false)} disabled={busy}>Cancel</Button>

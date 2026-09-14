@@ -1,4 +1,4 @@
-const CACHE_NAME = 'fitflex-portal-v1';
+const CACHE_NAME = 'fitflex-portal-v2';
 const APP_SHELL = [
   '/',
   '/login/',
@@ -32,7 +32,12 @@ self.addEventListener('fetch', (event) => {
   const { request } = event;
   const url = new URL(request.url);
 
-  if (request.method !== 'GET' || url.origin !== self.location.origin || url.pathname.startsWith('/api/')) {
+  if (
+    request.method !== 'GET' ||
+    url.origin !== self.location.origin ||
+    url.pathname.startsWith('/api/') ||
+    url.pathname.startsWith('/_next/')
+  ) {
     return;
   }
 

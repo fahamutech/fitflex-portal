@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 
-const API = 'http://localhost:3000';
+const API = process.env.FITFLEX_API_URL || 'http://localhost:3000';
 
 test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => {

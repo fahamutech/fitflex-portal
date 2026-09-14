@@ -1,5 +1,5 @@
 'use client';
-import { useState, useRef, DragEvent, ChangeEvent } from 'react';
+import { useEffect, useState, useRef, DragEvent, ChangeEvent } from 'react';
 import { Upload, X, ImageIcon, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/cn';
 import { api } from '@/lib/api';
@@ -92,6 +92,13 @@ export function ImageUpload({
   const [uploading, setUploading] = useState(0);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const imagesRef = useRef(value);
+  const thumbnailsRef = useRef(thumbnails);
+
+  useEffect(() => {
+    imagesRef.current = value;
+    thumbnailsRef.current = thumbnails;
+  }, [value, thumbnails]);
 
   function handleFiles(files: FileList | null) {
     if (!files || disabled) return;
@@ -104,8 +111,10 @@ export function ImageUpload({
       setUploading((n) => n + 1);
       uploadImage(file, token)
         .then(({ full, thumbnail }) => {
-          const nextImages = [...value, full].slice(0, maxFiles);
-          const nextThumbnails = [...thumbnails, thumbnail].slice(0, maxFiles);
+          const nextImages = [...imagesRef.current, full].slice(0, maxFiles);
+          const nextThumbnails = [...thumbnailsRef.current, thumbnail].slice(0, maxFiles);
+          imagesRef.current = nextImages;
+          thumbnailsRef.current = nextThumbnails;
           onChange(nextImages, nextThumbnails);
         })
         .catch((e) => {
@@ -136,10 +145,11 @@ export function ImageUpload({
   }
 
   function removeImage(index: number) {
-    onChange(
-      value.filter((_, i) => i !== index),
-      thumbnails.filter((_, i) => i !== index)
-    );
+    const nextImages = imagesRef.current.filter((_, i) => i !== index);
+    const nextThumbnails = thumbnailsRef.current.filter((_, i) => i !== index);
+    imagesRef.current = nextImages;
+    thumbnailsRef.current = nextThumbnails;
+    onChange(nextImages, nextThumbnails);
   }
 
   return (

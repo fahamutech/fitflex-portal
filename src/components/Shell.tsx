@@ -22,6 +22,7 @@ import {
   BookOpen,
   UserCog,
   BriefcaseBusiness,
+  ShoppingBag,
 } from 'lucide-react';
 import { useApp } from '../../app/providers';
 import { cn } from '@/lib/cn';
@@ -50,6 +51,7 @@ const ADMIN_NAV: NavItem[] = [
   { href: '/admin/owners',        labelKey: 'admin.nav.owners',         icon: UserCheck,       groupKey: 'nav.group.platform', aclScope: 'owners' },
   { href: '/admin/members',       labelKey: 'admin.nav.members',        icon: Users,           groupKey: 'nav.group.platform', aclScope: 'members' },
   { href: '/admin/trainers',      labelKey: 'admin.nav.trainers',       icon: Dumbbell,        groupKey: 'nav.group.platform', aclScope: 'trainers' },
+  { href: '/admin/products',      labelKey: 'admin.nav.products',       icon: ShoppingBag,     groupKey: 'nav.group.platform', aclScope: 'shop' },
   { href: '/admin/distributions', labelKey: 'admin.nav.distributions',  icon: BarChart3,       groupKey: 'nav.group.finance',  aclScope: 'payments' },
   { href: '/admin/book-keeping',  labelKey: 'admin.nav.bookkeeping',    icon: BookOpen,        groupKey: 'nav.group.finance',  aclScope: 'payments' },
   { href: '/admin/payments',      labelKey: 'admin.nav.payments',       icon: CreditCard,      groupKey: 'nav.group.operations', aclScope: 'payments' },
@@ -240,6 +242,26 @@ export function Shell({ children }: { children: ReactNode }) {
 
   /* Close mobile drawer on route change */
   useEffect(() => { setMobileOpen(false); }, [pathname]);
+
+  // Authentication is restored from localStorage after mount. Keep the server
+  // and the first client render identical so React never hydrates the public
+  // header as the authenticated shell (or vice versa).
+  if (!ready) {
+    return (
+      <div
+        className="min-h-screen bg-[var(--color-bg-secondary)] flex flex-col"
+        aria-busy="true"
+        data-testid="shell-restoring-session"
+      >
+        <header className="h-16 flex items-center justify-center border-b border-[var(--color-border-secondary)] bg-[var(--color-bg-primary)]">
+          <div className="flex items-center gap-2.5">
+            <BrandLogo className="h-7 w-7 rounded-[var(--radius-md)]" />
+            <span className="text-sm font-semibold text-[var(--color-fg-primary)]">FitFlex Af</span>
+          </div>
+        </header>
+      </div>
+    );
+  }
 
   const isLoginPage = pathname === '/login' || !token;
 

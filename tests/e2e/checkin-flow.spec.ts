@@ -1,6 +1,6 @@
 import { test, expect, request } from '@playwright/test';
 
-const API = 'http://localhost:3000';
+const API = process.env.FITFLEX_API_URL || 'http://localhost:3000';
 
 function devToken(payload: Record<string, string>) {
   return `dev:${Buffer.from(JSON.stringify(payload)).toString('base64url')}`;

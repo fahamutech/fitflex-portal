@@ -29,10 +29,11 @@ const BLANK_GYM: Partial<Gym> = {
   perVisitRate: 5000, commissionRate: 12, status: 'active',
   venueType: 'physical', accessMode: 'paid_visit',
   coordinates: { lat: -6.7924, lng: 39.2083 }, images: [], thumbnails: [],
+  homepageVisible: true, homepagePriority: 0,
 };
 
 export default function GymsPage() {
-  const { token, user } = useApp();
+  const { token, user, t } = useApp();
   const [gyms, setGyms]         = useState<Gym[]>([]);
   const [owners, setOwners]     = useState<GymOwnerRef[]>([]);
   const [trainers, setTrainers] = useState<TrainerRef[]>([]);
@@ -59,6 +60,7 @@ export default function GymsPage() {
   const [step, setStep] = useState<1 | 2>(1);
   const [rubricData, setRubricData] = useState<RubricData>(EMPTY_RUBRIC);
   const [rubricResult, setRubricResult] = useState<RubricResult | null>(null);
+  const [verificationBusyId, setVerificationBusyId] = useState<string | null>(null);
 
   const load = async () => {
     if (!token) return;
@@ -299,6 +301,22 @@ export default function GymsPage() {
     }
   }
 
+  async function handleVerificationChange(gym: Gym) {
+    if (!token || verificationBusyId) return;
+    const verified = !gym.verified;
+    setVerificationBusyId(gym.id);
+    setGyms(current => current.map(item => item.id === gym.id ? { ...item, verified } : item));
+    try {
+      await api.saveGym(token, { id: gym.id, verified });
+      setError(null);
+    } catch (e) {
+      setGyms(current => current.map(item => item.id === gym.id ? { ...item, verified: gym.verified } : item));
+      setError(e instanceof Error ? e.message : t('admin.gym.verificationUpdateFailed'));
+    } finally {
+      setVerificationBusyId(null);
+    }
+  }
+
   async function handleCreateOwner() {
     if (!token) return;
     const errs = validateOwnerDraft(newOwner);
@@ -367,6 +385,31 @@ export default function GymsPage() {
           {STATUS_OPTIONS.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
         </select>
       ),
+    },
+    {
+      key: 'verified', header: t('admin.gym.verification'), sortable: true,
+      cell: (gym) => (
+        <button
+          type="button"
+          role="switch"
+          aria-label={`${t('admin.gym.toggleVerification')}: ${gym.name}`}
+          aria-checked={gym.verified === true}
+          disabled={verificationBusyId === gym.id}
+          onClick={(event) => { event.stopPropagation(); void handleVerificationChange(gym); }}
+          className="flex items-center gap-2 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          <span className={`relative inline-flex h-5 w-9 rounded-full transition duration-100 ease-linear ${gym.verified ? 'bg-[var(--color-brand-600)]' : 'bg-[var(--color-bg-quaternary)]'}`}>
+            <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow-sm transition-transform duration-100 ease-linear ${gym.verified ? 'translate-x-[18px]' : 'translate-x-0.5'}`} />
+          </span>
+          <Badge tone={gym.verified ? 'success' : 'gray'}>
+            {gym.verified ? t('admin.gym.verified') : t('admin.gym.unverified')}
+          </Badge>
+        </button>
+      ),
+    },
+    {
+      key: 'homepagePriority', header: t('listing.priority'), sortable: true,
+      cell: (gym) => <span className="tabular-nums text-sm">{gym.homepageVisible === false ? '—' : gym.homepagePriority || 0}</span>,
     },
   ];
 
@@ -467,6 +510,27 @@ export default function GymsPage() {
                 />
                 Verified gym — show the verified badge to members
               </label>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <label className="flex items-center gap-3 rounded-[var(--radius-lg)] border border-[var(--color-border-secondary)] p-3 text-sm text-[var(--color-fg-primary)]">
+                  <input
+                    aria-label={t('listing.visible')}
+                    type="checkbox"
+                    checked={draft.homepageVisible !== false}
+                    onChange={e => setDraft({ ...draft, homepageVisible: e.target.checked })}
+                  />
+                  {t('listing.visible')}
+                </label>
+                <Field label={t('listing.priority')} hint={t('listing.priorityHint')}>
+                  <input
+                    aria-label={t('listing.priority')}
+                    className="ui-input"
+                    type="number"
+                    min="0"
+                    value={draft.homepagePriority ?? 0}
+                    onChange={e => setDraft({ ...draft, homepagePriority: Number(e.target.value) || 0 })}
+                  />
+                </Field>
+              </div>
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 <Field label="Rate per day (TZS)" error={formErrors.ratePerDay}>
                   <input className="ui-input" type="number" value={draft.ratePerDay || ''} placeholder="0" onChange={e => { const v = e.target.value === '' ? 0 : Number(e.target.value); setDraft({ ...draft, ratePerDay: v, perVisitRate: v }); setFormErrors(prev => { const { ratePerDay, ...rest } = prev; return rest; }); }} />

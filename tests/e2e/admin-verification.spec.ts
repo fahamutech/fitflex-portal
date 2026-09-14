@@ -1,8 +1,15 @@
 import { expect, test } from '@playwright/test';
 
-const API = 'http://localhost:3000';
+const API = process.env.FITFLEX_API_URL || 'http://localhost:3000';
 
 test('admin can review prior gym details and explicitly verify gyms and trainers', async ({ page }) => {
+  const hydrationErrors: string[] = [];
+  let savedGym: Record<string, unknown> | null = null;
+  page.on('console', message => {
+    if (message.type() === 'error' && /hydration failed|hydration mismatch/i.test(message.text())) {
+      hydrationErrors.push(message.text());
+    }
+  });
   await page.addInitScript(() => {
     localStorage.setItem('token', 'admin-e2e-token');
     localStorage.setItem('user', JSON.stringify({ id: 'admin-1', userType: 'admin', email: 'admin@example.com' }));
@@ -11,6 +18,10 @@ test('admin can review prior gym details and explicitly verify gyms and trainers
     const url = new URL(route.request().url());
     const gym = { id: 'gym-1', name: 'Mikocheni Fitness', location: 'Mikocheni', tier: 'standard', status: 'active', perVisitRate: 5000, ratePerDay: 5000, ratePerWeek: 30000, ratePerMonth: 100000, commissionRate: 10, verified: false, coordinates: { lat: -6.8, lng: 39.2 }, images: ['data:image/png;base64,iVBORw0KGgo='], amenities: ['Showers'], equipment: ['Treadmill'] };
     const trainer = { id: 'trainer-1', displayName: 'Amina Trainer', email: 'trainer@example.com', specialties: ['Yoga'], hourlyRateTzs: 10000, gymIds: ['gym-1'], status: 'active', verified: false, availability: [] };
+    if (url.pathname === '/admin/gyms' && route.request().method() === 'POST') {
+      savedGym = route.request().postDataJSON();
+      return route.fulfill({ json: { ...gym, ...savedGym } });
+    }
     if (url.pathname === '/admin/gyms') return route.fulfill({ json: [gym] });
     if (url.pathname === '/gyms/gym-1') return route.fulfill({ json: gym });
     if (url.pathname === '/admin/gym-owners') return route.fulfill({ json: [{ id: 'owner-1', displayName: 'Owner', gymIds: ['gym-1'] }] });
@@ -20,6 +31,11 @@ test('admin can review prior gym details and explicitly verify gyms and trainers
   });
 
   await page.goto('/admin/gyms');
+  const verificationSwitch = page.getByRole('switch', { name: /Toggle gym verification: Mikocheni Fitness/ });
+  await expect(verificationSwitch).toHaveAttribute('aria-checked', 'false');
+  await verificationSwitch.click();
+  await expect(verificationSwitch).toHaveAttribute('aria-checked', 'true');
+  await expect.poll(() => savedGym).toMatchObject({ id: 'gym-1', verified: true });
   await page.getByTitle('Edit gym').click();
   await expect(page.getByLabel('Verified gym')).toBeVisible();
   await page.getByRole('button', { name: /Edit Amenities/ }).click();
@@ -30,4 +46,5 @@ test('admin can review prior gym details and explicitly verify gyms and trainers
   await page.goto('/admin/trainers');
   await page.getByText('Amina Trainer').click();
   await expect(page.getByLabel('Verified trainer')).toBeVisible();
+  expect(hydrationErrors).toEqual([]);
 });

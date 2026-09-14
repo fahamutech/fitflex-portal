@@ -1,5 +1,10 @@
 import { defineConfig, devices } from '@playwright/test';
 
+const apiPort = Number(process.env.FITFLEX_API_PORT || 3000);
+const portalPort = Number(process.env.FITFLEX_PORTAL_PORT || 3001);
+const apiURL = process.env.FITFLEX_API_URL || `http://localhost:${apiPort}`;
+const portalURL = process.env.FITFLEX_PORTAL_URL || `http://localhost:${portalPort}`;
+
 export default defineConfig({
   testDir: './tests/e2e',
   timeout: 30_000,
@@ -7,19 +12,20 @@ export default defineConfig({
   workers: 1,
   retries: 0,
   use: {
-    baseURL: 'http://localhost:3001',
+    baseURL: portalURL,
     trace: 'on-first-retry'
   },
   webServer: [
     {
-      command: 'npm --prefix ../fitflex-functions run start:fs',
-      port: 3000,
+      command: `/usr/local/bin/bfast fs serve --port ${apiPort} --static`,
+      cwd: '../fitflex-functions',
+      port: apiPort,
       reuseExistingServer: true,
       timeout: 30_000
     },
     {
-      command: 'npm run dev:portal',
-      port: 3001,
+      command: `NEXT_PUBLIC_API_BASE=${apiURL} npx next dev -p ${portalPort}`,
+      port: portalPort,
       reuseExistingServer: true,
       timeout: 60_000
     }

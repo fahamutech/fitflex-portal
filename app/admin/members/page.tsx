@@ -133,8 +133,7 @@ export default function MembersPage() {
   function validateMemberForm(): Record<string, string> {
     const errs: Record<string, string> = {};
     if (!draft.displayName?.trim()) errs.displayName = 'Display name is required';
-    if (!draft.email?.trim()) errs.email = 'Email is required';
-    if (!draft.phone?.trim()) errs.phone = 'Phone is required';
+    if (!draft.email?.trim() && !draft.phone?.trim()) errs.email = 'Email or phone is required';
     if (!draft.accountStatus) errs.accountStatus = 'Status is required';
     return errs;
   }

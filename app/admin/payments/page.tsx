@@ -10,6 +10,11 @@ import { money, statusTone, statusLabel, formatDateTime } from '@/lib/admin-util
 
 type PaymentFilter = 'pending' | 'approved' | 'rejected' | 'cancelled' | 'all';
 
+function paymentTierLabel(payment: PaymentRequest): string {
+  const tier = payment.tier || payment.subscription?.tier;
+  return typeof tier === 'string' && tier.trim() ? tier.toUpperCase() : '—';
+}
+
 export default function PaymentsPage() {
   const { token, user } = useApp();
   const [payments, setPayments] = useState<PaymentRequest[]>([]);
@@ -79,7 +84,7 @@ export default function PaymentsPage() {
         </div>
       ),
     },
-    { key: 'tier', header: 'Tier', sortable: true, cell: (p) => <Badge tone="brand">{(p.tier ?? '—').toUpperCase()}</Badge> },
+    { key: 'tier', header: 'Tier', sortable: true, cell: (p) => <Badge tone="brand">{paymentTierLabel(p)}</Badge> },
     { key: 'amountTzs', header: 'Amount', sortable: true, align: 'right', cell: (p) => <span className="tabular-nums font-medium">{money(p.amountTzs)}</span> },
     { key: 'requestedAt', header: 'Date', sortable: true, cell: (p) => <span className="text-xs tabular-nums whitespace-nowrap">{formatDateTime(p.requestedAt)}</span> },
     { key: 'status', header: 'Status', sortable: true, cell: (p) => <Badge tone={statusTone(p.status)}>{statusLabel(p.status)}</Badge> },
