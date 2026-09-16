@@ -90,8 +90,13 @@ export const api = {
   deleteTrainer: (token: string, id: string) =>
     request<{ ok: boolean; trainer: TrainerProfile }>(`/admin/trainers/${id}`, { method: 'DELETE' }, token),
   adminProducts: (token: string) => request<ShopProduct[]>('/admin/products', {}, token),
+  createAdminProduct: (token: string, product: AdminProductDraft) =>
+    request<ShopProduct>('/admin/products', { method: 'POST', body: JSON.stringify(product) }, token),
   updateProductListing: (token: string, id: string, listing: { homepageVisible: boolean; homepagePriority: number; approvalStatus?: 'pending' | 'approved' | 'rejected' }) =>
     request<ShopProduct>(`/admin/products/${id}/listing`, { method: 'PUT', body: JSON.stringify(listing) }, token),
+  adminVendors: (token: string) => request<VendorSummary[]>('/admin/vendors', {}, token),
+  updateAdminVendor: (token: string, id: string, patch: Partial<Pick<VendorSummary, 'approvalStatus' | 'accountStatus' | 'verified' | 'approvalNote'>>) =>
+    request<VendorSummary>(`/admin/vendors/${id}`, { method: 'PUT', body: JSON.stringify(patch) }, token),
   trainerBookings: (token: string) => request<TrainerBooking[]>('/admin/trainer-bookings', {}, token),
   updateTrainerBooking: (token: string, id: string, status: 'confirmed' | 'completed' | 'cancelled') =>
     request<TrainerBooking>(`/admin/trainer-bookings/${id}`, { method: 'POST', body: JSON.stringify({ status }) }, token),
@@ -487,7 +492,7 @@ export interface RoleApproval {
   email?: string | null;
   displayName?: string | null;
   photoUrl?: string | null;
-  userType: 'gym_operator' | 'trainer';
+  userType: 'gym_operator' | 'trainer' | 'vendor';
   approvalStatus?: 'pending_approval' | 'approved' | 'rejected';
   verified?: boolean;
   approvalNote?: string | null;
@@ -548,6 +553,40 @@ export interface ShopProduct {
   approvalStatus?: 'pending' | 'approved' | 'rejected';
   homepageVisible?: boolean;
   homepagePriority?: number;
+}
+
+export interface AdminProductDraft {
+  vendorId: string;
+  name: string;
+  description?: string;
+  category?: string;
+  brand?: string;
+  priceTzs: number;
+  stock: number;
+  approvalStatus?: 'pending' | 'approved' | 'rejected';
+  homepageVisible?: boolean;
+  homepagePriority?: number;
+}
+
+export interface VendorSummary {
+  id: string;
+  displayName?: string | null;
+  email?: string | null;
+  phone?: string | null;
+  userType: 'vendor';
+  approvalStatus: 'pending_approval' | 'approved' | 'rejected';
+  approvalNote?: string | null;
+  accountStatus: 'active' | 'suspended';
+  verified?: boolean;
+  productCount: number;
+  pendingProductCount: number;
+  createdAt?: string;
+  vendorProfile?: {
+    businessName?: string | null;
+    businessCategory?: string | null;
+    address?: string | null;
+    status?: string | null;
+  } | null;
 }
 
 /** Lightweight owner projection (id/displayName/email/gymIds) for pages that only need owner names, e.g. the gyms table's owner column and owner-select dropdown. */
