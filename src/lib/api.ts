@@ -451,7 +451,12 @@ export interface Invoice {
 export interface PaymentRequest {
   id: string;
   memberId: string;
-  subscriptionId: string;
+  /** Null when the request pays for a trainer booking instead. */
+  subscriptionId: string | null;
+  /** Set when the request pays for a group of trainer booking slots. */
+  bookingGroupId?: string | null;
+  plan?: string | null;
+  currency?: string | null;
   tier: string | null;
   amountTzs: number;
   status: string;
