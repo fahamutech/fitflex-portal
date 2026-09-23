@@ -1,6 +1,6 @@
 // Thin client for the bfast-functions backend.
 
-const BASE = process.env.NEXT_PUBLIC_API_BASE || 'http://localhost:3000';
+const BASE = process.env.NEXT_PUBLIC_API_BASE || 'https://fitflex-faas.bfast.smartstock.co.tz';
 
 export class ApiError extends Error {
   status: number;
