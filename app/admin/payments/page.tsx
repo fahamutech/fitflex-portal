@@ -11,6 +11,7 @@ import { money, statusTone, statusLabel, formatDateTime } from '@/lib/admin-util
 type PaymentFilter = 'pending' | 'approved' | 'rejected' | 'cancelled' | 'all';
 
 function paymentTierLabel(payment: PaymentRequest): string {
+  if (payment.bookingGroupId) return 'TRAINER SESSION';
   const tier = payment.tier || payment.subscription?.tier;
   return typeof tier === 'string' && tier.trim() ? tier.toUpperCase() : '—';
 }
