@@ -1,0 +1,66 @@
+name: Deploy Portal to Firebase Hosting
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: portal-hosting-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-deploy:
+    name: Build static export and deploy
+    runs-on: ubuntu-latest
+
+    # NEXT_PUBLIC_* values are baked into the static bundle at build time.
+    # Set them as repository variables (Settings → Secrets and variables →
+    # Actions → Variables). The Firebase web config is public by design; the
+    # fallbacks mirror .env.example so only the API base is mandatory.
+    env:
+      NEXT_PUBLIC_API_BASE: ${{ vars.NEXT_PUBLIC_API_BASE }}
+      NEXT_PUBLIC_FIREBASE_API_KEY: ${{ vars.NEXT_PUBLIC_FIREBASE_API_KEY || 'AIzaSyCleDGLHf71NdmbFkXbJVzS9tOsmIMj7tA' }}
+      NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN: ${{ vars.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN || 'fitflex-af-pilot.firebaseapp.com' }}
+      NEXT_PUBLIC_FIREBASE_PROJECT_ID: ${{ vars.NEXT_PUBLIC_FIREBASE_PROJECT_ID || 'fitflex-af-pilot' }}
+      NEXT_PUBLIC_FIREBASE_APP_ID: ${{ vars.NEXT_PUBLIC_FIREBASE_APP_ID || '1:318978253903:web:49b58d5fda05603645f63a' }}
+      NEXT_PUBLIC_GOOGLE_CLIENT_ID: ${{ vars.NEXT_PUBLIC_GOOGLE_CLIENT_ID || '318978253903-u6du2v8thfbdbmortdh49k1g06uv91v7.apps.googleusercontent.com' }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # next.config.mjs falls back to http://localhost:3000, which would ship a
+      # portal that cannot reach the backend. Fail loudly instead.
+      - name: Check API base is configured
+        run: |
+          if [ -z "$NEXT_PUBLIC_API_BASE" ]; then
+            echo "::error::Repository variable NEXT_PUBLIC_API_BASE is not set (e.g. https://fitflex-faas.bfast.smartstock.co.tz)."
+            exit 1
+          fi
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build static export
+        run: npm run build
+
+      - name: Deploy to Firebase Hosting (live)
+        if: github.event_name != 'pull_request'
+        uses: FirebaseExtended/action-hosting-deploy@v0
+        with:
+          repoToken: ${{ secrets.GITHUB_TOKEN }}
+          firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_FITFLEX_AF_PILOT }}
+          projectId: fitflex-af-pilot
+          channelId: live
