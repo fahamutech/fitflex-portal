@@ -25,6 +25,8 @@ import {
   BriefcaseBusiness,
   ShoppingBag,
   Store,
+  Trophy,
+  Building,
 } from 'lucide-react';
 import { useApp } from '../../app/providers';
 import { cn } from '@/lib/cn';
@@ -40,6 +42,11 @@ type NavItem = {
   aclScope?: string; // required ACL scope for portal staff; undefined = super-admin only
 };
 
+// Company HR: their company's wellness challenges, nothing else.
+const HR_NAV: NavItem[] = [
+  { href: '/hr', labelKey: 'hr.nav.challenges', icon: Trophy },
+];
+
 const OPERATOR_NAV: NavItem[] = [
   { href: '/dashboard', labelKey: 'nav.dashboard',  icon: LayoutDashboard },
   { href: '/scan',      labelKey: 'nav.scan',       icon: QrCode },
@@ -53,6 +60,8 @@ const ADMIN_NAV: NavItem[] = [
   { href: '/admin/owners',        labelKey: 'admin.nav.owners',         icon: UserCheck,       groupKey: 'nav.group.platform', aclScope: 'owners' },
   { href: '/admin/members',       labelKey: 'admin.nav.members',        icon: Users,           groupKey: 'nav.group.platform', aclScope: 'members' },
   { href: '/admin/analytics',     labelKey: 'admin.nav.analytics',      icon: LineChart,       groupKey: 'nav.group.platform', aclScope: 'analytics' },
+  { href: '/admin/challenges',    labelKey: 'admin.nav.challenges',     icon: Trophy,          groupKey: 'nav.group.platform', aclScope: 'challenges' },
+  { href: '/admin/corporate',     labelKey: 'admin.nav.corporate',      icon: Building,        groupKey: 'nav.group.platform', aclScope: 'corporate' },
   { href: '/admin/trainers',      labelKey: 'admin.nav.trainers',       icon: Dumbbell,        groupKey: 'nav.group.platform', aclScope: 'trainers' },
   { href: '/admin/products',      labelKey: 'admin.nav.products',       icon: ShoppingBag,     groupKey: 'nav.group.platform', aclScope: 'shop' },
   { href: '/admin/vendors',       labelKey: 'admin.nav.vendors',        icon: Store,           groupKey: 'nav.group.platform', aclScope: 'shop' },
@@ -122,7 +131,7 @@ function SidebarContent({
         <div className="flex-1 min-w-0">
           <p className="truncate text-sm font-semibold text-white">FitFlex Af</p>
           <p className="truncate text-xs text-[var(--color-gray-500)]">
-            {user?.userType === 'admin' ? 'Pilot Console' : 'Operator Portal'}
+            {user?.userType === 'admin' ? 'Pilot Console' : user?.userType === 'corporate_hr' ? 'FitFlex for Business' : 'Operator Portal'}
           </p>
         </div>
       </div>
@@ -186,7 +195,7 @@ function SidebarContent({
           <Avatar name={(user as any)?.displayName || user?.email || user?.id || 'User'} size="sm" />
           <div className="flex-1 min-w-0">
             <p className="truncate text-xs font-medium text-white">{(user as any)?.displayName || user?.email || user?.id || '—'}</p>
-            <p className="truncate text-xs text-[var(--color-gray-500)] capitalize">{user?.userType}{user?.portalUser ? ' · staff' : ''}</p>
+            <p className="truncate text-xs text-[var(--color-gray-500)] capitalize">{user?.userType === 'corporate_hr' ? 'Company HR' : user?.userType}{user?.portalUser ? ' · staff' : ''}</p>
           </div>
           <button
             onClick={() => { signOut(); router.replace('/login'); }}
@@ -209,6 +218,7 @@ export function Shell({ children }: { children: ReactNode }) {
   const [mobileOpen, setMobileOpen] = useState(false);
 
   const isAdminUser   = token && user?.userType === 'admin';
+  const isHr          = token && user?.userType === 'corporate_hr';
   const isPortalStaff = isAdminUser && user?.portalUser === true;
 
   // Build the visible nav — portal staff only see items their ACL permits.
@@ -219,14 +229,18 @@ export function Shell({ children }: { children: ReactNode }) {
         if (!isPortalStaff) return true;             // super-admin sees everything
         return hasPermission(item.aclScope);         // portal staff: check ACL
       })
-    : OPERATOR_NAV;
+    : isHr ? HR_NAV : OPERATOR_NAV;
 
   useEffect(() => {
     if (!ready) return;
     if (!token && pathname !== '/login' && pathname !== '/') router.replace('/login');
 
+    // Company HR only ever sees /hr; nobody else does.
+    if (token && user?.userType === 'corporate_hr' && !pathname.startsWith('/hr')) { router.replace('/hr'); return; }
+    if (token && user?.userType !== 'corporate_hr' && pathname.startsWith('/hr')) router.replace(user?.userType === 'admin' ? '/admin' : '/dashboard');
+
     // Block non-admin users from admin routes
-    if (token && user?.userType !== 'admin' && pathname.startsWith('/admin')) router.replace('/dashboard');
+    if (token && user?.userType !== 'admin' && pathname.startsWith('/admin')) router.replace(user?.userType === 'corporate_hr' ? '/hr' : '/dashboard');
 
     // All admin users (including portal staff) go to /admin, not operator pages
     if (token && user?.userType === 'admin' && ['/dashboard', '/scan', '/checkins'].includes(pathname)) router.replace('/admin');
@@ -334,7 +348,7 @@ export function Shell({ children }: { children: ReactNode }) {
             </div>
             <span className="text-sm font-semibold text-[var(--color-fg-primary)]">FitFlex Af</span>
           </div>
-          <Badge tone="brand">{user?.userType}</Badge>
+          <Badge tone="brand">{user?.userType === 'corporate_hr' ? 'Company HR' : user?.userType}</Badge>
         </header>
 
         {/* Page content */}
