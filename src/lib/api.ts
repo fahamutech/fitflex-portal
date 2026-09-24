@@ -69,6 +69,11 @@ export const api = {
     request<CheckInResult>('/operator/checkins', { method: 'POST', body: JSON.stringify({ qrToken }) }, token),
   /** Slimmed list — no `images`/`thumbnails` arrays, only a single `thumbnail` field. */
   adminGyms: (token: string) => request<Gym[]>('/admin/gyms', {}, token),
+  /** Internal product analytics (aggregates only). Days are member-local (EAT), inclusive. */
+  adminAnalytics: (token: string, from: string, to: string) => {
+    const qs = new URLSearchParams({ from, to });
+    return request<AnalyticsOverview>(`/admin/analytics?${qs}`, {}, token);
+  },
   /** Full gym record (with `images`/`thumbnails`) — fetch on demand for the detail/edit views. */
   getGym: (id: string) => request<Gym>(`/gyms/${id}`),
   saveGym: (token: string, gym: Partial<Gym>) =>
@@ -653,4 +658,47 @@ export interface MemberMeResponse {
   pendingPayment: PaymentRequest | null;
   visitsUsed: number;
   visitCap: number | null;
+}
+
+// ── Internal analytics ──────────────────────────────────────────────────
+/** Share 0–1, or null when there was nothing to measure. */
+export type Rate = number | null;
+export interface WorkoutTally { due: number; completed: number; skipped: number; missed: number; completionRate: Rate }
+export interface CompletionTally { evaluated: number; met: number; completionRate: Rate }
+export interface AnalyticsOverview {
+  period: { from: string; to: string; days: number };
+  generatedAt: string;
+  members: number;
+  dailyActive: {
+    series: { day: string; members: number }[];
+    averageDaily: number; activeInPeriod: number; activeLast7Days: number; stickiness: Rate;
+  };
+  activityLogging: {
+    activities: number; membersLogging: number; loggingRate: Rate; perLoggingMember: number | null;
+    byOrigin: { device: number; fitflex: number; manual: number };
+  };
+  workouts: WorkoutTally & { trainerAssigned: WorkoutTally; selfPlanned: WorkoutTally; completedInPeriod: number };
+  challenges: {
+    running: number; byCreator: Record<string, number>; joinsInPeriod: number; participants: number;
+    participationRate: Rate; finishedEntries: number; completionRate: Rate; leaderboardOptInRate: Rate;
+  };
+  streaks: {
+    distributionAtEnd: { from: number; to: number | null; members: number }[];
+    onStreakAtStart: number; unbrokenThroughPeriod: number; streakRetention: Rate;
+    weeklyRetention: { week: string; active: number; activeNextWeek: number; retention: Rate }[];
+  };
+  goals: {
+    membersWithGoals: number; periodsEvaluated: number; periodsMet: number; completionRate: Rate;
+    byType: Record<string, CompletionTally>; byPeriod: Record<string, CompletionTally>;
+  };
+  trainers: {
+    activeConnections: number; trainersWithClients: number; requests: number; accepted: number; declined: number;
+    pending: number; acceptanceRate: Rate; clientsSharingData: number; workoutsAssigned: number;
+    trainersAssigning: number; assignedCompletionRate: Rate;
+  };
+  gyms: {
+    checkins: number; membersVisiting: number; visitRate: Rate; visitsPerVisitingMember: number | null;
+    gymsVisited: number; topGyms: { gymId: string; name: string | null; checkins: number; members: number }[];
+    gymChallenges: number; gymChallengeParticipants: number; membersSharingWithGyms: number;
+  };
 }
