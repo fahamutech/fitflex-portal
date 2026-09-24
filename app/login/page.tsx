@@ -11,13 +11,13 @@ export default function LoginPage() {
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [method, setMethod] = useState<'choose' | 'email'>('choose');
+  const [method, setMethod] = useState<'choose' | 'email' | 'hr'>('choose');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
 
   function handleSuccess(token: string, user: { id: string; userType: string; gymId?: string; portalUser?: boolean; aclPermissions?: string[]; email?: string }) {
     signIn(token, user);
-    router.replace(user.userType === 'admin' ? '/admin' : '/dashboard');
+    router.replace(user.userType === 'admin' ? '/admin' : user.userType === 'corporate_hr' ? '/hr' : '/dashboard');
   }
 
   function mapError(err: unknown): string {
@@ -76,6 +76,22 @@ export default function LoginPage() {
       handleSuccess(token, user);
     } catch (err) {
       setError(mapError(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // Company HR signs in with the email + password FitFlex set up (not Firebase).
+  async function onHrSignIn(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+    setBusy(true);
+    try {
+      const { token, user } = await api.hrLogin(email.trim(), password);
+      handleSuccess(token, user);
+    } catch (err) {
+      const code = err instanceof ApiError ? (err.body as any)?.error : null;
+      setError(code === 'invalid_credentials' ? t('login.hrInvalid') : code === 'account_suspended' ? t('login.suspended') : t('login.error'));
     } finally {
       setBusy(false);
     }
@@ -146,7 +162,40 @@ export default function LoginPage() {
                 >
                   {t('login.emailMethod')}
                 </Button>
+                <button
+                  type="button"
+                  onClick={() => { setMethod('hr'); setError(null); }}
+                  className="w-full text-center text-sm font-medium text-[var(--color-fg-brand)] hover:underline"
+                  data-testid="hr-method-btn"
+                >
+                  {t('login.hrMethod')}
+                </button>
               </>
+            )}
+
+            {method === 'hr' && (
+              <form onSubmit={onHrSignIn} className="space-y-4" data-testid="hr-login-form">
+                <div>
+                  <p className="text-sm font-semibold text-[var(--color-fg-primary)]">{t('login.hrHeading')}</p>
+                  <p className="text-xs text-[var(--color-fg-quaternary)]">{t('login.hrHint')}</p>
+                </div>
+                <Field label={t('login.email')}>
+                  <input type="email" className="ui-input" value={email} onChange={e => setEmail(e.target.value)} autoComplete="email" required data-testid="hr-email-input" />
+                </Field>
+                <Field label={t('login.password')}>
+                  <input type="password" className="ui-input" value={password} onChange={e => setPassword(e.target.value)} autoComplete="current-password" required data-testid="hr-password-input" />
+                </Field>
+                <Button type="submit" size="lg" className="w-full" disabled={busy} data-testid="hr-submit">
+                  {busy ? <><Spinner className="h-4 w-4 text-white" /> {t('login.signingIn')}</> : t('login.submit')}
+                </Button>
+                <button
+                  type="button"
+                  onClick={() => { setMethod('choose'); setError(null); }}
+                  className="w-full text-center text-xs text-[var(--color-fg-quaternary)] hover:text-[var(--color-fg-secondary)] transition-colors"
+                >
+                  {t('login.back')}
+                </button>
+              </form>
             )}
 
             {method === 'email' && (

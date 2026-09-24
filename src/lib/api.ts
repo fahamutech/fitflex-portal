@@ -69,6 +69,36 @@ export const api = {
     request<CheckInResult>('/operator/checkins', { method: 'POST', body: JSON.stringify({ qrToken }) }, token),
   /** Slimmed list — no `images`/`thumbnails` arrays, only a single `thumbnail` field. */
   adminGyms: (token: string) => request<Gym[]>('/admin/gyms', {}, token),
+  // ── Challenges: FitFlex admin (scope 'admin') and company HR ('corporate') ──
+  creatorChallenges: (token: string, scope: ChallengeScope) =>
+    request<{ challenges: ManagedChallenge[] }>(`/${scope}/challenges`, {}, token),
+  createChallenge: (token: string, scope: ChallengeScope, body: ChallengeInput) =>
+    request<{ challenge: ManagedChallenge }>(`/${scope}/challenges`, { method: 'POST', body: JSON.stringify(body) }, token),
+  updateChallenge: (token: string, scope: ChallengeScope, id: string, body: Partial<ChallengeInput>) =>
+    request<{ challenge: ManagedChallenge }>(`/${scope}/challenges/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(body) }, token),
+  challengeAction: (token: string, scope: ChallengeScope, id: string, action: 'cancel' | 'close' | 'archive') =>
+    request<{ challenge: ManagedChallenge }>(`/${scope}/challenges/${encodeURIComponent(id)}/${action}`, { method: 'POST' }, token),
+  challengeParticipation: (token: string, scope: ChallengeScope, id: string) =>
+    request<ChallengeParticipation>(`/${scope}/challenges/${encodeURIComponent(id)}/participants`, {}, token),
+  challengeStandings: (token: string, scope: ChallengeScope, id: string) =>
+    request<ChallengeStandings>(`/${scope}/challenges/${encodeURIComponent(id)}/leaderboard`, {}, token),
+  /** HR: the company's staff (for eligibility by department or person). */
+  corporateStaff: (token: string) =>
+    request<{ employees: CorporateEmployee[] }>('/corporate/staff', {}, token),
+  /** HR sign-in: email + password (not Firebase). */
+  hrLogin: (email: string, password: string) =>
+    request<{ token: string; user: { id: string; userType: string; email?: string; displayName?: string; corporateId?: string } }>(
+      '/auth/login', { method: 'POST', body: JSON.stringify({ email, password, requestedRole: 'corporate_hr' }) }
+    ),
+  // ── Companies and their HR logins (admin) ──
+  corporateAccounts: (token: string) =>
+    request<CorporateAccount[]>('/admin/corporate', {}, token),
+  hrUsers: (token: string, corporateId: string) =>
+    request<{ hrUsers: HrUser[] }>(`/admin/corporate/${encodeURIComponent(corporateId)}/hr-users`, {}, token),
+  createHrUser: (token: string, corporateId: string, body: { displayName: string; email: string; password: string }) =>
+    request<{ hrUser: HrUser }>(`/admin/corporate/${encodeURIComponent(corporateId)}/hr-users`, { method: 'POST', body: JSON.stringify(body) }, token),
+  setHrUserStatus: (token: string, corporateId: string, userId: string, status: 'active' | 'suspended') =>
+    request<{ hrUser: HrUser }>(`/admin/corporate/${encodeURIComponent(corporateId)}/hr-users/${encodeURIComponent(userId)}/status`, { method: 'POST', body: JSON.stringify({ status }) }, token),
   /** Internal product analytics (aggregates only). Days are member-local (EAT), inclusive. */
   adminAnalytics: (token: string, from: string, to: string) => {
     const qs = new URLSearchParams({ from, to });
@@ -701,4 +731,94 @@ export interface AnalyticsOverview {
     gymsVisited: number; topGyms: { gymId: string; name: string | null; checkins: number; members: number }[];
     gymChallenges: number; gymChallengeParticipants: number; membersSharingWithGyms: number;
   };
+}
+
+// ── Challenge management (admin + HR) ───────────────────────────────────
+export type ChallengeScope = 'admin' | 'corporate';
+export type ChallengeType = 'steps' | 'distance_km' | 'workouts' | 'active_minutes' | 'consistency' | 'gym_attendance';
+export type ChallengeMode = 'individual' | 'teams' | 'gym_vs_gym' | 'department';
+export type RewardFunding = 'fitflex' | 'company' | 'partner';
+export type Eligibility =
+  | { kind: 'all' }
+  | { kind: 'tiers'; tiers: string[] }
+  | { kind: 'departments'; departments: string[] }
+  | { kind: 'employees'; employeeIds: string[] };
+export interface ChallengeInput {
+  name: string;
+  description?: string | null;
+  type: ChallengeType;
+  target: number;
+  startDate: string;
+  endDate: string;
+  rewards: string[];
+  rewardFunding?: RewardFunding;
+  eligibility?: Eligibility;
+  mode?: ChallengeMode;
+  teams?: string[];
+}
+export interface ManagedChallenge {
+  id: string;
+  name: string;
+  description?: string | null;
+  type: ChallengeType;
+  target: number;
+  startDate: string;
+  endDate: string;
+  rewards: string[];
+  rewardFunding?: RewardFunding | null;
+  eligibility: Eligibility | null;
+  mode?: ChallengeMode;
+  status: 'active' | 'closed' | 'cancelled' | 'archived';
+  phase: 'upcoming' | 'active' | 'ended' | 'cancelled';
+  participantCount: number;
+  teams?: { id: string; name: string }[];
+}
+export interface ChallengeSummary {
+  eligible: number | null;
+  joined: number;
+  participationRate: Rate;
+  completed: number;
+  completionRate: Rate;
+  averageProgress: number;
+}
+export interface DepartmentParticipation {
+  department: string | null;
+  other: boolean;
+  eligible: number;
+  joined: number;
+  participationRate: Rate;
+  completed?: number;
+  averageProgress?: number;
+}
+export interface ChallengeParticipation {
+  summary: ChallengeSummary;
+  byDepartment?: DepartmentParticipation[];
+  minGroupSize?: number;
+}
+export interface ChallengeStandings {
+  teams: { rank: number; teamId: string; name: string; members: number; averageCompletion: number }[];
+  hiddenTeams: number;
+  minTeamSize: number;
+  participants: number;
+}
+export interface CorporateEmployee {
+  id: string;
+  displayName: string;
+  department?: string | null;
+  email?: string | null;
+  status: string;
+}
+export interface CorporateAccount {
+  id: string;
+  companyName: string;
+  status: string;
+  seatLimit?: number;
+  industrySector?: string;
+}
+export interface HrUser {
+  id: string;
+  displayName: string;
+  email: string;
+  accountStatus: 'active' | 'suspended';
+  createdAt?: string;
 }
