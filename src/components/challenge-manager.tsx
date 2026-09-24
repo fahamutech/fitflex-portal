@@ -1,12 +1,14 @@
 'use client';
 import { useEffect, useMemo, useState } from 'react';
-import { Plus, RefreshCw, Trophy, Lock, Users } from 'lucide-react';
+import { Gift, Plus, RefreshCw, Trophy, Lock, Users, X } from 'lucide-react';
+import Link from 'next/link';
 import { useApp } from '../../app/providers';
 import {
   api, ApiError, ChallengeInput, ChallengeMode, ChallengeParticipation, ChallengeScope,
   ChallengeStandings, ChallengeType, CorporateEmployee, Eligibility, ManagedChallenge,
-  Rate, RewardFunding,
+  Rate, RewardFunding, RewardItem, RewardItemInput, RewardQueue, RewardRule, RewardType,
 } from '@/lib/api';
+import { REWARD_TYPES, RULES, ruleLabel, STATUS, typeLabel } from '@/lib/rewards';
 import {
   Alert, Badge, Button, Card, CardContent, CardHeader, Field, MetricCard, PageHeader, Spinner,
 } from '@/components/shared';
@@ -51,7 +53,12 @@ const ERRORS: Record<string, string> = {
   ends_in_past: 'The end date has already passed.',
   invalid_target: 'That target is outside what the challenge length allows.',
   invalid_teams: 'Add at least two different team names.',
-  invalid_rewards: 'Up to 5 rewards, 80 characters each.',
+  invalid_rewards: 'Up to 5 rewards, each with a name of up to 80 characters.',
+  invalid_reward_type: 'Choose what kind of reward each one is.',
+  invalid_reward_rule: 'Choose who earns each reward.',
+  invalid_reward_top_n: 'Top places must be a whole number from 1 to 100.',
+  team_reward_needs_teams: 'A winning-team reward needs a team, gym or department format.',
+  reward_locked: 'Someone has already earned one of these rewards, so it can’t be removed or changed (you can still rename it).',
   invalid_eligibility: 'Choose at least one tier, department or employee.',
   invalid_reward_funding: 'Choose who funds the rewards.',
   mode_not_allowed: 'That challenge format is not available here.',
@@ -195,6 +202,65 @@ export function ChallengeManager({ scope, title, description }: { scope: Challen
   );
 }
 
+// ── Rewards ───────────────────────────────────────────────────────────────
+
+/** Rewards as items (challenges saved before structured rewards carry labels only). */
+function rewardItemsOf(c?: ManagedChallenge | null): RewardItem[] {
+  if (!c) return [];
+  if (Array.isArray(c.rewardItems)) return c.rewardItems;
+  return c.rewards.map((label, i) => ({ id: `legacy_${i}`, type: 'other', label, value: null, rule: 'finishers', topN: null }));
+}
+
+/** Does this area hand out the challenge's rewards? Admin: FitFlex/partner. HR: company-funded. */
+function handledHere(scope: ChallengeScope, c: ManagedChallenge) {
+  const funder = c.rewardFunding ?? (scope === 'corporate' ? 'company' : 'fitflex');
+  return scope === 'corporate' ? funder === 'company' : funder !== 'company';
+}
+
+const MAX_REWARDS = 5;
+
+function RewardEditor({ items, teamsOk, onChange }: {
+  items: RewardItemInput[]; teamsOk: boolean; onChange: (v: RewardItemInput[]) => void;
+}) {
+  const edit = (i: number, patch: Partial<RewardItemInput>) => onChange(items.map((r, j) => (j === i ? { ...r, ...patch } : r)));
+  return (
+    <fieldset className="space-y-2" data-testid="challenge-rewards">
+      <legend className="text-sm font-medium text-[var(--color-fg-secondary)]">Rewards (optional)</legend>
+      <p className="text-xs text-[var(--color-fg-quaternary)]">
+        Earning a reward isn’t the same as receiving it: each one starts as pending fulfilment and is approved, then issued, from the Rewards page.
+      </p>
+      {items.map((r, i) => {
+        const hint = REWARD_TYPES.find(t => t.value === r.type)?.valueHint;
+        return (
+          <div key={r.id ?? `new_${i}`} className="grid gap-2 rounded-[var(--radius-lg)] border border-[var(--color-border-secondary)] p-3 sm:grid-cols-12" data-testid={`reward-row-${i}`}>
+            <select className="ui-input sm:col-span-3" aria-label="Reward type" value={r.type} onChange={e => edit(i, { type: e.target.value as RewardType })}>
+              {REWARD_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+            </select>
+            <input className="ui-input sm:col-span-4" aria-label="Reward name" placeholder="e.g. 7-day FitFlex Gym Pass" maxLength={80} value={r.label} onChange={e => edit(i, { label: e.target.value })} />
+            <input className="ui-input sm:col-span-2" aria-label="Reward value" placeholder={hint || 'Value'} maxLength={40} value={r.value ?? ''} onChange={e => edit(i, { value: e.target.value })} />
+            <div className="flex gap-2 sm:col-span-3">
+              <select className="ui-input min-w-0 flex-1" aria-label="Who earns it" value={r.rule} onChange={e => edit(i, { rule: e.target.value as RewardRule, topN: e.target.value === 'top' ? r.topN ?? 3 : null })}>
+                {RULES.filter(x => x.value !== 'team' || teamsOk || r.rule === 'team').map(x => <option key={x.value} value={x.value}>{x.label}</option>)}
+              </select>
+              {r.rule === 'top' && (
+                <input className="ui-input w-16" type="number" min={1} max={100} aria-label="How many top places" value={r.topN ?? ''} onChange={e => edit(i, { topN: e.target.value === '' ? null : Number(e.target.value) })} />
+              )}
+              <button type="button" className="shrink-0 rounded-md p-2 text-[var(--color-fg-quaternary)] hover:bg-[var(--color-bg-secondary)]" aria-label={`Remove ${r.label || 'reward'}`} onClick={() => onChange(items.filter((_, j) => j !== i))}>
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+        );
+      })}
+      {items.length < MAX_REWARDS && (
+        <Button type="button" variant="secondary" size="sm" onClick={() => onChange([...items, { type: 'badge', label: '', value: null, rule: 'finishers', topN: null }])} data-testid="reward-add">
+          <Gift className="h-4 w-4" />Add a reward
+        </Button>
+      )}
+    </fieldset>
+  );
+}
+
 // ── Detail ────────────────────────────────────────────────────────────────
 
 function ChallengeDetail({ scope, staff, challenge: c, onClose, onEdit, onChanged }: {
@@ -204,15 +270,18 @@ function ChallengeDetail({ scope, staff, challenge: c, onClose, onEdit, onChange
   const { token } = useApp();
   const [p, setP] = useState<ChallengeParticipation | null>(null);
   const [standings, setStandings] = useState<ChallengeStandings | null>(null);
+  const [rewardCounts, setRewardCounts] = useState<RewardQueue['counts'] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const teamed = c.mode && c.mode !== 'individual';
+  const ownRewards = rewardItemsOf(c).length > 0 && handledHere(scope, c);
 
   useEffect(() => {
     if (!token) return;
     api.challengeParticipation(token, scope, c.id).then(setP).catch(e => setError(message(e)));
     if (teamed) api.challengeStandings(token, scope, c.id).then(setStandings).catch(() => setStandings(null));
-  }, [token, scope, c.id, teamed]);
+    if (ownRewards) api.rewardQueue(token, scope, { challengeId: c.id }).then(q => setRewardCounts(q.counts)).catch(() => setRewardCounts(null));
+  }, [token, scope, c.id, teamed, ownRewards]);
 
   const act = async (action: 'cancel' | 'close' | 'archive', confirmText: string) => {
     if (!token || !window.confirm(confirmText)) return;
@@ -309,9 +378,32 @@ function ChallengeDetail({ scope, staff, challenge: c, onClose, onEdit, onChange
         <div className="grid gap-3 sm:grid-cols-2">
           <div>
             <p className="text-xs font-medium text-[var(--color-fg-tertiary)]">Rewards</p>
-            <p className="text-sm">{c.rewards.length ? c.rewards.join(', ') : 'None'}</p>
+            {rewardItemsOf(c).length === 0 ? <p className="text-sm">None</p> : (
+              <ul className="space-y-1 text-sm" data-testid="challenge-reward-list">
+                {rewardItemsOf(c).map(r => (
+                  <li key={r.id}>
+                    <span className="font-medium">{r.label}</span>
+                    <span className="text-[var(--color-fg-quaternary)]"> · {typeLabel(r.type)}{r.value ? ` · ${r.value}` : ''} · {ruleLabel(r)}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
             {c.rewards.length > 0 && c.rewardFunding && (
               <p className="text-xs text-[var(--color-fg-quaternary)]">Funded by {FUNDERS[scope].find(f => f.value === c.rewardFunding)?.label ?? c.rewardFunding}</p>
+            )}
+            {rewardCounts && rewardItemsOf(c).length > 0 && (
+              <p className="mt-1 flex flex-wrap items-center gap-1.5 text-xs" data-testid="challenge-reward-counts">
+                {(['pending', 'approved', 'issued', 'rejected'] as const).filter(k => rewardCounts[k] > 0).map(k => (
+                  <Badge key={k} tone={STATUS[k].tone}>{rewardCounts[k]} {STATUS[k].label.toLowerCase()}</Badge>
+                ))}
+                {Object.values(rewardCounts).every(n => n === 0) && <span className="text-[var(--color-fg-quaternary)]">Nobody has earned one yet.</span>}
+                {Object.values(rewardCounts).some(n => n > 0) && (
+                  <Link className="font-medium text-[var(--color-fg-brand)] underline-offset-2 hover:underline" href={`${scope === 'admin' ? '/admin' : '/hr'}/rewards?challengeId=${encodeURIComponent(c.id)}`}>Hand out rewards</Link>
+                )}
+              </p>
+            )}
+            {!rewardCounts && rewardItemsOf(c).length > 0 && c.rewardFunding && !handledHere(scope, c) && (
+              <p className="mt-1 text-xs text-[var(--color-fg-quaternary)]">FitFlex hands these out.</p>
             )}
           </div>
           {c.description && (
@@ -358,7 +450,7 @@ function ChallengeForm({ scope, staff, existing, onClose, onSaved }: {
     endDate: existing?.endDate ?? today(),
     mode: existing?.mode ?? 'individual' as ChallengeMode,
     teams: '',
-    rewards: (existing?.rewards ?? []).join('\n'),
+    rewards: rewardItemsOf(existing).map(r => ({ ...r })) as RewardItemInput[],
     rewardFunding: (existing?.rewardFunding ?? FUNDERS[scope][0].value) as RewardFunding,
     eligKind: (existing?.eligibility?.kind ?? 'all') as Eligibility['kind'],
     tiers: existing?.eligibility?.kind === 'tiers' ? existing.eligibility.tiers : [] as string[],
@@ -386,10 +478,12 @@ function ChallengeForm({ scope, staff, existing, onClose, onSaved }: {
   const save = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!token) return;
-    const rewards = f.rewards.split('\n').map(r => r.trim()).filter(Boolean);
+    const rewardItems = f.rewards
+      .map(r => ({ ...r, label: r.label.trim(), value: r.value?.trim() || null, topN: r.rule === 'top' ? Number(r.topN) || null : null }))
+      .filter(r => r.label);
     const body: ChallengeInput = {
       name: f.name.trim(), description: f.description.trim() || null, type: f.type,
-      target: Number(f.target), startDate: f.startDate, endDate: f.endDate, rewards,
+      target: Number(f.target), startDate: f.startDate, endDate: f.endDate, rewardItems,
       rewardFunding: f.rewardFunding, eligibility: eligibility(), mode: f.mode,
       ...(!existing && f.mode === 'teams' ? { teams: f.teams.split(',').map(t => t.trim()).filter(Boolean) } : {}),
     };
@@ -500,10 +594,8 @@ function ChallengeForm({ scope, staff, existing, onClose, onSaved }: {
           </div>
         </Field>
 
+        <RewardEditor items={f.rewards} teamsOk={f.mode !== 'individual'} onChange={v => set('rewards', v)} />
         <div className="grid gap-4 sm:grid-cols-2">
-          <Field label="Rewards (one per line, optional)">
-            <textarea className="ui-input" rows={3} value={f.rewards} onChange={e => set('rewards', e.target.value)} placeholder={'Finisher badge\nTSh 20,000 voucher'} data-testid="challenge-rewards" />
-          </Field>
           <Field label="Rewards funded by">
             <select className="ui-input" value={f.rewardFunding} onChange={e => set('rewardFunding', e.target.value as RewardFunding)} data-testid="challenge-funding">
               {FUNDERS[scope].map(x => <option key={x.value} value={x.value}>{x.label}</option>)}
