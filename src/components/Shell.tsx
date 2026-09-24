@@ -26,6 +26,7 @@ import {
   ShoppingBag,
   Store,
   Trophy,
+  Gift,
   Building,
 } from 'lucide-react';
 import { useApp } from '../../app/providers';
@@ -42,9 +43,13 @@ type NavItem = {
   aclScope?: string; // required ACL scope for portal staff; undefined = super-admin only
 };
 
+// Section roots highlight only on themselves, not on their sub-pages.
+const ROOTS = new Set(['/admin', '/hr']);
+
 // Company HR: their company's wellness challenges, nothing else.
 const HR_NAV: NavItem[] = [
   { href: '/hr', labelKey: 'hr.nav.challenges', icon: Trophy },
+  { href: '/hr/rewards', labelKey: 'hr.nav.rewards', icon: Gift },
 ];
 
 const OPERATOR_NAV: NavItem[] = [
@@ -61,6 +66,7 @@ const ADMIN_NAV: NavItem[] = [
   { href: '/admin/members',       labelKey: 'admin.nav.members',        icon: Users,           groupKey: 'nav.group.platform', aclScope: 'members' },
   { href: '/admin/analytics',     labelKey: 'admin.nav.analytics',      icon: LineChart,       groupKey: 'nav.group.platform', aclScope: 'analytics' },
   { href: '/admin/challenges',    labelKey: 'admin.nav.challenges',     icon: Trophy,          groupKey: 'nav.group.platform', aclScope: 'challenges' },
+  { href: '/admin/rewards',       labelKey: 'admin.nav.rewards',        icon: Gift,            groupKey: 'nav.group.platform', aclScope: 'rewards' },
   { href: '/admin/corporate',     labelKey: 'admin.nav.corporate',      icon: Building,        groupKey: 'nav.group.platform', aclScope: 'corporate' },
   { href: '/admin/trainers',      labelKey: 'admin.nav.trainers',       icon: Dumbbell,        groupKey: 'nav.group.platform', aclScope: 'trainers' },
   { href: '/admin/products',      labelKey: 'admin.nav.products',       icon: ShoppingBag,     groupKey: 'nav.group.platform', aclScope: 'shop' },
@@ -150,7 +156,7 @@ function SidebarContent({
                   href={item.href}
                   label={resolveLabel(t, item.labelKey)}
                   icon={item.icon}
-                  active={item.href === '/admin' ? pathname === '/admin' : (pathname === item.href || pathname.startsWith(item.href + '/'))}
+                  active={ROOTS.has(item.href) ? pathname.replace(/\/$/, '') === item.href : (pathname === item.href || pathname.startsWith(item.href + '/'))}
                   onClick={onLinkClick}
                 />
               ))}
@@ -163,7 +169,7 @@ function SidebarContent({
                       href={item.href}
                       label={resolveLabel(t, item.labelKey)}
                       icon={item.icon}
-                      active={item.href === '/admin' ? pathname === '/admin' : (pathname === item.href || pathname.startsWith(item.href + '/'))}
+                      active={ROOTS.has(item.href) ? pathname.replace(/\/$/, '') === item.href : (pathname === item.href || pathname.startsWith(item.href + '/'))}
                       onClick={onLinkClick}
                     />
                   ))}
@@ -248,7 +254,7 @@ export function Shell({ children }: { children: ReactNode }) {
     // Portal staff: redirect away from pages outside their ACL
     if (token && isPortalStaff && pathname.startsWith('/admin')) {
       const matchedItem = ADMIN_NAV.find(item =>
-        item.href === '/admin' ? pathname === '/admin' : pathname.startsWith(item.href)
+        ROOTS.has(item.href) ? pathname.replace(/\/$/, '') === item.href : pathname.startsWith(item.href)
       );
       if (matchedItem?.aclScope && !hasPermission(matchedItem.aclScope)) {
         // Redirect to the first permitted page, or just /admin overview

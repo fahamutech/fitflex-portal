@@ -82,6 +82,16 @@ export const api = {
     request<ChallengeParticipation>(`/${scope}/challenges/${encodeURIComponent(id)}/participants`, {}, token),
   challengeStandings: (token: string, scope: ChallengeScope, id: string) =>
     request<ChallengeStandings>(`/${scope}/challenges/${encodeURIComponent(id)}/leaderboard`, {}, token),
+  /** Earned rewards to hand out: FitFlex admin ('admin') or company HR ('corporate'). */
+  rewardQueue: (token: string, scope: ChallengeScope, filters: { status?: RewardStatus; challengeId?: string } = {}) => {
+    const q = new URLSearchParams();
+    if (filters.status) q.set('status', filters.status);
+    if (filters.challengeId) q.set('challengeId', filters.challengeId);
+    const s = q.toString();
+    return request<RewardQueue>(`/${scope}/rewards${s ? '?' + s : ''}`, {}, token);
+  },
+  setRewardStatus: (token: string, scope: ChallengeScope, id: string, body: { status: RewardStatus; reference?: string; note?: string }) =>
+    request<{ reward: RewardAward }>(`/${scope}/rewards/${encodeURIComponent(id)}/status`, { method: 'POST', body: JSON.stringify(body) }, token),
   /** HR: the company's staff (for eligibility by department or person). */
   corporateStaff: (token: string) =>
     request<{ employees: CorporateEmployee[] }>('/corporate/staff', {}, token),
@@ -738,6 +748,35 @@ export type ChallengeScope = 'admin' | 'corporate';
 export type ChallengeType = 'steps' | 'distance_km' | 'workouts' | 'active_minutes' | 'consistency' | 'gym_attendance';
 export type ChallengeMode = 'individual' | 'teams' | 'gym_vs_gym' | 'department';
 export type RewardFunding = 'fitflex' | 'company' | 'partner';
+export type RewardType = 'points' | 'discount' | 'gym_pass' | 'trainer_session' | 'vendor_voucher' | 'corporate_reward' | 'badge' | 'certificate' | 'other';
+export type RewardRule = 'finishers' | 'top' | 'team';
+export interface RewardItem {
+  id: string;
+  type: RewardType;
+  label: string;
+  value: string | null;
+  rule: RewardRule;
+  topN: number | null;
+}
+export type RewardItemInput = Omit<RewardItem, 'id'> & { id?: string };
+export type RewardStatus = 'pending' | 'approved' | 'issued' | 'rejected';
+export interface RewardHistoryEntry { status: RewardStatus; at: string; by: string | null; byName?: string | null; note?: string; reference?: string }
+/** One member's earned reward, as a fulfilment queue sees it (never their activity). */
+export interface RewardAward {
+  id: string;
+  challenge: { id: string; name: string | null; endDate: string | null };
+  reward: { id: string; type: RewardType; label: string; value: string | null; rule: RewardRule };
+  rank: number | null;
+  status: RewardStatus;
+  earnedAt: string;
+  issuedAt: string | null;
+  reference: string | null;
+  note: string | null;
+  member: { id: string; displayName: string | null; department?: string | null };
+  funder: string;
+  history: RewardHistoryEntry[];
+}
+export interface RewardQueue { rewards: RewardAward[]; counts: Record<RewardStatus, number> }
 export type Eligibility =
   | { kind: 'all' }
   | { kind: 'tiers'; tiers: string[] }
@@ -750,7 +789,7 @@ export interface ChallengeInput {
   target: number;
   startDate: string;
   endDate: string;
-  rewards: string[];
+  rewardItems: RewardItemInput[];
   rewardFunding?: RewardFunding;
   eligibility?: Eligibility;
   mode?: ChallengeMode;
@@ -765,6 +804,7 @@ export interface ManagedChallenge {
   startDate: string;
   endDate: string;
   rewards: string[];
+  rewardItems?: RewardItem[] | null;
   rewardFunding?: RewardFunding | null;
   eligibility: Eligibility | null;
   mode?: ChallengeMode;
