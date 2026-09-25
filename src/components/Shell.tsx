@@ -29,6 +29,7 @@ import {
   Gift,
   Flag,
   Building,
+  Megaphone,
 } from 'lucide-react';
 import { useApp } from '../../app/providers';
 import { cn } from '@/lib/cn';
@@ -59,6 +60,8 @@ const OPERATOR_NAV: NavItem[] = [
   { href: '/scan',      labelKey: 'nav.scan',       icon: QrCode },
   { href: '/checkins',  labelKey: 'nav.checkins',   icon: ClipboardList },
   { href: '/owner/manage', labelKey: 'nav.manageGym', icon: BriefcaseBusiness },
+  // Owners always; gym staff only with the communications permission.
+  { href: '/owner/communications', labelKey: 'nav.communications', icon: Megaphone, aclScope: 'communications' },
 ];
 
 const ADMIN_NAV: NavItem[] = [
@@ -70,6 +73,7 @@ const ADMIN_NAV: NavItem[] = [
   { href: '/admin/challenges',    labelKey: 'admin.nav.challenges',     icon: Trophy,          groupKey: 'nav.group.platform', aclScope: 'challenges' },
   { href: '/admin/rewards',       labelKey: 'admin.nav.rewards',        icon: Gift,            groupKey: 'nav.group.platform', aclScope: 'rewards' },
   { href: '/admin/social',        labelKey: 'admin.nav.social',         icon: Flag,            groupKey: 'nav.group.platform', aclScope: 'social' },
+  { href: '/admin/communications', labelKey: 'admin.nav.communications', icon: Megaphone,     groupKey: 'nav.group.platform', aclScope: 'communications' },
   { href: '/admin/corporate',     labelKey: 'admin.nav.corporate',      icon: Building,        groupKey: 'nav.group.platform', aclScope: 'corporate' },
   { href: '/admin/trainers',      labelKey: 'admin.nav.trainers',       icon: Dumbbell,        groupKey: 'nav.group.platform', aclScope: 'trainers' },
   { href: '/admin/products',      labelKey: 'admin.nav.products',       icon: ShoppingBag,     groupKey: 'nav.group.platform', aclScope: 'shop' },
@@ -238,7 +242,8 @@ export function Shell({ children }: { children: ReactNode }) {
         if (!isPortalStaff) return true;             // super-admin sees everything
         return hasPermission(item.aclScope);         // portal staff: check ACL
       })
-    : isHr ? HR_NAV : OPERATOR_NAV;
+    : isHr ? HR_NAV
+    : OPERATOR_NAV.filter(item => !item.aclScope || user?.userType !== 'gym_staff' || hasPermission(item.aclScope));
 
   useEffect(() => {
     if (!ready) return;

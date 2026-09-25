@@ -69,6 +69,42 @@ export const api = {
     request<CheckInResult>('/operator/checkins', { method: 'POST', body: JSON.stringify({ qrToken }) }, token),
   /** Slimmed list — no `images`/`thumbnails` arrays, only a single `thumbnail` field. */
   adminGyms: (token: string) => request<Gym[]>('/admin/gyms', {}, token),
+  // ── Communications: a gym's messages to its direct members (scope 'owner')
+  // and FitFlex-wide messages (scope 'admin'). Same shapes for both. ──
+  commsOverview: (token: string, scope: CommsScope, gymId?: string) =>
+    request<CommsOverview>(`/${scope}/communications/overview${gymId ? `?gymId=${encodeURIComponent(gymId)}` : ''}`, {}, token),
+  commsSegments: (token: string, scope: CommsScope) =>
+    request<CommsCatalog>(`/${scope}/communications/segments`, {}, token),
+  commsAudiencePreview: (token: string, scope: CommsScope, body: { gymId?: string; preset?: string | null; filter?: unknown; purpose?: string }) =>
+    request<CommsAudiencePreview>(`/${scope}/communications/audience/preview`, { method: 'POST', body: JSON.stringify(body) }, token),
+  commsCampaigns: (token: string, scope: CommsScope, opts: { gymId?: string; status?: string } = {}) => {
+    const q = new URLSearchParams();
+    if (opts.gymId) q.set('gymId', opts.gymId);
+    if (opts.status) q.set('status', opts.status);
+    const qs = q.toString();
+    return request<{ campaigns: CommsCampaign[] }>(`/${scope}/communications/campaigns${qs ? `?${qs}` : ''}`, {}, token);
+  },
+  commsCampaign: (token: string, scope: CommsScope, id: string) =>
+    request<{ campaign: CommsCampaign; progress: Record<string, Record<string, number>> }>(`/${scope}/communications/campaigns/${encodeURIComponent(id)}`, {}, token),
+  commsPreviewDraft: (token: string, scope: CommsScope, body: CommsDraft) =>
+    request<CommsPreview>(`/${scope}/communications/campaigns/preview`, { method: 'POST', body: JSON.stringify(body) }, token),
+  commsCreate: (token: string, scope: CommsScope, body: CommsDraft) =>
+    request<{ campaign: CommsCampaign }>(`/${scope}/communications/campaigns`, { method: 'POST', body: JSON.stringify(body) }, token),
+  commsUpdate: (token: string, scope: CommsScope, id: string, body: Partial<CommsDraft>) =>
+    request<{ campaign: CommsCampaign }>(`/${scope}/communications/campaigns/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(body) }, token),
+  commsDelete: (token: string, scope: CommsScope, id: string) =>
+    request<{ ok: boolean }>(`/${scope}/communications/campaigns/${encodeURIComponent(id)}`, { method: 'DELETE' }, token),
+  commsAction: (token: string, scope: CommsScope, id: string, action: 'cancel' | 'unschedule') =>
+    request<{ campaign: CommsCampaign }>(`/${scope}/communications/campaigns/${encodeURIComponent(id)}/${action}`, { method: 'POST' }, token),
+  commsSchedule: (token: string, scope: CommsScope, id: string, scheduledAt: string, confirmLargeSend = false) =>
+    request<{ campaign: CommsCampaign }>(`/${scope}/communications/campaigns/${encodeURIComponent(id)}/schedule`, {
+      method: 'POST', body: JSON.stringify({ scheduledAt, ...(confirmLargeSend ? { confirmLargeSend: true } : {}) }),
+    }, token),
+  commsSend: (token: string, scope: CommsScope, id: string, sendRequestId: string, confirmLargeSend = false) =>
+    request<{ campaign: CommsCampaign; replayed?: boolean }>(`/${scope}/communications/campaigns/${encodeURIComponent(id)}/send`, {
+      method: 'POST', body: JSON.stringify({ sendRequestId, ...(confirmLargeSend ? { confirmLargeSend: true } : {}) }),
+    }, token),
+
   // ── Challenges: FitFlex admin (scope 'admin') and company HR ('corporate') ──
   creatorChallenges: (token: string, scope: ChallengeScope) =>
     request<{ challenges: ManagedChallenge[] }>(`/${scope}/challenges`, {}, token),
@@ -903,4 +939,50 @@ export interface HrUser {
   email: string;
   accountStatus: 'active' | 'suspended';
   createdAt?: string;
+}
+
+// ── Communications ──────────────────────────────────────────────────────
+export type CommsScope = 'owner' | 'admin';
+export type CommsChannel = 'in_app' | 'push' | 'whatsapp';
+export type CommsPurpose = 'promotion' | 'renewal' | 'payment' | 'announcement' | 'engagement' | 'general';
+export type CommsStatus = 'draft' | 'scheduled' | 'sending' | 'sent' | 'partially_failed' | 'failed' | 'cancelled';
+export type CommsDeepLink = 'message' | 'membership' | 'renewal' | 'payment' | 'gym';
+export interface CommsContent {
+  title: string; body: string; ctaLabel?: string; deepLink?: CommsDeepLink;
+  offerName?: string; discount?: string; amountTzs?: number;
+}
+export interface CommsAudience { preset?: string | null; filter?: unknown }
+export interface CommsDraft {
+  gymId?: string; name?: string; purpose?: CommsPurpose; audience?: CommsAudience;
+  content?: CommsContent; channels?: CommsChannel[];
+}
+export interface CommsCounts {
+  targeted: number; queued: number; skipped: Record<string, number>;
+  byChannel: Partial<Record<CommsChannel, { queued: number; skipped: number }>>;
+}
+export interface CommsCampaign {
+  id: string; senderType: 'gym' | 'platform'; gymId: string | null; name: string; purpose: CommsPurpose;
+  category: 'transactional' | 'marketing'; status: CommsStatus; audience?: CommsAudience; content?: CommsContent;
+  channels: CommsChannel[]; scheduledAt: string | null; sentAt: string | null; createdAt: string;
+  counts: CommsCounts | null; title?: string | null; preset?: string | null;
+}
+export interface CommsOverview {
+  senderType: 'gym' | 'platform'; members: number | null; campaigns: Partial<Record<CommsStatus, number>>;
+  recent: CommsCampaign[]; channels: Record<CommsChannel, boolean>;
+  limits: { largeSendThreshold: number; marketingWeeklyCap: number };
+}
+export interface CommsCatalog {
+  scope: 'gym' | 'platform';
+  presets: Array<{ key: string; filter: unknown }>;
+  fields: Array<{ key: string; type: string; ops: string[]; values?: string[] }>;
+}
+export interface CommsAudiencePreview {
+  count: number; category: string;
+  channels: Record<CommsChannel, { eligible: number; excluded: Record<string, number> }>;
+  sample: Array<{ id: string; displayName: string | null; status: string }>;
+}
+export interface CommsPreview {
+  category: string; counts: CommsCounts; largeSendThreshold: number;
+  example: { memberName: string | null; title: string; body: string; ctaLabel: string | null; deepLink: CommsDeepLink } | null;
+  warnings: Array<{ code: string; count?: number; channel?: CommsChannel }>;
 }
