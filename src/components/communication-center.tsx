@@ -327,7 +327,7 @@ function Composer({ scope, token, t, gymId, campaign, onClose, onDone }: {
     setBusy(true); setError(null);
     try {
       const id = await saveDraft();
-      if (later) await api.commsSchedule(token, scope, id, new Date(scheduledAt).toISOString());
+      if (later) await api.commsSchedule(token, scope, id, new Date(scheduledAt).toISOString(), confirmLarge);
       else await api.commsSend(token, scope, id, sendRequestId.current, confirmLarge);
       onDone(id);
     } catch (e) {
