@@ -25,6 +25,7 @@ const ACL_SCOPES = [
   { key: 'approvals', label: 'Approvals' },
   { key: 'settings',  label: 'Settings' },
   { key: 'users',     label: 'Portal Users' },
+  { key: 'communications', label: 'Messages' },
 ] as const;
 
 type AclScope = typeof ACL_SCOPES[number]['key'];
