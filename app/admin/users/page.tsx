@@ -18,6 +18,7 @@ const ACL_SCOPES = [
   { key: 'analytics', label: 'Analytics' },
   { key: 'challenges', label: 'Challenges' },
   { key: 'rewards', label: 'Rewards' },
+  { key: 'social', label: 'Community moderation' },
   { key: 'corporate', label: 'Companies' },
   { key: 'shop',      label: 'Products' },
   { key: 'payments',  label: 'Payments' },

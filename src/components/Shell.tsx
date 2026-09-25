@@ -27,6 +27,7 @@ import {
   Store,
   Trophy,
   Gift,
+  Flag,
   Building,
 } from 'lucide-react';
 import { useApp } from '../../app/providers';
@@ -50,6 +51,7 @@ const ROOTS = new Set(['/admin', '/hr']);
 const HR_NAV: NavItem[] = [
   { href: '/hr', labelKey: 'hr.nav.challenges', icon: Trophy },
   { href: '/hr/rewards', labelKey: 'hr.nav.rewards', icon: Gift },
+  { href: '/hr/groups', labelKey: 'hr.nav.groups', icon: Users },
 ];
 
 const OPERATOR_NAV: NavItem[] = [
@@ -67,6 +69,7 @@ const ADMIN_NAV: NavItem[] = [
   { href: '/admin/analytics',     labelKey: 'admin.nav.analytics',      icon: LineChart,       groupKey: 'nav.group.platform', aclScope: 'analytics' },
   { href: '/admin/challenges',    labelKey: 'admin.nav.challenges',     icon: Trophy,          groupKey: 'nav.group.platform', aclScope: 'challenges' },
   { href: '/admin/rewards',       labelKey: 'admin.nav.rewards',        icon: Gift,            groupKey: 'nav.group.platform', aclScope: 'rewards' },
+  { href: '/admin/social',        labelKey: 'admin.nav.social',         icon: Flag,            groupKey: 'nav.group.platform', aclScope: 'social' },
   { href: '/admin/corporate',     labelKey: 'admin.nav.corporate',      icon: Building,        groupKey: 'nav.group.platform', aclScope: 'corporate' },
   { href: '/admin/trainers',      labelKey: 'admin.nav.trainers',       icon: Dumbbell,        groupKey: 'nav.group.platform', aclScope: 'trainers' },
   { href: '/admin/products',      labelKey: 'admin.nav.products',       icon: ShoppingBag,     groupKey: 'nav.group.platform', aclScope: 'shop' },

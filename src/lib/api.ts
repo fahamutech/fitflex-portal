@@ -92,6 +92,22 @@ export const api = {
   },
   setRewardStatus: (token: string, scope: ChallengeScope, id: string, body: { status: RewardStatus; reference?: string; note?: string }) =>
     request<{ reward: RewardAward }>(`/${scope}/rewards/${encodeURIComponent(id)}/status`, { method: 'POST', body: JSON.stringify(body) }, token),
+  // ── Groups (company HR) and moderation (admin) ──
+  corporateGroups: (token: string) => request<{ groups: SocialGroup[] }>('/corporate/groups', {}, token),
+  createCorporateGroup: (token: string, body: GroupInput) =>
+    request<{ group: SocialGroup }>('/corporate/groups', { method: 'POST', body: JSON.stringify(body) }, token),
+  corporateGroup: (token: string, id: string) =>
+    request<{ group: SocialGroup; members: GroupMember[] }>(`/corporate/groups/${encodeURIComponent(id)}`, {}, token),
+  updateCorporateGroup: (token: string, id: string, body: Partial<GroupInput>) =>
+    request<{ group: SocialGroup; members: GroupMember[] }>(`/corporate/groups/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(body) }, token),
+  archiveCorporateGroup: (token: string, id: string) =>
+    request<{ archived: boolean }>(`/corporate/groups/${encodeURIComponent(id)}/archive`, { method: 'POST' }, token),
+  corporateGroupMember: (token: string, id: string, userId: string, action: GroupMemberAction) =>
+    request<{ group: SocialGroup; members: GroupMember[] }>(`/corporate/groups/${encodeURIComponent(id)}/members/${encodeURIComponent(userId)}/${action}`, { method: 'POST' }, token),
+  socialReports: (token: string, status: SocialReportStatus) =>
+    request<{ reports: SocialReport[] }>(`/admin/social/reports?${new URLSearchParams({ status })}`, {}, token),
+  resolveSocialReport: (token: string, id: string, action: 'remove' | 'dismiss') =>
+    request<{ resolved: boolean }>(`/admin/social/reports/${encodeURIComponent(id)}/resolve`, { method: 'POST', body: JSON.stringify({ action }) }, token),
   /** HR: the company's staff (for eligibility by department or person). */
   corporateStaff: (token: string) =>
     request<{ employees: CorporateEmployee[] }>('/corporate/staff', {}, token),
@@ -748,6 +764,32 @@ export type ChallengeScope = 'admin' | 'corporate';
 export type ChallengeType = 'steps' | 'distance_km' | 'workouts' | 'active_minutes' | 'consistency' | 'gym_attendance';
 export type ChallengeMode = 'individual' | 'teams' | 'gym_vs_gym' | 'department';
 export type RewardFunding = 'fitflex' | 'company' | 'partner';
+export interface SocialGroup {
+  id: string;
+  name: string;
+  description: string | null;
+  ownerType: 'member' | 'trainer' | 'gym' | 'corporate';
+  joinPolicy: 'open' | 'approval';
+  discoverable: boolean;
+  memberCount: number;
+  inviteCode?: string;
+  pending?: number;
+  canManage?: boolean;
+}
+export interface GroupInput { name: string; description?: string; joinPolicy: 'open' | 'approval'; discoverable: boolean }
+export interface GroupMember { id: string; displayName: string | null; role: 'admin' | 'member'; status: 'active' | 'pending' }
+export type GroupMemberAction = 'approve' | 'remove' | 'make_admin' | 'make_member';
+export type SocialReportStatus = 'open' | 'actioned' | 'dismissed';
+export interface SocialReport {
+  id: string;
+  targetType: 'user' | 'activity' | 'comment' | 'group';
+  targetId: string;
+  reason: string | null;
+  status: SocialReportStatus;
+  createdAt: string;
+  reporter: string | null;
+  target: { text?: string; author?: string | null; removed?: boolean; displayName?: string | null; name?: string; archived?: boolean; owner?: string | null; type?: string; title?: string | null } | null;
+}
 export type RewardType = 'points' | 'discount' | 'gym_pass' | 'trainer_session' | 'vendor_voucher' | 'corporate_reward' | 'badge' | 'certificate' | 'other';
 export type RewardRule = 'finishers' | 'top' | 'team';
 export interface RewardItem {
