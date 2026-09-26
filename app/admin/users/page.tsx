@@ -24,6 +24,7 @@ const ACL_SCOPES = [
   { key: 'shop',      label: 'Products' },
   { key: 'payments',  label: 'Payments' },
   { key: 'approvals', label: 'Approvals' },
+  { key: 'kyc',       label: 'Partner verification' },
   { key: 'settings',  label: 'Settings' },
   { key: 'users',     label: 'Portal Users' },
   { key: 'communications', label: 'Messages' },
@@ -35,7 +36,7 @@ const ROLE_PRESETS = [
   { key: 'custom',      label: 'Custom',      scopes: [] as AclScope[] },
   { key: 'sales',       label: 'Sales Person', scopes: ['gyms', 'owners', 'trainers', 'members'] as AclScope[] },
   { key: 'finance',     label: 'Finance',      scopes: ['payments', 'approvals'] as AclScope[] },
-  { key: 'operations',  label: 'Operations',   scopes: ['gyms', 'trainers', 'members', 'approvals'] as AclScope[] },
+  { key: 'operations',  label: 'Operations',   scopes: ['gyms', 'trainers', 'members', 'approvals', 'kyc'] as AclScope[] },
 ] as const;
 
 type RolePreset = typeof ROLE_PRESETS[number]['key'];
