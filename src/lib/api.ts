@@ -104,6 +104,28 @@ export const api = {
     request<{ campaign: CommsCampaign; replayed?: boolean }>(`/${scope}/communications/campaigns/${encodeURIComponent(id)}/send`, {
       method: 'POST', body: JSON.stringify({ sendRequestId, ...(confirmLargeSend ? { confirmLargeSend: true } : {}) }),
     }, token),
+  // Templates: FitFlex's (read-only) and, for gyms, their own.
+  commsTemplates: (token: string, scope: CommsScope, opts: { gymId?: string; group?: string } = {}) => {
+    const q = new URLSearchParams();
+    if (opts.gymId) q.set('gymId', opts.gymId);
+    if (opts.group) q.set('group', opts.group);
+    const qs = q.toString();
+    return request<{ templates: CommsTemplate[] }>(`/${scope}/communications/templates${qs ? `?${qs}` : ''}`, {}, token);
+  },
+  commsTemplate: (token: string, scope: CommsScope, id: string) =>
+    request<{ template: CommsTemplate }>(`/${scope}/communications/templates/${encodeURIComponent(id)}`, {}, token),
+  commsTemplatePreview: (token: string, scope: CommsScope, id: string, body: { gymId?: string; values?: CommsTemplateValues } = {}) =>
+    request<CommsTemplatePreview>(`/${scope}/communications/templates/${encodeURIComponent(id)}/preview`, { method: 'POST', body: JSON.stringify(body) }, token),
+  commsTemplatePreviewNew: (token: string, scope: CommsScope, body: CommsTemplateDraft & { values?: CommsTemplateValues }) =>
+    request<CommsTemplatePreview>(`/${scope}/communications/templates/preview`, { method: 'POST', body: JSON.stringify(body) }, token),
+  commsTemplateCreate: (token: string, body: CommsTemplateDraft) =>
+    request<{ template: CommsTemplate }>('/owner/communications/templates', { method: 'POST', body: JSON.stringify(body) }, token),
+  commsTemplateUpdate: (token: string, id: string, body: Partial<CommsTemplateDraft>) =>
+    request<{ template: CommsTemplate }>(`/owner/communications/templates/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(body) }, token),
+  commsTemplateDuplicate: (token: string, id: string, opts: { gymId?: string; name?: string } = {}) =>
+    request<{ template: CommsTemplate }>(`/owner/communications/templates/${encodeURIComponent(id)}/duplicate`, { method: 'POST', body: JSON.stringify(opts) }, token),
+  commsTemplateArchive: (token: string, id: string) =>
+    request<{ ok: boolean }>(`/owner/communications/templates/${encodeURIComponent(id)}/archive`, { method: 'POST' }, token),
 
   // ── Challenges: FitFlex admin (scope 'admin') and company HR ('corporate') ──
   creatorChallenges: (token: string, scope: ChallengeScope) =>
@@ -947,14 +969,39 @@ export type CommsChannel = 'in_app' | 'push' | 'whatsapp';
 export type CommsPurpose = 'promotion' | 'renewal' | 'payment' | 'announcement' | 'engagement' | 'general';
 export type CommsStatus = 'draft' | 'scheduled' | 'sending' | 'sent' | 'partially_failed' | 'failed' | 'cancelled';
 export type CommsDeepLink = 'message' | 'membership' | 'renewal' | 'payment' | 'gym';
+export type CommsLocale = 'en' | 'sw';
+export interface CommsText { title: string; body: string; ctaLabel?: string }
+/** The main language's text is inline; the other language, if written, is in `translations`. */
 export interface CommsContent {
   title: string; body: string; ctaLabel?: string; deepLink?: CommsDeepLink;
   offerName?: string; discount?: string; amountTzs?: number;
+  locale?: CommsLocale; translations?: Partial<Record<CommsLocale, CommsText>>;
+}
+export type CommsTemplateGroup = 'membership' | 'payment' | 'marketing' | 'engagement' | 'general';
+export interface CommsTemplate {
+  id: string; key: string; system: boolean; gymId: string | null; name: string;
+  group: CommsTemplateGroup; purpose: CommsPurpose; category: string; deepLink: CommsDeepLink;
+  bodies: Partial<Record<CommsLocale, CommsText>>; variables: string[]; status: string;
+  basedOn: string | null; updatedAt: string | null;
+}
+export interface CommsTemplateDraft {
+  gymId?: string; name: string; purpose: CommsPurpose; group?: CommsTemplateGroup; deepLink?: CommsDeepLink;
+  bodies: Partial<Record<CommsLocale, CommsText>>;
+}
+export interface CommsTemplateValues { offerName?: string; discount?: string; amountTzs?: number }
+export interface CommsTemplatePreview {
+  senderName: string; sampleMember: string;
+  byLocale: Partial<Record<CommsLocale, {
+    in_app: { title: string; body: string; ctaLabel: string | null; deepLink: CommsDeepLink };
+    push: { title: string; body: string; truncated: boolean };
+  }>>;
+  whatsapp: { ready: boolean; byLocale: Partial<Record<CommsLocale, { ready: boolean; reason?: string }>> };
+  needsValues: string[];
 }
 export interface CommsAudience { preset?: string | null; filter?: unknown }
 export interface CommsDraft {
   gymId?: string; name?: string; purpose?: CommsPurpose; audience?: CommsAudience;
-  content?: CommsContent; channels?: CommsChannel[];
+  content?: CommsContent; channels?: CommsChannel[]; templateId?: string | null;
 }
 export interface CommsCounts {
   targeted: number; queued: number; skipped: Record<string, number>;
@@ -964,7 +1011,7 @@ export interface CommsCampaign {
   id: string; senderType: 'gym' | 'platform'; gymId: string | null; name: string; purpose: CommsPurpose;
   category: 'transactional' | 'marketing'; status: CommsStatus; audience?: CommsAudience; content?: CommsContent;
   channels: CommsChannel[]; scheduledAt: string | null; sentAt: string | null; createdAt: string;
-  counts: CommsCounts | null; title?: string | null; preset?: string | null;
+  counts: CommsCounts | null; title?: string | null; preset?: string | null; templateId?: string | null;
 }
 export interface CommsOverview {
   senderType: 'gym' | 'platform'; members: number | null; campaigns: Partial<Record<CommsStatus, number>>;
