@@ -140,6 +140,37 @@ export const api = {
     request<ChallengeParticipation>(`/${scope}/challenges/${encodeURIComponent(id)}/participants`, {}, token),
   challengeStandings: (token: string, scope: ChallengeScope, id: string) =>
     request<ChallengeStandings>(`/${scope}/challenges/${encodeURIComponent(id)}/leaderboard`, {}, token),
+  // ─── Partner KYC / KYB review (admin, 'kyc' scope) ───
+  kycCases: (token: string, filters: { status?: KycCaseStatus; partnerType?: KycPartnerType } = {}) => {
+    const q = new URLSearchParams();
+    if (filters.status) q.set('status', filters.status);
+    if (filters.partnerType) q.set('partnerType', filters.partnerType);
+    const s = q.toString();
+    return request<KycCaseRow[]>(`/admin/kyc/cases${s ? '?' + s : ''}`, {}, token);
+  },
+  kycCase: (token: string, id: string) => request<KycCaseDetail>(`/admin/kyc/cases/${encodeURIComponent(id)}`, {}, token),
+  claimKycCase: (token: string, id: string) =>
+    request<KycCaseDetail>(`/admin/kyc/cases/${encodeURIComponent(id)}/claim`, { method: 'POST' }, token),
+  decideKycCase: (token: string, id: string, body: { decision: KycDecision; reasonCode?: string; reasonNote?: string; override?: boolean }) =>
+    request<KycCaseDetail>(`/admin/kyc/cases/${encodeURIComponent(id)}/decision`, { method: 'POST', body: JSON.stringify(body) }, token),
+  reviewKycDocument: (token: string, id: string, documentId: string, body: { decision: 'accept' | 'reject'; note?: string }) =>
+    request<KycCaseDetail>(`/admin/kyc/cases/${encodeURIComponent(id)}/documents/${encodeURIComponent(documentId)}/review`, { method: 'POST', body: JSON.stringify(body) }, token),
+  reviewKycSettlementAccount: (token: string, id: string, accountId: string, body: { decision: 'verify' | 'reject'; note?: string }) =>
+    request<KycCaseDetail>(`/admin/kyc/cases/${encodeURIComponent(id)}/settlement-accounts/${encodeURIComponent(accountId)}/review`, { method: 'POST', body: JSON.stringify(body) }, token),
+  recordKycSiteVisit: (token: string, gymId: string, body: { result: 'passed' | 'failed'; score: number; maxScore?: number; tier: string; visitedOn?: string; notes?: string }) =>
+    request<{ check: KycCheck; gymTier: string | null; tierMatches: boolean }>(`/admin/kyc/gyms/${encodeURIComponent(gymId)}/site-visit`, { method: 'POST', body: JSON.stringify(body) }, token),
+  /** A KYC document's file, fetched with the session token (it has no public URL). */
+  kycDocumentFile: async (token: string, id: string, documentId: string): Promise<Blob> => {
+    const res = await fetch(`${BASE}/admin/kyc/cases/${encodeURIComponent(id)}/documents/${encodeURIComponent(documentId)}/file`, {
+      headers: { authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      if (res.status === 401 && _onUnauthorized) _onUnauthorized();
+      throw new ApiError(res.status, body);
+    }
+    return res.blob();
+  },
   /** Earned rewards to hand out: FitFlex admin ('admin') or company HR ('corporate'). */
   rewardQueue: (token: string, scope: ChallengeScope, filters: { status?: RewardStatus; challengeId?: string } = {}) => {
     const q = new URLSearchParams();
@@ -1032,4 +1063,174 @@ export interface CommsPreview {
   category: string; counts: CommsCounts; largeSendThreshold: number;
   example: { memberName: string | null; title: string; body: string; ctaLabel: string | null; deepLink: CommsDeepLink } | null;
   warnings: Array<{ code: string; count?: number; channel?: CommsChannel }>;
+}
+
+// ── Partner KYC / KYB ────────────────────────────────────────────────────
+export type KycPartnerType = 'gym_owner' | 'trainer' | 'vendor' | 'corporate';
+export type KycCaseStatus = 'draft' | 'submitted' | 'in_review' | 'info_requested' | 'approved' | 'rejected' | 'suspended';
+export type KycDecision = 'approve' | 'reject' | 'request_info' | 'suspend' | 'reinstate' | 'reopen';
+export type KycItemStatus = 'complete' | 'submitted' | 'missing' | 'incomplete' | 'file_missing' | 'rejected' | 'expired' | 'failed' | 'mismatch';
+
+export interface KycCaseRow {
+  id: string;
+  partnerType: KycPartnerType;
+  subjectId: string;
+  partnerName: string | null;
+  legalName: string | null;
+  status: KycCaseStatus;
+  tier: number;
+  round: number;
+  submittedAt: string | null;
+  updatedAt: string;
+  createdAt: string;
+}
+
+export interface KycAddress { line1?: string; line2?: string; city?: string; region?: string; country?: string; postalCode?: string }
+
+export interface KycCase {
+  id: string;
+  partnerType: KycPartnerType;
+  userId: string | null;
+  corporateId: string | null;
+  status: KycCaseStatus;
+  tier: number;
+  round: number;
+  legalName: string | null;
+  tradingName: string | null;
+  entityType: string | null;
+  registrationNumber: string | null;
+  registrationAuthority: string | null;
+  incorporatedOn: string | null;
+  registeredAddress: KycAddress | null;
+  businessActivity: string | null;
+  tin: string | null;
+  submittedAt: string | null;
+  reviewerId: string | null;
+  decidedAt: string | null;
+  decidedBy: string | null;
+  reasonCode: string | null;
+  reasonNote: string | null;
+  reverifyAt: string | null;
+  updatedAt: string;
+}
+
+export interface KycPerson {
+  id: string;
+  role: string;
+  fullName: string;
+  dateOfBirth: string | null;
+  nationality: string | null;
+  idType: string | null;
+  idNumber: string | null;
+  idExpiresOn: string | null;
+  phone: string | null;
+  email: string | null;
+  address: KycAddress | null;
+  position: string | null;
+  relationship: string | null;
+  authority: string | null;
+  ownershipPct: number | null;
+  status: string;
+}
+
+export interface KycDocument {
+  id: string;
+  requirementKey: string;
+  docType: string;
+  status: 'pending' | 'accepted' | 'rejected' | 'expired' | 'superseded';
+  hasFile: boolean;
+  fileName: string | null;
+  mimeType: string | null;
+  sizeBytes: number | null;
+  documentNumber: string | null;
+  issuer: string | null;
+  issuedOn: string | null;
+  expiresOn: string | null;
+  details: Record<string, unknown>;
+  reviewNote: string | null;
+  reviewedAt: string | null;
+  supersedesId: string | null;
+  round: number;
+  createdAt: string;
+}
+
+export interface KycSettlementAccount {
+  id: string;
+  method: 'bank' | 'mobile_money';
+  provider: string;
+  accountName: string;
+  accountNumber: string;
+  branch: string | null;
+  currency: string;
+  status: 'pending_verification' | 'verified' | 'rejected' | 'disabled';
+  isPrimary: boolean;
+  createdAt: string;
+}
+
+export interface KycCheck {
+  id: string;
+  checkType: string;
+  targetType: string;
+  targetId: string | null;
+  method: string;
+  provider: string | null;
+  result: 'pending' | 'passed' | 'failed' | 'inconclusive';
+  evidence: Record<string, unknown>;
+  note: string | null;
+  performedAt: string | null;
+  createdAt: string;
+}
+
+export interface KycEvent {
+  id: string;
+  eventType: string;
+  fromStatus: string | null;
+  toStatus: string | null;
+  targetType: string | null;
+  targetId: string | null;
+  actorId: string | null;
+  actorRole: string | null;
+  reasonCode: string | null;
+  note: string | null;
+  data: Record<string, unknown>;
+  at: string;
+}
+
+export interface KycChecklistItem {
+  key: string;
+  by: 'partner' | 'reviewer';
+  status: KycItemStatus;
+  gymId?: string;
+  gymName?: string;
+  requirementKey?: string;
+  missingFields?: string[];
+  note?: string | null;
+  expiresOn?: string | null;
+  score?: number;
+  maxScore?: number | null;
+  gymTier?: string | null;
+  vettedTier?: string;
+  expectedIdType?: string;
+}
+
+export interface KycChecklist {
+  partnerType: KycPartnerType;
+  tier: number;
+  sections: Array<{ key: string; items: KycChecklistItem[] }>;
+  missing: string[];
+  awaitingReview: string[];
+  readyToSubmit: boolean;
+  complete: boolean;
+}
+
+export interface KycCaseDetail {
+  partnerType: KycPartnerType;
+  case: KycCase;
+  people: KycPerson[];
+  documents: KycDocument[];
+  settlementAccounts: KycSettlementAccount[];
+  checklist: KycChecklist;
+  checks: KycCheck[];
+  agreements: Array<{ id: string; agreementType: string; version: string; status: string; acceptedAt: string }>;
+  events: KycEvent[];
 }
