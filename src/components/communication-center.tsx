@@ -2,26 +2,29 @@
 // Communication Center — shared by gym owners/staff (scope 'owner': their
 // gym's direct members) and FitFlex admins (scope 'admin': every member,
 // with area targeting). Overview, campaign list, the seven-step campaign
-// flow and campaign detail, all against the same backend endpoints.
+// flow and campaign detail, and message templates, all against the same
+// backend endpoints.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Megaphone, Plus, RefreshCw, ArrowLeft } from 'lucide-react';
+import { Megaphone, Plus, RefreshCw, ArrowLeft, FileText } from 'lucide-react';
 import { useApp } from '../../app/providers';
 import {
-  api, ApiError, CommsCampaign, CommsChannel, CommsContent, CommsDeepLink, CommsDraft, CommsOverview,
-  CommsPreview, CommsPurpose, CommsScope, CommsStatus, Gym,
+  api, ApiError, CommsCampaign, CommsChannel, CommsContent, CommsDeepLink, CommsDraft, CommsLocale, CommsOverview,
+  CommsPreview, CommsPurpose, CommsScope, CommsStatus, CommsTemplate, CommsText, Gym,
 } from '@/lib/api';
 import type { MessageKey } from '@/lib/i18n';
 import { Alert, Badge, Button, Card, EmptyState, Field, Input, MetricCard, PageHeader, Segmented, Spinner } from './shared';
 import { ConfirmDialog } from './dialog';
+import {
+  DEEP_LINKS, LOCALES, MessageCard, PURPOSES, PushCard, SENDER_VARIABLES, T, VARIABLES, errorText, fill, textOk,
+  variablesIn, when,
+} from './communication-shared';
+import {
+  BilingualText, TemplateDetail, TemplateEditor, TemplatePicker, TemplatesTab, contentFromTemplate,
+} from './communication-templates';
 
-type T = (key: string) => string;
-
-const PURPOSES: CommsPurpose[] = ['promotion', 'renewal', 'payment', 'announcement', 'engagement', 'general'];
 const TRANSACTIONAL: CommsPurpose[] = ['renewal', 'payment', 'announcement'];
 const CHANNELS: CommsChannel[] = ['in_app', 'push', 'whatsapp'];
-const DEEP_LINKS: CommsDeepLink[] = ['message', 'membership', 'renewal', 'payment', 'gym'];
-const VARIABLES = ['member_name', 'gym_name', 'plan_name', 'expiry_date', 'offer_name', 'discount', 'amount'];
 const STEPS = ['purpose', 'audience', 'message', 'channels', 'schedule', 'preview', 'confirm'] as const;
 type Step = typeof STEPS[number];
 const STATUS_TONE: Record<CommsStatus, 'gray' | 'warning' | 'brand' | 'success' | 'danger'> = {
@@ -31,22 +34,6 @@ const SKIP_REASONS = new Set([
   'in_app_marketing_off', 'push_marketing_off', 'whatsapp_marketing_not_opted_in', 'whatsapp_opted_out',
   'whatsapp_transactional_off', 'no_device', 'no_phone', 'push_disabled', 'whatsapp_not_configured', 'marketing_cap',
 ]);
-
-const fill = (s: string, vars: Record<string, string | number>) =>
-  Object.entries(vars).reduce((out, [k, v]) => out.replace(`{${k}}`, String(v)), s);
-const when = (iso: string | null | undefined) =>
-  iso ? new Date(iso).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '';
-const variablesIn = (text: string) => [...text.matchAll(/\{\{\s*([a-z_]+)\s*\}\}/g)].map(m => m[1]);
-
-function errorText(t: T, err: unknown): string {
-  const code = err instanceof ApiError ? (err.body as any)?.error : null;
-  const known: Record<string, string> = {
-    nobody_reachable: 'comms.warn.nobody_reachable',
-    empty_audience: 'comms.audience.none',
-    schedule_too_soon: 'comms.schedule.tooSoon',
-  };
-  return code && known[code] ? t(known[code]) : `${t('comms.error.generic')}${code ? ` (${code})` : ''}`;
-}
 
 // ── audience conditions on top of a preset ──────────────────────────────────
 type Refine = { expiresWithin?: number; noVisitFor?: number; plans: string[]; gender?: string; age?: [number, number | null]; area?: string };
@@ -69,10 +56,15 @@ function refineToFilter(r: Refine) {
 }
 
 // ── entry ───────────────────────────────────────────────────────────────────
-type View = { kind: 'home' } | { kind: 'compose'; campaign?: CommsCampaign } | { kind: 'detail'; id: string };
+type View =
+  | { kind: 'home'; tab?: string }
+  | { kind: 'compose'; campaign?: CommsCampaign; templateId?: string }
+  | { kind: 'detail'; id: string }
+  | { kind: 'template'; id: string }
+  | { kind: 'templateEdit'; id?: string };
 
 export function CommunicationCenter({ scope }: { scope: CommsScope }) {
-  const { token, t: translate } = useApp();
+  const { token, t: translate, locale } = useApp();
   const t: T = useCallback((k: string) => translate(k as MessageKey), [translate]);
   const [view, setView] = useState<View>({ kind: 'home' });
   const [gyms, setGyms] = useState<Gym[]>([]);
@@ -93,24 +85,40 @@ export function CommunicationCenter({ scope }: { scope: CommsScope }) {
     return <EmptyState title={t('comms.title')} body={t('comms.error.generic')} />;
   }
   const home = () => setView({ kind: 'home' });
+  const templates = () => setView({ kind: 'home', tab: 'templates' });
+  const openTemplate = (id: string) => setView({ kind: 'template', id });
   if (view.kind === 'compose') {
-    return <Composer scope={scope} token={token} t={t} gymId={gymId} campaign={view.campaign}
-      onClose={home} onDone={id => setView({ kind: 'detail', id })} />;
+    return <Composer scope={scope} token={token} t={t} locale={locale} gymId={gymId} campaign={view.campaign}
+      templateId={view.templateId} onClose={home} onDone={id => setView({ kind: 'detail', id })} />;
+  }
+  if (view.kind === 'template') {
+    return <TemplateDetail key={view.id} scope={scope} token={token} t={t} gymId={gymId} id={view.id} onBack={templates}
+      onUse={id => setView({ kind: 'compose', templateId: id })}
+      onEdit={id => setView({ kind: 'templateEdit', id })}
+      onCopied={id => setView({ kind: 'templateEdit', id })} />;
+  }
+  if (view.kind === 'templateEdit' && scope === 'owner') {
+    return <TemplateEditor key={view.id ?? 'new'} token={token} t={t} gymId={gymId} id={view.id}
+      onBack={view.id ? () => openTemplate(view.id!) : templates} onSaved={openTemplate} />;
   }
   if (view.kind === 'detail') {
     return <Detail scope={scope} token={token} t={t} id={view.id} onBack={home}
       onEdit={c => setView({ kind: 'compose', campaign: c })} />;
   }
   return <Home scope={scope} token={token} t={t} gyms={gyms} gymId={gymId} setGymId={setGymId}
-    onNew={() => setView({ kind: 'compose' })} onOpen={id => setView({ kind: 'detail', id })} />;
+    initialTab={view.kind === 'home' ? view.tab : undefined}
+    onNew={() => setView({ kind: 'compose' })} onOpen={id => setView({ kind: 'detail', id })}
+    onOpenTemplate={openTemplate}
+    onNewTemplate={scope === 'owner' ? () => setView({ kind: 'templateEdit' }) : undefined} />;
 }
 
 // ── home: overview + campaigns ─────────────────────────────────────────────
-function Home({ scope, token, t, gyms, gymId, setGymId, onNew, onOpen }: {
+function Home({ scope, token, t, gyms, gymId, setGymId, initialTab, onNew, onOpen, onOpenTemplate, onNewTemplate }: {
   scope: CommsScope; token: string; t: T; gyms: Gym[]; gymId?: string; setGymId: (id: string) => void;
-  onNew: () => void; onOpen: (id: string) => void;
+  initialTab?: string; onNew: () => void; onOpen: (id: string) => void;
+  onOpenTemplate: (id: string) => void; onNewTemplate?: () => void;
 }) {
-  const [tab, setTab] = useState('overview');
+  const [tab, setTab] = useState(initialTab ?? 'overview');
   const [overview, setOverview] = useState<CommsOverview | null>(null);
   const [campaigns, setCampaigns] = useState<CommsCampaign[]>([]);
   const [status, setStatus] = useState<CommsStatus | ''>('');
@@ -148,8 +156,10 @@ function Home({ scope, token, t, gyms, gymId, setGymId, onNew, onOpen }: {
       />
       {error && <Alert tone="error" className="mb-4">{error}</Alert>}
       <Segmented className="mb-4 w-fit" value={tab} onChange={setTab}
-        options={[['overview', t('comms.tab.overview')], ['campaigns', t('comms.tab.campaigns')]]} />
-      {loading && !overview ? <Spinner /> : tab === 'overview' && overview ? (
+        options={[['overview', t('comms.tab.overview')], ['campaigns', t('comms.tab.campaigns')], ['templates', t('comms.tab.templates')]]} />
+      {tab === 'templates' ? (
+        <TemplatesTab scope={scope} token={token} t={t} gymId={gymId} onOpen={onOpenTemplate} onNew={onNewTemplate} />
+      ) : loading && !overview ? <Spinner /> : tab === 'overview' && overview ? (
         <div className="space-y-4">
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             <MetricCard label={t('comms.overview.members')} value={overview.members ?? '–'} />
@@ -213,8 +223,10 @@ function CampaignList({ t, campaigns, onOpen }: { t: T; campaigns: CommsCampaign
 }
 
 // ── composer ────────────────────────────────────────────────────────────────
-function Composer({ scope, token, t, gymId, campaign, onClose, onDone }: {
-  scope: CommsScope; token: string; t: T; gymId?: string; campaign?: CommsCampaign;
+function Composer({ scope, token, t, locale, gymId, campaign, templateId, onClose, onDone }: {
+  scope: CommsScope; token: string; t: T; locale: CommsLocale; gymId?: string; campaign?: CommsCampaign;
+  /** Start from this template (the "Use this template" button). */
+  templateId?: string;
   onClose: () => void; onDone: (id: string) => void;
 }) {
   const [step, setStep] = useState<Step>('purpose');
@@ -223,7 +235,12 @@ function Composer({ scope, token, t, gymId, campaign, onClose, onDone }: {
   const [refine, setRefine] = useState<Refine>(EMPTY_REFINE);
   // A saved filter this form didn't build is kept untouched until cleared.
   const [savedFilter, setSavedFilter] = useState<unknown>(campaign?.audience?.filter);
-  const [content, setContent] = useState<CommsContent>(campaign?.content ?? { title: '', body: '', deepLink: 'message' });
+  const [content, setContent] = useState<CommsContent>(campaign?.content
+    ? { locale: 'en', ...campaign.content }
+    : { title: '', body: '', deepLink: 'message', locale });
+  const [tplId, setTplId] = useState<string | null>(campaign?.templateId ?? null);
+  const [picking, setPicking] = useState(false);
+  const [lang, setLang] = useState<CommsLocale>(content.locale ?? 'en');
   const [channels, setChannels] = useState<CommsChannel[]>(campaign?.channels?.length ? campaign.channels : ['in_app']);
   const [later, setLater] = useState(Boolean(campaign?.scheduledAt));
   const [scheduledAt, setScheduledAt] = useState<string>(campaign?.scheduledAt ? campaign.scheduledAt.slice(0, 16) : '');
@@ -240,10 +257,30 @@ function Composer({ scope, token, t, gymId, campaign, onClose, onDone }: {
   const saved = useRef<string | undefined>(undefined);
   // One id per message: pressing Send again never sends twice.
   const sendRequestId = useRef(typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`);
-  const bodyRef = useRef<HTMLTextAreaElement>(null);
   // State updates land on the next render, so a fast double-click could
   // start two saves; this ref stops the second one straight away.
   const inFlight = useRef(false);
+
+  function applyTemplate(tpl: CommsTemplate) {
+    const next = contentFromTemplate(tpl, locale, content);
+    setTplId(tpl.id);
+    setContent(next);
+    setPurpose(tpl.purpose);
+    setLang(next.locale ?? 'en');
+    setPicking(false);
+  }
+
+  function clearTemplate() {
+    setTplId(null);
+    setContent(c => ({ title: '', body: '', ctaLabel: '', deepLink: 'message', locale, translations: {},
+      offerName: c.offerName, discount: c.discount, amountTzs: c.amountTzs }));
+    setLang(locale);
+  }
+
+  useEffect(() => {
+    if (!templateId) return;
+    api.commsTemplate(token, scope, templateId).then(r => applyTemplate(r.template)).catch(e => setError(errorText(t, e)));
+  }, [templateId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     api.commsSegments(token, scope).then(c => setPresets(c.presets.map(p => p.key))).catch(() => setPresets([]));
@@ -251,19 +288,41 @@ function Composer({ scope, token, t, gymId, campaign, onClose, onDone }: {
   }, [token, scope, gymId]);
 
   const filter = savedFilter ?? refineToFilter(refine);
-  const draft: CommsDraft = useMemo(() => ({
-    ...(scope === 'owner' && gymId ? { gymId } : {}),
-    name: content.title.trim().slice(0, 80) || undefined,
-    purpose,
-    audience: { preset, ...(filter ? { filter } : {}) },
-    content: {
-      ...content,
-      ctaLabel: content.ctaLabel?.trim() || undefined,
-      offerName: content.offerName?.trim() || undefined,
-      discount: content.discount?.trim() || undefined,
-    },
-    channels,
-  }), [scope, gymId, content, purpose, preset, filter, channels]);
+  const main: CommsLocale = content.locale ?? 'en';
+  const texts: Partial<Record<CommsLocale, CommsText>> = {
+    ...content.translations,
+    [main]: { title: content.title, body: content.body, ctaLabel: content.ctaLabel },
+  };
+  const others = LOCALES.filter(l => l !== main);
+  const draft: CommsDraft = useMemo(() => {
+    const translations = Object.fromEntries(Object.entries(content.translations ?? {})
+      .filter(([l, x]) => l !== main && x && (x.title.trim() || x.body.trim()))
+      .map(([l, x]) => [l, { title: x!.title.trim(), body: x!.body.trim(), ...(x!.ctaLabel?.trim() ? { ctaLabel: x!.ctaLabel.trim() } : {}) }]));
+    return {
+      ...(scope === 'owner' && gymId ? { gymId } : {}),
+      name: content.title.trim().slice(0, 80) || undefined,
+      purpose,
+      audience: { preset, ...(filter ? { filter } : {}) },
+      content: {
+        ...content,
+        ctaLabel: content.ctaLabel?.trim() || undefined,
+        offerName: content.offerName?.trim() || undefined,
+        discount: content.discount?.trim() || undefined,
+        translations: Object.keys(translations).length ? translations : undefined,
+      },
+      channels,
+      templateId: tplId,
+    };
+  }, [scope, gymId, content, main, purpose, preset, filter, channels, tplId]);
+
+  function setText(l: CommsLocale, x: CommsText) {
+    setContent(c => l === (c.locale ?? 'en')
+      ? { ...c, title: x.title, body: x.body, ctaLabel: x.ctaLabel }
+      : { ...c, translations: { ...c.translations, [l]: x } });
+  }
+  function removeText(l: CommsLocale) {
+    setContent(c => { const { [l]: _gone, ...rest } = c.translations ?? {}; return { ...c, translations: rest }; });
+  }
 
   // Live "N members match" count.
   useEffect(() => {
@@ -288,7 +347,7 @@ function Composer({ scope, token, t, gymId, campaign, onClose, onDone }: {
     }
   }, [step]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const used = variablesIn(`${content.title} ${content.body}`);
+  const used = variablesIn(Object.values(texts).map(x => `${x?.title} ${x?.body}`).join(' '));
   const unknown = used.filter(v => !VARIABLES.includes(v));
   const missing = [
     used.includes('offer_name') && !content.offerName?.trim() ? 'offer_name' : null,
@@ -301,7 +360,7 @@ function Composer({ scope, token, t, gymId, campaign, onClose, onDone }: {
   const canContinue: Record<Step, boolean> = {
     purpose: Boolean(purpose),
     audience: (count?.n ?? 0) > 0,
-    message: Boolean(content.title.trim() && content.body.trim()) && content.title.length <= 65 && content.body.length <= 1000 && !unknown.length && !missing.length,
+    message: textOk(texts[main], true) && others.every(l => textOk(texts[l], false)) && !unknown.length && !missing.length,
     channels: channels.length > 0,
     schedule: !tooSoon,
     preview: Boolean(preview) && !preview!.warnings.some(w => w.code === 'nobody_reachable'),
@@ -341,14 +400,6 @@ function Composer({ scope, token, t, gymId, campaign, onClose, onDone }: {
     inFlight.current = true;
     setBusy(true); setError(null);
     try { onDone(await saveDraft()); } catch (e) { setError(errorText(t, e)); } finally { inFlight.current = false; setBusy(false); }
-  }
-
-  function insertVariable(v: string) {
-    const el = bodyRef.current;
-    const token_ = `{{${v}}}`;
-    const start = el?.selectionStart ?? content.body.length;
-    const end = el?.selectionEnd ?? content.body.length;
-    setContent(c => ({ ...c, body: c.body.slice(0, start) + token_ + c.body.slice(end) }));
   }
 
   const setR = (patch: Partial<Refine>) => { setSavedFilter(undefined); setRefine(r => ({ ...r, ...patch })); };
@@ -442,36 +493,43 @@ function Composer({ scope, token, t, gymId, campaign, onClose, onDone }: {
 
         {step === 'message' && (
           <>
-            <Field label={t('comms.msg.title')} hint={`${content.title.length}/65`} error={content.title.length > 65 ? fill(t('comms.msg.tooLong'), { n: 65 }) : undefined}>
-              <Input value={content.title} placeholder={t('comms.msg.titleHint')} onChange={e => setContent(c => ({ ...c, title: e.target.value }))} data-testid="msg-title" />
-            </Field>
-            <Field label={t('comms.msg.body')} hint={`${content.body.length}/1000`} error={content.body.length > 1000 ? fill(t('comms.msg.tooLong'), { n: 1000 }) : undefined}>
-              <textarea ref={bodyRef} className="ui-input" rows={5} value={content.body} placeholder={t('comms.msg.bodyHint')}
-                onChange={e => setContent(c => ({ ...c, body: e.target.value }))} data-testid="msg-body" />
-            </Field>
-            <div>
-              <p className="mb-1 text-xs text-[var(--color-fg-quaternary)]">{t('comms.msg.personalise')}</p>
-              <div className="flex flex-wrap gap-2">
-                {VARIABLES.map(v => <Button key={v} size="sm" variant="secondary" onClick={() => insertVariable(v)} data-testid={`var-${v}`}>{t(`comms.var.${v}`)}</Button>)}
+            {tplId ? (
+              <div className="flex flex-wrap items-center gap-2 rounded-[var(--radius-lg)] bg-[var(--color-bg-secondary)] p-3 text-sm" data-testid="msg-template">
+                <FileText className="h-4 w-4 text-[var(--color-brand-600)]" />
+                <span className="flex-1">{t('comms.tpl.using')}</span>
+                <Button size="sm" variant="secondary" onClick={() => setPicking(true)} data-testid="msg-change-template">{t('comms.tpl.change')}</Button>
+                <Button size="sm" variant="ghost" onClick={clearTemplate} data-testid="msg-clear-template">{t('comms.tpl.blank')}</Button>
               </div>
-            </div>
+            ) : (
+              <button type="button" onClick={() => setPicking(true)} data-testid="msg-pick-template"
+                className="flex w-full items-center gap-3 rounded-[var(--radius-lg)] border border-dashed border-[var(--color-border-primary)] p-3 text-left hover:bg-[var(--color-bg-secondary)]">
+                <FileText className="h-4 w-4 text-[var(--color-brand-600)]" />
+                <span>
+                  <span className="block text-sm font-medium">{t('comms.tpl.start')}</span>
+                  <span className="block text-xs text-[var(--color-fg-quaternary)]">{t('comms.tpl.startBody')}</span>
+                </span>
+              </button>
+            )}
+            <BilingualText t={t} texts={texts} main={main} lang={lang} setLang={setLang} onChange={setText} onRemove={removeText} />
             {unknown.length > 0 && <Alert tone="error">{t('comms.msg.unknownVariable').replace('{name}', unknown[0])}</Alert>}
-            {(purpose === 'promotion' || used.some(v => ['offer_name', 'discount', 'amount'].includes(v))) && (
-              <div className="grid gap-4 sm:grid-cols-3">
-                <Field label={t('comms.var.offer_name')}><Input value={content.offerName ?? ''} onChange={e => setContent(c => ({ ...c, offerName: e.target.value }))} /></Field>
-                <Field label={t('comms.var.discount')}><Input value={content.discount ?? ''} placeholder={t('comms.msg.discountHint')} onChange={e => setContent(c => ({ ...c, discount: e.target.value }))} /></Field>
-                <Field label={t('comms.msg.amountTzs')}><Input inputMode="numeric" value={content.amountTzs ?? ''} onChange={e => { const n = parseInt(e.target.value.replace(/\D/g, ''), 10); setContent(c => ({ ...c, amountTzs: Number.isNaN(n) ? undefined : n })); }} /></Field>
+            {(purpose === 'promotion' || used.some(v => SENDER_VARIABLES.includes(v))) && (
+              <div className="space-y-2">
+                <p className="text-xs text-[var(--color-fg-quaternary)]">{t('comms.msg.offerBothLangs')}</p>
+                <div className="grid gap-4 sm:grid-cols-3">
+                  <Field label={t('comms.var.offer_name')}><Input value={content.offerName ?? ''} onChange={e => setContent(c => ({ ...c, offerName: e.target.value }))} data-testid="msg-offer" /></Field>
+                  <Field label={t('comms.var.discount')}><Input value={content.discount ?? ''} placeholder={t('comms.msg.discountHint')} onChange={e => setContent(c => ({ ...c, discount: e.target.value }))} data-testid="msg-discount" /></Field>
+                  <Field label={t('comms.msg.amountTzs')}><Input inputMode="numeric" value={content.amountTzs ?? ''} onChange={e => { const n = parseInt(e.target.value.replace(/\D/g, ''), 10); setContent(c => ({ ...c, amountTzs: Number.isNaN(n) ? undefined : n })); }} /></Field>
+                </div>
               </div>
             )}
             {missing.length > 0 && <Alert tone="warning">{fill(t('comms.msg.fillIn'), { names: missing.map(v => t(`comms.var.${v}`)).join(', ') })}</Alert>}
-            <div className="grid gap-4 sm:grid-cols-2">
-              <Field label={t('comms.msg.buttonLabel')}><Input value={content.ctaLabel ?? ''} placeholder={t('comms.msg.buttonHint')} maxLength={25} onChange={e => setContent(c => ({ ...c, ctaLabel: e.target.value }))} /></Field>
-              <Field label={t('comms.msg.opens')}>
-                <select className="ui-input" value={content.deepLink ?? 'message'} onChange={e => setContent(c => ({ ...c, deepLink: e.target.value as CommsDeepLink }))}>
-                  {DEEP_LINKS.map(d => <option key={d} value={d}>{t(`comms.link.${d}`)}</option>)}
-                </select>
-              </Field>
-            </div>
+            <Field label={t('comms.msg.opens')}>
+              <select className="ui-input" value={content.deepLink ?? 'message'} onChange={e => setContent(c => ({ ...c, deepLink: e.target.value as CommsDeepLink }))} data-testid="msg-link">
+                {DEEP_LINKS.map(d => <option key={d} value={d}>{t(`comms.link.${d}`)}</option>)}
+              </select>
+            </Field>
+            <TemplatePicker open={picking} onClose={() => setPicking(false)} scope={scope} token={token} t={t}
+              gymId={gymId} purpose={purpose} onPick={applyTemplate} />
           </>
         )}
 
@@ -524,11 +582,7 @@ function Composer({ scope, token, t, gymId, campaign, onClose, onDone }: {
                 {channels.includes('push') && (
                   <div data-testid="preview-push">
                     <p className="mb-1 text-xs font-semibold">{t('comms.channel.push')}</p>
-                    <div className="max-w-sm rounded-[var(--radius-lg)] border border-[var(--color-border-secondary)] bg-[var(--color-bg-secondary)] p-3">
-                      <p className="text-xs text-[var(--color-fg-quaternary)]">FitFlex</p>
-                      <p className="truncate text-sm font-semibold">{preview.example.title}</p>
-                      <p className="line-clamp-2 text-xs">{preview.example.body}</p>
-                    </div>
+                    <PushCard sender="FitFlex" title={preview.example.title} body={preview.example.body} />
                   </div>
                 )}
                 {channels.includes('in_app') && (
@@ -598,16 +652,6 @@ function Summary({ label, value }: { label: string; value: string }) {
     <div>
       <dt className="text-xs text-[var(--color-fg-quaternary)]">{label}</dt>
       <dd className="font-medium">{value}</dd>
-    </div>
-  );
-}
-
-function MessageCard({ title, body, cta }: { title: string; body: string; cta?: string | null }) {
-  return (
-    <div className="max-w-sm rounded-[var(--radius-xl)] border border-[var(--color-border-secondary)] p-4">
-      <p className="font-semibold">{title}</p>
-      <p className="mt-1 whitespace-pre-line text-sm">{body}</p>
-      {cta && <span className="mt-3 inline-block rounded-[var(--radius-lg)] bg-[var(--color-brand-500)] px-3 py-1.5 text-xs font-semibold text-white">{cta}</span>}
     </div>
   );
 }
