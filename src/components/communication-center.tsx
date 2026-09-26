@@ -22,6 +22,7 @@ import {
 import {
   BilingualText, TemplateDetail, TemplateEditor, TemplatePicker, TemplatesTab, contentFromTemplate,
 } from './communication-templates';
+import { WhatsAppAdmin } from './communication-whatsapp';
 
 const TRANSACTIONAL: CommsPurpose[] = ['renewal', 'payment', 'announcement'];
 const CHANNELS: CommsChannel[] = ['in_app', 'push', 'whatsapp'];
@@ -33,6 +34,7 @@ const STATUS_TONE: Record<CommsStatus, 'gray' | 'warning' | 'brand' | 'success' 
 const SKIP_REASONS = new Set([
   'in_app_marketing_off', 'push_marketing_off', 'whatsapp_marketing_not_opted_in', 'whatsapp_opted_out',
   'whatsapp_transactional_off', 'no_device', 'no_phone', 'push_disabled', 'whatsapp_not_configured', 'marketing_cap',
+  'whatsapp_disabled', 'whatsapp_template_not_approved', 'invalid_phone',
 ]);
 
 // ── audience conditions on top of a preset ──────────────────────────────────
@@ -156,8 +158,11 @@ function Home({ scope, token, t, gyms, gymId, setGymId, initialTab, onNew, onOpe
       />
       {error && <Alert tone="error" className="mb-4">{error}</Alert>}
       <Segmented className="mb-4 w-fit" value={tab} onChange={setTab}
-        options={[['overview', t('comms.tab.overview')], ['campaigns', t('comms.tab.campaigns')], ['templates', t('comms.tab.templates')]]} />
-      {tab === 'templates' ? (
+        options={[['overview', t('comms.tab.overview')], ['campaigns', t('comms.tab.campaigns')], ['templates', t('comms.tab.templates')],
+          ...(scope === 'admin' ? [['whatsapp', t('comms.tab.whatsapp')] as [string, string]] : [])]} />
+      {tab === 'whatsapp' && scope === 'admin' ? (
+        <WhatsAppAdmin token={token} t={t} />
+      ) : tab === 'templates' ? (
         <TemplatesTab scope={scope} token={token} t={t} gymId={gymId} onOpen={onOpenTemplate} onNew={onNewTemplate} />
       ) : loading && !overview ? <Spinner /> : tab === 'overview' && overview ? (
         <div className="space-y-4">
@@ -260,9 +265,16 @@ function Composer({ scope, token, t, locale, gymId, campaign, templateId, onClos
   // State updates land on the next render, so a fast double-click could
   // start two saves; this ref stops the second one straight away.
   const inFlight = useRef(false);
+  // WhatsApp only carries provider-approved templates: it can be picked only
+  // when it's set up and the message started from a template approved for it.
+  const [waReady, setWaReady] = useState(false);
+  const usable = (ch: CommsChannel) => available[ch] && (ch !== 'whatsapp' || (Boolean(tplId) && waReady));
 
   function applyTemplate(tpl: CommsTemplate) {
     const next = contentFromTemplate(tpl, locale, content);
+    const ready = Boolean(tpl.whatsapp?.ready);
+    setWaReady(ready);
+    if (!ready) setChannels(cs => cs.filter(c => c !== 'whatsapp'));
     setTplId(tpl.id);
     setContent(next);
     setPurpose(tpl.purpose);
@@ -270,16 +282,30 @@ function Composer({ scope, token, t, locale, gymId, campaign, templateId, onClos
     setPicking(false);
   }
 
+  // The template list doesn't say whether a template is approved for
+  // WhatsApp; the template on its own does.
+  function pickTemplate(tpl: CommsTemplate) {
+    api.commsTemplate(token, scope, tpl.id).then(r => applyTemplate(r.template)).catch(() => applyTemplate(tpl));
+  }
+
   function clearTemplate() {
     setTplId(null);
+    setWaReady(false);
+    setChannels(cs => cs.filter(c => c !== 'whatsapp'));
     setContent(c => ({ title: '', body: '', ctaLabel: '', deepLink: 'message', locale, translations: {},
       offerName: c.offerName, discount: c.discount, amountTzs: c.amountTzs }));
     setLang(locale);
   }
 
   useEffect(() => {
-    if (!templateId) return;
-    api.commsTemplate(token, scope, templateId).then(r => applyTemplate(r.template)).catch(e => setError(errorText(t, e)));
+    if (templateId) {
+      api.commsTemplate(token, scope, templateId).then(r => applyTemplate(r.template)).catch(e => setError(errorText(t, e)));
+    } else if (campaign?.templateId) {
+      // A draft started from a template: may it still go on WhatsApp?
+      api.commsTemplate(token, scope, campaign.templateId)
+        .then(r => { const ready = Boolean(r.template.whatsapp?.ready); setWaReady(ready); if (!ready) setChannels(cs => cs.filter(c => c !== 'whatsapp')); })
+        .catch(() => setChannels(cs => cs.filter(c => c !== 'whatsapp')));
+    }
   }, [templateId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
@@ -338,7 +364,7 @@ function Composer({ scope, token, t, locale, gymId, campaign, templateId, onClos
   useEffect(() => {
     setError(null);
     if (step === 'channels') {
-      const all = CHANNELS.filter(c => available[c]);
+      const all = CHANNELS.filter(usable);
       api.commsPreviewDraft(token, scope, { ...draft, channels: all }).then(setReach).catch(() => setReach(null));
     }
     if (step === 'preview') {
@@ -529,14 +555,14 @@ function Composer({ scope, token, t, locale, gymId, campaign, templateId, onClos
               </select>
             </Field>
             <TemplatePicker open={picking} onClose={() => setPicking(false)} scope={scope} token={token} t={t}
-              gymId={gymId} purpose={purpose} onPick={applyTemplate} />
+              gymId={gymId} purpose={purpose} onPick={pickTemplate} />
           </>
         )}
 
         {step === 'channels' && (
           <div className="space-y-3">
             {CHANNELS.map(ch => {
-              const on = available[ch];
+              const on = usable(ch);
               const reached = reach?.counts.byChannel[ch]?.queued;
               return (
                 <label key={ch} className={`flex items-start gap-3 rounded-[var(--radius-lg)] border border-[var(--color-border-secondary)] p-3 ${on ? '' : 'opacity-60'}`}>
@@ -545,7 +571,7 @@ function Composer({ scope, token, t, locale, gymId, campaign, templateId, onClos
                   <span>
                     <span className="block text-sm font-medium">{t(`comms.channel.${ch}`)}</span>
                     <span className="block text-xs text-[var(--color-fg-quaternary)]">
-                      {!on ? t(ch === 'whatsapp' ? 'comms.channel.whatsappSoon' : 'comms.channel.pushOff')
+                      {!on ? t(ch !== 'whatsapp' ? 'comms.channel.pushOff' : available.whatsapp ? 'comms.channel.whatsappNeedsTemplate' : 'comms.channel.whatsappSoon')
                         : reached != null && reach ? fill(t('comms.channel.reaches'), { n: reached, total: reach.counts.targeted })
                         : t(`comms.channel.${ch}.body`)}
                     </span>

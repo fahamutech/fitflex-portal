@@ -36,6 +36,7 @@ export function errorText(t: T, err: unknown): string {
     system_template_read_only: 'comms.tpl.readOnly',
     template_archived: 'comms.tpl.isArchived',
     template_not_found: 'comms.tpl.notFound',
+    whatsapp_template_required: 'comms.channel.whatsappNeedsTemplate',
   };
   return code && known[code] ? t(known[code]) : `${t('comms.error.generic')}${code ? ` (${code})` : ''}`;
 }
