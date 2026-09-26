@@ -359,7 +359,7 @@ export function TemplateEditor({ token, t, gymId, id, onBack, onSaved }: {
       <div className="grid gap-4 lg:grid-cols-[3fr_2fr]">
         <Card className="space-y-4 p-5">
           <Field label={t('comms.tpl.name')}>
-            <Input value={name} maxLength={80} onChange={e => setName(e.target.value)} data-testid="tpl-name" />
+            <Input value={name} maxLength={60} onChange={e => setName(e.target.value)} data-testid="tpl-name" />
           </Field>
           <div className="grid gap-4 sm:grid-cols-3">
             <Field label={t('comms.tpl.group')}>
