@@ -24,6 +24,7 @@ import {
 } from './communication-templates';
 import { WhatsAppAdmin } from './communication-whatsapp';
 import { MemberTimeline, MessageLog, Recipients, StatsGrid } from './communication-history';
+import { AutomationsTab } from './communication-automations';
 
 const TRANSACTIONAL: CommsPurpose[] = ['renewal', 'payment', 'announcement'];
 const CHANNELS: CommsChannel[] = ['in_app', 'push', 'whatsapp'];
@@ -201,9 +202,12 @@ function Home({ scope, token, t, gyms, gymId, setGymId, initialTab, onNew, onOpe
       {error && <Alert tone="error" className="mb-4">{error}</Alert>}
       <Segmented className="mb-4 w-fit" value={tab} onChange={setTab}
         options={[['overview', t('comms.tab.overview')], ['campaigns', t('comms.tab.campaigns')], ['templates', t('comms.tab.templates')],
+          ...(scope === 'owner' ? [['automations', t('comms.tab.automations')] as [string, string]] : []),
           ['history', t('comms.tab.history')],
           ...(scope === 'admin' ? [['whatsapp', t('comms.tab.whatsapp')] as [string, string]] : [])]} />
-      {tab === 'history' ? (
+      {tab === 'automations' && scope === 'owner' ? (
+        <AutomationsTab token={token} t={t} gymId={gymId} />
+      ) : tab === 'history' ? (
         <MessageLog scope={scope} token={token} t={t} gymId={gymId} onOpenMember={onOpenMember} />
       ) : tab === 'whatsapp' && scope === 'admin' ? (
         <WhatsAppAdmin token={token} t={t} />
