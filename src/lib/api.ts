@@ -38,6 +38,14 @@ async function request<T>(path: string, opts: RequestInit = {}, token?: string):
   return body as T;
 }
 
+/** "?a=1&b=2" from the set values of `params`, or "". */
+function qs(params: object): string {
+  const q = new URLSearchParams();
+  for (const [k, v] of Object.entries(params)) if (v != null && v !== '') q.set(k, String(v));
+  const s = q.toString();
+  return s ? `?${s}` : '';
+}
+
 export const api = {
   firebaseSession: (idToken: string, requestedRole: 'member' | 'trainer' | 'gym_owner' | 'gym_operator' | 'admin' = 'gym_operator') =>
     request<{ token: string; user: { id: string; userType: string; gymId?: string; email?: string; portalUser?: boolean; aclPermissions?: string[] } }>(
@@ -77,15 +85,22 @@ export const api = {
     request<CommsCatalog>(`/${scope}/communications/segments`, {}, token),
   commsAudiencePreview: (token: string, scope: CommsScope, body: { gymId?: string; preset?: string | null; filter?: unknown; purpose?: string }) =>
     request<CommsAudiencePreview>(`/${scope}/communications/audience/preview`, { method: 'POST', body: JSON.stringify(body) }, token),
-  commsCampaigns: (token: string, scope: CommsScope, opts: { gymId?: string; status?: string } = {}) => {
-    const q = new URLSearchParams();
-    if (opts.gymId) q.set('gymId', opts.gymId);
-    if (opts.status) q.set('status', opts.status);
-    const qs = q.toString();
-    return request<{ campaigns: CommsCampaign[] }>(`/${scope}/communications/campaigns${qs ? `?${qs}` : ''}`, {}, token);
-  },
+  /** Campaign history. Filters: gymId, status, purpose, channel, from, to, search; cursor paging. */
+  commsCampaigns: (token: string, scope: CommsScope, opts: Record<string, string | undefined> = {}) =>
+    request<{ campaigns: CommsCampaign[]; nextCursor: string | null }>(`/${scope}/communications/campaigns${qs(opts)}`, {}, token),
   commsCampaign: (token: string, scope: CommsScope, id: string) =>
-    request<{ campaign: CommsCampaign; progress: Record<string, Record<string, number>> }>(`/${scope}/communications/campaigns/${encodeURIComponent(id)}`, {}, token),
+    request<{ campaign: CommsCampaign; progress: Record<string, Record<string, number>>; stats: CommsStats | null }>(`/${scope}/communications/campaigns/${encodeURIComponent(id)}`, {}, token),
+  // History (M8): the message log, one message, a campaign's recipients, a member's timeline, counts.
+  commsMessages: (token: string, scope: CommsScope, filters: CommsHistoryFilters = {}) =>
+    request<{ messages: CommsMessage[]; nextCursor: string | null }>(`/${scope}/communications/messages${qs(filters)}`, {}, token),
+  commsMessage: (token: string, scope: CommsScope, id: string) =>
+    request<{ message: CommsMessage }>(`/${scope}/communications/messages/${encodeURIComponent(id)}`, {}, token),
+  commsRecipients: (token: string, scope: CommsScope, campaignId: string, filters: CommsHistoryFilters = {}) =>
+    request<{ recipients: CommsRecipient[]; nextCursor: string | null }>(`/${scope}/communications/campaigns/${encodeURIComponent(campaignId)}/recipients${qs(filters)}`, {}, token),
+  commsMemberHistory: (token: string, scope: CommsScope, memberId: string, filters: CommsHistoryFilters = {}) =>
+    request<{ memberId: string; items: CommsTimelineItem[]; nextCursor: string | null }>(`/${scope}/members/${encodeURIComponent(memberId)}/communications${qs(filters)}`, {}, token),
+  commsSummary: (token: string, scope: CommsScope, filters: CommsHistoryFilters = {}) =>
+    request<CommsStats & { byDay: Array<{ day: string; messages: number }> }>(`/${scope}/communications/summary${qs(filters)}`, {}, token),
   commsPreviewDraft: (token: string, scope: CommsScope, body: CommsDraft) =>
     request<CommsPreview>(`/${scope}/communications/campaigns/preview`, { method: 'POST', body: JSON.stringify(body) }, token),
   commsCreate: (token: string, scope: CommsScope, body: CommsDraft) =>
@@ -1078,6 +1093,42 @@ export interface CommsCampaign {
   category: 'transactional' | 'marketing'; status: CommsStatus; audience?: CommsAudience; content?: CommsContent;
   channels: CommsChannel[]; scheduledAt: string | null; sentAt: string | null; createdAt: string;
   counts: CommsCounts | null; title?: string | null; preset?: string | null; templateId?: string | null;
+  /** History: who created it and its delivery numbers from the ledger. */
+  createdByName?: string | null; stats?: CommsStats | null;
+  template?: { id: string; key: string; name: string; system: boolean } | null;
+}
+export type CommsMessageStatus = 'queued' | 'sending' | 'sent' | 'delivered' | 'read' | 'clicked' | 'failed' | 'skipped';
+export interface CommsTotals { pending: number; sent: number; delivered: number; opened: number; clicked: number; failed: number; skipped: number }
+export interface CommsStats {
+  targeted?: number; messages: number;
+  byChannel: Partial<Record<CommsChannel, Partial<Record<CommsMessageStatus | 'opened', number>>>>;
+  totals: CommsTotals;
+}
+export interface CommsMessage {
+  id: string; campaignId: string | null; automationRunId: string | null; campaignName: string | null;
+  senderType: 'gym' | 'platform'; gymId: string | null; memberId: string; memberName: string | null;
+  channel: CommsChannel; category: 'transactional' | 'marketing'; messageType: CommsPurpose;
+  title: string; body: string; locale: string | null; deepLink: string | null;
+  status: CommsMessageStatus; skipReason: string | null; failureReason: string | null; failurePermanent: boolean; attempts: number;
+  /** Who delivered it and their reference — never credentials. */
+  provider: { name: 'inbox' | 'fcm' | 'whatsapp'; messageId: string | null; templateName?: string | null; language?: string | null; devices?: number | null; failedDevices?: number; errors?: string[]; parameters?: string[] };
+  createdAt: string | null; sentAt: string | null; deliveredAt: string | null; openedAt: string | null;
+  clickedAt: string | null; failedAt: string | null; nextAttemptAt: string | null;
+  /** Only on a single message. */
+  notificationId?: string | null;
+  campaign?: { id: string; name: string; purpose: CommsPurpose; status: CommsStatus } | null;
+  template?: { id: string; key: string | null; name: string | null; system: boolean } | null;
+}
+export type CommsOutcome = 'reached' | 'pending' | 'failed' | 'skipped';
+export interface CommsTimelineItem {
+  key: string; campaignId: string | null; automationRunId: string | null; campaignName: string | null;
+  memberId: string; memberName: string | null; category: string; messageType: CommsPurpose;
+  title: string; body: string; locale: string | null; createdAt: string | null; outcome: CommsOutcome; channels: CommsMessage[];
+}
+export interface CommsRecipient { memberId: string; memberName: string | null; outcome: CommsOutcome; channels: CommsMessage[] }
+export interface CommsHistoryFilters {
+  memberId?: string; campaignId?: string; channel?: string; category?: string; messageType?: string;
+  status?: string; from?: string; to?: string; search?: string; gymId?: string; cursor?: string; limit?: number;
 }
 export interface CommsOverview {
   senderType: 'gym' | 'platform'; members: number | null; campaigns: Partial<Record<CommsStatus, number>>;
