@@ -220,7 +220,8 @@ export const api = {
     return request<AnalyticsOverview>(`/admin/analytics?${qs}`, {}, token);
   },
   /** Full gym record (with `images`/`thumbnails`) — fetch on demand for the detail/edit views. */
-  getGym: (id: string) => request<Gym>(`/gyms/${id}`),
+  /** Pass the admin token to include trainer-pass pricing (hidden from anonymous callers). */
+  getGym: (id: string, token?: string) => request<Gym>(`/gyms/${id}`, {}, token),
   saveGym: (token: string, gym: Partial<Gym>) =>
     request<Gym>('/admin/gyms', { method: 'POST', body: JSON.stringify(gym) }, token),
   deleteGym: (token: string, id: string) =>
@@ -483,6 +484,28 @@ export interface Gym {
   verified?: boolean;
   homepageVisible?: boolean;
   homepagePriority?: number;
+  /** Trainer passes the owner sells — only trainers (and admins) see them. */
+  trainerPass?: TrainerPassConfig;
+}
+
+export type TrainerPassPeriod = 'daily' | 'weekly' | 'monthly';
+
+/**
+ * Gym trainer passes: any of daily/weekly/monthly, each with its own fee in
+ * TZS. `feeTzs`/`period` mirror the first option for older app builds.
+ */
+export interface TrainerPassConfig {
+  enabled: boolean;
+  options?: Partial<Record<TrainerPassPeriod, number>>;
+  feeTzs?: number;
+  period?: TrainerPassPeriod;
+}
+
+/** Trainer social profiles, stored as bare handles. */
+export interface TrainerSocialLinks {
+  instagram?: string;
+  facebook?: string;
+  twitter?: string;
 }
 
 export interface GymVisitRecord {
@@ -613,10 +636,21 @@ export interface PaymentRequest {
   provider: string;
   reference: string | null;
   note?: string | null;
+  /** The gym a gym-bound request pays for (trainer pass / gym plan). */
+  gymId?: string | null;
+  gym?: { id: string; name: string } | null;
   requestedAt: string;
   decidedAt: string | null;
   member?: { email?: string | null; phone?: string | null; displayName?: string | null };
-  subscription?: { tier?: string | null; status: string; renewsAt?: string } | null;
+  subscription?: {
+    tier?: string | null;
+    /** 'platform_pass' | 'direct_sub' | 'trainer_pass' | … */
+    type?: string | null;
+    plan?: string | null;
+    status: string;
+    renewsAt?: string;
+    expiresAt?: string | null;
+  } | null;
 }
 
 export interface MemberProfile {
@@ -691,6 +725,7 @@ export interface TrainerProfile {
   homepageVisible?: boolean;
   homepagePriority?: number;
   availability?: Array<{ day?: string; date?: string; gymId?: string; gymName?: string; slots: string[] }>;
+  socialLinks?: TrainerSocialLinks;
 }
 
 export interface ShopProduct {
