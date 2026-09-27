@@ -31,6 +31,7 @@ import {
   Flag,
   Building,
   Megaphone,
+  Star,
 } from 'lucide-react';
 import { useApp } from '../../app/providers';
 import { cn } from '@/lib/cn';
@@ -63,6 +64,8 @@ const OPERATOR_NAV: NavItem[] = [
   { href: '/owner/manage', labelKey: 'nav.manageGym', icon: BriefcaseBusiness },
   // Owners always; gym staff only with the communications permission.
   { href: '/owner/communications', labelKey: 'nav.communications', icon: Megaphone, aclScope: 'communications' },
+  // Owners always; gym staff only with the gyms permission (read-only).
+  { href: '/owner/reviews', labelKey: 'nav.reviews', icon: Star, aclScope: 'gyms' },
 ];
 
 const ADMIN_NAV: NavItem[] = [
@@ -74,6 +77,7 @@ const ADMIN_NAV: NavItem[] = [
   { href: '/admin/challenges',    labelKey: 'admin.nav.challenges',     icon: Trophy,          groupKey: 'nav.group.platform', aclScope: 'challenges' },
   { href: '/admin/rewards',       labelKey: 'admin.nav.rewards',        icon: Gift,            groupKey: 'nav.group.platform', aclScope: 'rewards' },
   { href: '/admin/social',        labelKey: 'admin.nav.social',         icon: Flag,            groupKey: 'nav.group.platform', aclScope: 'social' },
+  { href: '/admin/reviews',       labelKey: 'admin.nav.reviews',        icon: Star,            groupKey: 'nav.group.platform', aclScope: 'social' },
   { href: '/admin/communications', labelKey: 'admin.nav.communications', icon: Megaphone,     groupKey: 'nav.group.platform', aclScope: 'communications' },
   { href: '/admin/corporate',     labelKey: 'admin.nav.corporate',      icon: Building,        groupKey: 'nav.group.platform', aclScope: 'corporate' },
   { href: '/admin/trainers',      labelKey: 'admin.nav.trainers',       icon: Dumbbell,        groupKey: 'nav.group.platform', aclScope: 'trainers' },

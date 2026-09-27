@@ -235,6 +235,16 @@ export const api = {
     request<{ reports: SocialReport[] }>(`/admin/social/reports?${new URLSearchParams({ status })}`, {}, token),
   resolveSocialReport: (token: string, id: string, action: 'remove' | 'dismiss') =>
     request<{ resolved: boolean }>(`/admin/social/reports/${encodeURIComponent(id)}/resolve`, { method: 'POST', body: JSON.stringify({ action }) }, token),
+  // ─── Gym and trainer reviews ───
+  /** Admin: every review of one kind, newest first (max 200), optionally one status. */
+  adminReviews: (token: string, kind: ReviewKind, status?: ReviewStatus) =>
+    request<AdminReview[]>(`/admin/${kind}-reviews${qs({ status })}`, {}, token),
+  moderateReview: (token: string, kind: ReviewKind, id: string, action: ReviewAction) =>
+    request<{ ok: boolean; reviewId: string; status: ReviewStatus }>(
+      `/admin/${kind}-reviews/${encodeURIComponent(id)}/moderate`, { method: 'POST', body: JSON.stringify({ action }) }, token),
+  /** Owner / gym staff: published reviews for one of their gyms. */
+  ownerGymReviews: (token: string, gymId: string) =>
+    request<{ gymId: string; summary: ReviewSummary; reviews: PublicReview[] }>(`/operator/gym-reviews${qs({ gymId })}`, {}, token),
   /** HR: the company's staff (for eligibility by department or person). */
   corporateStaff: (token: string) =>
     request<{ employees: CorporateEmployee[] }>('/corporate/staff', {}, token),
@@ -941,6 +951,39 @@ export interface SocialGroup {
 export interface GroupInput { name: string; description?: string; joinPolicy: 'open' | 'approval'; discoverable: boolean }
 export interface GroupMember { id: string; displayName: string | null; role: 'admin' | 'member'; status: 'active' | 'pending' }
 export type GroupMemberAction = 'approve' | 'remove' | 'make_admin' | 'make_member';
+export type ReviewKind = 'gym' | 'trainer';
+export type ReviewStatus = 'published' | 'flagged' | 'hidden';
+export type ReviewAction = 'hide' | 'flag' | 'restore';
+/** A review as admins see it: full member name and moderation state. */
+export interface AdminReview {
+  id: string;
+  gymId?: string;
+  trainerId?: string;
+  gymName?: string | null;
+  trainerName?: string | null;
+  memberId: string;
+  memberName: string | null;
+  rating: number;
+  text: string | null;
+  status: ReviewStatus;
+  moderatedBy?: string | null;
+  moderatedAt?: string | null;
+  createdAt: string;
+}
+/** A published review as the public sees it: first name + initial only. */
+export interface PublicReview {
+  id: string;
+  rating: number;
+  text: string | null;
+  memberName: string;
+  memberPhotoUrl: string | null;
+  createdAt: string;
+}
+export interface ReviewSummary {
+  averageRating: number | null;
+  reviewCount: number;
+  distribution: Record<string, number>;
+}
 export type SocialReportStatus = 'open' | 'actioned' | 'dismissed';
 export interface SocialReport {
   id: string;
