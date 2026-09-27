@@ -124,6 +124,19 @@ export const api = {
     request<{ template: CommsTemplate }>(`/owner/communications/templates/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(body) }, token),
   commsTemplateDuplicate: (token: string, id: string, opts: { gymId?: string; name?: string } = {}) =>
     request<{ template: CommsTemplate }>(`/owner/communications/templates/${encodeURIComponent(id)}/duplicate`, { method: 'POST', body: JSON.stringify(opts) }, token),
+  // WhatsApp (FitFlex admins): provider status, kill switch, approved-template registry, test send.
+  waStatus: (token: string) => request<WhatsAppStatus>('/admin/communications/whatsapp', {}, token),
+  waSetEnabled: (token: string, enabled: boolean) =>
+    request<WhatsAppStatus>('/admin/communications/whatsapp', { method: 'PUT', body: JSON.stringify({ enabled }) }, token),
+  waRegistry: (token: string) => request<WhatsAppRegistry>('/admin/communications/whatsapp/templates', {}, token),
+  waRegister: (token: string, body: { providerTemplateName: string; language: CommsLocale; category: WhatsAppCategory; variables: string[]; approvalStatus?: WhatsAppApproval }) =>
+    request<{ template: WhatsAppRegistryRow }>('/admin/communications/whatsapp/templates', { method: 'POST', body: JSON.stringify(body) }, token),
+  waUpdate: (token: string, id: string, body: { approvalStatus?: WhatsAppApproval; variables?: string[]; category?: WhatsAppCategory }) =>
+    request<{ template: WhatsAppRegistryRow }>(`/admin/communications/whatsapp/templates/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(body) }, token),
+  waSync: (token: string) =>
+    request<WhatsAppRegistry & { synced: number }>('/admin/communications/whatsapp/templates/sync', { method: 'POST' }, token),
+  waTest: (token: string, body: { phone: string; templateName: string; language: CommsLocale; parameters: string[] }) =>
+    request<{ ok: boolean; providerMessageId: string }>('/admin/communications/whatsapp/test', { method: 'POST', body: JSON.stringify(body) }, token),
   commsTemplateArchive: (token: string, id: string) =>
     request<{ ok: boolean }>(`/owner/communications/templates/${encodeURIComponent(id)}/archive`, { method: 'POST' }, token),
 
@@ -1014,11 +1027,33 @@ export interface CommsTemplate {
   group: CommsTemplateGroup; purpose: CommsPurpose; category: string; deepLink: CommsDeepLink;
   bodies: Partial<Record<CommsLocale, CommsText>>; variables: string[]; status: string;
   basedOn: string | null; updatedAt: string | null;
+  /** Only on a single template (GET …/templates/:id): whether it's approved for WhatsApp. */
+  whatsapp?: { ready: boolean; byLocale: Partial<Record<CommsLocale, { ready: boolean; reason?: string }>> };
 }
 export interface CommsTemplateDraft {
   gymId?: string; name: string; purpose: CommsPurpose; group?: CommsTemplateGroup; deepLink?: CommsDeepLink;
   bodies: Partial<Record<CommsLocale, CommsText>>;
 }
+export type WhatsAppApproval = 'pending' | 'approved' | 'rejected' | 'paused';
+export type WhatsAppCategory = 'utility' | 'marketing' | 'authentication';
+export interface WhatsAppStatus {
+  /** Never includes credentials — only which environment variables are missing. */
+  provider: { name: string; configured: boolean; setup?: { reason: string; wanted: string | null; missing: string[] } };
+  enabled: boolean; available: boolean;
+  webhook: { path: string; secretSet: boolean };
+  members: { withPhone: number; marketingOptedIn: number; optedOut: number };
+  templates: Record<WhatsAppApproval, number>;
+  last7Days: Record<string, number>;
+}
+export interface WhatsAppRegistryRow {
+  id: string; provider: string; providerTemplateName: string; language: CommsLocale; category: WhatsAppCategory;
+  variables: string[]; approvalStatus: WhatsAppApproval; lastSyncedAt: string | null; updatedAt: string | null;
+}
+export interface WhatsAppExpected {
+  templateKey: string; providerTemplateName: string; language: CommsLocale; category: WhatsAppCategory;
+  variables: string[]; body: string; registered: { id: string; approvalStatus: WhatsAppApproval } | null;
+}
+export interface WhatsAppRegistry { provider: string; templates: WhatsAppRegistryRow[]; expected: WhatsAppExpected[] }
 export interface CommsTemplateValues { offerName?: string; discount?: string; amountTzs?: number }
 export interface CommsTemplatePreview {
   senderName: string; sampleMember: string;
