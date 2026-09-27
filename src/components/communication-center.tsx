@@ -9,7 +9,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Megaphone, Plus, RefreshCw, ArrowLeft, FileText } from 'lucide-react';
 import { useApp } from '../../app/providers';
 import {
-  api, ApiError, CommsCampaign, CommsChannel, CommsContent, CommsDeepLink, CommsDraft, CommsLocale, CommsOverview,
+  api, ApiError, CommsCampaign, CommsChannel, CommsContent, CommsDeepLink, CommsDraft, CommsLocale, CommsOverview, CommsStats,
   CommsPreview, CommsPurpose, CommsScope, CommsStatus, CommsTemplate, CommsText, Gym,
 } from '@/lib/api';
 import type { MessageKey } from '@/lib/i18n';
@@ -23,6 +23,7 @@ import {
   BilingualText, TemplateDetail, TemplateEditor, TemplatePicker, TemplatesTab, contentFromTemplate,
 } from './communication-templates';
 import { WhatsAppAdmin } from './communication-whatsapp';
+import { MemberTimeline, MessageLog, Recipients, StatsGrid } from './communication-history';
 
 const TRANSACTIONAL: CommsPurpose[] = ['renewal', 'payment', 'announcement'];
 const CHANNELS: CommsChannel[] = ['in_app', 'push', 'whatsapp'];
@@ -63,7 +64,8 @@ type View =
   | { kind: 'compose'; campaign?: CommsCampaign; templateId?: string }
   | { kind: 'detail'; id: string }
   | { kind: 'template'; id: string }
-  | { kind: 'templateEdit'; id?: string };
+  | { kind: 'templateEdit'; id?: string }
+  | { kind: 'member'; memberId: string; name: string | null; back: View };
 
 export function CommunicationCenter({ scope }: { scope: CommsScope }) {
   const { token, t: translate, locale } = useApp();
@@ -103,40 +105,59 @@ export function CommunicationCenter({ scope }: { scope: CommsScope }) {
     return <TemplateEditor key={view.id ?? 'new'} token={token} t={t} gymId={gymId} id={view.id}
       onBack={view.id ? () => openTemplate(view.id!) : templates} onSaved={openTemplate} />;
   }
+  // A member's messages, opened from the History tab or a campaign's recipients.
+  const openMember = (memberId: string, name: string | null) => setView({ kind: 'member', memberId, name, back: view });
+  if (view.kind === 'member') {
+    return <MemberTimeline scope={scope} token={token} t={t} memberId={view.memberId} memberName={view.name}
+      gymId={gymId} onBack={() => setView(view.back)} />;
+  }
   if (view.kind === 'detail') {
     return <Detail scope={scope} token={token} t={t} id={view.id} onBack={home}
-      onEdit={c => setView({ kind: 'compose', campaign: c })} />;
+      onEdit={c => setView({ kind: 'compose', campaign: c })} onOpenMember={openMember} />;
   }
   return <Home scope={scope} token={token} t={t} gyms={gyms} gymId={gymId} setGymId={setGymId}
     initialTab={view.kind === 'home' ? view.tab : undefined}
+    onOpenMember={(memberId, name) => setView({ kind: 'member', memberId, name, back: { kind: 'home', tab: 'history' } })}
     onNew={() => setView({ kind: 'compose' })} onOpen={id => setView({ kind: 'detail', id })}
     onOpenTemplate={openTemplate}
     onNewTemplate={scope === 'owner' ? () => setView({ kind: 'templateEdit' }) : undefined} />;
 }
 
 // ── home: overview + campaigns ─────────────────────────────────────────────
-function Home({ scope, token, t, gyms, gymId, setGymId, initialTab, onNew, onOpen, onOpenTemplate, onNewTemplate }: {
+function Home({ scope, token, t, gyms, gymId, setGymId, initialTab, onNew, onOpen, onOpenTemplate, onNewTemplate, onOpenMember }: {
   scope: CommsScope; token: string; t: T; gyms: Gym[]; gymId?: string; setGymId: (id: string) => void;
   initialTab?: string; onNew: () => void; onOpen: (id: string) => void;
   onOpenTemplate: (id: string) => void; onNewTemplate?: () => void;
+  onOpenMember: (memberId: string, name: string | null) => void;
 }) {
   const [tab, setTab] = useState(initialTab ?? 'overview');
   const [overview, setOverview] = useState<CommsOverview | null>(null);
   const [campaigns, setCampaigns] = useState<CommsCampaign[]>([]);
+  const [cursor, setCursor] = useState<string | null>(null);
   const [status, setStatus] = useState<CommsStatus | ''>('');
+  // Campaign history filters beyond status.
+  const [cf, setCf] = useState<{ purpose?: string; channel?: string; search?: string; from?: string; to?: string }>({});
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
+  const listQuery = useCallback((more?: string | null) => ({ gymId, status: status || undefined, ...cf, ...(more ? { cursor: more } : {}) }), [gymId, status, cf]);
   const load = useCallback(async () => {
     setLoading(true);
     try {
       const [o, list] = await Promise.all([
         api.commsOverview(token, scope, gymId),
-        api.commsCampaigns(token, scope, { gymId, status: status || undefined }),
+        api.commsCampaigns(token, scope, listQuery()),
       ]);
-      setOverview(o); setCampaigns(list.campaigns); setError(null);
+      setOverview(o); setCampaigns(list.campaigns); setCursor(list.nextCursor ?? null); setError(null);
     } catch (e) { setError(errorText(t, e)); } finally { setLoading(false); }
-  }, [token, scope, gymId, status, t]);
+  }, [token, scope, gymId, listQuery, t]);
+  async function loadMore() {
+    if (!cursor) return;
+    try {
+      const list = await api.commsCampaigns(token, scope, listQuery(cursor));
+      setCampaigns(cs => [...cs, ...list.campaigns]); setCursor(list.nextCursor ?? null);
+    } catch (e) { setError(errorText(t, e)); }
+  }
 
   useEffect(() => { load(); }, [load]);
 
@@ -159,8 +180,11 @@ function Home({ scope, token, t, gyms, gymId, setGymId, initialTab, onNew, onOpe
       {error && <Alert tone="error" className="mb-4">{error}</Alert>}
       <Segmented className="mb-4 w-fit" value={tab} onChange={setTab}
         options={[['overview', t('comms.tab.overview')], ['campaigns', t('comms.tab.campaigns')], ['templates', t('comms.tab.templates')],
+          ['history', t('comms.tab.history')],
           ...(scope === 'admin' ? [['whatsapp', t('comms.tab.whatsapp')] as [string, string]] : [])]} />
-      {tab === 'whatsapp' && scope === 'admin' ? (
+      {tab === 'history' ? (
+        <MessageLog scope={scope} token={token} t={t} gymId={gymId} onOpenMember={onOpenMember} />
+      ) : tab === 'whatsapp' && scope === 'admin' ? (
         <WhatsAppAdmin token={token} t={t} />
       ) : tab === 'templates' ? (
         <TemplatesTab scope={scope} token={token} t={t} gymId={gymId} onOpen={onOpenTemplate} onNew={onNewTemplate} />
@@ -197,7 +221,26 @@ function Home({ scope, token, t, gyms, gymId, setGymId, initialTab, onNew, onOpe
               </Button>
             ))}
           </div>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5" data-testid="campaign-filters">
+            <Input placeholder={t('comms.history.searchCampaign')} defaultValue={cf.search ?? ''} data-testid="cf-search"
+              onKeyDown={e => { if (e.key === 'Enter') setCf(f => ({ ...f, search: (e.target as HTMLInputElement).value.trim() || undefined })); }} />
+            <select className="ui-input" value={cf.purpose ?? ''} onChange={e => setCf(f => ({ ...f, purpose: e.target.value || undefined }))} data-testid="cf-purpose" aria-label={t('comms.history.kind')}>
+              <option value="">{t('comms.filter.allTypes')}</option>
+              {PURPOSES.map(p => <option key={p} value={p}>{t(`comms.purpose.${p}`)}</option>)}
+            </select>
+            <select className="ui-input" value={cf.channel ?? ''} onChange={e => setCf(f => ({ ...f, channel: e.target.value || undefined }))} data-testid="cf-channel" aria-label={t('comms.history.channel')}>
+              <option value="">{t('comms.filter.allChannels')}</option>
+              {CHANNELS.map(c => <option key={c} value={c}>{t(`comms.channel.${c}`)}</option>)}
+            </select>
+            <Input type="date" value={cf.from ?? ''} aria-label={t('comms.history.from')} onChange={e => setCf(f => ({ ...f, from: e.target.value || undefined }))} data-testid="cf-from" />
+            <Input type="date" value={cf.to ?? ''} aria-label={t('comms.history.to')} onChange={e => setCf(f => ({ ...f, to: e.target.value || undefined }))} data-testid="cf-to" />
+          </div>
           <CampaignList t={t} campaigns={campaigns} onOpen={onOpen} />
+          {cursor && (
+            <div className="flex justify-center">
+              <Button variant="secondary" onClick={loadMore} data-testid="campaigns-more">{t('comms.history.loadMore')}</Button>
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -217,8 +260,15 @@ function CampaignList({ t, campaigns, onOpen }: { t: T; campaigns: CommsCampaign
             <p className="text-xs text-[var(--color-fg-quaternary)]">
               {[t(`comms.purpose.${c.purpose}`),
                 c.status === 'scheduled' ? fill(t('comms.scheduledFor'), { when: when(c.scheduledAt) }) : when(c.createdAt),
-                c.counts ? fill(t('comms.membersCount'), { n: c.counts.targeted }) : null].filter(Boolean).join(' · ')}
+                c.counts ? fill(t('comms.membersCount'), { n: c.stats?.targeted ?? c.counts.targeted }) : null].filter(Boolean).join(' · ')}
             </p>
+            {c.stats && c.stats.totals.sent + c.stats.totals.failed > 0 && (
+              <p className="text-xs text-[var(--color-fg-tertiary)]" data-testid={`campaign-stats-${c.id}`}>
+                {[fill(t('comms.history.sentN'), { n: c.stats.totals.sent }), fill(t('comms.history.openedN'), { n: c.stats.totals.opened }),
+                  c.stats.totals.failed ? fill(t('comms.history.failedN'), { n: c.stats.totals.failed }) : null].filter(Boolean).join(' · ')}
+                {c.createdByName ? ` · ${fill(t('comms.history.createdBy'), { name: c.createdByName })}` : ''}
+              </p>
+            )}
           </div>
           <Badge tone={STATUS_TONE[c.status]} dot={c.status === 'sending'}>{t(`comms.status.${c.status}`)}</Badge>
         </button>
@@ -683,10 +733,11 @@ function Summary({ label, value }: { label: string; value: string }) {
 }
 
 // ── detail ──────────────────────────────────────────────────────────────────
-function Detail({ scope, token, t, id, onBack, onEdit }: {
+function Detail({ scope, token, t, id, onBack, onEdit, onOpenMember }: {
   scope: CommsScope; token: string; t: T; id: string; onBack: () => void; onEdit: (c: CommsCampaign) => void;
+  onOpenMember: (memberId: string, name: string | null) => void;
 }) {
-  const [data, setData] = useState<{ campaign: CommsCampaign; progress: Record<string, Record<string, number>> } | null>(null);
+  const [data, setData] = useState<{ campaign: CommsCampaign; progress: Record<string, Record<string, number>>; stats: CommsStats | null } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [confirm, setConfirm] = useState<'delete' | 'cancel' | null>(null);
@@ -709,10 +760,18 @@ function Detail({ scope, token, t, id, onBack, onEdit }: {
     <div data-testid="comms-detail">
       <PageHeader title={c.content?.title || t('comms.untitled')} description={[t(`comms.purpose.${c.purpose}`), c.status === 'scheduled' ? fill(t('comms.scheduledFor'), { when: when(c.scheduledAt) }) : when(c.createdAt)].join(' · ')} actions={back} />
       {error && <Alert tone="error" className="mb-4">{error}</Alert>}
-      <div className="mb-4 flex items-center gap-2">
+      <div className="mb-4 flex flex-wrap items-center gap-2">
         <Badge tone={STATUS_TONE[c.status]} dot={c.status === 'sending'}>{t(`comms.status.${c.status}`)}</Badge>
         {c.status === 'sending' && <span className="text-sm text-[var(--color-fg-quaternary)]">{t('comms.detail.sending')}</span>}
+        {(c.createdByName || c.template) && (
+          <span className="text-xs text-[var(--color-fg-quaternary)]" data-testid="detail-origin">
+            {[c.createdByName ? fill(t('comms.history.createdBy'), { name: c.createdByName }) : null,
+              c.template ? fill(t('comms.history.fromTemplate'), { name: (c.template.system && t(`comms.tpl.${c.template.key}`)) || c.template.name }) : null,
+              c.sentAt ? `${t('comms.history.at.sent')} ${when(c.sentAt)}` : null].filter(Boolean).join(' · ')}
+          </span>
+        )}
       </div>
+      {delivered && data.stats && <Card className="mb-4 p-4"><StatsGrid t={t} stats={data.stats} /></Card>}
       <div className="grid gap-4 lg:grid-cols-2">
         <Card className="p-4 space-y-2">
           <p className="text-sm font-semibold">{t('comms.detail.audience')}</p>
@@ -748,6 +807,12 @@ function Detail({ scope, token, t, id, onBack, onEdit }: {
             </div>
           )}
         </Card>
+      )}
+      {delivered && (
+        <div className="mt-4">
+          <p className="mb-2 text-sm font-semibold">{t('comms.history.recipientsTitle')}</p>
+          <Recipients scope={scope} token={token} t={t} campaignId={c.id} onOpenMember={onOpenMember} />
+        </div>
       )}
       <div className="mt-4 flex flex-wrap gap-2">
         {c.status === 'draft' && <>
