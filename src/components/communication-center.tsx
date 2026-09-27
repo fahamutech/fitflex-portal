@@ -10,7 +10,7 @@ import { Megaphone, Plus, RefreshCw, ArrowLeft, FileText } from 'lucide-react';
 import { useApp } from '../../app/providers';
 import {
   api, ApiError, CommsCampaign, CommsChannel, CommsContent, CommsDeepLink, CommsDraft, CommsLocale, CommsOverview, CommsStats,
-  CommsPreview, CommsPurpose, CommsScope, CommsStatus, CommsTemplate, CommsText, Gym,
+  CommsPreview, CommsPurpose, CommsRecipients, CommsScope, CommsStatus, CommsTemplate, CommsText, Gym,
 } from '@/lib/api';
 import type { MessageKey } from '@/lib/i18n';
 import { Alert, Badge, Button, Card, EmptyState, Field, Input, MetricCard, PageHeader, Segmented, Spinner } from './shared';
@@ -56,6 +56,27 @@ function refineToFilter(r: Refine) {
   if (r.age) all.push(r.age[1] == null ? { field: 'age', op: 'gte', value: r.age[0] } : { field: 'age', op: 'between', value: r.age });
   if (r.area?.trim()) all.push({ field: 'area', op: 'contains', value: r.area.trim() });
   return all.length ? { all } : undefined;
+}
+
+// ── FitFlex → trainers: conditions on top of a trainer preset ───────────────
+type TrainerRefine = { pass?: 'active' | 'pending' | 'none'; verifiedOnly?: boolean };
+
+function trainerRefineToFilter(r: TrainerRefine) {
+  const all: unknown[] = [];
+  if (r.pass) all.push({ field: 'trainerPass', op: 'eq', value: r.pass });
+  if (r.verifiedOnly) all.push({ field: 'trainerVerified', op: 'eq', value: 'yes' });
+  return all.length ? { all } : undefined;
+}
+
+/** Label keys for an audience's preset and "N match", by recipients. */
+function audienceKeys(recipients: CommsRecipients | undefined, preset: string, n: number) {
+  const trainers = recipients === 'trainers';
+  return {
+    preset: trainers ? `comms.trainerPreset.${preset}` : `comms.preset.${preset}`,
+    match: trainers
+      ? (n === 1 ? 'comms.audience.matchOneTrainer' : 'comms.audience.matchTrainers')
+      : (n === 1 ? 'comms.audience.matchOne' : 'comms.audience.match'),
+  };
 }
 
 // ── entry ───────────────────────────────────────────────────────────────────
@@ -192,6 +213,7 @@ function Home({ scope, token, t, gyms, gymId, setGymId, initialTab, onNew, onOpe
         <div className="space-y-4">
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             <MetricCard label={t('comms.overview.members')} value={overview.members ?? '–'} />
+            {overview.trainers !== undefined && <MetricCard label={t('comms.overview.trainers')} value={overview.trainers ?? '–'} />}
             <MetricCard label={t('comms.overview.sent')} value={sent} />
             <MetricCard label={t('comms.overview.scheduled')} value={overview.campaigns.scheduled ?? 0} />
             <MetricCard label={t('comms.overview.drafts')} value={overview.campaigns.draft ?? 0} />
@@ -287,7 +309,10 @@ function Composer({ scope, token, t, locale, gymId, campaign, templateId, onClos
   const [step, setStep] = useState<Step>('purpose');
   const [purpose, setPurpose] = useState<CommsPurpose | undefined>(campaign?.purpose);
   const [preset, setPreset] = useState<string>(campaign?.audience?.preset ?? 'active');
+  // FitFlex only: members (default) or trainers.
+  const [recipients, setRecipients] = useState<CommsRecipients>(campaign?.audience?.recipients ?? 'members');
   const [refine, setRefine] = useState<Refine>(EMPTY_REFINE);
+  const [trainerRefine, setTrainerRefine] = useState<TrainerRefine>({});
   // A saved filter this form didn't build is kept untouched until cleared.
   const [savedFilter, setSavedFilter] = useState<unknown>(campaign?.audience?.filter);
   const [content, setContent] = useState<CommsContent>(campaign?.content
@@ -359,11 +384,22 @@ function Composer({ scope, token, t, locale, gymId, campaign, templateId, onClos
   }, [templateId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
-    api.commsSegments(token, scope).then(c => setPresets(c.presets.map(p => p.key))).catch(() => setPresets([]));
     api.commsOverview(token, scope, gymId).then(o => setAvailable(o.channels)).catch(() => undefined);
   }, [token, scope, gymId]);
 
-  const filter = savedFilter ?? refineToFilter(refine);
+  useEffect(() => {
+    api.commsSegments(token, scope, recipients).then(c => setPresets(c.presets.map(p => p.key))).catch(() => setPresets([]));
+  }, [token, scope, recipients]);
+
+  function chooseRecipients(next: CommsRecipients) {
+    if (next === recipients) return;
+    setRecipients(next);
+    setPreset(next === 'trainers' ? 'all' : 'active');
+    setSavedFilter(undefined);
+    setCount(null);
+  }
+
+  const filter = savedFilter ?? (recipients === 'trainers' ? trainerRefineToFilter(trainerRefine) : refineToFilter(refine));
   const main: CommsLocale = content.locale ?? 'en';
   const texts: Partial<Record<CommsLocale, CommsText>> = {
     ...content.translations,
@@ -378,7 +414,7 @@ function Composer({ scope, token, t, locale, gymId, campaign, templateId, onClos
       ...(scope === 'owner' && gymId ? { gymId } : {}),
       name: content.title.trim().slice(0, 80) || undefined,
       purpose,
-      audience: { preset, ...(filter ? { filter } : {}) },
+      audience: { preset, ...(filter ? { filter } : {}), ...(recipients === 'trainers' ? { recipients } : {}) },
       content: {
         ...content,
         ctaLabel: content.ctaLabel?.trim() || undefined,
@@ -389,7 +425,7 @@ function Composer({ scope, token, t, locale, gymId, campaign, templateId, onClos
       channels,
       templateId: tplId,
     };
-  }, [scope, gymId, content, main, purpose, preset, filter, channels, tplId]);
+  }, [scope, gymId, content, main, purpose, preset, filter, recipients, channels, tplId]);
 
   function setText(l: CommsLocale, x: CommsText) {
     setContent(c => l === (c.locale ?? 'en')
@@ -404,12 +440,16 @@ function Composer({ scope, token, t, locale, gymId, campaign, templateId, onClos
   useEffect(() => {
     if (step !== 'audience') return;
     const timer = setTimeout(() => {
-      api.commsAudiencePreview(token, scope, { gymId: scope === 'owner' ? gymId : undefined, preset, filter, purpose })
+      api.commsAudiencePreview(token, scope, {
+        gymId: scope === 'owner' ? gymId : undefined,
+        ...(recipients === 'trainers' ? { recipients } : {}),
+        preset, filter, purpose,
+      })
         .then(r => setCount({ n: r.count, names: r.sample.map(s => s.displayName || '').filter(Boolean) }))
         .catch(e => setError(errorText(t, e)));
     }, 400);
     return () => clearTimeout(timer);
-  }, [step, token, scope, gymId, preset, JSON.stringify(filter), purpose]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [step, token, scope, gymId, recipients, preset, JSON.stringify(filter), purpose]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     setError(null);
@@ -509,19 +549,47 @@ function Composer({ scope, token, t, locale, gymId, campaign, templateId, onClos
 
         {step === 'audience' && (
           <>
+            {scope === 'admin' && (
+              <Field label={t('comms.audience.sendTo')}>
+                <div className="flex flex-wrap gap-2">
+                  {(['members', 'trainers'] as const).map(r => (
+                    <Button key={r} size="sm" variant={chip(recipients === r)} onClick={() => chooseRecipients(r)} data-testid={`recipients-${r}`}>
+                      {t(`comms.recipients.${r}`)}
+                    </Button>
+                  ))}
+                </div>
+              </Field>
+            )}
             <div data-testid="audience-count"><Alert tone="info">
-              {count == null ? '…' : count.n === 0 ? t('comms.audience.none')
-                : fill(t(count.n === 1 ? 'comms.audience.matchOne' : 'comms.audience.match'), { n: count.n })}
+              {count == null ? '…' : count.n === 0 ? t(recipients === 'trainers' ? 'comms.audience.noneTrainers' : 'comms.audience.none')
+                : fill(t(audienceKeys(recipients, preset, count.n).match), { n: count.n })}
               {count && count.names.length > 0 && <span className="block text-xs font-normal">{fill(t('comms.audience.forExample'), { names: count.names.slice(0, 3).join(', ') })}</span>}
             </Alert></div>
-            <Field label={t('comms.audience.who')} hint={presets.includes(preset) ? t(scope === 'admin' && preset === 'all' ? 'comms.admin.all.body' : `comms.preset.${preset}.body`) : undefined}>
+            <Field label={t('comms.audience.who')} hint={presets.includes(preset)
+              ? t(recipients === 'trainers' ? `comms.trainerPreset.${preset}.body` : scope === 'admin' && preset === 'all' ? 'comms.admin.all.body' : `comms.preset.${preset}.body`)
+              : undefined}>
               <div className="flex flex-wrap gap-2">
-                {presets.map(p => <Button key={p} size="sm" variant={chip(preset === p)} onClick={() => setPreset(p)} data-testid={`preset-${p}`}>{t(`comms.preset.${p}`)}</Button>)}
+                {presets.map(p => <Button key={p} size="sm" variant={chip(preset === p)} onClick={() => setPreset(p)} data-testid={`preset-${p}`}>{t(audienceKeys(recipients, p, 0).preset)}</Button>)}
               </div>
             </Field>
             <p className="text-sm font-semibold">{t('comms.audience.narrow')}</p>
             {savedFilter ? (
               <Alert tone="info">{t('comms.audience.customSetElsewhere')} <button type="button" className="underline" onClick={() => setSavedFilter(undefined)}>{t('comms.audience.clearCustom')}</button></Alert>
+            ) : recipients === 'trainers' ? (
+              <div className="grid gap-4 sm:grid-cols-2">
+                <Field label={t('comms.audience.trainerPass')}>
+                  <select className="ui-input" value={trainerRefine.pass ?? ''} data-testid="refine-trainer-pass"
+                    onChange={e => setTrainerRefine({ ...trainerRefine, pass: (e.target.value || undefined) as TrainerRefine['pass'] })}>
+                    <option value="">—</option>
+                    {(['active', 'pending', 'none'] as const).map(v => <option key={v} value={v}>{t(`comms.audience.trainerPass.${v}`)}</option>)}
+                  </select>
+                </Field>
+                <label className="flex items-center gap-2 self-end text-sm">
+                  <input type="checkbox" checked={Boolean(trainerRefine.verifiedOnly)} data-testid="refine-trainer-verified"
+                    onChange={e => setTrainerRefine({ ...trainerRefine, verifiedOnly: e.target.checked || undefined })} />
+                  {t('comms.audience.verifiedTrainersOnly')}
+                </label>
+              </div>
             ) : (
               <div className="grid gap-4 sm:grid-cols-2">
                 <Field label={t('comms.audience.expiresWithin')}>
@@ -675,7 +743,7 @@ function Composer({ scope, token, t, locale, gymId, campaign, templateId, onClos
         {step === 'confirm' && (
           <div className="space-y-3 text-sm">
             <dl className="grid gap-2 sm:grid-cols-2">
-              <Summary label={t('comms.confirm.audience')} value={`${t(`comms.preset.${preset}`)} · ${fill(t(targeted === 1 ? 'comms.audience.matchOne' : 'comms.audience.match'), { n: targeted })}`} />
+              <Summary label={t('comms.confirm.audience')} value={`${t(audienceKeys(recipients, preset, targeted).preset)} · ${fill(t(audienceKeys(recipients, preset, targeted).match), { n: targeted })}`} />
               {channels.map(ch => <Summary key={ch} label={t(`comms.channel.${ch}`)} value={fill(t('comms.channel.reaches'), { n: preview?.counts.byChannel[ch]?.queued ?? '–', total: targeted })} />)}
               <Summary label={t('comms.msg.title')} value={content.title} />
               <Summary label={t('comms.confirm.when')} value={later ? when(new Date(scheduledAt).toISOString()) : t('comms.schedule.now')} />
@@ -775,8 +843,8 @@ function Detail({ scope, token, t, id, onBack, onEdit, onOpenMember }: {
       <div className="grid gap-4 lg:grid-cols-2">
         <Card className="p-4 space-y-2">
           <p className="text-sm font-semibold">{t('comms.detail.audience')}</p>
-          <p className="text-sm">{t(`comms.preset.${c.audience?.preset ?? 'all'}`)}{c.audience?.filter ? ` · ${t('comms.detail.withConditions')}` : ''}</p>
-          {c.counts && <p className="text-sm">{fill(t(c.counts.targeted === 1 ? 'comms.audience.matchOne' : 'comms.audience.match'), { n: c.counts.targeted })}</p>}
+          <p className="text-sm">{t(audienceKeys(c.audience?.recipients, c.audience?.preset ?? 'all', 0).preset)}{c.audience?.filter ? ` · ${t('comms.detail.withConditions')}` : ''}</p>
+          {c.counts && <p className="text-sm">{fill(t(audienceKeys(c.audience?.recipients, c.audience?.preset ?? 'all', c.counts.targeted).match), { n: c.counts.targeted })}</p>}
           <p className="text-xs text-[var(--color-fg-quaternary)]">{c.channels.map(ch => t(`comms.channel.${ch}`)).join(' · ')}</p>
         </Card>
         <div>

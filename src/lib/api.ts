@@ -81,9 +81,10 @@ export const api = {
   // and FitFlex-wide messages (scope 'admin'). Same shapes for both. ──
   commsOverview: (token: string, scope: CommsScope, gymId?: string) =>
     request<CommsOverview>(`/${scope}/communications/overview${gymId ? `?gymId=${encodeURIComponent(gymId)}` : ''}`, {}, token),
-  commsSegments: (token: string, scope: CommsScope) =>
-    request<CommsCatalog>(`/${scope}/communications/segments`, {}, token),
-  commsAudiencePreview: (token: string, scope: CommsScope, body: { gymId?: string; preset?: string | null; filter?: unknown; purpose?: string }) =>
+  /** FitFlex (admin) can ask for the trainer audiences with recipients 'trainers'. */
+  commsSegments: (token: string, scope: CommsScope, recipients: CommsRecipients = 'members') =>
+    request<CommsCatalog>(`/${scope}/communications/segments${recipients === 'trainers' ? '?recipients=trainers' : ''}`, {}, token),
+  commsAudiencePreview: (token: string, scope: CommsScope, body: { gymId?: string; recipients?: CommsRecipients; preset?: string | null; filter?: unknown; purpose?: string }) =>
     request<CommsAudiencePreview>(`/${scope}/communications/audience/preview`, { method: 'POST', body: JSON.stringify(body) }, token),
   /** Campaign history. Filters: gymId, status, purpose, channel, from, to, search; cursor paging. */
   commsCampaigns: (token: string, scope: CommsScope, opts: Record<string, string | undefined> = {}) =>
@@ -1114,7 +1115,9 @@ export interface CommsTemplatePreview {
   whatsapp: { ready: boolean; byLocale: Partial<Record<CommsLocale, { ready: boolean; reason?: string }>> };
   needsValues: string[];
 }
-export interface CommsAudience { preset?: string | null; filter?: unknown }
+/** Who a FitFlex message goes to; gym messages always go to members. */
+export type CommsRecipients = 'members' | 'trainers';
+export interface CommsAudience { preset?: string | null; filter?: unknown; recipients?: CommsRecipients }
 export interface CommsDraft {
   gymId?: string; name?: string; purpose?: CommsPurpose; audience?: CommsAudience;
   content?: CommsContent; channels?: CommsChannel[]; templateId?: string | null;
@@ -1127,7 +1130,7 @@ export interface CommsCampaign {
   id: string; senderType: 'gym' | 'platform'; gymId: string | null; name: string; purpose: CommsPurpose;
   category: 'transactional' | 'marketing'; status: CommsStatus; audience?: CommsAudience; content?: CommsContent;
   channels: CommsChannel[]; scheduledAt: string | null; sentAt: string | null; createdAt: string;
-  counts: CommsCounts | null; title?: string | null; preset?: string | null; templateId?: string | null;
+  counts: CommsCounts | null; title?: string | null; preset?: string | null; recipients?: CommsRecipients; templateId?: string | null;
   /** History: who created it and its delivery numbers from the ledger. */
   createdByName?: string | null; stats?: CommsStats | null;
   template?: { id: string; key: string; name: string; system: boolean } | null;
@@ -1166,12 +1169,15 @@ export interface CommsHistoryFilters {
   status?: string; from?: string; to?: string; search?: string; gymId?: string; cursor?: string; limit?: number;
 }
 export interface CommsOverview {
-  senderType: 'gym' | 'platform'; members: number | null; campaigns: Partial<Record<CommsStatus, number>>;
+  senderType: 'gym' | 'platform'; members: number | null;
+  /** FitFlex only: active trainers FitFlex can message. */
+  trainers?: number | null;
+  campaigns: Partial<Record<CommsStatus, number>>;
   recent: CommsCampaign[]; channels: Record<CommsChannel, boolean>;
   limits: { largeSendThreshold: number; marketingWeeklyCap: number };
 }
 export interface CommsCatalog {
-  scope: 'gym' | 'platform';
+  scope: 'gym' | 'platform' | 'trainers';
   presets: Array<{ key: string; filter: unknown }>;
   fields: Array<{ key: string; type: string; ops: string[]; values?: string[] }>;
 }
