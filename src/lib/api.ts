@@ -152,6 +152,15 @@ export const api = {
     request<WhatsAppRegistry & { synced: number }>('/admin/communications/whatsapp/templates/sync', { method: 'POST' }, token),
   waTest: (token: string, body: { phone: string; templateName: string; language: CommsLocale; parameters: string[] }) =>
     request<{ ok: boolean; providerMessageId: string }>('/admin/communications/whatsapp/test', { method: 'POST', body: JSON.stringify(body) }, token),
+  // Automations (gym owners): lifecycle messages that send themselves.
+  commsAutomations: (token: string, gymId?: string) =>
+    request<{ automations: CommsAutomation[] }>(`/owner/communications/automations${qs({ gymId })}`, {}, token),
+  commsAutomationUpdate: (token: string, id: string, body: { status?: 'enabled' | 'disabled'; channels?: CommsChannel[]; templateId?: string }) =>
+    request<{ automation: CommsAutomation }>(`/owner/communications/automations/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(body) }, token),
+  commsAutomationRuns: (token: string, id: string) =>
+    request<{ runs: CommsAutomationRun[] }>(`/owner/communications/automations/${encodeURIComponent(id)}/runs`, {}, token),
+  commsAutomationPreview: (token: string, id: string) =>
+    request<CommsTemplatePreview>(`/owner/communications/automations/${encodeURIComponent(id)}/preview`, { method: 'POST' }, token),
   commsTemplateArchive: (token: string, id: string) =>
     request<{ ok: boolean }>(`/owner/communications/templates/${encodeURIComponent(id)}/archive`, { method: 'POST' }, token),
 
@@ -1120,6 +1129,21 @@ export interface CommsMessage {
   template?: { id: string; key: string | null; name: string | null; system: boolean } | null;
 }
 export type CommsOutcome = 'reached' | 'pending' | 'failed' | 'skipped';
+export type CommsAutomationTrigger = 'membership_activated' | 'membership_expiring' | 'membership_expired' | 'payment_failed' | 'member_inactive';
+export interface CommsAutomation {
+  id: string; gymId: string; name: string; trigger: CommsAutomationTrigger; offsetDays: number;
+  conditions: Record<string, unknown> | null; channels: CommsChannel[];
+  /** 'paused' = stopped by the engine; see pausedReason. */
+  status: 'enabled' | 'disabled' | 'paused'; pausedReason: string | null;
+  template: { id: string; key: string | null; name: string | null; system: boolean; purpose: CommsPurpose | null } | null;
+  lastRunAt: string | null; updatedAt: string | null;
+  stats?: { fired: number; skipped: number; messages: number; reached: number; failed: number; opened: number };
+}
+export interface CommsAutomationRun {
+  id: string; memberId: string; memberName: string | null; occurrenceKey: string; status: 'queued' | 'skipped';
+  context: Record<string, unknown> | null; createdAt: string | null;
+  channels: Array<{ id: string; channel: CommsChannel; status: CommsMessageStatus; reason: string | null }>;
+}
 export interface CommsTimelineItem {
   key: string; campaignId: string | null; automationRunId: string | null; campaignName: string | null;
   memberId: string; memberName: string | null; category: string; messageType: CommsPurpose;
