@@ -11,6 +11,7 @@ import { SearchableSelect, SelectOption } from '@/components/searchable-select';
 import { statusTone, statusLabel, money } from '@/lib/admin-utils';
 import { GymCreateForm, GymDraft, BLANK_GYM_DRAFT, validateGymDraft } from '@/components/gym-create-form';
 import { OwnerInlineForm, OwnerFormDraft, BLANK_OWNER_DRAFT, validateOwnerDraft } from '@/components/owner-inline-form';
+import { SOCIAL_PLATFORMS, cleanSocialLinks } from '@/lib/social-handles';
 
 export default function TrainersPage() {
   const { token, user, t } = useApp();
@@ -113,6 +114,9 @@ export default function TrainersPage() {
     const rate = Number(rateInput);
     if (!rate || rate <= 0) errs.hourlyRateTzs = 'Per session rate is required';
     if (!draft.status) errs.status = 'Status is required';
+    for (const platform of cleanSocialLinks(draft.socialLinks).invalid) {
+      errs[`social_${platform}`] = 'Enter a handle, @handle or profile link';
+    }
     return errs;
   }
 
@@ -151,6 +155,7 @@ export default function TrainersPage() {
         sessionRateCurrency: sessionCurrency,
         gymIds: draftGymIds,
         availability,
+        socialLinks: cleanSocialLinks(draft.socialLinks).links,
       };
       if (editing) {
         await api.saveTrainer(token, { ...payload, id: editing.id });
@@ -438,6 +443,25 @@ export default function TrainersPage() {
               onCreateNew={() => setGymDialogOpen(true)}
             />
           </Field>
+          <div>
+            <p className="mb-1.5 text-sm font-medium text-[var(--color-fg-secondary)]">Social media (optional)</p>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              {SOCIAL_PLATFORMS.map(({ id, label }) => (
+                <Field key={id} label={label} error={formErrors[`social_${id}`]}>
+                  <input
+                    aria-label={label}
+                    className="ui-input"
+                    value={draft.socialLinks?.[id] || ''}
+                    placeholder="@handle or profile link"
+                    onChange={e => {
+                      setDraft({ ...draft, socialLinks: { ...draft.socialLinks, [id]: e.target.value } });
+                      setFormErrors(prev => { const { [`social_${id}`]: _cleared, ...rest } = prev; return rest; });
+                    }}
+                  />
+                </Field>
+              ))}
+            </div>
+          </div>
           <Field label="Availability" hint="Set available days, gym, and time slots.">
             <div className="space-y-3">
               {draftAvailability.map((entry, i) => (

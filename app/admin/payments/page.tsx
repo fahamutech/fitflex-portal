@@ -9,9 +9,18 @@ import { Dialog, DialogFooter, ConfirmDialog } from '@/components/dialog';
 import { money, statusTone, statusLabel, formatDateTime } from '@/lib/admin-utils';
 
 type PaymentFilter = 'pending' | 'approved' | 'rejected' | 'cancelled' | 'all';
+type KindFilter = 'all' | 'trainer_pass';
+
+/** A trainer pass is known by its subscription type; `note` can be edited. */
+function isTrainerPass(payment: PaymentRequest): boolean {
+  return payment.subscription?.type === 'trainer_pass' || (!payment.subscription && payment.note === 'trainer_pass');
+}
 
 function paymentTierLabel(payment: PaymentRequest): string {
   if (payment.bookingGroupId) return 'TRAINER SESSION';
+  const plan = (payment.subscription?.plan || payment.plan || '').toUpperCase();
+  if (isTrainerPass(payment)) return plan ? `TRAINER PASS · ${plan}` : 'TRAINER PASS';
+  if (payment.subscription?.type === 'direct_sub') return plan ? `GYM PLAN · ${plan}` : 'GYM PLAN';
   const tier = payment.tier || payment.subscription?.tier;
   return typeof tier === 'string' && tier.trim() ? tier.toUpperCase() : '—';
 }
@@ -23,6 +32,7 @@ export default function PaymentsPage() {
   const [error, setError]       = useState<string | null>(null);
   const [busy, setBusy]         = useState(false);
   const [filter, setFilter]     = useState<PaymentFilter>('pending');
+  const [kind, setKind]         = useState<KindFilter>('all');
   const [actionTarget, setActionTarget] = useState<{ payment: PaymentRequest; action: 'approved' | 'rejected' | 'cancelled' } | null>(null);
   const [editTarget, setEditTarget] = useState<PaymentRequest | null>(null);
   const [editFields, setEditFields] = useState<{ reference: string; note: string }>({ reference: '', note: '' });
@@ -43,7 +53,9 @@ export default function PaymentsPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { load(); }, [token]);
 
-  const filtered = filter === 'all' ? payments : payments.filter(p => p.status === filter);
+  const filtered = payments
+    .filter(p => filter === 'all' || p.status === filter)
+    .filter(p => kind === 'all' || isTrainerPass(p));
 
   async function handleAction() {
     if (!token || !actionTarget) return;
@@ -85,7 +97,15 @@ export default function PaymentsPage() {
         </div>
       ),
     },
-    { key: 'tier', header: 'Tier', sortable: true, cell: (p) => <Badge tone="brand">{paymentTierLabel(p)}</Badge> },
+    {
+      key: 'tier', header: 'Tier', sortable: true,
+      cell: (p) => (
+        <div>
+          <Badge tone={isTrainerPass(p) ? 'warning' : 'brand'}>{paymentTierLabel(p)}</Badge>
+          {p.gym && <div className="mt-1 text-xs text-[var(--color-fg-tertiary)]">{p.gym.name}</div>}
+        </div>
+      ),
+    },
     { key: 'amountTzs', header: 'Amount', sortable: true, align: 'right', cell: (p) => <span className="tabular-nums font-medium">{money(p.amountTzs)}</span> },
     { key: 'requestedAt', header: 'Date', sortable: true, cell: (p) => <span className="text-xs tabular-nums whitespace-nowrap">{formatDateTime(p.requestedAt)}</span> },
     { key: 'status', header: 'Status', sortable: true, cell: (p) => <Badge tone={statusTone(p.status)}>{statusLabel(p.status)}</Badge> },
@@ -119,7 +139,7 @@ export default function PaymentsPage() {
               filterPlaceholder="Search payments..."
               emptyState="No payments found."
               extraFilters={
-                <div className="flex gap-1">
+                <div className="flex flex-wrap gap-1">
                   {(['pending', 'approved', 'rejected', 'cancelled', 'all'] as const).map(f => (
                     <button
                       key={f}
@@ -129,6 +149,18 @@ export default function PaymentsPage() {
                       }`}
                     >
                       {f.charAt(0).toUpperCase() + f.slice(1)}
+                    </button>
+                  ))}
+                  <span className="mx-1 w-px self-stretch bg-[var(--color-border-secondary)]" aria-hidden />
+                  {([['all', 'All types'], ['trainer_pass', 'Trainer passes']] as const).map(([k, label]) => (
+                    <button
+                      key={k}
+                      onClick={() => setKind(k)}
+                      className={`px-3 py-1 text-xs rounded-[var(--radius-full)] font-medium transition-colors ${
+                        kind === k ? 'bg-[var(--color-brand-50)] text-[var(--color-brand-700)]' : 'text-[var(--color-fg-tertiary)] hover:bg-[var(--color-bg-tertiary)]'
+                      }`}
+                    >
+                      {label}
                     </button>
                   ))}
                 </div>
@@ -163,7 +195,7 @@ export default function PaymentsPage() {
         onClose={() => setActionTarget(null)}
         onConfirm={handleAction}
         title={actionTarget ? `${actionTarget.action.charAt(0).toUpperCase() + actionTarget.action.slice(1)} payment` : ''}
-        description={`Set payment for ${actionTarget?.payment.member?.displayName || actionTarget?.payment.memberId} (${money(actionTarget?.payment.amountTzs)}) to "${actionTarget?.action}"?`}
+        description={`Set payment for ${actionTarget?.payment.member?.displayName || actionTarget?.payment.memberId} (${money(actionTarget?.payment.amountTzs)}${actionTarget && isTrainerPass(actionTarget.payment) ? ` — ${paymentTierLabel(actionTarget.payment).toLowerCase()}${actionTarget.payment.gym ? ` at ${actionTarget.payment.gym.name}` : ''}` : ''}) to "${actionTarget?.action}"?${actionTarget?.action === 'approved' && isTrainerPass(actionTarget.payment) ? ' The pass period starts now.' : ''}`}
         confirmLabel={actionTarget?.action === 'approved' ? 'Approve' : actionTarget?.action === 'rejected' ? 'Reject' : 'Cancel payment'}
         tone={actionTarget?.action === 'approved' ? 'primary' : 'danger'}
         busy={busy}

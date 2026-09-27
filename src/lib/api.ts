@@ -81,9 +81,10 @@ export const api = {
   // and FitFlex-wide messages (scope 'admin'). Same shapes for both. ──
   commsOverview: (token: string, scope: CommsScope, gymId?: string) =>
     request<CommsOverview>(`/${scope}/communications/overview${gymId ? `?gymId=${encodeURIComponent(gymId)}` : ''}`, {}, token),
-  commsSegments: (token: string, scope: CommsScope) =>
-    request<CommsCatalog>(`/${scope}/communications/segments`, {}, token),
-  commsAudiencePreview: (token: string, scope: CommsScope, body: { gymId?: string; preset?: string | null; filter?: unknown; purpose?: string }) =>
+  /** FitFlex (admin) can ask for the trainer audiences with recipients 'trainers'. */
+  commsSegments: (token: string, scope: CommsScope, recipients: CommsRecipients = 'members') =>
+    request<CommsCatalog>(`/${scope}/communications/segments${recipients === 'trainers' ? '?recipients=trainers' : ''}`, {}, token),
+  commsAudiencePreview: (token: string, scope: CommsScope, body: { gymId?: string; recipients?: CommsRecipients; preset?: string | null; filter?: unknown; purpose?: string }) =>
     request<CommsAudiencePreview>(`/${scope}/communications/audience/preview`, { method: 'POST', body: JSON.stringify(body) }, token),
   /** Campaign history. Filters: gymId, status, purpose, channel, from, to, search; cursor paging. */
   commsCampaigns: (token: string, scope: CommsScope, opts: Record<string, string | undefined> = {}) =>
@@ -257,7 +258,8 @@ export const api = {
     return request<AnalyticsOverview>(`/admin/analytics?${qs}`, {}, token);
   },
   /** Full gym record (with `images`/`thumbnails`) — fetch on demand for the detail/edit views. */
-  getGym: (id: string) => request<Gym>(`/gyms/${id}`),
+  /** Pass the admin token to include trainer-pass pricing (hidden from anonymous callers). */
+  getGym: (id: string, token?: string) => request<Gym>(`/gyms/${id}`, {}, token),
   saveGym: (token: string, gym: Partial<Gym>) =>
     request<Gym>('/admin/gyms', { method: 'POST', body: JSON.stringify(gym) }, token),
   deleteGym: (token: string, id: string) =>
@@ -520,6 +522,28 @@ export interface Gym {
   verified?: boolean;
   homepageVisible?: boolean;
   homepagePriority?: number;
+  /** Trainer passes the owner sells — only trainers (and admins) see them. */
+  trainerPass?: TrainerPassConfig;
+}
+
+export type TrainerPassPeriod = 'daily' | 'weekly' | 'monthly';
+
+/**
+ * Gym trainer passes: any of daily/weekly/monthly, each with its own fee in
+ * TZS. `feeTzs`/`period` mirror the first option for older app builds.
+ */
+export interface TrainerPassConfig {
+  enabled: boolean;
+  options?: Partial<Record<TrainerPassPeriod, number>>;
+  feeTzs?: number;
+  period?: TrainerPassPeriod;
+}
+
+/** Trainer social profiles, stored as bare handles. */
+export interface TrainerSocialLinks {
+  instagram?: string;
+  facebook?: string;
+  twitter?: string;
 }
 
 export interface GymVisitRecord {
@@ -650,10 +674,21 @@ export interface PaymentRequest {
   provider: string;
   reference: string | null;
   note?: string | null;
+  /** The gym a gym-bound request pays for (trainer pass / gym plan). */
+  gymId?: string | null;
+  gym?: { id: string; name: string } | null;
   requestedAt: string;
   decidedAt: string | null;
   member?: { email?: string | null; phone?: string | null; displayName?: string | null };
-  subscription?: { tier?: string | null; status: string; renewsAt?: string } | null;
+  subscription?: {
+    tier?: string | null;
+    /** 'platform_pass' | 'direct_sub' | 'trainer_pass' | … */
+    type?: string | null;
+    plan?: string | null;
+    status: string;
+    renewsAt?: string;
+    expiresAt?: string | null;
+  } | null;
 }
 
 export interface MemberProfile {
@@ -728,6 +763,7 @@ export interface TrainerProfile {
   homepageVisible?: boolean;
   homepagePriority?: number;
   availability?: Array<{ day?: string; date?: string; gymId?: string; gymName?: string; slots: string[] }>;
+  socialLinks?: TrainerSocialLinks;
 }
 
 export interface ShopProduct {
@@ -1088,7 +1124,9 @@ export interface CommsTemplatePreview {
   whatsapp: { ready: boolean; byLocale: Partial<Record<CommsLocale, { ready: boolean; reason?: string }>> };
   needsValues: string[];
 }
-export interface CommsAudience { preset?: string | null; filter?: unknown }
+/** Who a FitFlex message goes to; gym messages always go to members. */
+export type CommsRecipients = 'members' | 'trainers';
+export interface CommsAudience { preset?: string | null; filter?: unknown; recipients?: CommsRecipients }
 export interface CommsDraft {
   gymId?: string; name?: string; purpose?: CommsPurpose; audience?: CommsAudience;
   content?: CommsContent; channels?: CommsChannel[]; templateId?: string | null;
@@ -1101,7 +1139,7 @@ export interface CommsCampaign {
   id: string; senderType: 'gym' | 'platform'; gymId: string | null; name: string; purpose: CommsPurpose;
   category: 'transactional' | 'marketing'; status: CommsStatus; audience?: CommsAudience; content?: CommsContent;
   channels: CommsChannel[]; scheduledAt: string | null; sentAt: string | null; createdAt: string;
-  counts: CommsCounts | null; title?: string | null; preset?: string | null; templateId?: string | null;
+  counts: CommsCounts | null; title?: string | null; preset?: string | null; recipients?: CommsRecipients; templateId?: string | null;
   /** History: who created it and its delivery numbers from the ledger. */
   createdByName?: string | null; stats?: CommsStats | null;
   template?: { id: string; key: string; name: string; system: boolean } | null;
@@ -1155,12 +1193,15 @@ export interface CommsHistoryFilters {
   status?: string; from?: string; to?: string; search?: string; gymId?: string; cursor?: string; limit?: number;
 }
 export interface CommsOverview {
-  senderType: 'gym' | 'platform'; members: number | null; campaigns: Partial<Record<CommsStatus, number>>;
+  senderType: 'gym' | 'platform'; members: number | null;
+  /** FitFlex only: active trainers FitFlex can message. */
+  trainers?: number | null;
+  campaigns: Partial<Record<CommsStatus, number>>;
   recent: CommsCampaign[]; channels: Record<CommsChannel, boolean>;
   limits: { largeSendThreshold: number; marketingWeeklyCap: number };
 }
 export interface CommsCatalog {
-  scope: 'gym' | 'platform';
+  scope: 'gym' | 'platform' | 'trainers';
   presets: Array<{ key: string; filter: unknown }>;
   fields: Array<{ key: string; type: string; ops: string[]; values?: string[] }>;
 }

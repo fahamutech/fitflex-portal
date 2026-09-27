@@ -15,6 +15,7 @@ import { GymScoringRubric, RubricData, RubricResult, EMPTY_RUBRIC } from '@/comp
 import { statusTone, statusLabel, money } from '@/lib/admin-utils';
 import { OwnerInlineForm, OwnerFormDraft, BLANK_OWNER_DRAFT, validateOwnerDraft } from '@/components/owner-inline-form';
 import { TrainerInlineForm, TrainerFormDraft, BLANK_TRAINER_DRAFT, validateTrainerDraft } from '@/components/trainer-inline-form';
+import { TrainerPassFields, trainerPassError, trainerPassOptions } from '@/components/trainer-pass-fields';
 
 const TIERS = ['standard', 'midtier', 'premium', 'luxury_executive'];
 const STATUS_OPTIONS: { value: string; label: string; tone: 'success' | 'danger' | 'gray' }[] = [
@@ -88,7 +89,7 @@ export default function GymsPage() {
     setDetailGym(gym);
     setSlideIndex(0);
     setDetailImagesLoading(true);
-    api.getGym(gym.id)
+    api.getGym(gym.id, token ?? undefined)
       .then(full => setDetailGym(current => (current && current.id === gym.id ? { ...current, ...full } : current)))
       .catch(() => {})
       .finally(() => setDetailImagesLoading(false));
@@ -131,7 +132,7 @@ export default function GymsPage() {
     setEditLoading(true);
     let full: Gym = gym;
     try {
-      full = await api.getGym(gym.id);
+      full = await api.getGym(gym.id, token ?? undefined);
     } catch {
       // fall back to the slim row; the ImageUpload will just start empty
     } finally {
@@ -157,6 +158,8 @@ export default function GymsPage() {
     if (draft.ratePerWeek == null || draft.ratePerWeek <= 0) errs.ratePerWeek = 'Week rate is required';
     if (draft.ratePerMonth == null || draft.ratePerMonth <= 0) errs.ratePerMonth = 'Month rate is required';
     if (draft.commissionRate == null || draft.commissionRate < 0) errs.commissionRate = 'Commission rate is required';
+    const passError = trainerPassError(draft.trainerPass);
+    if (passError) errs.trainerPass = passError;
     if (!draft.images || draft.images.length === 0) errs.images = 'At least one image is required';
     if (!draftOwnerId) errs.owner = 'Owner is required';
     if (draft.coordinates?.lat == null) errs.lat = 'Location is required — use the map to set it';
@@ -545,6 +548,13 @@ export default function GymsPage() {
               <Field label="Commission %" error={formErrors.commissionRate}>
                 <input className="ui-input" type="number" value={draft.commissionRate || ''} placeholder="0" onChange={e => { setDraft({ ...draft, commissionRate: e.target.value === '' ? 0 : Number(e.target.value) }); setFormErrors(prev => { const { commissionRate, ...rest } = prev; return rest; }); }} />
               </Field>
+              <Field label="Trainer passes (optional)">
+                <TrainerPassFields
+                  value={draft.trainerPass}
+                  error={formErrors.trainerPass}
+                  onChange={(trainerPass) => { setDraft({ ...draft, trainerPass }); setFormErrors(prev => { const { trainerPass: _cleared, ...rest } = prev; return rest; }); }}
+                />
+              </Field>
               <Field label="Owner" error={formErrors.owner}>
                 <SearchableSelect
                   options={ownerOptions}
@@ -823,6 +833,24 @@ export default function GymsPage() {
                 <p className="text-xs text-[var(--color-fg-quaternary)] mb-1">Per Month</p>
                 <p className="text-lg font-semibold tabular-nums">{money(detailGym.ratePerMonth ?? 0)}</p>
               </div>
+            </div>
+
+            {/* Trainer passes (trainer-only pricing) */}
+            <div>
+              <p className="text-xs text-[var(--color-fg-quaternary)] mb-1.5">Trainer passes</p>
+              {detailGym.trainerPass?.enabled && Object.values(trainerPassOptions(detailGym.trainerPass)).some(f => (f ?? 0) > 0) ? (
+                <div className="flex flex-wrap gap-1.5">
+                  {(['daily', 'weekly', 'monthly'] as const)
+                    .filter(p => (trainerPassOptions(detailGym.trainerPass)[p] ?? 0) > 0)
+                    .map(p => (
+                      <Badge key={p} tone="brand">
+                        {p.charAt(0).toUpperCase() + p.slice(1)} · {money(trainerPassOptions(detailGym.trainerPass)[p] ?? 0)}
+                      </Badge>
+                    ))}
+                </div>
+              ) : (
+                <p className="text-sm text-[var(--color-fg-tertiary)]">Not sold — trainers use the member rates.</p>
+              )}
             </div>
 
             {/* Amenities */}
