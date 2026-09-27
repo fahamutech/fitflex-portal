@@ -3,7 +3,14 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useApp } from '../providers';
 import { api, ApiError } from '@/lib/api';
-import { signInWithGoogleIdToken, signInWithEmailPasswordIdToken } from '@/lib/firebase';
+import {
+  signInWithGoogleIdToken,
+  signInWithEmailPasswordIdToken,
+  currentFirebaseEmail,
+  sendVerificationEmail,
+  verifiedIdTokenOrNull,
+  signOutFirebase,
+} from '@/lib/firebase';
 import { Button, Card, CardContent, Alert, Spinner, Field } from '@/components/shared';
 
 export default function LoginPage() {
@@ -11,7 +18,9 @@ export default function LoginPage() {
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [method, setMethod] = useState<'choose' | 'email' | 'hr'>('choose');
+  const [method, setMethod] = useState<'choose' | 'email' | 'hr' | 'verify'>('choose');
+  const [notice, setNotice] = useState<string | null>(null);
+  const [verifyEmail, setVerifyEmail] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
 
@@ -27,8 +36,6 @@ export default function LoginPage() {
         return t('login.adminRequired');
       if (body?.error === 'account_suspended')
         return t('login.suspended');
-      if (body?.error === 'email_already_used_for_different_role')
-        return t('login.wrongRole').replace('{role}', body.existingRole);
       return t('login.error');
     }
     const authCode = typeof err === 'object' && err && 'code' in err ? String((err as { code?: string }).code) : '';
@@ -60,6 +67,7 @@ export default function LoginPage() {
       const { token, user } = await api.firebaseSession(idToken, 'admin');
       handleSuccess(token, user);
     } catch (err) {
+      if (needsEmailVerification(err)) return startVerification();
       setError(mapError(err));
     } finally {
       setBusy(false);
@@ -75,10 +83,64 @@ export default function LoginPage() {
       const { token, user } = await api.firebaseSession(idToken, 'admin');
       handleSuccess(token, user);
     } catch (err) {
+      if (needsEmailVerification(err)) return startVerification();
       setError(mapError(err));
     } finally {
       setBusy(false);
     }
+  }
+
+  // The backend refuses a sign-in (409 email_verification_required) when an
+  // unverified email would claim a FitFlex account this Firebase login
+  // doesn't own. Keep the Firebase session, send the link, and retry after.
+  function needsEmailVerification(err: unknown) {
+    return err instanceof ApiError && (err.body as any)?.error === 'email_verification_required';
+  }
+
+  async function startVerification() {
+    setError(null);
+    setVerifyEmail(currentFirebaseEmail() ?? email);
+    setMethod('verify');
+    await resendVerification();
+  }
+
+  async function resendVerification() {
+    try {
+      await sendVerificationEmail();
+      setNotice(t('login.verifySent'));
+    } catch {
+      setNotice(t('login.verifySendFailed'));
+    }
+  }
+
+  async function onVerifiedContinue() {
+    setError(null);
+    setBusy(true);
+    try {
+      const idToken = await verifiedIdTokenOrNull();
+      if (!idToken) {
+        setNotice(t('login.verifyNotYet'));
+        return;
+      }
+      const { token, user } = await api.firebaseSession(idToken, 'admin');
+      handleSuccess(token, user);
+    } catch (err) {
+      if (needsEmailVerification(err)) setNotice(t('login.verifyNotYet'));
+      else setError(mapError(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function useOtherAccount() {
+    try {
+      await signOutFirebase();
+    } catch {
+      // Leaving the verify step matters more than a failed sign-out.
+    }
+    setNotice(null);
+    setError(null);
+    setMethod('choose');
   }
 
   // Company HR signs in with the email + password FitFlex set up (not Firebase).
@@ -196,6 +258,36 @@ export default function LoginPage() {
                   {t('login.back')}
                 </button>
               </form>
+            )}
+
+            {method === 'verify' && (
+              <div className="space-y-4" data-testid="verify-email-step">
+                <div>
+                  <p className="text-sm font-semibold text-[var(--color-fg-primary)]">{t('login.verifyTitle')}</p>
+                  <p className="text-xs text-[var(--color-fg-quaternary)]">{t('login.verifyBody').replace('{email}', verifyEmail)}</p>
+                </div>
+                {notice && <Alert tone="info">{notice}</Alert>}
+                <Button type="button" size="lg" className="w-full" disabled={busy} onClick={onVerifiedContinue} data-testid="verify-email-continue">
+                  {busy ? <><Spinner className="h-4 w-4 text-white" /> {t('login.signingIn')}</> : t('login.verifyContinue')}
+                </Button>
+                <button
+                  type="button"
+                  onClick={resendVerification}
+                  disabled={busy}
+                  className="w-full text-center text-sm font-medium text-[var(--color-fg-brand)] hover:underline"
+                  data-testid="verify-email-resend"
+                >
+                  {t('login.verifyResend')}
+                </button>
+                <button
+                  type="button"
+                  onClick={useOtherAccount}
+                  className="w-full text-center text-xs text-[var(--color-fg-quaternary)] hover:text-[var(--color-fg-secondary)] transition-colors"
+                  data-testid="verify-email-other-account"
+                >
+                  {t('login.verifyOtherAccount')}
+                </button>
+              </div>
             )}
 
             {method === 'email' && (

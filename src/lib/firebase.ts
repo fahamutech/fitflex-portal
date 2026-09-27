@@ -5,6 +5,8 @@ import {
   signInWithCredential,
   signInWithPopup,
   signInWithEmailAndPassword,
+  sendEmailVerification,
+  signOut,
 } from 'firebase/auth';
 
 declare global {
@@ -123,4 +125,41 @@ export async function signInWithEmailPasswordIdToken(email: string, password: st
   const auth = getFirebaseAuth();
   const credential = await signInWithEmailAndPassword(auth, email, password);
   return credential.user.getIdToken();
+}
+
+// ─── Email verification (Identity V2 · I0) ─────────────────────────────────
+// The backend refuses a sign-in with 409 email_verification_required when an
+// unverified email would claim a FitFlex account this Firebase login doesn't
+// own. These keep the Firebase session so the person can verify and retry.
+
+function requireFirebaseUser() {
+  const user = getFirebaseAuth().currentUser;
+  if (!user) throw new Error('No signed-in Firebase user.');
+  return user;
+}
+
+/** Email of the signed-in Firebase user, if any. */
+export function currentFirebaseEmail(): string | null {
+  return getFirebaseAuth().currentUser?.email ?? null;
+}
+
+/** Sends Firebase's verification link to the signed-in user's email. */
+export async function sendVerificationEmail() {
+  await sendEmailVerification(requireFirebaseUser());
+}
+
+/**
+ * Reloads the Firebase user (the link is opened elsewhere). Returns a freshly
+ * minted ID token once the email is verified, otherwise null.
+ */
+export async function verifiedIdTokenOrNull(): Promise<string | null> {
+  const user = requireFirebaseUser();
+  await user.reload();
+  if (!getFirebaseAuth().currentUser?.emailVerified) return null;
+  // Force-refresh: the cached token still says email_verified: false.
+  return user.getIdToken(true);
+}
+
+export async function signOutFirebase() {
+  await signOut(getFirebaseAuth());
 }
