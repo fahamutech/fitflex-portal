@@ -9,6 +9,7 @@ import { api, CommsAutomation, CommsAutomationRun, CommsChannel, CommsTemplate, 
 import { Alert, Badge, Button, Card, Spinner } from './shared';
 import { MessageCard, T, errorText, fill, when } from './communication-shared';
 import { whyNot } from './communication-history';
+import { ResultsPanel } from './communication-results';
 
 const CHANNELS: CommsChannel[] = ['in_app', 'push', 'whatsapp'];
 
@@ -116,6 +117,8 @@ function AutomationDetail({ token, t, a, gymId, busy, onUpdate }: {
         </div>
         <p className="mt-1 text-xs text-[var(--color-fg-quaternary)]">{t('comms.auto.channelsNote')}</p>
       </div>
+      <ResultsPanel t={t} title={t('comms.results.last30')} deps={[token, a.id]}
+        load={() => api.commsAutomationAnalytics(token, a.id, 30)} />
       <div className="grid gap-4 lg:grid-cols-2">
         <div className="space-y-2">
           <p className="text-sm font-semibold">{t('comms.auto.message')}</p>
