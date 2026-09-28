@@ -305,10 +305,15 @@ function Checklist({ data }: { data: KycCaseDetail }) {
                   <span>
                     {itemLabel(i.key)}{i.gymName ? <span className="text-[var(--color-fg-quaternary)]"> · {i.gymName}</span> : null}
                     {i.by === 'reviewer' && <span className="ml-1 text-xs text-[var(--color-fg-quaternary)]">(FitFlex)</span>}
+                    {i.optional && <span className="ml-1 text-xs text-[var(--color-fg-quaternary)]">(optional)</span>}
                     {i.missingFields?.length ? <span className="block text-xs text-[var(--color-fg-quaternary)]">Needs: {i.missingFields.join(', ')}</span> : null}
                     {i.status === 'mismatch' && <span className="block text-xs text-[var(--color-fg-quaternary)]">Listed {GYM_TIER_LABEL[i.gymTier ?? ''] ?? i.gymTier}, vetted {GYM_TIER_LABEL[i.vettedTier ?? ''] ?? i.vettedTier}</span>}
                   </span>
-                  <span className="shrink-0 whitespace-nowrap"><Badge tone={ITEM_STATUS[i.status].tone}>{ITEM_STATUS[i.status].label}</Badge></span>
+                  <span className="shrink-0 whitespace-nowrap">
+                    {i.optional && i.status === 'missing'
+                      ? <Badge tone="gray">Optional</Badge>
+                      : <Badge tone={ITEM_STATUS[i.status].tone}>{ITEM_STATUS[i.status].label}</Badge>}
+                  </span>
                 </li>
               ))}
             </ul>
