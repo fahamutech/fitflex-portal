@@ -294,7 +294,7 @@ export const api = {
   updateProductListing: (token: string, id: string, listing: { homepageVisible: boolean; homepagePriority: number; approvalStatus?: 'pending' | 'approved' | 'rejected' }) =>
     request<ShopProduct>(`/admin/products/${id}/listing`, { method: 'PUT', body: JSON.stringify(listing) }, token),
   adminVendors: (token: string) => request<VendorSummary[]>('/admin/vendors', {}, token),
-  updateAdminVendor: (token: string, id: string, patch: Partial<Pick<VendorSummary, 'approvalStatus' | 'accountStatus' | 'verified' | 'approvalNote'>>) =>
+  updateAdminVendor: (token: string, id: string, patch: Partial<Pick<VendorSummary, 'approvalStatus' | 'accountStatus' | 'approvalNote'>>) =>
     request<VendorSummary>(`/admin/vendors/${id}`, { method: 'PUT', body: JSON.stringify(patch) }, token),
   trainerBookings: (token: string) => request<TrainerBooking[]>('/admin/trainer-bookings', {}, token),
   updateTrainerBooking: (token: string, id: string, status: 'confirmed' | 'completed' | 'cancelled') =>
@@ -815,7 +815,10 @@ export interface VendorSummary {
   approvalStatus: 'pending_approval' | 'approved' | 'rejected';
   approvalNote?: string | null;
   accountStatus: 'active' | 'suspended';
-  verified?: boolean;
+  /** The vendor's KYC case status; null if they haven't started. */
+  kycStatus?: KycCaseStatus | null;
+  /** Existing vendors predate KYC and keep working without it. */
+  kycExempt?: boolean;
   productCount: number;
   pendingProductCount: number;
   createdAt?: string;
@@ -1397,6 +1400,8 @@ export interface KycChecklistItem {
   gymId?: string;
   gymName?: string;
   requirementKey?: string;
+  /** Collected if given, never required (e.g. a vendor's business licence). */
+  optional?: boolean;
   missingFields?: string[];
   note?: string | null;
   expiresOn?: string | null;
