@@ -153,6 +153,13 @@ export const api = {
     request<WhatsAppRegistry & { synced: number }>('/admin/communications/whatsapp/templates/sync', { method: 'POST' }, token),
   waTest: (token: string, body: { phone: string; templateName: string; language: CommsLocale; parameters: string[] }) =>
     request<{ ok: boolean; providerMessageId: string }>('/admin/communications/whatsapp/test', { method: 'POST', body: JSON.stringify(body) }, token),
+  // Analytics: delivery, engagement and attributed revenue.
+  commsAnalytics: (token: string, scope: CommsScope, opts: { days?: number; gymId?: string } = {}) =>
+    request<CommsResults>(`/${scope}/communications/analytics${qs(opts)}`, {}, token),
+  commsCampaignAnalytics: (token: string, scope: CommsScope, id: string) =>
+    request<CommsResults>(`/${scope}/communications/campaigns/${encodeURIComponent(id)}/analytics`, {}, token),
+  commsAutomationAnalytics: (token: string, id: string, days = 30) =>
+    request<CommsResults>(`/owner/communications/automations/${encodeURIComponent(id)}/analytics${qs({ days })}`, {}, token),
   // Automations (gym owners): lifecycle messages that send themselves.
   commsAutomations: (token: string, gymId?: string) =>
     request<{ automations: CommsAutomation[] }>(`/owner/communications/automations${qs({ gymId })}`, {}, token),
@@ -1213,6 +1220,23 @@ export interface CommsMessage {
   template?: { id: string; key: string | null; name: string | null; system: boolean } | null;
 }
 export type CommsOutcome = 'reached' | 'pending' | 'failed' | 'skipped';
+/** Results. A null count means there's no data for it (shown as "—"), never zero. */
+export interface CommsResults {
+  period?: { from: string; to: string; days?: number };
+  attribution: { model: 'last_touch'; clickWindowDays: number; openWindowDays: number };
+  members: {
+    recipients: number; sent: number; delivered: number | null; failed: number;
+    opened: number; clicked: number; ctaCompleted?: number | null; renewed: number; paid: number;
+  };
+  revenue: { currency: 'TZS'; attributedTzs: number; payments: number };
+  channels: Partial<Record<CommsChannel, { messages: number; sent: number; delivered: number | null; opened: number; clicked: number; failed: number; skipped: number; pending: number }>>;
+  reasons?: { failed: Record<string, number>; skipped: Record<string, number> };
+  conversions?: Array<{ paymentId: string; memberId: string; memberName: string | null; amountTzs: number; paidAt: string | null; via: 'click' | 'open'; touchAt: string | null; renewal: boolean }>;
+  sources?: Array<{
+    type: 'campaign' | 'automation'; id: string; name: string | null; purpose?: CommsPurpose | null; trigger?: CommsAutomationTrigger | null;
+    offsetDays?: number | null; lastSentAt: string | null; recipients: number; sent: number; opened: number; clicked: number; paid: number; attributedTzs: number;
+  }>;
+}
 export type CommsAutomationTrigger = 'membership_activated' | 'membership_expiring' | 'membership_expired' | 'payment_failed' | 'member_inactive';
 export interface CommsAutomation {
   id: string; gymId: string; name: string; trigger: CommsAutomationTrigger; offsetDays: number;

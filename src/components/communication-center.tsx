@@ -24,7 +24,8 @@ import {
 } from './communication-templates';
 import { WhatsAppAdmin } from './communication-whatsapp';
 import { MemberTimeline, MessageLog, Recipients, StatsGrid } from './communication-history';
-import { AutomationsTab } from './communication-automations';
+import { AutomationsTab, automationTitle } from './communication-automations';
+import { ResultsPanel, SourcesTable, periodTitle } from './communication-results';
 
 const TRANSACTIONAL: CommsPurpose[] = ['renewal', 'payment', 'announcement'];
 const CHANNELS: CommsChannel[] = ['in_app', 'push', 'whatsapp'];
@@ -235,6 +236,7 @@ function Home({ scope, token, t, gyms, gymId, setGymId, initialTab, onNew, onOpe
               ))}
             </div>
           </Card>
+          <PeriodResults scope={scope} token={token} t={t} gymId={gymId} onOpen={onOpen} />
           <p className="text-sm font-semibold">{t('comms.overview.recent')}</p>
           <CampaignList t={t} campaigns={overview.recent} onOpen={onOpen} />
         </div>
@@ -882,6 +884,12 @@ function Detail({ scope, token, t, id, onBack, onEdit, onOpenMember }: {
       )}
       {delivered && (
         <div className="mt-4">
+          <ResultsPanel t={t} title={t('comms.results.campaignTitle')} deps={[token, scope, c.id]}
+            load={() => api.commsCampaignAnalytics(token, scope, c.id)} />
+        </div>
+      )}
+      {delivered && (
+        <div className="mt-4">
           <p className="mb-2 text-sm font-semibold">{t('comms.history.recipientsTitle')}</p>
           <Recipients scope={scope} token={token} t={t} campaignId={c.id} onOpenMember={onOpenMember} />
         </div>
@@ -908,6 +916,34 @@ function Detail({ scope, token, t, id, onBack, onEdit, onOpenMember }: {
           ? act(() => api.commsDelete(token, scope, c.id), onBack)
           : act(() => api.commsAction(token, scope, c.id, 'cancel'))}
       />
+    </div>
+  );
+}
+
+// ── results for a period (Overview) ─────────────────────────────────────────
+function PeriodResults({ scope, token, t, gymId, onOpen }: {
+  scope: CommsScope; token: string; t: T; gymId?: string; onOpen: (id: string) => void;
+}) {
+  const [days, setDays] = useState(30);
+  return (
+    <div className="space-y-2" data-testid="period-results">
+      <div className="flex items-center gap-2">
+        <p className="text-sm font-semibold">{t('comms.results.title')}</p>
+        <span className="flex-1" />
+        {[7, 30, 90].map(d => (
+          <Button key={d} size="sm" variant={days === d ? 'primary' : 'secondary'} onClick={() => setDays(d)} data-testid={`results-days-${d}`}>
+            {periodTitle(t, d)}
+          </Button>
+        ))}
+      </div>
+      <ResultsPanel t={t} title={periodTitle(t, days)} deps={[token, scope, gymId, days]} conversions={false}
+        load={() => api.commsAnalytics(token, scope, { days, gymId: scope === 'owner' ? gymId : undefined })}>
+        {r => (
+          <SourcesTable t={t} r={r}
+            nameOf={s => (s.type === 'automation' && s.trigger ? automationTitle(t, { trigger: s.trigger, offsetDays: s.offsetDays ?? 0 }) : s.name || t('comms.untitled'))}
+            onOpen={s => { if (s.type === 'campaign') onOpen(s.id); }} />
+        )}
+      </ResultsPanel>
     </div>
   );
 }
