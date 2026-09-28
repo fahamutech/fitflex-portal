@@ -554,7 +554,7 @@ export default function TrainersPage() {
               checked={draft.verified === true}
               onChange={e => setDraft({ ...draft, verified: e.target.checked })}
             />
-            Verified trainer — show the verified badge to members
+            Verified trainer — badge for partners from before KYC; newer trainers get it when KYC-approved
           </label>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <label className="flex items-center gap-3 rounded-[var(--radius-lg)] border border-[var(--color-border-secondary)] p-3 text-sm text-[var(--color-fg-primary)]">

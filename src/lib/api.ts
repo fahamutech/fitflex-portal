@@ -1304,6 +1304,8 @@ export interface KycCaseRow {
   submittedAt: string | null;
   updatedAt: string;
   createdAt: string;
+  /** Uploaded documents waiting for review (e.g. renewals on an approved case). */
+  documentsToReview?: number;
 }
 
 export interface KycAddress { line1?: string; line2?: string; city?: string; region?: string; country?: string; postalCode?: string }

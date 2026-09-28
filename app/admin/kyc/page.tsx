@@ -116,6 +116,9 @@ export default function KycPage() {
                       <td className="px-4 py-3">
                         <Badge tone={CASE_STATUS[r.status].tone}>{CASE_STATUS[r.status].label}</Badge>
                         {r.round > 1 && <span className="ml-2 text-xs text-[var(--color-fg-quaternary)]">Round {r.round}</span>}
+                        {!!r.documentsToReview && r.status !== 'in_review' && r.status !== 'submitted' && (
+                          <span className="ml-2"><Badge tone="warning">{r.documentsToReview} to review</Badge></span>
+                        )}
                       </td>
                       <td className="whitespace-nowrap px-4 py-3">{day(r.submittedAt)}</td>
                       <td className="whitespace-nowrap px-4 py-3">{day(r.updatedAt)}</td>
