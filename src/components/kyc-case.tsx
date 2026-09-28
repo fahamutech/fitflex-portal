@@ -63,6 +63,8 @@ export function KycCaseView({ caseId, partnerName, onBack }: { caseId: string; p
   const c = data.case;
   const status = CASE_STATUS[c.status];
   const inReview = c.status === 'in_review';
+  // Approved and suspended partners can upload renewed documents; those are reviewed one by one.
+  const renewable = c.status === 'approved' || c.status === 'suspended';
   const mine = c.reviewerId === user?.id;
   const name = partnerName || c.legalName || data.people[0]?.fullName || 'Partner';
   const currentDocs = latestDocuments(data.documents);
@@ -141,7 +143,7 @@ export function KycCaseView({ caseId, partnerName, onBack }: { caseId: string; p
                       </div>
                       <div className="flex shrink-0 gap-2">
                         {d.hasFile && <Button size="sm" variant="secondary" onClick={() => setPending({ kind: 'view', doc: d })} data-testid="kyc-doc-view"><Eye className="h-4 w-4" />View</Button>}
-                        {inReview && d.status === 'pending' && <>
+                        {(inReview || renewable) && d.status === 'pending' && <>
                           <Button size="sm" disabled={!d.hasFile} title={d.hasFile ? undefined : 'No file yet'} onClick={() => setPending({ kind: 'document', doc: d, decision: 'accept' })} data-testid="kyc-doc-accept"><Check className="h-4 w-4" />Accept</Button>
                           <Button size="sm" variant="secondary" onClick={() => setPending({ kind: 'document', doc: d, decision: 'reject' })} data-testid="kyc-doc-reject"><X className="h-4 w-4" />Reject</Button>
                         </>}
