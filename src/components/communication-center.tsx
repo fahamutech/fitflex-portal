@@ -16,7 +16,7 @@ import type { MessageKey } from '@/lib/i18n';
 import { Alert, Badge, Button, Card, EmptyState, Field, Input, MetricCard, PageHeader, Segmented, Spinner } from './shared';
 import { ConfirmDialog } from './dialog';
 import {
-  DEEP_LINKS, LOCALES, MessageCard, PURPOSES, PushCard, SENDER_VARIABLES, T, VARIABLES, errorText, fill, textOk,
+  DEEP_LINKS, LOCALES, MessageCard, PURPOSES, PushCard, SENDER_VARIABLES, T, VARIABLES, errorText, fill, skipLabel, textOk,
   variablesIn, when,
 } from './communication-shared';
 import {
@@ -34,12 +34,6 @@ type Step = typeof STEPS[number];
 const STATUS_TONE: Record<CommsStatus, 'gray' | 'warning' | 'brand' | 'success' | 'danger'> = {
   draft: 'gray', scheduled: 'warning', sending: 'brand', sent: 'success', partially_failed: 'warning', failed: 'danger', cancelled: 'gray',
 };
-const SKIP_REASONS = new Set([
-  'in_app_marketing_off', 'push_marketing_off', 'whatsapp_marketing_not_opted_in', 'whatsapp_opted_out',
-  'whatsapp_transactional_off', 'no_device', 'no_phone', 'push_disabled', 'whatsapp_not_configured', 'marketing_cap',
-  'whatsapp_disabled', 'whatsapp_template_not_approved', 'invalid_phone',
-]);
-
 // ── audience conditions on top of a preset ──────────────────────────────────
 type Refine = { expiresWithin?: number; noVisitFor?: number; plans: string[]; gender?: string; age?: [number, number | null]; area?: string };
 const EMPTY_REFINE: Refine = { plans: [] };
@@ -705,7 +699,7 @@ function Composer({ scope, token, t, locale, gymId, campaign, templateId, onClos
             })}
             {reach && Object.keys(reach.counts.skipped).length > 0 && (
               <p className="text-xs text-[var(--color-fg-quaternary)]">
-                {Object.entries(reach.counts.skipped).map(([r, n]) => `${SKIP_REASONS.has(r) ? t(`comms.skip.${r}`) : r}: ${n}`).join(' · ')}
+                {Object.entries(reach.counts.skipped).map(([r, n]) => `${skipLabel(t, r)}: ${n}`).join(' · ')}
               </p>
             )}
           </div>
@@ -877,7 +871,7 @@ function Detail({ scope, token, t, id, onBack, onEdit, onOpenMember }: {
           {c.counts && Object.keys(c.counts.skipped).length > 0 && (
             <div className="mt-3 text-xs text-[var(--color-fg-quaternary)]">
               <p className="font-semibold">{t('comms.detail.whySkipped')}</p>
-              {Object.entries(c.counts.skipped).map(([r, n]) => <p key={r}>{SKIP_REASONS.has(r) ? t(`comms.skip.${r}`) : r}: {n}</p>)}
+              {Object.entries(c.counts.skipped).map(([r, n]) => <p key={r}>{skipLabel(t, r)}: {n}</p>)}
             </div>
           )}
         </Card>
@@ -903,6 +897,10 @@ function Detail({ scope, token, t, id, onBack, onEdit, onOpenMember }: {
           <Button variant="secondary" disabled={busy} onClick={() => act(() => api.commsAction(token, scope, c.id, 'unschedule'))} data-testid="detail-unschedule">{t('comms.detail.unschedule')}</Button>
           <Button variant="secondary" disabled={busy} onClick={() => setConfirm('cancel')} data-testid="detail-cancel">{t('comms.detail.cancel')}</Button>
         </>}
+        <Button variant="ghost" disabled={busy} data-testid="detail-duplicate"
+          onClick={() => act(async () => onEdit((await api.commsDuplicate(token, scope, c.id)).campaign), () => {})}>
+          {t('comms.detail.duplicate')}
+        </Button>
       </div>
       <ConfirmDialog
         open={confirm !== null}

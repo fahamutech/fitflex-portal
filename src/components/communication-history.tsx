@@ -13,19 +13,13 @@ import {
 } from '@/lib/api';
 import { Alert, Badge, Button, Card, EmptyState, Field, Input, PageHeader, Spinner } from './shared';
 import { Dialog } from './dialog';
-import { PURPOSES, T, errorText, fill, when } from './communication-shared';
+import { PURPOSES, T, errorText, fill, skipLabel, when } from './communication-shared';
 
 const CHANNELS: CommsChannel[] = ['in_app', 'push', 'whatsapp'];
 const STATUS_FILTERS = ['reached', 'pending', 'opened', 'failed', 'skipped'];
 const FAILURES = new Set([
   'invalid_recipient', 'recipient_opted_out', 'template_not_approved', 'provider_unavailable', 'provider_failed',
   'rate_limited', 'push_failed', 'push_disabled', 'push_unavailable', 'no_device', 'whatsapp_template_missing', 'channel_not_supported',
-]);
-const SKIPS = new Set([
-  'in_app_marketing_off', 'push_marketing_off', 'whatsapp_marketing_not_opted_in', 'whatsapp_opted_out',
-  'whatsapp_transactional_off', 'no_device', 'no_phone', 'push_disabled', 'whatsapp_not_configured', 'marketing_cap',
-  'whatsapp_disabled', 'whatsapp_template_not_approved', 'invalid_phone',
-  'account_suspended', 'member_not_found', 'not_gym_member',
 ]);
 const STATUS_TONE: Record<string, 'gray' | 'warning' | 'brand' | 'success' | 'danger'> = {
   queued: 'warning', sending: 'warning', sent: 'brand', delivered: 'success', read: 'success', clicked: 'success', failed: 'danger', skipped: 'gray',
@@ -37,7 +31,7 @@ const OUTCOME_TONE: Record<CommsOutcome, 'gray' | 'warning' | 'success' | 'dange
 /** Why a message didn't go out, in words. */
 export function whyNot(t: T, m: Pick<CommsMessage, 'failureReason' | 'skipReason'>): string {
   if (m.failureReason) return FAILURES.has(m.failureReason) ? t(`comms.failure.${m.failureReason}`) : m.failureReason;
-  if (m.skipReason) return SKIPS.has(m.skipReason) ? t(`comms.skip.${m.skipReason}`) : m.skipReason;
+  if (m.skipReason) return skipLabel(t, m.skipReason);
   return '';
 }
 
