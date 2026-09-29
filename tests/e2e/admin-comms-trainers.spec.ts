@@ -27,6 +27,13 @@ test('FitFlex can address a message to trainers instead of members', async ({ pa
       });
     }
     if (url.pathname === '/admin/communications/campaigns') return route.fulfill({ json: { campaigns: [], nextCursor: null } });
+    if (url.pathname === '/admin/communications/analytics') {
+      return route.fulfill({ json: {
+        attribution: { model: 'last_touch', clickWindowDays: 7, openWindowDays: 3 },
+        members: { recipients: 0, sent: 0, delivered: null, failed: 0, opened: 0, clicked: 0, ctaCompleted: null, renewed: 0, paid: 0 },
+        revenue: { currency: 'TZS', attributedTzs: 0, payments: 0 }, channels: {}, sources: [],
+      } });
+    }
     if (url.pathname === '/admin/communications/segments') {
       segmentQueries.push(url.search);
       const trainers = url.searchParams.get('recipients') === 'trainers';

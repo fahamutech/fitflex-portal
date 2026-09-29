@@ -110,6 +110,9 @@ export const api = {
     request<{ campaign: CommsCampaign }>(`/${scope}/communications/campaigns/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(body) }, token),
   commsDelete: (token: string, scope: CommsScope, id: string) =>
     request<{ ok: boolean }>(`/${scope}/communications/campaigns/${encodeURIComponent(id)}`, { method: 'DELETE' }, token),
+  /** Any campaign copied into a new draft (same audience, message and channels). */
+  commsDuplicate: (token: string, scope: CommsScope, id: string) =>
+    request<{ campaign: CommsCampaign }>(`/${scope}/communications/campaigns/${encodeURIComponent(id)}/duplicate`, { method: 'POST' }, token),
   commsAction: (token: string, scope: CommsScope, id: string, action: 'cancel' | 'unschedule') =>
     request<{ campaign: CommsCampaign }>(`/${scope}/communications/campaigns/${encodeURIComponent(id)}/${action}`, { method: 'POST' }, token),
   commsSchedule: (token: string, scope: CommsScope, id: string, scheduledAt: string, confirmLargeSend = false) =>
