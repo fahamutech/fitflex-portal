@@ -18,6 +18,7 @@ function isTrainerPass(payment: PaymentRequest): boolean {
 
 function paymentTierLabel(payment: PaymentRequest): string {
   if (payment.bookingGroupId) return 'TRAINER SESSION';
+  if (payment.orderId) return 'SHOP ORDER';
   const plan = (payment.subscription?.plan || payment.plan || '').toUpperCase();
   if (isTrainerPass(payment)) return plan ? `TRAINER PASS · ${plan}` : 'TRAINER PASS';
   if (payment.subscription?.type === 'direct_sub') return plan ? `GYM PLAN · ${plan}` : 'GYM PLAN';
