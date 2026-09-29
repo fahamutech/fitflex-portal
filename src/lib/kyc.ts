@@ -34,7 +34,7 @@ export const ITEM_STATUS: Record<KycItemStatus, { label: string; tone: BadgeTone
 export const SECTION_LABEL: Record<string, string> = {
   identity: 'Identity', business: 'Business', operational: 'Operations', settlement: 'Payout',
   professional: 'Professional', representative: 'Representative', marketplace: 'Marketplace',
-  company: 'Company', commercial: 'Commercial',
+  company: 'Company', commercial: 'Commercial', agreements: 'Agreements',
 };
 
 const ITEM_LABEL: Record<string, string> = {
@@ -51,6 +51,7 @@ const ITEM_LABEL: Record<string, string> = {
   delivery: 'Delivery', returns: 'Returns policy', settlement: 'Settlement account',
   seats: 'Seats', pass_tier: 'Pass tier', subsidy: 'Subsidy', billing_cycle: 'Billing cycle',
   contract: 'Signed contract', billing_contact: 'Billing contact',
+  partner_terms: 'Partner terms', kyc_consent: 'Verification consent',
 };
 
 /** "business.tin_certificate" → "TIN certificate". */
@@ -58,6 +59,11 @@ export function itemLabel(key: string) {
   const field = key.split('.').pop() ?? key;
   return ITEM_LABEL[field] ?? field.replace(/_/g, ' ');
 }
+
+export const AGREEMENT_LABEL: Record<string, string> = {
+  partner_agreement: 'Partner terms', kyc_consent: 'Verification consent', corporate_contract: 'Corporate contract',
+  platform_terms: 'Platform terms', commission_schedule: 'Commission schedule', data_processing: 'Data processing',
+};
 
 export const REQUIREMENT_LABEL: Record<string, string> = {
   owner_id: 'Owner ID', trainer_id: 'Trainer ID', representative_id: 'Representative ID',
@@ -147,7 +153,9 @@ export function eventLine(e: { eventType: string; fromStatus: string | null; toS
     case 'profile_updated': return 'Business details updated';
     case 'settlement_account_changed': return `Payout account ${d.change ?? 'changed'}${d.primary ? ' (now the payout account)' : ''}`;
     case 'check_recorded': return `Site visit recorded: ${d.result ?? ''}${d.tier ? `, ${GYM_TIER_LABEL[String(d.tier)] ?? d.tier}` : ''}`;
-    case 'agreement_accepted': return `Contract recorded: ${d.version ?? ''}`;
+    case 'agreement_accepted': return d.agreementType && d.agreementType !== 'corporate_contract'
+      ? `Accepted ${AGREEMENT_LABEL[String(d.agreementType)] ?? d.agreementType} (${d.version ?? ''})`
+      : `Contract recorded: ${d.version ?? ''}`;
     case 'reviewer_assigned': return 'Reviewer changed';
     default: return e.eventType.replace(/_/g, ' ');
   }
