@@ -1,11 +1,22 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { CheckCircle2, RefreshCw, ShieldCheck, ShieldOff, UserRoundCheck, UserRoundX, XCircle } from 'lucide-react';
+import Link from 'next/link';
+import { BadgeCheck, CheckCircle2, RefreshCw, UserRoundCheck, UserRoundX, XCircle } from 'lucide-react';
 import { useApp } from '../../providers';
 import { api, VendorSummary } from '@/lib/api';
+import { CASE_STATUS } from '@/lib/kyc';
 import { Alert, Badge, Button, Card, PageHeader, Spinner } from '@/components/shared';
 import { ColumnDef, DataTable } from '@/components/data-table';
+
+/** A vendor is "verified" by their KYC case; existing vendors predate KYC. */
+function KycBadge({ vendor, t }: { vendor: VendorSummary; t: ReturnType<typeof useApp>['t'] }) {
+  if (vendor.kycStatus) {
+    const s = CASE_STATUS[vendor.kycStatus];
+    return <Badge tone={s.tone}>{t('vendors.kyc')}: {s.label}</Badge>;
+  }
+  return <Badge tone={vendor.kycExempt ? 'gray' : 'warning'}>{t(vendor.kycExempt ? 'vendors.kycExisting' : 'vendors.kycNotStarted')}</Badge>;
+}
 
 function approvalTone(status: VendorSummary['approvalStatus']) {
   if (status === 'approved') return 'success' as const;
@@ -70,7 +81,7 @@ export default function VendorsPage() {
       key: 'approvalStatus', header: t('vendors.approval'), sortable: true,
       cell: (vendor) => <div className="flex flex-wrap gap-1">
         <Badge tone={approvalTone(vendor.approvalStatus)}>{t(`vendors.${vendor.approvalStatus === 'pending_approval' ? 'pending' : vendor.approvalStatus}`)}</Badge>
-        <Badge tone={vendor.verified ? 'success' : 'gray'}>{t(vendor.verified ? 'vendors.verified' : 'vendors.unverified')}</Badge>
+        <KycBadge vendor={vendor} t={t} />
       </div>,
     },
     {
@@ -99,9 +110,10 @@ export default function VendorsPage() {
         filterPlaceholder={t('vendors.title')}
         emptyState={t('vendors.empty')}
         actions={(vendor) => <div className="flex flex-wrap justify-end gap-1">
-          {vendor.approvalStatus !== 'approved' && <Button variant="ghost" size="sm" title={t('vendors.approve')} disabled={busyId === vendor.id} onClick={() => update(vendor, { approvalStatus: 'approved' })}><CheckCircle2 className="h-4 w-4 text-[var(--color-success-600)]" /></Button>}
-          {vendor.approvalStatus !== 'rejected' && <Button variant="ghost" size="sm" title={t('vendors.reject')} disabled={busyId === vendor.id} onClick={() => update(vendor, { approvalStatus: 'rejected' })}><XCircle className="h-4 w-4 text-[var(--color-error-600)]" /></Button>}
-          <Button variant="ghost" size="sm" title={t(vendor.verified ? 'vendors.unverify' : 'vendors.verify')} disabled={busyId === vendor.id} onClick={() => update(vendor, { verified: !vendor.verified })}>{vendor.verified ? <ShieldOff className="h-4 w-4" /> : <ShieldCheck className="h-4 w-4" />}</Button>
+          {/* New vendors are approved through their KYC case. */}
+          {!vendor.kycExempt && <Link href="/admin/kyc" title={t('vendors.kycReview')} className="inline-flex items-center rounded-md px-2 py-1 text-[var(--color-brand-700)] hover:bg-[var(--color-bg-secondary)]"><BadgeCheck className="h-4 w-4" /></Link>}
+          {vendor.kycExempt && vendor.approvalStatus !== 'approved' && <Button variant="ghost" size="sm" title={t('vendors.approve')} disabled={busyId === vendor.id} onClick={() => update(vendor, { approvalStatus: 'approved' })}><CheckCircle2 className="h-4 w-4 text-[var(--color-success-600)]" /></Button>}
+          {vendor.kycExempt && vendor.approvalStatus !== 'rejected' && <Button variant="ghost" size="sm" title={t('vendors.reject')} disabled={busyId === vendor.id} onClick={() => update(vendor, { approvalStatus: 'rejected' })}><XCircle className="h-4 w-4 text-[var(--color-error-600)]" /></Button>}
           <Button variant="ghost" size="sm" title={t(vendor.accountStatus === 'active' ? 'vendors.suspend' : 'vendors.reactivate')} disabled={busyId === vendor.id} onClick={() => update(vendor, { accountStatus: vendor.accountStatus === 'active' ? 'suspended' : 'active' })}>{vendor.accountStatus === 'active' ? <UserRoundX className="h-4 w-4" /> : <UserRoundCheck className="h-4 w-4" />}</Button>
         </div>}
       />

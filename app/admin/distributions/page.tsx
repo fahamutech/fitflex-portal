@@ -2,7 +2,7 @@
 import { useEffect, useState, useMemo } from 'react';
 import { RefreshCw, CheckCircle, Upload } from 'lucide-react';
 import { useApp } from '../../providers';
-import { api, PeriodDistribution, PeriodMemberDetail, Invoice } from '@/lib/api';
+import { api, ApiError, PeriodDistribution, PeriodMemberDetail, Invoice } from '@/lib/api';
 import { Badge, Button, PageHeader, Alert, Spinner, Card, Field } from '@/components/shared';
 import { DataTable, ColumnDef } from '@/components/data-table';
 import { Dialog, DialogFooter } from '@/components/dialog';
@@ -27,11 +27,40 @@ interface DistRow {
   members: PeriodMemberDetail[];
 }
 
+const KYC_HOLD_REASON: Record<string, string> = {
+  kyc_not_started: "the gym owner hasn't started verification",
+  kyc_draft: "the gym owner hasn't submitted verification yet",
+  kyc_submitted: 'verification is waiting for review',
+  kyc_in_review: 'verification is being reviewed',
+  kyc_info_requested: 'verification is waiting on more information from the owner',
+  kyc_rejected: 'verification was rejected',
+};
+
+/** Why an invoice can't be marked paid yet (new gyms need KYC and a verified payout account). */
+function payoutError(e: unknown): string {
+  if (e instanceof ApiError) {
+    const body = (e.body ?? {}) as { error?: string; reason?: string; until?: string };
+    if (body.error === 'payout_on_hold') {
+      return `Payout on hold: ${KYC_HOLD_REASON[body.reason ?? ''] ?? 'the gym owner is not verified yet'}. Review them under Verification.`;
+    }
+    if (body.error === 'payout_account_not_verified') {
+      return "Payout on hold: the gym owner's payout account hasn't been verified yet. Verify it on their case under Verification.";
+    }
+    if (body.error === 'payout_account_cooling_off') {
+      const until = body.until ? new Date(body.until).toLocaleString() : 'the cooling-off period ends';
+      return `Payout on hold: the payout account was changed recently. It can be paid after ${until}.`;
+    }
+    if (body.error) return `Couldn't mark as paid (${body.error.replace(/_/g, ' ')}).`;
+  }
+  return e instanceof Error ? e.message : 'Failed to update invoice';
+}
+
 export default function DistributionsPage() {
   const { token, user } = useApp();
   const [periods, setPeriods]   = useState<PeriodDistribution[]>([]);
   const [loading, setLoading]   = useState(true);
   const [error, setError]       = useState<string | null>(null);
+  const [receiptError, setReceiptError] = useState<string | null>(null);
   const [busy, setBusy]         = useState(false);
   const [balanceFilter, setBalanceFilter] = useState<'all' | 'outstanding' | 'paid'>('all');
 
@@ -99,6 +128,7 @@ export default function DistributionsPage() {
 
   function openReceiptUpload(inv: Invoice) {
     setReceiptDialog(inv);
+    setReceiptError(null);
     setReceiptImages(inv.receiptUrl ? [inv.receiptUrl] : []);
     setPaymentRef(inv.paymentReference || '');
   }
@@ -117,7 +147,7 @@ export default function DistributionsPage() {
       setDetailRow(null);
       await load();
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to update invoice');
+      setReceiptError(payoutError(e));
     } finally {
       setBusy(false);
     }
@@ -304,6 +334,7 @@ export default function DistributionsPage() {
         size="md"
       >
         <div className="space-y-4">
+          {receiptError && <Alert tone="warning">{receiptError}</Alert>}
           <Field label="Payment reference" hint="Transaction ID, receipt number, or bank reference.">
             <input className="ui-input" value={paymentRef} onChange={e => setPaymentRef(e.target.value)} placeholder="e.g. TXN-2024-001234" />
           </Field>
