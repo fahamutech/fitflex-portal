@@ -25,6 +25,7 @@ const SKIPS = new Set([
   'in_app_marketing_off', 'push_marketing_off', 'whatsapp_marketing_not_opted_in', 'whatsapp_opted_out',
   'whatsapp_transactional_off', 'no_device', 'no_phone', 'push_disabled', 'whatsapp_not_configured', 'marketing_cap',
   'whatsapp_disabled', 'whatsapp_template_not_approved', 'invalid_phone',
+  'account_suspended', 'member_not_found', 'not_gym_member',
 ]);
 const STATUS_TONE: Record<string, 'gray' | 'warning' | 'brand' | 'success' | 'danger'> = {
   queued: 'warning', sending: 'warning', sent: 'brand', delivered: 'success', read: 'success', clicked: 'success', failed: 'danger', skipped: 'gray',
