@@ -1459,6 +1459,6 @@ export interface KycCaseDetail {
   settlementAccounts: KycSettlementAccount[];
   checklist: KycChecklist;
   checks: KycCheck[];
-  agreements: Array<{ id: string; agreementType: string; version: string; status: string; acceptedAt: string }>;
+  agreements: Array<{ id: string; agreementType: string; version: string; status: string; acceptedAt: string; acceptedIp?: string | null; acceptedUserAgent?: string | null }>;
   events: KycEvent[];
 }

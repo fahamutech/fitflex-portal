@@ -1,12 +1,12 @@
 'use client';
 import { useCallback, useEffect, useState } from 'react';
 import {
-  ArrowLeft, Check, Eye, FileText, History, Lock, MapPin, RefreshCw, ShieldAlert, ShieldCheck, UserCheck, Wallet, X,
+  ArrowLeft, Check, Eye, FileText, History, Lock, MapPin, RefreshCw, ScrollText, ShieldAlert, ShieldCheck, UserCheck, Wallet, X,
 } from 'lucide-react';
 import { useApp } from '../../app/providers';
 import { api, KycCaseDetail, KycChecklistItem, KycDecision, KycDocument, KycSettlementAccount } from '@/lib/api';
 import {
-  CASE_STATUS, DECISION_COPY, GYM_TIERS, GYM_TIER_LABEL, ITEM_STATUS, PARTNER_TYPE_LABEL, REASON_LABEL, REQUIREMENT_LABEL,
+  AGREEMENT_LABEL, CASE_STATUS, DECISION_COPY, GYM_TIERS, GYM_TIER_LABEL, ITEM_STATUS, PARTNER_TYPE_LABEL, REASON_LABEL, REQUIREMENT_LABEL,
   SECTION_LABEL, addressLine, dateTime, day, errorMessage, eventLine, itemLabel,
 } from '@/lib/kyc';
 import { Alert, Badge, Button, Card, CardContent, CardHeader, Field, Spinner } from '@/components/shared';
@@ -178,6 +178,29 @@ export function KycCaseView({ caseId, partnerName, onBack }: { caseId: string; p
                           <Button size="sm" variant="secondary" onClick={() => setPending({ kind: 'account', account: a, decision: 'reject' })}><X className="h-4 w-4" />Reject</Button>
                         </div>
                       )}
+                    </li>
+                  ))}
+                </ul>
+              </CardContent>
+            </Card>
+          )}
+
+          {data.agreements.length > 0 && (
+            <Card>
+              <CardHeader><h2 className="flex items-center gap-2 font-semibold"><ScrollText className="h-4 w-4" />Agreements</h2></CardHeader>
+              <CardContent className="p-0">
+                <ul className="divide-y divide-[var(--color-border-secondary)]">
+                  {data.agreements.map(a => (
+                    <li key={a.id} className="px-5 py-4 text-sm" data-testid={`kyc-agreement-${a.agreementType}`}>
+                      <p className="flex flex-wrap items-center gap-2 font-medium">
+                        {AGREEMENT_LABEL[a.agreementType] ?? a.agreementType}
+                        <span className="text-xs text-[var(--color-fg-quaternary)]">version {a.version}</span>
+                        <Badge tone={a.status === 'accepted' ? 'success' : 'gray'}>{a.status[0].toUpperCase() + a.status.slice(1)}</Badge>
+                      </p>
+                      <p className="text-xs text-[var(--color-fg-tertiary)]">
+                        {[`${a.agreementType === 'corporate_contract' ? 'Signed' : 'Accepted'} ${day(a.acceptedAt)}`,
+                          a.acceptedIp && `from ${a.acceptedIp}`, a.acceptedUserAgent].filter(Boolean).join(' · ')}
+                      </p>
                     </li>
                   ))}
                 </ul>
