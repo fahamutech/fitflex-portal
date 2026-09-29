@@ -682,10 +682,12 @@ export interface Invoice {
 export interface PaymentRequest {
   id: string;
   memberId: string;
-  /** Null when the request pays for a trainer booking instead. */
+  /** Null when the request pays for a trainer booking or a shop order instead. */
   subscriptionId: string | null;
   /** Set when the request pays for a group of trainer booking slots. */
   bookingGroupId?: string | null;
+  /** Set when the request pays for a marketplace order. */
+  orderId?: string | null;
   plan?: string | null;
   currency?: string | null;
   tier: string | null;
