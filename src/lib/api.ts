@@ -321,6 +321,28 @@ export const api = {
     request<{ beneficiary: B2BBeneficiary }>(`/b2b/organizations/${encodeURIComponent(id)}/beneficiaries`, { method: 'POST', body: JSON.stringify(body) }, token),
   setB2BBeneficiaryStatus: (token: string, id: string, beneficiaryId: string, status: string) =>
     request<{ beneficiary: B2BBeneficiary }>(`/b2b/organizations/${encodeURIComponent(id)}/beneficiaries/${encodeURIComponent(beneficiaryId)}/status`, { method: 'POST', body: JSON.stringify({ status }) }, token),
+  // ── B2B wellness programmes and benefits ──
+  b2bProgramReference: () => request<B2BProgramReference>('/b2b/programs/reference'),
+  adminB2BPrograms: (token: string, params: { status?: string; organizationId?: string; limit?: number } = {}) =>
+    request<Paged<B2BProgram>>(`/admin/b2b/programs${qs(params)}`, {}, token),
+  b2bPrograms: (token: string, orgId: string) =>
+    request<Paged<B2BProgram>>(`/b2b/organizations/${encodeURIComponent(orgId)}/programs?limit=100`, {}, token),
+  b2bProgram: (token: string, orgId: string, programId: string) =>
+    request<{ program: B2BProgram; benefits: B2BBenefit[] }>(`/b2b/organizations/${encodeURIComponent(orgId)}/programs/${encodeURIComponent(programId)}`, {}, token),
+  createB2BProgram: (token: string, orgId: string, body: B2BProgramInput) =>
+    request<{ program: B2BProgram }>(`/b2b/organizations/${encodeURIComponent(orgId)}/programs`, { method: 'POST', body: JSON.stringify(body) }, token),
+  updateB2BProgram: (token: string, orgId: string, programId: string, body: Partial<B2BProgramInput>) =>
+    request<{ program: B2BProgram }>(`/b2b/organizations/${encodeURIComponent(orgId)}/programs/${encodeURIComponent(programId)}`, { method: 'PUT', body: JSON.stringify(body) }, token),
+  setB2BProgramStatus: (token: string, orgId: string, programId: string, status: string, reason?: string) =>
+    request<{ program: B2BProgram }>(`/b2b/organizations/${encodeURIComponent(orgId)}/programs/${encodeURIComponent(programId)}/status`, { method: 'POST', body: JSON.stringify({ status, reason }) }, token),
+  b2bProgramEligibility: (token: string, orgId: string, programId: string, params: { benefitId?: string; include?: 'all'; limit?: number } = {}) =>
+    request<Paged<B2BEligibilityRow> & { counts: { beneficiaries: number; wouldBeEligible: number; eligibleToday: number } }>(`/b2b/organizations/${encodeURIComponent(orgId)}/programs/${encodeURIComponent(programId)}/eligibility${qs(params)}`, {}, token),
+  createB2BBenefit: (token: string, orgId: string, programId: string, body: B2BBenefitInput) =>
+    request<{ benefit: B2BBenefit }>(`/b2b/organizations/${encodeURIComponent(orgId)}/programs/${encodeURIComponent(programId)}/benefits`, { method: 'POST', body: JSON.stringify(body) }, token),
+  updateB2BBenefit: (token: string, orgId: string, programId: string, benefitId: string, body: Partial<B2BBenefitInput>) =>
+    request<{ benefit: B2BBenefit }>(`/b2b/organizations/${encodeURIComponent(orgId)}/programs/${encodeURIComponent(programId)}/benefits/${encodeURIComponent(benefitId)}`, { method: 'PUT', body: JSON.stringify(body) }, token),
+  setB2BBenefitStatus: (token: string, orgId: string, programId: string, benefitId: string, status: string) =>
+    request<{ benefit: B2BBenefit }>(`/b2b/organizations/${encodeURIComponent(orgId)}/programs/${encodeURIComponent(programId)}/benefits/${encodeURIComponent(benefitId)}/status`, { method: 'POST', body: JSON.stringify({ status }) }, token),
   /** Internal product analytics (aggregates only). Days are member-local (EAT), inclusive. */
   adminAnalytics: (token: string, from: string, to: string) => {
     const qs = new URLSearchParams({ from, to });
@@ -1225,6 +1247,86 @@ export interface B2BBeneficiary {
   enrolledAt: string | null;
   source: 'b2b' | 'corporate_employee';
   readOnly: boolean;
+}
+export type B2BProgramStatus = 'draft' | 'pending' | 'active' | 'paused' | 'expired' | 'cancelled';
+export interface B2BProgramReference {
+  programTypes: Record<string, string>;
+  programStatuses: Record<B2BProgramStatus, B2BProgramStatus[]>;
+  benefitTypes: Record<string, { label: string; fulfilledBy: string; providerKeys: string[] }>;
+  benefitStatuses: Record<string, string[]>;
+  fundingTypes: Record<string, string>;
+  usagePeriods: string[];
+  eligibilityScopes: string[];
+}
+export interface B2BEligibility {
+  scope: 'all' | 'groups' | 'selected';
+  groups: string[];
+  beneficiaryIds: string[];
+  beneficiaryTypes: string[];
+  enrolledOnOrBefore: string | null;
+}
+export interface B2BProgramInput {
+  name: string;
+  description?: string | null;
+  programType?: string;
+  startDate: string;
+  endDate?: string | null;
+  eligibility?: Partial<B2BEligibility>;
+  budgetTzs?: number | null;
+}
+export interface B2BProgram extends B2BProgramInput {
+  id: string;
+  organizationId: string;
+  programType: string;
+  endDate: string | null;
+  eligibility: B2BEligibility;
+  status: B2BProgramStatus;
+  effectiveStatus: B2BProgramStatus;
+  budgetTzs: number | null;
+  activatedAt?: string | null;
+  createdAt?: string;
+}
+export interface B2BProviderRules {
+  scope: 'all' | 'selected';
+  gymIds?: string[];
+  gymTiers?: string[];
+  trainerIds?: string[];
+  vendorIds?: string[];
+  productCategories?: string[];
+  challengeIds?: string[];
+}
+export interface B2BBenefitInput {
+  name: string;
+  description?: string | null;
+  benefitType: string;
+  fundingType: string;
+  sponsorAmountTzs?: number | null;
+  sponsorShareBps?: number | null;
+  sponsorCapTzs?: number | null;
+  beneficiaryAmountTzs?: number | null;
+  usageLimit?: number | null;
+  usagePeriod: string;
+  periodSponsorCapTzs?: number | null;
+  eligibility?: { groups: string[]; beneficiaryTypes: string[] } | null;
+  providerRules?: B2BProviderRules;
+  startDate?: string | null;
+  endDate?: string | null;
+  terms?: string | null;
+}
+export interface B2BBenefit extends B2BBenefitInput {
+  id: string;
+  programId: string;
+  status: 'draft' | 'active' | 'inactive';
+  providerRules: B2BProviderRules;
+  validity: { startDate: string; endDate: string | null };
+  fundingSummary: string;
+}
+export interface B2BEligibilityRow {
+  beneficiary: { id: string; displayName: string | null; userId: string | null; beneficiaryType: string; groupName: string | null; status: string; source: string };
+  wouldBeEligible: boolean;
+  reason: string | null;
+  eligibleToday: boolean;
+  todayReason: string | null;
 }
 export interface HrUser {
   id: string;

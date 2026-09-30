@@ -3,9 +3,10 @@ import { useEffect, useState } from 'react';
 import { Building2, Plus, RefreshCw, UserPlus, Users } from 'lucide-react';
 import { useApp } from '../../providers';
 import {
-  api, ApiError, B2BBeneficiary, B2BOrganization, B2BOrganizationUser, B2BReference,
+  api, ApiError, B2BBeneficiary, B2BOrganization, B2BOrganizationUser, B2BProgram, B2BReference,
 } from '@/lib/api';
 import { Alert, Badge, Button, Card, CardContent, CardHeader, Field, PageHeader, Spinner } from '@/components/shared';
+import { B2BPrograms } from '@/components/b2b-programs';
 
 const ERRORS: Record<string, string> = {
   invalid_organization_type: 'Choose an organisation type.',
@@ -54,6 +55,7 @@ export default function AdminB2BPage() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [awaiting, setAwaiting] = useState<B2BProgram[]>([]);
 
   const load = async () => {
     if (!token) return;
@@ -63,6 +65,8 @@ export default function AdminB2BPage() {
       setError('Could not load organisations.');
       setOrgs([]);
     }
+    // Programmes submitted by organisations, waiting for FitFlex to activate them.
+    api.adminB2BPrograms(token, { status: 'pending', limit: 100 }).then(r => setAwaiting(r.items)).catch(() => setAwaiting([]));
   };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { api.b2bReference().then(setRef).catch(() => setRef(null)); }, []);
@@ -174,6 +178,25 @@ export default function AdminB2BPage() {
       />
       {error && <Alert tone="error">{error}</Alert>}
       {notice && <Alert tone="success">{notice}</Alert>}
+
+      {awaiting.length > 0 && (
+        <Card>
+          <CardHeader><span className="text-sm font-semibold">Programmes awaiting activation ({awaiting.length})</span></CardHeader>
+          <CardContent>
+            <ul className="divide-y divide-[var(--color-border-secondary)] text-sm" data-testid="programs-awaiting">
+              {awaiting.map(p => {
+                const org = orgs?.find(o => o.id === p.organizationId);
+                return (
+                  <li key={p.id} className="flex items-center justify-between gap-2 py-2">
+                    <span><span className="font-medium">{p.name}</span> <span className="text-[var(--color-fg-quaternary)]">{org?.legalName ?? p.organizationId} · from {p.startDate}</span></span>
+                    {org && <Button size="sm" variant="secondary" onClick={() => open(org)}>Review</Button>}
+                  </li>
+                );
+              })}
+            </ul>
+          </CardContent>
+        </Card>
+      )}
 
       <div className="grid gap-6 lg:grid-cols-5">
         <Card className="lg:col-span-2">
@@ -371,6 +394,8 @@ export default function AdminB2BPage() {
                   )}
                 </CardContent>
               </Card>
+
+              {token && <B2BPrograms token={token} org={selected} beneficiaries={beneficiaries ?? []} onChanged={load} />}
             </>
           )}
         </div>
