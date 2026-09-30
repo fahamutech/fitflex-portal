@@ -19,11 +19,27 @@ export function setOnUnauthorized(cb: (() => void) | null) {
   _onUnauthorized = cb;
 }
 
+// Identity V2 (decision C3b): this build understands persons and personas.
+// The backend ignores the header unless its V2 flags are on.
+export const IDENTITY_V2_CLIENT = 'identity-v2';
+
+/** A persona (User row) of the signed-in Person, as the backend returns it. */
+export interface PersonaSummary {
+  id: string;
+  userType: string;
+  displayName?: string | null;
+  approvalStatus?: string;
+  accountStatus?: string;
+  onboardingCompleted?: boolean;
+  portalOnly?: boolean;
+}
+
 async function request<T>(path: string, opts: RequestInit = {}, token?: string): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
     ...opts,
     headers: {
       'content-type': 'application/json',
+      'x-fitflex-client': IDENTITY_V2_CLIENT,
       ...(token ? { authorization: `Bearer ${token}` } : {}),
       ...(opts.headers || {})
     }
@@ -50,6 +66,13 @@ export const api = {
   firebaseSession: (idToken: string, requestedRole: 'member' | 'trainer' | 'gym_owner' | 'gym_operator' | 'admin' = 'gym_operator') =>
     request<{ token: string; user: { id: string; userType: string; gymId?: string; email?: string; portalUser?: boolean; aclPermissions?: string[] } }>(
       '/auth/firebase/session', { method: 'POST', body: JSON.stringify({ idToken, requestedRole }) }
+    ),
+  // ─── Identity V2 personas (404 while the backend flags are off) ───
+  myPersonas: (token: string) =>
+    request<{ personas: PersonaSummary[]; activePersonaId: string }>('/me/personas', {}, token),
+  switchPersona: (token: string, personaId: string) =>
+    request<{ token: string; user: { id: string; userType: string; gymId?: string; email?: string; portalUser?: boolean; aclPermissions?: string[] }; personas: PersonaSummary[] }>(
+      '/auth/switch-persona', { method: 'POST', body: JSON.stringify({ personaId }) }, token
     ),
   login: (email: string, password: string) =>
     request<{ token: string; user: { id: string; userType: string; gymId?: string; portalUser?: boolean; aclPermissions?: string[] } }>(

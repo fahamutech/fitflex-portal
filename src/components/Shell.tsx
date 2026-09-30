@@ -142,7 +142,23 @@ function SidebarContent({
 }) {
   const pathname = usePathname();
   const router = useRouter();
-  const { t, user, signOut, locale, setLocale } = useApp();
+  const { t, user, signOut, locale, setLocale, switchablePersonas, switchPersona } = useApp();
+  const [switching, setSwitching] = useState(false);
+  const [switchError, setSwitchError] = useState<string | null>(null);
+
+  // Identity V2: move this session onto another portal persona of the same Person.
+  async function onSwitchPersona(personaId: string) {
+    if (!personaId) return;
+    setSwitching(true); setSwitchError(null);
+    try {
+      const next = await switchPersona(personaId);
+      router.replace(next.userType === 'corporate_hr' ? '/hr' : '/dashboard');
+    } catch {
+      setSwitchError(t('nav.switchRoleFailed'));
+    } finally {
+      setSwitching(false);
+    }
+  }
 
   return (
     <div className="flex h-full flex-col">
@@ -210,6 +226,32 @@ function SidebarContent({
             <option value="sw">Kiswahili</option>
           </select>
         </div>
+
+        {/* Identity V2: switch role, only when another portal persona exists */}
+        {switchablePersonas.length > 0 && (
+          <div className="px-3 py-2" data-testid="persona-switcher">
+            <label className="block text-[10px] uppercase tracking-wide text-[var(--color-gray-500)]" htmlFor="persona-select">
+              {t('nav.switchRole')}
+            </label>
+            <select
+              id="persona-select"
+              data-testid="persona-select"
+              disabled={switching}
+              value=""
+              onChange={e => onSwitchPersona(e.target.value)}
+              className="mt-1 w-full rounded-[var(--radius-sm)] bg-[var(--color-gray-800)] px-2 py-1 text-xs text-white border-none outline-none cursor-pointer"
+            >
+              <option value="" disabled>{t('nav.switchRoleChoose')}</option>
+              {switchablePersonas.map(p => (
+                <option key={p.id} value={p.id}>
+                  {p.userType === 'corporate_hr' ? t('nav.personaHr') : p.userType === 'gym_staff' ? t('nav.personaStaff') : t('nav.personaOwner')}
+                  {p.approvalStatus === 'pending_approval' ? ` · ${t('nav.personaPending')}` : ''}
+                </option>
+              ))}
+            </select>
+            {switchError && <p className="mt-1 text-[10px] text-[var(--color-error-300)]" role="alert">{switchError}</p>}
+          </div>
+        )}
 
         {/* User row + sign out */}
         <div className="flex items-center gap-3 rounded-[var(--radius-md)] px-3 py-2">
