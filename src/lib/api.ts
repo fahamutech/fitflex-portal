@@ -272,6 +272,32 @@ export const api = {
     request<{ hrUser: HrUser }>(`/admin/corporate/${encodeURIComponent(corporateId)}/hr-users`, { method: 'POST', body: JSON.stringify(body) }, token),
   setHrUserStatus: (token: string, corporateId: string, userId: string, status: 'active' | 'suspended') =>
     request<{ hrUser: HrUser }>(`/admin/corporate/${encodeURIComponent(corporateId)}/hr-users/${encodeURIComponent(userId)}/status`, { method: 'POST', body: JSON.stringify({ status }) }, token),
+  // ── B2B organisations (admin, 'b2b' scope) ──
+  b2bReference: () => request<B2BReference>('/b2b/reference'),
+  b2bOrganizations: (token: string, params: { type?: string; status?: string; search?: string; limit?: number; cursor?: number | null } = {}) =>
+    request<Paged<B2BOrganization>>(`/admin/b2b/organizations${qs(params)}`, {}, token),
+  createB2BOrganization: (token: string, body: Partial<B2BOrganization>) =>
+    request<{ organization: B2BOrganization }>('/admin/b2b/organizations', { method: 'POST', body: JSON.stringify(body) }, token),
+  b2bOrganization: (token: string, id: string) =>
+    request<{ organization: B2BOrganization; access: { role: string; permissions: string[] } }>(`/b2b/organizations/${encodeURIComponent(id)}`, {}, token),
+  updateB2BOrganization: (token: string, id: string, body: Partial<B2BOrganization>) =>
+    request<{ organization: B2BOrganization }>(`/b2b/organizations/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify(body) }, token),
+  setB2BOrganizationStatus: (token: string, id: string, status: string, reason?: string) =>
+    request<{ organization: B2BOrganization }>(`/admin/b2b/organizations/${encodeURIComponent(id)}/status`, { method: 'POST', body: JSON.stringify({ status, reason }) }, token),
+  syncCorporateOrganizations: (token: string) =>
+    request<{ created: number; existing: number }>('/admin/b2b/corporate-sync', { method: 'POST' }, token),
+  b2bOrganizationUsers: (token: string, id: string, params: { status?: string; limit?: number } = {}) =>
+    request<Paged<B2BOrganizationUser>>(`/b2b/organizations/${encodeURIComponent(id)}/users${qs(params)}`, {}, token),
+  addB2BOrganizationUser: (token: string, id: string, body: { userId: string; role: string; permissions?: string[] }) =>
+    request<{ organizationUser: B2BOrganizationUser }>(`/b2b/organizations/${encodeURIComponent(id)}/users`, { method: 'POST', body: JSON.stringify(body) }, token),
+  updateB2BOrganizationUser: (token: string, id: string, orgUserId: string, body: { role?: string; status?: string; permissions?: string[] }) =>
+    request<{ organizationUser: B2BOrganizationUser }>(`/b2b/organizations/${encodeURIComponent(id)}/users/${encodeURIComponent(orgUserId)}`, { method: 'PUT', body: JSON.stringify(body) }, token),
+  b2bBeneficiaries: (token: string, id: string, params: { status?: string; search?: string; limit?: number } = {}) =>
+    request<Paged<B2BBeneficiary>>(`/b2b/organizations/${encodeURIComponent(id)}/beneficiaries${qs(params)}`, {}, token),
+  enrollB2BBeneficiary: (token: string, id: string, body: { userId: string; beneficiaryType?: string; externalReference?: string; groupName?: string; status?: string }) =>
+    request<{ beneficiary: B2BBeneficiary }>(`/b2b/organizations/${encodeURIComponent(id)}/beneficiaries`, { method: 'POST', body: JSON.stringify(body) }, token),
+  setB2BBeneficiaryStatus: (token: string, id: string, beneficiaryId: string, status: string) =>
+    request<{ beneficiary: B2BBeneficiary }>(`/b2b/organizations/${encodeURIComponent(id)}/beneficiaries/${encodeURIComponent(beneficiaryId)}/status`, { method: 'POST', body: JSON.stringify({ status }) }, token),
   /** Internal product analytics (aggregates only). Days are member-local (EAT), inclusive. */
   adminAnalytics: (token: string, from: string, to: string) => {
     const qs = new URLSearchParams({ from, to });
@@ -1116,6 +1142,66 @@ export interface CorporateAccount {
   status: string;
   seatLimit?: number;
   industrySector?: string;
+}
+export interface Paged<T> {
+  items: T[];
+  total: number;
+  nextCursor: number | null;
+}
+export type B2BOrganizationStatus = 'pending' | 'active' | 'suspended' | 'inactive';
+export interface B2BReference {
+  organizationTypes: Record<string, string>;
+  organizationStatuses: Record<B2BOrganizationStatus, B2BOrganizationStatus[]>;
+  organizationUserRoles: string[];
+  organizationUserStatuses: string[];
+  permissions: string[];
+  beneficiaryTypes: Record<string, string>;
+  beneficiaryStatuses: Record<string, string[]>;
+  industrySectors: Record<string, string>;
+}
+export interface B2BOrganization {
+  id: string;
+  organizationType: string;
+  legalName: string;
+  tradingName?: string | null;
+  industrySector?: string | null;
+  registrationNumber?: string | null;
+  taxIdentificationNumber?: string | null;
+  email?: string | null;
+  phone?: string | null;
+  address?: Record<string, string> | null;
+  status: B2BOrganizationStatus;
+  statusReason?: string | null;
+  legacyCorporateId?: string | null;
+  /** 'corporate' = mapped from a CorporateAccount, which owns `managedFields`. */
+  source: 'b2b' | 'corporate';
+  managedFields: string[];
+  kyc: { supported: boolean; caseId: string | null; status: string | null };
+  createdAt?: string;
+}
+export interface B2BOrganizationUser {
+  id: string;
+  organizationId: string;
+  userId: string;
+  role: string;
+  permissions: string[];
+  status: 'active' | 'suspended' | 'removed';
+  source: 'b2b' | 'corporate_hr';
+  readOnly: boolean;
+  user: { displayName: string | null; email: string | null; userType: string } | null;
+}
+export interface B2BBeneficiary {
+  id: string;
+  organizationId: string;
+  userId: string | null;
+  displayName: string | null;
+  externalReference: string | null;
+  beneficiaryType: string;
+  groupName: string | null;
+  status: 'pending' | 'active' | 'suspended' | 'inactive';
+  enrolledAt: string | null;
+  source: 'b2b' | 'corporate_employee';
+  readOnly: boolean;
 }
 export interface HrUser {
   id: string;

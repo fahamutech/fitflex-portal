@@ -30,6 +30,7 @@ import {
   Gift,
   Flag,
   Building,
+  Network,
   Megaphone,
   Star,
 } from 'lucide-react';
@@ -80,6 +81,7 @@ const ADMIN_NAV: NavItem[] = [
   { href: '/admin/reviews',       labelKey: 'admin.nav.reviews',        icon: Star,            groupKey: 'nav.group.platform', aclScope: 'social' },
   { href: '/admin/communications', labelKey: 'admin.nav.communications', icon: Megaphone,     groupKey: 'nav.group.platform', aclScope: 'communications' },
   { href: '/admin/corporate',     labelKey: 'admin.nav.corporate',      icon: Building,        groupKey: 'nav.group.platform', aclScope: 'corporate' },
+  { href: '/admin/b2b',           labelKey: 'admin.nav.b2b',            icon: Network,         groupKey: 'nav.group.platform', aclScope: 'b2b' },
   { href: '/admin/trainers',      labelKey: 'admin.nav.trainers',       icon: Dumbbell,        groupKey: 'nav.group.platform', aclScope: 'trainers' },
   { href: '/admin/products',      labelKey: 'admin.nav.products',       icon: ShoppingBag,     groupKey: 'nav.group.platform', aclScope: 'shop' },
   { href: '/admin/vendors',       labelKey: 'admin.nav.vendors',        icon: Store,           groupKey: 'nav.group.platform', aclScope: 'shop' },
