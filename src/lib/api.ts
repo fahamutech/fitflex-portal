@@ -269,6 +269,21 @@ export const api = {
   decideSettlementAdjustment: (token: string, id: string, decision: 'apply' | 'reject', reason?: string) =>
     request<unknown>(`/admin/settlements/adjustments/${encodeURIComponent(id)}/${decision}`, { method: 'POST', body: JSON.stringify({ reason }) }, token),
 
+  // ─── Settlement configuration (admin, 'payments' scope) ───
+  settlementConfig: (token: string) => request<SettlementConfig>('/admin/settlement-config', {}, token),
+  draftPassTierVersion: (token: string, body: { tierKey: string; priceTzs: number; visitAllowance: number; reason?: string }) =>
+    request<unknown>('/admin/settlement-config/pass-tiers', { method: 'POST', body: JSON.stringify(body) }, token),
+  draftSettlementRule: (token: string, body: Partial<SettlementRuleValues> & { scopeType: SettlementRuleScope; scopeId?: string | null; name?: string; reason?: string }) =>
+    request<unknown>('/admin/settlement-config/rules', { method: 'POST', body: JSON.stringify(body) }, token),
+  draftGymRateCard: (token: string, body: { gymId: string; retailDailyTzs: number; retailWeeklyTzs: number; retailMonthlyTzs: number; reason?: string }) =>
+    request<unknown>('/admin/settlement-config/rate-cards', { method: 'POST', body: JSON.stringify(body) }, token),
+  draftMissingRateCards: (token: string) =>
+    request<{ drafted: GymRateCard[]; skipped: Array<{ gymId: string; reason: string }> }>('/admin/settlement-config/rate-cards/draft-missing', { method: 'POST' }, token),
+  activateSettlementConfig: (token: string, kind: SettlementConfigKind, id: string, effectiveFrom: string) =>
+    request<unknown>(`/admin/settlement-config/${kind}/${encodeURIComponent(id)}/activate`, { method: 'POST', body: JSON.stringify({ effectiveFrom }) }, token),
+  rejectSettlementConfig: (token: string, kind: SettlementConfigKind, id: string, reason: string) =>
+    request<unknown>(`/admin/settlement-config/${kind}/${encodeURIComponent(id)}/reject`, { method: 'POST', body: JSON.stringify({ reason }) }, token),
+
   // ─── Partner KYC / KYB review (admin, 'kyc' scope) ───
   kycCases: (token: string, filters: { status?: KycCaseStatus; partnerType?: KycPartnerType } = {}) => {
     const q = new URLSearchParams();
@@ -1870,3 +1885,42 @@ export interface GymSettlementDetail {
   visits: SettlementVisit[];
   adjustments: SettlementAdjustment[];
 }
+
+// ─── Settlement configuration ───
+export type SettlementConfigKind = 'pass-tiers' | 'rules' | 'rate-cards';
+export type SettlementConfigStatus = 'draft' | 'active' | 'rejected';
+export type SettlementRuleScope = 'global' | 'pass_tier' | 'gym_tier' | 'gym';
+
+interface SettlementConfigRow {
+  id: string;
+  version: number;
+  status: SettlementConfigStatus;
+  effectiveFrom: string | null;
+  effectiveTo: string | null;
+  reason: string | null;
+  createdBy: string | null;
+  approvedBy: string | null;
+  createdAt?: string;
+}
+
+export interface PassTierVersion extends SettlementConfigRow { tierKey: string; priceTzs: number; visitAllowance: number }
+
+export interface SettlementRuleValues {
+  networkPayoutBps: number | null;
+  dailyDiscountBps: number | null; weeklyDiscountBps: number | null; monthlyDiscountBps: number | null;
+  dailyCeilingTzs: number | null; weeklyCeilingTzs: number | null; monthlyCeilingTzs: number | null;
+}
+
+export interface SettlementRule extends SettlementConfigRow, SettlementRuleValues {
+  name: string | null;
+  scopeType: SettlementRuleScope | 'special_contract';
+  scopeId: string | null;
+}
+
+export interface GymRateCard extends SettlementConfigRow, Omit<SettlementRuleValues, 'networkPayoutBps'> {
+  gymId: string;
+  gymTier: string;
+  retailDailyTzs: number; retailWeeklyTzs: number; retailMonthlyTzs: number;
+}
+
+export interface SettlementConfig { passTierVersions: PassTierVersion[]; rules: SettlementRule[]; rateCards: GymRateCard[] }
