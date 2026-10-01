@@ -343,6 +343,15 @@ export const api = {
     request<{ benefit: B2BBenefit }>(`/b2b/organizations/${encodeURIComponent(orgId)}/programs/${encodeURIComponent(programId)}/benefits/${encodeURIComponent(benefitId)}`, { method: 'PUT', body: JSON.stringify(body) }, token),
   setB2BBenefitStatus: (token: string, orgId: string, programId: string, benefitId: string, status: string) =>
     request<{ benefit: B2BBenefit }>(`/b2b/organizations/${encodeURIComponent(orgId)}/programs/${encodeURIComponent(programId)}/benefits/${encodeURIComponent(benefitId)}/status`, { method: 'POST', body: JSON.stringify({ status }) }, token),
+  // ── B2B benefit usage (consumption ledger) ──
+  b2bProgramUsage: (token: string, orgId: string, programId: string, params: { from?: string; to?: string } = {}) =>
+    request<B2BProgramUsage>(`/b2b/organizations/${encodeURIComponent(orgId)}/programs/${encodeURIComponent(programId)}/usage${qs(params)}`, {}, token),
+  adminB2BConsumptions: (token: string, params: B2BConsumptionFilters = {}) =>
+    request<Paged<B2BConsumption> & { totals: B2BUsageMoney }>(`/admin/b2b/consumptions${qs(params)}`, {}, token),
+  adminB2BConsumption: (token: string, id: string) =>
+    request<{ consumption: B2BConsumption; sourceEvent: Record<string, unknown> | null; settlementCandidate: Record<string, unknown> }>(`/admin/b2b/consumptions/${encodeURIComponent(id)}`, {}, token),
+  reverseB2BConsumption: (token: string, id: string, reason: string) =>
+    request<{ consumption: B2BConsumption }>(`/admin/b2b/consumptions/${encodeURIComponent(id)}/reverse`, { method: 'POST', body: JSON.stringify({ reason }) }, token),
   /** Internal product analytics (aggregates only). Days are member-local (EAT), inclusive. */
   adminAnalytics: (token: string, from: string, to: string) => {
     const qs = new URLSearchParams({ from, to });
@@ -1282,6 +1291,7 @@ export interface B2BProgram extends B2BProgramInput {
   eligibility: B2BEligibility;
   status: B2BProgramStatus;
   effectiveStatus: B2BProgramStatus;
+  statusReason?: string | null;
   budgetTzs: number | null;
   activatedAt?: string | null;
   createdAt?: string;
@@ -1327,6 +1337,36 @@ export interface B2BEligibilityRow {
   reason: string | null;
   eligibleToday: boolean;
   todayReason: string | null;
+}
+export interface B2BUsageMoney { grossTzs: number; sponsorTzs: number; beneficiaryTzs: number }
+export interface B2BUsageRow extends B2BUsageMoney { uses: number }
+export interface B2BProgramUsage {
+  program: { id: string; name: string; status: string; statusReason: string | null };
+  budget: { budgetTzs: number | null; spentTzs: number; remainingTzs: number | null };
+  totals: B2BUsageRow;
+  byStatus: Record<string, number>;
+  byBenefit: (B2BUsageRow & { benefitId: string; benefitName: string | null })[];
+  byProvider: (B2BUsageRow & { providerType: string; providerId: string; providerName: string | null })[];
+  byBeneficiary: (B2BUsageRow & { beneficiaryId: string; beneficiaryName: string | null })[];
+}
+export interface B2BConsumptionFilters {
+  organizationId?: string; programId?: string; benefitId?: string; beneficiaryId?: string; userId?: string;
+  providerId?: string; serviceType?: string; status?: string; from?: string; to?: string; limit?: number; cursor?: number | null;
+}
+export interface B2BConsumption extends B2BUsageMoney {
+  id: string;
+  organizationId: string; organizationName: string | null;
+  programId: string; programName: string | null;
+  benefitId: string; benefitName: string | null;
+  beneficiaryId: string; beneficiaryName: string | null; userId: string | null;
+  sourceType: string; sourceId: string; serviceType: string;
+  providerType: string; providerId: string; providerName: string | null;
+  consumedAt: string; businessDate: string; quantity: number;
+  status: 'pending' | 'approved' | 'rejected' | 'reversed' | 'cancelled';
+  rejectionReason: string | null;
+  verifiedAt: string | null;
+  reversedAt: string | null; reversedBy: string | null; reversalReason: string | null;
+  rulesSnapshot: Record<string, unknown> | null;
 }
 export interface HrUser {
   id: string;
