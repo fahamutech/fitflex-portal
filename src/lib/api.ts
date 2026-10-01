@@ -251,6 +251,24 @@ export const api = {
     request<ChallengeParticipation>(`/${scope}/challenges/${encodeURIComponent(id)}/participants`, {}, token),
   challengeStandings: (token: string, scope: ChallengeScope, id: string) =>
     request<ChallengeStandings>(`/${scope}/challenges/${encodeURIComponent(id)}/leaderboard`, {}, token),
+  // ─── Gym settlements (admin; reads need 'payments', each step its own scope) ───
+  settlementRuns: (token: string, mode?: SettlementMode) =>
+    request<SettlementRun[]>(`/admin/settlements/runs${qs({ mode })}`, {}, token),
+  settlementRun: (token: string, id: string) =>
+    request<{ run: SettlementRun; statements: GymSettlement[] }>(`/admin/settlements/runs/${encodeURIComponent(id)}`, {}, token),
+  runSettlement: (token: string, body: { month: string; mode: SettlementMode }) =>
+    request<{ run: SettlementRun; alreadyRun?: boolean }>('/admin/settlements/runs', { method: 'POST', body: JSON.stringify(body) }, token),
+  settlementStatements: (token: string, filters: { mode?: SettlementMode; status?: GymSettlementStatus; gymId?: string } = {}) =>
+    request<GymSettlement[]>(`/admin/settlements/statements${qs(filters)}`, {}, token),
+  settlementStatement: (token: string, id: string) =>
+    request<GymSettlementDetail>(`/admin/settlements/statements/${encodeURIComponent(id)}`, {}, token),
+  settlementStep: (token: string, id: string, step: SettlementStep, body: { reason?: string; paymentReference?: string; receiptUrl?: string } = {}) =>
+    request<unknown>(`/admin/settlements/statements/${encodeURIComponent(id)}/${step}`, { method: 'POST', body: JSON.stringify(body) }, token),
+  proposeSettlementAdjustment: (token: string, id: string, body: { amountTzs: number; type: 'correction' | 'clawback' | 'manual'; reason: string }) =>
+    request<{ adjustment: SettlementAdjustment }>(`/admin/settlements/statements/${encodeURIComponent(id)}/adjustments`, { method: 'POST', body: JSON.stringify(body) }, token),
+  decideSettlementAdjustment: (token: string, id: string, decision: 'apply' | 'reject', reason?: string) =>
+    request<unknown>(`/admin/settlements/adjustments/${encodeURIComponent(id)}/${decision}`, { method: 'POST', body: JSON.stringify({ reason }) }, token),
+
   // ─── Partner KYC / KYB review (admin, 'kyc' scope) ───
   kycCases: (token: string, filters: { status?: KycCaseStatus; partnerType?: KycPartnerType } = {}) => {
     const q = new URLSearchParams();
@@ -1754,4 +1772,101 @@ export interface KycCaseDetail {
   checks: KycCheck[];
   agreements: Array<{ id: string; agreementType: string; version: string; status: string; acceptedAt: string; acceptedIp?: string | null; acceptedUserAgent?: string | null }>;
   events: KycEvent[];
+}
+
+// ─── Gym settlements ───
+export type SettlementMode = 'live' | 'shadow';
+export type GymSettlementStatus = 'draft' | 'submitted' | 'approved' | 'payable' | 'paid' | 'voided';
+export type SettlementStep = 'submit' | 'reject' | 'approve' | 'hold' | 'release' | 'payable' | 'pay';
+
+export interface SettlementRunException { subscriptionId: string; memberId: string; reason: string; missing?: string[] }
+
+export interface SettlementRun {
+  id: string;
+  mode: SettlementMode;
+  periodStartDate: string;
+  periodEndDate: string;
+  status: 'draft' | 'locked' | 'failed';
+  engineVersion: string;
+  error?: string | null;
+  createdAt?: string;
+  lockedAt?: string | null;
+  configurationSnapshot?: {
+    stats?: { candidateCycles: number; settledCycles: number; skippedCycles: number; statements: number; b2bCycles: number; payableVisits: number; totalPreliminaryTzs: number; totalFinalTzs: number };
+    exceptions?: SettlementRunException[];
+  } | null;
+}
+
+export interface GymSettlement {
+  id: string;
+  runId: string;
+  mode: SettlementMode;
+  gymId: string;
+  gymName: string | null;
+  periodStartDate: string;
+  periodEndDate: string;
+  memberCycleCount: number;
+  qualifyingVisitCount: number;
+  heldVisitCount: number;
+  preliminaryTzs: number;
+  networkAdjustmentTzs: number;
+  adjustmentsTzs: number;
+  carryForwardTzs: number;
+  finalNetTzs: number;
+  status: GymSettlementStatus;
+  holdReason?: string | null;
+  rejectReason?: string | null;
+  destinationSnapshot?: { accountLast4?: string; method?: string; provider?: string; accountName?: string } | null;
+  submittedBy?: string | null;
+  submittedAt?: string | null;
+  approvedAt?: string | null;
+  paidAt?: string | null;
+  paymentReference?: string | null;
+  receiptUrl?: string | null;
+}
+
+export interface GymSettlementLine {
+  id: string;
+  memberId: string;
+  member: { publicId: string | null; displayName: string | null } | null;
+  fundingType: 'platform_pass' | 'b2b_benefit' | null;
+  qualifyingVisitCount: number;
+  heldVisitCount: number;
+  bracket: string | null;
+  rawPreliminaryTzs: number;
+  preliminaryTzs: number;
+  monotonicGuardApplied: boolean;
+  networkAdjustmentTzs: number;
+  finalTzs: number;
+  rateCardSnapshot?: { wholesaleDailyTzs?: number; wholesaleWeeklyTzs?: number; wholesaleMonthlyTzs?: number } | null;
+}
+
+export interface SettlementVisit {
+  id: string;
+  lineId: string | null;
+  checkinId: string;
+  businessDate: string | null;
+  outcome: string;
+  eligibility: string;
+  allowanceSlot: number | null;
+}
+
+export interface SettlementAdjustment {
+  id: string;
+  gymSettlementId: string;
+  amountTzs: number;
+  type: 'correction' | 'clawback' | 'manual' | 'carry_forward';
+  reason: string;
+  status: 'proposed' | 'applied' | 'rejected';
+  createdBy: string;
+  createdAt?: string;
+  appliedAt?: string | null;
+  rejectReason?: string | null;
+}
+
+export interface GymSettlementDetail {
+  statement: GymSettlement;
+  lines: GymSettlementLine[];
+  visits: SettlementVisit[];
+  adjustments: SettlementAdjustment[];
 }
