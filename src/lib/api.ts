@@ -284,6 +284,12 @@ export const api = {
   rejectSettlementConfig: (token: string, kind: SettlementConfigKind, id: string, reason: string) =>
     request<unknown>(`/admin/settlement-config/${kind}/${encodeURIComponent(id)}/reject`, { method: 'POST', body: JSON.stringify({ reason }) }, token),
 
+  // ─── Gym settlements (owner / gym staff with 'payments') ───
+  ownerSettlements: (token: string, gymId?: string) =>
+    request<OwnerStatement[]>(`/owner/settlements${qs({ gymId })}`, {}, token),
+  ownerSettlement: (token: string, id: string) =>
+    request<OwnerStatementDetail>(`/owner/settlements/${encodeURIComponent(id)}`, {}, token),
+
   // ─── Partner KYC / KYB review (admin, 'kyc' scope) ───
   kycCases: (token: string, filters: { status?: KycCaseStatus; partnerType?: KycPartnerType } = {}) => {
     const q = new URLSearchParams();
@@ -1924,3 +1930,45 @@ export interface GymRateCard extends SettlementConfigRow, Omit<SettlementRuleVal
 }
 
 export interface SettlementConfig { passTierVersions: PassTierVersion[]; rules: SettlementRule[]; rateCards: GymRateCard[] }
+
+// ─── Gym settlements, as the gym's owner sees them ───
+export type OwnerStatementStatus = 'preparing' | 'in_review' | 'approved' | 'payment_due' | 'paid';
+
+export interface OwnerStatement {
+  id: string;
+  gymId: string;
+  gymName: string | null;
+  periodStartDate: string;
+  periodEndDate: string;
+  status: OwnerStatementStatus;
+  onHold: boolean;
+  members: number;
+  visits: number;
+  earnedTzs: number;
+  networkAdjustmentTzs: number;
+  adjustmentsTzs: number;
+  carriedForwardTzs: number;
+  payableTzs: number;
+  paidAt: string | null;
+  paymentReference: string | null;
+  receiptUrl: string | null;
+  payoutAccountLast4: string | null;
+}
+
+export interface OwnerStatementLine {
+  memberCode: string | null;
+  funding: 'pass' | 'sponsored';
+  visits: number;
+  visitDates: string[];
+  bracket: string | null;
+  rates: { dailyTzs: number; weeklyTzs: number; monthlyTzs: number } | null;
+  earnedTzs: number;
+  networkAdjustmentTzs: number;
+  finalTzs: number;
+}
+
+export interface OwnerStatementDetail {
+  statement: OwnerStatement;
+  lines: OwnerStatementLine[];
+  adjustments: Array<{ amountTzs: number; type: string; reason: string; appliedAt: string | null }>;
+}
