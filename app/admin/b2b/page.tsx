@@ -57,6 +57,7 @@ export default function AdminB2BPage() {
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [awaiting, setAwaiting] = useState<B2BProgram[]>([]);
+  const [programsKey, setProgramsKey] = useState(0);
 
   const load = async () => {
     if (!token) return;
@@ -127,6 +128,13 @@ export default function AdminB2BPage() {
     setSelected(organization);
     setOrgs(list => (list ?? []).map(o => (o.id === organization.id ? organization : o)));
   }, 'Could not change the status.');
+
+  // Express the company's seat arrangement as a draft programme with a sponsored pass.
+  const convertSeats = () => token && selected?.legacyCorporateId && run(async () => {
+    const { program } = await api.convertCorporateToProgram(token, selected.legacyCorporateId!);
+    setNotice(`Draft programme “${program.name}” created with a sponsored pass. Review it below, then submit and activate it. Seat bills stop once it is live.`);
+    setProgramsKey(k => k + 1);
+  }, 'Could not move seat billing (it may already be a programme).');
 
   const addUser = (e: React.FormEvent) => {
     e.preventDefault();
@@ -296,9 +304,12 @@ export default function AdminB2BPage() {
                     ))}
                   </dl>
                   {mapped ? (
-                    <p className="text-xs text-[var(--color-fg-quaternary)]" data-testid="b2b-mapped-note">
-                      Company from the Companies page. Its details, status, HR logins and staff are managed there and shown here read-only.
-                    </p>
+                    <div className="space-y-2">
+                      <p className="text-xs text-[var(--color-fg-quaternary)]" data-testid="b2b-mapped-note">
+                        Company from the Companies page. Its details, status, HR logins and staff are managed there and shown here read-only.
+                      </p>
+                      <Button size="sm" variant="secondary" disabled={busy} onClick={convertSeats} data-testid="b2b-convert-seats">Move seat billing to a programme</Button>
+                    </div>
                   ) : (
                     <div className="flex flex-wrap gap-2" data-testid="b2b-status-actions">
                       {nextStatuses.map(s => (
@@ -397,7 +408,7 @@ export default function AdminB2BPage() {
                 </CardContent>
               </Card>
 
-              {token && <B2BPrograms token={token} org={selected} beneficiaries={beneficiaries ?? []} onChanged={load} />}
+              {token && <B2BPrograms key={`${selected.id}-${programsKey}`} token={token} org={selected} beneficiaries={beneficiaries ?? []} onChanged={load} />}
             </>
           )}
         </div>

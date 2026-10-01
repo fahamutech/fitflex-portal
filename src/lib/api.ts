@@ -431,6 +431,23 @@ export const api = {
     request<{ consumption: B2BConsumption; sourceEvent: Record<string, unknown> | null; settlementCandidate: Record<string, unknown> }>(`/admin/b2b/consumptions/${encodeURIComponent(id)}`, {}, token),
   reverseB2BConsumption: (token: string, id: string, reason: string) =>
     request<{ consumption: B2BConsumption }>(`/admin/b2b/consumptions/${encodeURIComponent(id)}/reverse`, { method: 'POST', body: JSON.stringify({ reason }) }, token),
+  // ── B2B sponsor billing (FitFlex admin) ──
+  prepareB2BInvoice: (token: string, programId: string, kind: 'prepaid' | 'usage', period: string) =>
+    request<{ invoice: B2BSponsorInvoice | null; added: number; credited?: number }>(`/admin/b2b/programs/${encodeURIComponent(programId)}/invoices/prepare`, { method: 'POST', body: JSON.stringify({ kind, period }) }, token),
+  adminB2BInvoices: (token: string, params: { organizationId?: string; programId?: string; period?: string; kind?: string; status?: string; limit?: number } = {}) =>
+    request<Paged<B2BSponsorInvoice>>(`/admin/b2b/invoices${qs(params)}`, {}, token),
+  adminB2BInvoice: (token: string, invoiceId: string) =>
+    request<{ invoice: B2BSponsorInvoice; lines: B2BSponsorInvoiceLine[] }>(`/admin/b2b/invoices/${encodeURIComponent(invoiceId)}`, {}, token),
+  issueB2BInvoice: (token: string, invoiceId: string, vatRateBps: number) =>
+    request<{ invoice: B2BSponsorInvoice }>(`/admin/b2b/invoices/${encodeURIComponent(invoiceId)}/issue`, { method: 'POST', body: JSON.stringify({ vatRateBps }) }, token),
+  payB2BInvoice: (token: string, invoiceId: string, paymentReference: string) =>
+    request<{ invoice: B2BSponsorInvoice }>(`/admin/b2b/invoices/${encodeURIComponent(invoiceId)}/paid`, { method: 'POST', body: JSON.stringify({ paymentReference }) }, token),
+  voidB2BInvoice: (token: string, invoiceId: string, reason: string) =>
+    request<{ invoice: B2BSponsorInvoice }>(`/admin/b2b/invoices/${encodeURIComponent(invoiceId)}/void`, { method: 'POST', body: JSON.stringify({ reason }) }, token),
+  b2bEntitlements: (token: string, programId: string, period?: string) =>
+    request<{ period: string; counts: Record<string, number>; entitlements: B2BPassEntitlement[] }>(`/admin/b2b/programs/${encodeURIComponent(programId)}/entitlements${qs({ period })}`, {}, token),
+  convertCorporateToProgram: (token: string, corporateId: string) =>
+    request<{ organizationId: string; program: B2BProgram; benefit: B2BBenefit }>(`/admin/b2b/corporate/${encodeURIComponent(corporateId)}/convert`, { method: 'POST' }, token),
   /** Internal product analytics (aggregates only). Days are member-local (EAT), inclusive. */
   adminAnalytics: (token: string, from: string, to: string) => {
     const qs = new URLSearchParams({ from, to });
@@ -1361,6 +1378,8 @@ export interface B2BProgramInput {
   endDate?: string | null;
   eligibility?: Partial<B2BEligibility>;
   budgetTzs?: number | null;
+  /** Discount on the pass tier's price, basis points. FitFlex admins only. */
+  discountBps?: number;
 }
 export interface B2BProgram extends B2BProgramInput {
   id: string;
@@ -1401,6 +1420,8 @@ export interface B2BBenefitInput {
   startDate?: string | null;
   endDate?: string | null;
   terms?: string | null;
+  /** Sponsored pass only: the pass tier the member gets. */
+  passTier?: string | null;
 }
 export interface B2BBenefit extends B2BBenefitInput {
   id: string;
@@ -1446,6 +1467,43 @@ export interface B2BConsumption extends B2BUsageMoney {
   verifiedAt: string | null;
   reversedAt: string | null; reversedBy: string | null; reversalReason: string | null;
   rulesSnapshot: Record<string, unknown> | null;
+}
+export interface B2BSponsorInvoice {
+  id: string;
+  number: string;
+  organizationId: string;
+  programId: string;
+  period: string;
+  kind: 'prepaid' | 'usage';
+  status: 'draft' | 'issued' | 'paid' | 'void';
+  /** VAT-inclusive. */
+  totalTzs: number;
+  vatRateBps: number | null;
+  vatTzs: number | null;
+  issuedAt: string | null;
+  paidAt: string | null;
+  paymentReference: string | null;
+  voidReason: string | null;
+}
+export interface B2BSponsorInvoiceLine {
+  id: string;
+  kind: 'pass' | 'usage' | 'credit';
+  description: string;
+  beneficiaryId: string | null;
+  beneficiaryName: string | null;
+  quantity: number;
+  amountTzs: number;
+}
+export interface B2BPassEntitlement {
+  id: string;
+  beneficiaryId: string;
+  beneficiaryName: string | null;
+  period: string;
+  passTier: string;
+  feeTzs: number;
+  sponsorTzs: number;
+  memberTzs: number;
+  status: 'invoiced' | 'scheduled' | 'awaiting_link' | 'awaiting_member' | 'active' | 'void';
 }
 export interface HrUser {
   id: string;
