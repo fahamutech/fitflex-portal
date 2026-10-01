@@ -1,7 +1,7 @@
 'use client';
 import { createContext, ReactNode, useCallback, useContext, useEffect, useState } from 'react';
 import { Locale, MessageKey, t as translate } from '@/lib/i18n';
-import { api, setOnUnauthorized, type PersonaSummary } from '@/lib/api';
+import { api, ApiError, setOnUnauthorized, type PersonaSummary } from '@/lib/api';
 import { PwaRegistration } from '@/components/pwa-registration';
 
 export interface PortalAppUser {
@@ -26,6 +26,8 @@ interface AppCtx {
   /** Identity V2: personas this portal session can switch to (empty when V2 is off). */
   switchablePersonas: PersonaSummary[];
   switchPersona: (personaId: string) => Promise<PortalAppUser>;
+  /** Identity V2: people join a gym by invitation; the forms that set a PIN for them are replaced. */
+  invitesEnabled: boolean;
 }
 
 // Only personas the portal has screens for; members, trainers and vendors
@@ -46,6 +48,7 @@ export function Providers({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AppCtx['user']>(null);
   const [ready, setReady] = useState(false);
   const [personas, setPersonas] = useState<PersonaSummary[]>([]);
+  const [invitesEnabled, setInvitesEnabled] = useState(false);
 
   useEffect(() => {
     const l = (typeof localStorage !== 'undefined' && localStorage.getItem('locale')) as Locale | null;
@@ -74,6 +77,17 @@ export function Providers({ children }: { children: ReactNode }) {
     api.myPersonas(token)
       .then(r => { if (!cancelled) setPersonas(Array.isArray(r.personas) ? r.personas : []); })
       .catch(() => { if (!cancelled) setPersonas([]); });
+    return () => { cancelled = true; };
+  }, [token]);
+
+  // Identity V2: /me/invitations answers only while invitations are switched on.
+  useEffect(() => {
+    if (!token) { setInvitesEnabled(false); return; }
+    let cancelled = false;
+    api.myInvitations(token)
+      .then(r => { if (!cancelled) setInvitesEnabled(Array.isArray(r?.invitations)); })
+      // 'user_not_found' is the route answering for an account with no Person yet: still on.
+      .catch(e => { if (!cancelled) setInvitesEnabled(e instanceof ApiError && e.status === 404 && (e.body as { error?: string } | null)?.error === 'user_not_found'); });
     return () => { cancelled = true; };
   }, [token]);
 
@@ -106,7 +120,7 @@ export function Providers({ children }: { children: ReactNode }) {
   }, [signOut]);
 
   return (
-    <Ctx.Provider value={{ ready, locale, setLocale, t: (k) => translate(locale, k), token, user, signIn, signOut, hasPermission, switchablePersonas, switchPersona }}>
+    <Ctx.Provider value={{ ready, locale, setLocale, t: (k) => translate(locale, k), token, user, signIn, signOut, hasPermission, switchablePersonas, switchPersona, invitesEnabled }}>
       <PwaRegistration />
       {children}
     </Ctx.Provider>

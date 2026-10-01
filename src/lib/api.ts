@@ -34,6 +34,35 @@ export interface PersonaSummary {
   portalOnly?: boolean;
 }
 
+export type InviteRole = 'member' | 'staff' | 'trainer';
+
+/** An invitation as the organisation that sent it sees it (Identity V2 · I6). */
+export interface GymInvitation {
+  id: string;
+  role: InviteRole;
+  status: 'pending' | 'claimed' | 'accepted' | 'declined' | 'cancelled' | 'expired';
+  identifierType: 'phone' | 'email';
+  identifierValue?: string;
+  expiresAt: string;
+  createdAt: string;
+  plan?: { tier: string; durationUnit: 'D' | 'W' | 'M'; startDate: string; endDate: string };
+  paidAmountTzs?: number | null;
+  /** A paid invitation that expired unaccepted: re-issue it or record the refund. */
+  needsResolution?: boolean;
+}
+
+export interface GymInvitationInput {
+  role: InviteRole;
+  phone?: string;
+  email?: string;
+  aclPermissions?: string[];
+  durationUnit?: 'D' | 'W' | 'M';
+  startDate?: string;
+  endDate?: string;
+  tier?: string;
+  paidAmount?: number;
+}
+
 async function request<T>(path: string, opts: RequestInit = {}, token?: string): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
     ...opts,
@@ -70,6 +99,17 @@ export const api = {
   // ─── Identity V2 personas (404 while the backend flags are off) ───
   myPersonas: (token: string) =>
     request<{ personas: PersonaSummary[]; activePersonaId: string }>('/me/personas', {}, token),
+  // Identity V2 · I6: invitations. Every route is 404 while the backend flag is off.
+  myInvitations: (token: string) => request<{ invitations: unknown[] }>('/me/invitations', {}, token),
+  gymLookupPerson: (token: string, gymId: string, contact: { phone?: string; email?: string }) =>
+    request<{ found: boolean; maskedName: string | null }>(`/orgs/gym/${encodeURIComponent(gymId)}/people/lookup`, { method: 'POST', body: JSON.stringify(contact) }, token),
+  /** `token` (the link) is returned once, and only for a newly created invitation. */
+  gymCreateInvitation: (token: string, gymId: string, body: GymInvitationInput) =>
+    request<{ created: boolean; invitation: GymInvitation; token?: string }>(`/orgs/gym/${encodeURIComponent(gymId)}/invitations`, { method: 'POST', body: JSON.stringify(body) }, token),
+  gymInvitations: (token: string, gymId: string) =>
+    request<{ invitations: GymInvitation[] }>(`/orgs/gym/${encodeURIComponent(gymId)}/invitations`, {}, token),
+  gymInvitationAction: (token: string, gymId: string, invitationId: string, action: 'cancel' | 'resend' | 'reissue' | 'refunded') =>
+    request<{ invitation: GymInvitation; token?: string }>(`/orgs/gym/${encodeURIComponent(gymId)}/invitations/${encodeURIComponent(invitationId)}/${action}`, { method: 'POST', body: '{}' }, token),
   switchPersona: (token: string, personaId: string) =>
     request<{ token: string; user: { id: string; userType: string; gymId?: string; email?: string; portalUser?: boolean; aclPermissions?: string[] }; personas: PersonaSummary[] }>(
       '/auth/switch-persona', { method: 'POST', body: JSON.stringify({ personaId }) }, token
