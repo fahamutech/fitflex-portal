@@ -69,6 +69,8 @@ const OPERATOR_NAV: NavItem[] = [
   { href: '/owner/communications', labelKey: 'nav.communications', icon: Megaphone, aclScope: 'communications' },
   // Owners always; gym staff only with the gyms permission (read-only).
   { href: '/owner/reviews', labelKey: 'nav.reviews', icon: Star, aclScope: 'gyms' },
+  // Owners always; gym staff only with the payments permission (read-only).
+  { href: '/owner/statements', labelKey: 'nav.statements', icon: HandCoins, aclScope: 'payments' },
 ];
 
 const ADMIN_NAV: NavItem[] = [
