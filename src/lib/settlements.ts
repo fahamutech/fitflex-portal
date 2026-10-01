@@ -104,3 +104,53 @@ export function lastMonth(now = new Date()) {
   const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1));
   return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
 }
+
+// ── configuration ───────────────────────────────────────────────────────────
+
+export const PASS_TIER_KEYS = ['basic', 'pro', 'premium', 'executive'] as const;
+export const SETTLED_GYM_TIERS = ['standard', 'midtier', 'premium', 'luxury_executive'] as const;
+
+const TIER_LABEL: Record<string, string> = {
+  basic: 'Basic', pro: 'Pro', premium: 'Premium', executive: 'Executive',
+  standard: 'Standard', midtier: 'Mid-tier', luxury_executive: 'Luxury / Executive', online: 'Online',
+};
+export const tierLabel = (key: string | null | undefined) => (key ? TIER_LABEL[key] ?? key : '—');
+
+/** Basis points as a percentage: 2500 → "25%". */
+export const percent = (bps: number | null | undefined) => (bps == null ? '—' : `${bps / 100}%`);
+
+/** What the gym is paid for a rate: the discounted retail rate, up to the ceiling. */
+export const wholesale = (retailTzs: number, discountBps: number | null, ceilingTzs: number | null) =>
+  (discountBps == null || ceilingTzs == null ? null : Math.min(Math.floor((retailTzs * (10000 - discountBps)) / 10000), ceilingTzs));
+
+/** Today in East Africa Time, "YYYY-MM-DD": the earliest date a replacement can start. */
+export const todayEAT = (now = new Date()) => new Date(now.getTime() + 3 * 3600 * 1000).toISOString().slice(0, 10);
+
+const CONFIG_ERRORS: Record<string, string> = {
+  cannot_approve_own_draft: 'You drafted this, so someone else has to activate it.',
+  approver_required: 'You don’t have permission to do that.',
+  acl_forbidden: 'You don’t have permission to do that.',
+  not_a_draft: 'This is no longer a draft. Refresh to see where it stands.',
+  not_found: 'This draft no longer exists.',
+  effective_from_in_past: 'The start date can’t be in the past: a version is already in force.',
+  invalid_effective_from: 'Choose a start date.',
+  overlaps_later_version: 'A version already starts on or after that date. Choose a later date.',
+  rule_missing: 'This gym’s tier has no active discount or ceiling rule for that date. Activate the rule first.',
+  special_contract_reserved: 'Special contracts can’t be activated yet.',
+  tier_key_required: 'Choose a pass.',
+  price_must_be_whole_tzs: 'Enter the price as a whole amount in TZS.',
+  allowance_must_be_whole_number: 'Enter the number of visits as a whole number.',
+  retail_must_be_whole_tzs: 'Enter all three retail rates as whole amounts in TZS.',
+  gym_not_found: 'Choose a gym.',
+  invalid_scope: 'Choose what the rule applies to.',
+  scope_id_mismatch: 'Choose what the rule applies to.',
+  rule_has_no_values: 'Fill in at least one value.',
+  invalid_rule_value: 'Percentages must be between 0 and 100, amounts whole TZS.',
+  network_rule_scope: 'The network share can only be set for all gyms or for a pass.',
+  reimbursement_rule_scope: 'Discounts and ceilings can’t be set per pass.',
+};
+
+export function configError(err: unknown) {
+  const code = (err as { body?: { error?: string } })?.body?.error ?? '';
+  return CONFIG_ERRORS[code] ?? 'Something went wrong.';
+}
