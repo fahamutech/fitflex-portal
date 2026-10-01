@@ -2,9 +2,9 @@
 import { useCallback, useEffect, useState } from 'react';
 import { HandCoins, Play, RefreshCw } from 'lucide-react';
 import { useApp } from '../../providers';
-import { api, GymSettlement, GymSettlementStatus, SettlementMode, SettlementRun } from '@/lib/api';
+import { api, GymSettlement, GymSettlementStatus, SettlementClawbacks, SettlementMode, SettlementRun } from '@/lib/api';
 import { money } from '@/lib/admin-utils';
-import { STATEMENT_STATUS, STATEMENT_TABS, lastMonth, period, settlementError, shortDay, skipReason } from '@/lib/settlements';
+import { STATEMENT_STATUS, STATEMENT_TABS, clawbackSkipReason, lastMonth, period, settlementError, shortDay, signed, skipReason } from '@/lib/settlements';
 import { Alert, Badge, Button, Card, CardContent, Field, PageHeader, Segmented, Spinner } from '@/components/shared';
 import { Dialog, DialogFooter } from '@/components/dialog';
 import { SettlementStatementView } from '@/components/settlement-statement';
@@ -28,6 +28,7 @@ export default function SettlementsPage() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
+  const [clawbacks, setClawbacks] = useState<SettlementClawbacks | null>(null);
 
   // The open statement lives in the URL so it survives a refresh and can be shared.
   useEffect(() => {
@@ -49,6 +50,8 @@ export default function SettlementsPage() {
       const [statements, runRows] = await Promise.all([api.settlementStatements(token, { mode }), api.settlementRuns(token, mode)]);
       setRows(statements);
       setRuns(runRows);
+      // Differences from voided check-ins that no statement has taken yet.
+      setClawbacks(mode === 'live' ? await api.settlementClawbacks(token).catch(() => null) : null);
     } catch (err) {
       setError(settlementError(err));
       setRows([]);
@@ -79,6 +82,20 @@ export default function SettlementsPage() {
       />
       {error && <Alert tone="error">{error}</Alert>}
       {notice && <Alert tone="success">{notice}</Alert>}
+      {clawbacks && clawbacks.pending.length > 0 && (
+        <Alert tone="warning">
+          <span data-testid="settlement-clawbacks-pending">
+            {clawbacks.pending.length === 1 ? 'One amount from a voided check-in is' : `${clawbacks.pending.length} amounts from voided check-ins are`} waiting for the gym’s next statement:{' '}
+            {clawbacks.pending.map(p => `${p.gymName || 'Unnamed gym'} ${signed(p.amountTzs)}`).join(', ')}.
+          </span>
+        </Alert>
+      )}
+      {clawbacks && clawbacks.skipped.length > 0 && (
+        <Alert tone="warning">
+          {clawbacks.skipped.length === 1 ? 'One member cycle with a voided check-in' : `${clawbacks.skipped.length} member cycles with voided check-ins`} could not be recalculated:{' '}
+          {[...new Set(clawbacks.skipped.map(x => clawbackSkipReason(x.reason)))].join('; ')}.
+        </Alert>
+      )}
       {mode === 'shadow' && <Alert tone="info">Shadow statements are a trial calculation. They can’t be submitted, approved or paid.</Alert>}
 
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -134,7 +151,7 @@ export default function SettlementsPage() {
                           <td className="whitespace-nowrap px-4 py-3 text-right font-medium tabular-nums">{money(r.finalNetTzs)}</td>
                           <td className="px-4 py-3">
                             <Badge tone={STATEMENT_STATUS[r.status].tone}>{STATEMENT_STATUS[r.status].label}</Badge>
-                            {r.holdReason && <span className="ml-2"><Badge tone="danger">On hold</Badge></span>}
+                            {r.holdReason && r.status !== 'voided' && <span className="ml-2"><Badge tone="danger">On hold</Badge></span>}
                           </td>
                         </tr>
                       ))}

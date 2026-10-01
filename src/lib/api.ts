@@ -266,6 +266,8 @@ export const api = {
     request<unknown>(`/admin/settlements/statements/${encodeURIComponent(id)}/${step}`, { method: 'POST', body: JSON.stringify(body) }, token),
   proposeSettlementAdjustment: (token: string, id: string, body: { amountTzs: number; type: 'correction' | 'clawback' | 'manual'; reason: string }) =>
     request<{ adjustment: SettlementAdjustment }>(`/admin/settlements/statements/${encodeURIComponent(id)}/adjustments`, { method: 'POST', body: JSON.stringify(body) }, token),
+  /** Differences from voided check-ins: waiting for a draft statement, about to be raised, or needing a person. Nothing is changed. */
+  settlementClawbacks: (token: string) => request<SettlementClawbacks>('/admin/settlements/clawbacks', {}, token),
   decideSettlementAdjustment: (token: string, id: string, decision: 'apply' | 'reject', reason?: string) =>
     request<unknown>(`/admin/settlements/adjustments/${encodeURIComponent(id)}/${decision}`, { method: 'POST', body: JSON.stringify({ reason }) }, token),
 
@@ -1856,7 +1858,7 @@ export interface KycCaseDetail {
 // ─── Gym settlements ───
 export type SettlementMode = 'live' | 'shadow';
 export type GymSettlementStatus = 'draft' | 'submitted' | 'approved' | 'payable' | 'paid' | 'voided';
-export type SettlementStep = 'submit' | 'reject' | 'approve' | 'hold' | 'release' | 'payable' | 'pay';
+export type SettlementStep = 'submit' | 'reject' | 'approve' | 'hold' | 'release' | 'payable' | 'pay' | 'void';
 
 export interface SettlementRunException { subscriptionId: string; memberId: string; reason: string; missing?: string[] }
 
@@ -1895,6 +1897,8 @@ export interface GymSettlement {
   status: GymSettlementStatus;
   holdReason?: string | null;
   rejectReason?: string | null;
+  voidReason?: string | null;
+  voidedAt?: string | null;
   destinationSnapshot?: { accountLast4?: string; method?: string; provider?: string; accountName?: string } | null;
   submittedBy?: string | null;
   submittedAt?: string | null;
@@ -1936,7 +1940,7 @@ export interface SettlementAdjustment {
   amountTzs: number;
   type: 'correction' | 'clawback' | 'manual' | 'carry_forward';
   reason: string;
-  status: 'proposed' | 'applied' | 'rejected';
+  status: 'proposed' | 'applied' | 'rejected' | 'voided';
   createdBy: string;
   createdAt?: string;
   appliedAt?: string | null;
@@ -2029,4 +2033,19 @@ export interface OwnerStatementDetail {
   statement: OwnerStatement;
   lines: OwnerStatementLine[];
   adjustments: Array<{ amountTzs: number; type: string; reason: string; appliedAt: string | null }>;
+}
+
+export interface SettlementClawbackItem {
+  gymId: string;
+  gymName: string | null;
+  memberCycleSettlementId: string;
+  amountTzs: number;
+  type: 'clawback' | 'correction';
+  reason: string;
+}
+
+export interface SettlementClawbacks {
+  raised: SettlementClawbackItem[];
+  pending: SettlementClawbackItem[];
+  skipped: Array<{ memberCycleSettlementId: string; memberId: string; reason: string }>;
 }

@@ -13,7 +13,7 @@ import { ConfirmDialog, Dialog, DialogFooter } from '@/components/dialog';
 
 type Ask =
   | { kind: 'confirm'; step: SettlementStep; title: string; description: string; label: string }
-  | { kind: 'reason'; step: 'reject' | 'hold'; title: string; description: string; label: string }
+  | { kind: 'reason'; step: 'reject' | 'hold' | 'void'; title: string; description: string; label: string }
   | { kind: 'pay' }
   | { kind: 'adjust' }
   | { kind: 'reject-adjustment'; adjustment: SettlementAdjustment };
@@ -86,12 +86,12 @@ export function SettlementStatementView({ statementId, onBack }: { statementId: 
           <p className="mt-0.5 flex flex-wrap items-center gap-2 text-sm text-[var(--color-fg-quaternary)]">
             {period(s)}
             <Badge tone={STATEMENT_STATUS[s.status].tone}>{STATEMENT_STATUS[s.status].label}</Badge>
-            {held && <Badge tone="danger">On hold</Badge>}
+            {held && s.status !== 'voided' && <Badge tone="danger">On hold</Badge>}
             {!live && <Badge tone="gray">Shadow</Badge>}
           </p>
         </div>
         <div className="flex flex-wrap gap-2" data-testid="settlement-actions">
-          {held && canApprove && (
+          {held && canApprove && s.status !== 'voided' && (
             <Button size="sm" onClick={() => setAsk({ kind: 'confirm', step: 'release', title: 'Release the hold?', description: 'The statement carries on from where it was.', label: 'Release' })}>Release hold</Button>
           )}
           {s.status === 'draft' && canPrepare && (
@@ -114,6 +114,9 @@ export function SettlementStatementView({ statementId, onBack }: { statementId: 
           {s.status === 'payable' && canPay && (
             <Button size="sm" onClick={() => setAsk({ kind: 'pay' })} data-testid="settlement-pay">Record payment</Button>
           )}
+          {canApprove && ['draft', 'submitted', 'approved'].includes(s.status) && (
+            <Button size="sm" variant="ghost" onClick={() => setAsk({ kind: 'reason', step: 'void', title: 'Void this statement', description: `${s.gymName || 'This gym'} will never be paid for ${period(s)} on this statement, and its visits are not settled again. This can’t be undone. To pay later instead, put it on hold.`, label: 'Void statement' })} data-testid="settlement-void">Void</Button>
+          )}
           {!held && canPrepare && ['draft', 'submitted', 'approved', 'payable'].includes(s.status) && (
             <Button size="sm" variant="ghost" onClick={() => setAsk({ kind: 'reason', step: 'hold', title: 'Put on hold', description: 'A statement on hold can’t be paid until it is released.', label: 'Put on hold' })} data-testid="settlement-hold">Put on hold</Button>
           )}
@@ -123,7 +126,8 @@ export function SettlementStatementView({ statementId, onBack }: { statementId: 
       {error && <Alert tone="error">{error}</Alert>}
       {notice && <Alert tone="success">{notice}</Alert>}
       {!live && <Alert tone="info">This is a shadow statement: a trial calculation that can’t be submitted, approved or paid.</Alert>}
-      {held && <Alert tone="warning">On hold: {s.holdReason}</Alert>}
+      {s.status === 'voided' && <Alert tone="error">Voided{s.voidedAt ? ` on ${shortDay(s.voidedAt)}` : ''}: {s.voidReason}. Nothing is paid on this statement.</Alert>}
+      {held && s.status !== 'voided' && <Alert tone="warning">On hold: {s.holdReason}</Alert>}
       {s.status === 'draft' && s.rejectReason && <Alert tone="warning">Sent back: {s.rejectReason}</Alert>}
       {s.carryForwardTzs > 0 && <Alert tone="info">{money(s.carryForwardTzs)} could not be recovered from this statement and is carried forward to the gym’s next one.</Alert>}
 
@@ -131,7 +135,7 @@ export function SettlementStatementView({ statementId, onBack }: { statementId: 
         <MetricCard label="Earned at the gym’s rates" value={money(s.preliminaryTzs)} sub={`${s.qualifyingVisitCount} visits · ${s.memberCycleCount} members`} />
         <MetricCard label="Network adjustment" value={signed(-s.networkAdjustmentTzs)} sub="Member caps applied" />
         <MetricCard label="Adjustments" value={signed(s.adjustmentsTzs)} sub={proposed.length ? `${proposed.length} waiting for a decision` : 'Corrections and clawbacks'} />
-        <MetricCard label={s.status === 'paid' ? 'Paid' : 'To pay'} value={<span data-testid="settlement-net">{money(s.finalNetTzs)}</span>} sub={s.heldVisitCount ? `${s.heldVisitCount} visits held back` : undefined} />
+        <MetricCard label={s.status === 'paid' ? 'Paid' : s.status === 'voided' ? 'Not paid (voided)' : 'To pay'} value={<span data-testid="settlement-net">{money(s.finalNetTzs)}</span>} sub={s.heldVisitCount ? `${s.heldVisitCount} visits held back` : undefined} />
       </div>
 
       {(s.status === 'payable' || s.status === 'paid') && (
@@ -280,7 +284,7 @@ export function SettlementStatementView({ statementId, onBack }: { statementId: 
 
 const DONE: Record<SettlementStep, string> = {
   submit: 'Submitted for approval.', reject: 'Sent back to draft.', approve: 'Approved.', hold: 'Put on hold.',
-  release: 'Hold released.', payable: 'Cleared for payment.', pay: 'Payment recorded.',
+  release: 'Hold released.', payable: 'Cleared for payment.', pay: 'Payment recorded.', void: 'Statement voided.',
 };
 
 function ReasonDialog({ title, description, label, busy, onClose, onSubmit }: {

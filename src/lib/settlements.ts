@@ -12,7 +12,7 @@ export const STATEMENT_STATUS: Record<GymSettlementStatus, { label: string; tone
 };
 
 // The order finance works through a month.
-export const STATEMENT_TABS: GymSettlementStatus[] = ['draft', 'submitted', 'approved', 'payable', 'paid'];
+export const STATEMENT_TABS: GymSettlementStatus[] = ['draft', 'submitted', 'approved', 'payable', 'paid', 'voided'];
 
 export const BRACKET_LABEL: Record<string, string> = {
   none: '—', daily: 'Daily rate', weekly: 'One week', double_weekly: 'Two weeks', monthly: 'Month',
@@ -28,6 +28,7 @@ export const ADJUSTMENT_STATUS: Record<SettlementAdjustment['status'], { label: 
   proposed: { label: 'Proposed', tone: 'warning' },
   applied: { label: 'Applied', tone: 'success' },
   rejected: { label: 'Rejected', tone: 'danger' },
+  voided: { label: 'Cancelled with the statement', tone: 'gray' },
 };
 
 const VISIT_REASON: Record<string, string> = {
@@ -44,6 +45,13 @@ const SKIP_REASON: Record<string, string> = {
   held_visits: 'Has disputed, flagged or unrated visits',
 };
 export const skipReason = (code: string) => SKIP_REASON[code] ?? code.replace(/_/g, ' ');
+
+const CLAWBACK_SKIP: Record<string, string> = {
+  held_visits: 'has a disputed or flagged visit that needs a decision first',
+  cannot_reproduce: 'can no longer be recalculated exactly; add a manual adjustment',
+  cannot_recalculate: 'can no longer be recalculated exactly; add a manual adjustment',
+};
+export const clawbackSkipReason = (code: string) => CLAWBACK_SKIP[code] ?? code.replace(/_/g, ' ');
 
 const NOT_PAYABLE: Record<string, string> = {
   no_owner_account: 'the gym has no owner account',
