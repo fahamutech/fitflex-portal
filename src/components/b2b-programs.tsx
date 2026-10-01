@@ -1,9 +1,9 @@
 'use client';
 import { useEffect, useState } from 'react';
-import { ArrowLeft, Gift, Pencil, Plus, Users } from 'lucide-react';
+import { ArrowLeft, BarChart3, Gift, Pencil, Plus, Users } from 'lucide-react';
 import {
   api, ApiError, B2BBeneficiary, B2BBenefit, B2BBenefitInput, B2BEligibilityRow, B2BOrganization,
-  B2BProgram, B2BProgramInput, B2BProgramReference, B2BProviderRules,
+  B2BProgram, B2BProgramInput, B2BProgramReference, B2BProgramUsage, B2BProviderRules,
 } from '@/lib/api';
 import { Alert, Badge, Button, Card, CardContent, CardHeader, Field, Spinner } from '@/components/shared';
 
@@ -37,6 +37,8 @@ const ERRORS: Record<string, string> = {
   benefit_live: 'An active benefit in a live programme only takes new wording. Deactivate it to change the rest.',
   last_active_benefit: 'A live programme needs at least one active benefit. Pause the programme instead.',
   benefit_ended: 'This benefit’s dates have passed.',
+  remark_required: 'Say why the programme is being resumed.',
+  budget_still_exhausted: 'The budget is fully spent. Raise it (Edit) before resuming.',
 };
 const message = (err: unknown, fallback: string) =>
   err instanceof ApiError ? ERRORS[(err.body as { error?: string })?.error ?? ''] ?? fallback : fallback;
@@ -89,6 +91,8 @@ export function B2BPrograms({ token, org, beneficiaries, onChanged }: { token: s
   const [programForm, setProgramForm] = useState<typeof EMPTY_PROGRAM | null>(null);
   const [benefitForm, setBenefitForm] = useState<(typeof EMPTY_BENEFIT & { id?: string }) | null>(null);
   const [eligibility, setEligibility] = useState<{ rows: B2BEligibilityRow[]; counts: { beneficiaries: number; wouldBeEligible: number; eligibleToday: number } } | null>(null);
+  const [usage, setUsage] = useState<B2BProgramUsage | null>(null);
+  const [remark, setRemark] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -110,10 +114,11 @@ export function B2BPrograms({ token, org, beneficiaries, onChanged }: { token: s
   const openProgram = (id: string) => run(async () => {
     setOpen(await api.b2bProgram(token, org.id, id));
     setEligibility(null);
+    setUsage(null);
     setBenefitForm(null);
   }, 'Could not load the programme.');
   // Eligibility is a snapshot of one programme's rules: drop it whenever the programme reloads.
-  const refresh = async (id: string) => { setEligibility(null); setOpen(await api.b2bProgram(token, org.id, id)); await loadList(); onChanged?.(); };
+  const refresh = async (id: string) => { setEligibility(null); setUsage(null); setOpen(await api.b2bProgram(token, org.id, id)); await loadList(); onChanged?.(); };
 
   // ── Programme form ──
   const editProgram = (p?: B2BProgram) => setProgramForm(p ? {
@@ -144,9 +149,16 @@ export function B2BPrograms({ token, org, beneficiaries, onChanged }: { token: s
   };
 
   const move = (status: string) => open && run(async () => {
-    await api.setB2BProgramStatus(token, org.id, open.program.id, status);
+    await api.setB2BProgramStatus(token, org.id, open.program.id, status, remark.trim() || undefined);
+    setRemark('');
     await refresh(open.program.id);
   }, 'Could not change the status.');
+
+  const showUsage = () => open && run(async () => {
+    setUsage(await api.b2bProgramUsage(token, org.id, open.program.id));
+  }, 'Could not load usage.');
+  // Paused because the budget ran out: FitFlex resumes it, with a remark.
+  const budgetPaused = open?.program.effectiveStatus === 'paused' && open.program.statusReason === 'budget_exhausted';
 
   const showEligibility = () => open && run(async () => {
     const r = await api.b2bProgramEligibility(token, org.id, open.program.id, { include: 'all', limit: 100 });
@@ -358,7 +370,7 @@ export function B2BPrograms({ token, org, beneficiaries, onChanged }: { token: s
           )
         ) : (
           <div className="space-y-4" data-testid="program-detail">
-            <button className="flex items-center gap-1 text-xs text-[var(--color-fg-quaternary)]" onClick={() => { setOpen(null); setProgramForm(null); setBenefitForm(null); setEligibility(null); }}>
+            <button className="flex items-center gap-1 text-xs text-[var(--color-fg-quaternary)]" onClick={() => { setOpen(null); setProgramForm(null); setBenefitForm(null); setEligibility(null); setUsage(null); }}>
               <ArrowLeft className="h-3 w-3" />All programmes
             </button>
             {programForm ? programFormView : (
@@ -388,7 +400,55 @@ export function B2BPrograms({ token, org, beneficiaries, onChanged }: { token: s
                     </Button>
                   ))}
                   <Button size="sm" variant="secondary" onClick={showEligibility} data-testid="program-eligibility"><Users className="h-4 w-4" />Eligible beneficiaries</Button>
+                  <Button size="sm" variant="secondary" onClick={showUsage} data-testid="program-usage"><BarChart3 className="h-4 w-4" />Usage</Button>
                 </div>
+                {budgetPaused && (
+                  <div className="space-y-2" data-testid="budget-paused">
+                    <Alert tone="warning">Paused because the sponsor budget ran out. Raise the budget (Edit), then resume with a remark.</Alert>
+                    <input className="ui-input" placeholder="Why is it being resumed? (required)" value={remark} onChange={e => setRemark(e.target.value)} data-testid="resume-remark" />
+                  </div>
+                )}
+                {usage && (
+                  <div className="space-y-3 rounded-lg border border-[var(--color-border-secondary)] p-3" data-testid="usage-panel">
+                    <div className="grid gap-2 sm:grid-cols-4">
+                      {([
+                        ['Uses', String(usage.totals.uses)],
+                        ['Service value', tzs(usage.totals.grossTzs)],
+                        ['Sponsor pays', tzs(usage.totals.sponsorTzs)],
+                        ['Beneficiaries pay', tzs(usage.totals.beneficiaryTzs)],
+                      ] as const).map(([k, v]) => (
+                        <div key={k}><div className="text-xs text-[var(--color-fg-quaternary)]">{k}</div><div className="font-semibold">{v}</div></div>
+                      ))}
+                    </div>
+                    {usage.budget.budgetTzs != null && (
+                      <p className="text-xs text-[var(--color-fg-quaternary)]">
+                        Budget {tzs(usage.budget.budgetTzs)} · committed {tzs(usage.budget.spentTzs)} · left {tzs(usage.budget.remainingTzs)}
+                      </p>
+                    )}
+                    {usage.totals.uses === 0 ? <p className="text-[var(--color-fg-quaternary)]">No usage yet.</p> : (
+                      <div className="grid gap-4 sm:grid-cols-3">
+                        {([
+                          ['By benefit', usage.byBenefit.map(r => [r.benefitId, r.benefitName ?? r.benefitId, r] as const)],
+                          ['By provider', usage.byProvider.map(r => [r.providerId, r.providerName ?? r.providerId, r] as const)],
+                          ['By beneficiary', usage.byBeneficiary.map(r => [r.beneficiaryId, r.beneficiaryName ?? r.beneficiaryId, r] as const)],
+                        ] as const).map(([title, rows]) => (
+                          <div key={title}>
+                            <div className="mb-1 text-xs font-semibold">{title}</div>
+                            <ul className="space-y-1 text-xs">
+                              {rows.map(([id, name, r]) => (
+                                <li key={id} className="flex justify-between gap-2">
+                                  <span className="truncate">{name}</span>
+                                  <span className="shrink-0 text-[var(--color-fg-quaternary)]">{r.uses} · {tzs(r.sponsorTzs)}</span>
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    <p className="text-xs text-[var(--color-fg-quaternary)]">Totals only. Each row shows uses and what the sponsor pays; individual visits are in Benefit usage.</p>
+                  </div>
+                )}
                 {eligibility && (
                   <div className="rounded-lg border border-[var(--color-border-secondary)] p-3" data-testid="eligibility-panel">
                     <p className="mb-2 text-xs text-[var(--color-fg-quaternary)]">

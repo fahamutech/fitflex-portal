@@ -1,6 +1,7 @@
 'use client';
 import { useEffect, useState } from 'react';
-import { Building2, Plus, RefreshCw, UserPlus, Users } from 'lucide-react';
+import Link from 'next/link';
+import { BarChart3, Building2, Plus, RefreshCw, UserPlus, Users } from 'lucide-react';
 import { useApp } from '../../providers';
 import {
   api, ApiError, B2BBeneficiary, B2BOrganization, B2BOrganizationUser, B2BProgram, B2BReference,
@@ -171,6 +172,7 @@ export default function AdminB2BPage() {
         description="Organisations that sponsor wellness for employees, policyholders, members or customers."
         actions={(
           <div className="flex gap-2">
+            <Link href="/admin/b2b/usage"><Button variant="secondary" size="sm" data-testid="b2b-usage-link"><BarChart3 className="h-4 w-4" />Benefit usage</Button></Link>
             <Button variant="secondary" size="sm" onClick={sync} disabled={busy} data-testid="b2b-sync"><RefreshCw className="h-4 w-4" />Sync companies</Button>
             <Button size="sm" onClick={() => { setCreating(true); setSelected(null); setError(null); setNotice(null); }} data-testid="b2b-new"><Plus className="h-4 w-4" />New organisation</Button>
           </div>
