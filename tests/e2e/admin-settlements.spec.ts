@@ -37,7 +37,8 @@ async function setup(page: Page, user: Json, state: { statement: Json; adjustmen
         if (state.statement.submittedBy === user.id) return route.fulfill({ status: 403, json: { error: 'cannot_approve_own_submission' } });
         state.statement = { ...state.statement, status: 'approved' };
       }
-      if (path.endsWith('/payable')) return route.fulfill({ status: 409, json: { error: 'not_payable', reason: 'payout_account_not_verified' } });
+      if (path.endsWith('/void')) state.statement = { ...state.statement, status: 'voided', voidReason: body?.reason, voidedAt: '2026-11-03T09:00:00.000Z' };
+      if (path.endsWith('/payable')) return  route.fulfill({ status: 409, json: { error: 'not_payable', reason: 'payout_account_not_verified' } });
       if (path.endsWith('/adjustments')) {
         state.adjustments.push({ id: 'adj-1', gymSettlementId: 'st-1', status: 'proposed', createdBy: user.id, ...body });
         return route.fulfill({ status: 201, json: { adjustment: state.adjustments[0] } });
@@ -45,6 +46,7 @@ async function setup(page: Page, user: Json, state: { statement: Json; adjustmen
       if (path === '/admin/settlements/runs') return route.fulfill({ status: 201, json: { run: { id: 'run-2', mode: body?.mode, periodStartDate: `${body?.month}-01`, periodEndDate: `${body?.month}-30`, status: 'locked' } } });
       return route.fulfill({ json: { statement: state.statement } });
     }
+    if (path === '/admin/settlements/clawbacks') return route.fulfill({ json: { raised: [], pending: [{ gymId: 'gym-2', gymName: 'Kariakoo Gym', memberCycleSettlementId: 'mcs-1', amountTzs: -61638, type: 'clawback', reason: 'Visit on 2026-10-15 voided after settlement' }], skipped: [{ memberCycleSettlementId: 'mcs-2', memberId: 'm-3', reason: 'held_visits' }] } });
     if (path === '/admin/settlements/statements') return route.fulfill({ json: url.searchParams.get('mode') === 'shadow' ? [] : [state.statement] });
     if (path === '/admin/settlements/statements/st-1') return route.fulfill({ json: { statement: state.statement, lines, visits, adjustments: state.adjustments } });
     if (path === '/admin/settlements/runs') {
@@ -128,4 +130,27 @@ test('portal staff without settlement scopes can read but not act; runs list sho
   await page.getByTestId('settlement-row-st-1').click();
   await expect(page.getByTestId('settlement-net')).toBeVisible();
   await expect(page.getByTestId('settlement-actions').getByRole('button')).toHaveCount(0);
+});
+
+test('an approver voids a statement with a reason; amounts waiting from voided check-ins are shown', async ({ page }) => {
+  const state = { statement: statement({ status: 'submitted', submittedBy: 'admin-1' }), adjustments: [] as Json[], calls: [] as Array<{ path: string; body: Json | null }> };
+  await setup(page, { id: 'admin-2', userType: 'admin', email: 'second@example.com' }, state);
+
+  await page.goto('/admin/settlements');
+  await expect(page.getByTestId('settlement-clawbacks-pending')).toContainText('Kariakoo Gym −TZS 61,638');
+  await expect(page.getByText('has a disputed or flagged visit that needs a decision first')).toBeVisible();
+
+  await page.getByTestId('settlement-tab-submitted').click();
+  await page.getByTestId('settlement-row-st-1').click();
+  await page.getByTestId('settlement-void').click();
+  await expect(page.getByTestId('settlement-reason-submit')).toBeDisabled();
+  await page.getByTestId('settlement-reason').fill('Gym left the network');
+  await page.getByTestId('settlement-reason-submit').click();
+  expect(state.calls.at(-1)).toEqual({ path: '/admin/settlements/statements/st-1/void', body: { reason: 'Gym left the network' } });
+  await expect(page.getByText('Voided on 3 Nov: Gym left the network. Nothing is paid on this statement.')).toBeVisible();
+  await expect(page.getByTestId('settlement-actions').getByRole('button')).toHaveCount(0);
+
+  await page.getByTestId('settlement-back').click();
+  await page.getByTestId('settlement-tab-voided').click();
+  await expect(page.getByTestId('settlement-table')).toContainText('Mikocheni Fitness');
 });
