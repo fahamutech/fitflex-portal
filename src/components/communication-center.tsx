@@ -779,12 +779,21 @@ function Composer({ scope, token, t, locale, gymId, campaign, templateId, onClos
   );
 }
 
+// A placeholder blank for everyone reads differently from one blank for some.
+const warningKey = (w: CommsPreview['warnings'][number]) =>
+  (w.code === 'empty_value' && w.count != null && w.count === w.of ? 'comms.warn.empty_value_all' : `comms.warn.${w.code}`);
+const variableLabel = (t: T, v: string) => t(`comms.var.${v}`) || v;
+
 function Warnings({ t, warnings }: { t: T; warnings: CommsPreview['warnings'] }) {
   return (
     <>
       {warnings.map(w => (
-        <Alert key={`${w.code}-${w.channel ?? ''}`} tone={w.code === 'nobody_reachable' ? 'error' : 'warning'}>
-          {fill(t(`comms.warn.${w.code}`), { n: w.count ?? '', channel: w.channel ? t(`comms.channel.${w.channel}`) : '' })}
+        <Alert key={`${w.code}-${w.channel ?? ''}-${w.variable ?? ''}`} tone={w.code === 'nobody_reachable' ? 'error' : 'warning'}
+          data-testid={`warning-${w.code}${w.variable ? `-${w.variable}` : ''}`}>
+          {fill(t(warningKey(w)), {
+            n: w.count ?? '', of: w.of ?? '', channel: w.channel ? t(`comms.channel.${w.channel}`) : '',
+            variable: w.variable ? variableLabel(t, w.variable) : '',
+          })}
         </Alert>
       ))}
     </>

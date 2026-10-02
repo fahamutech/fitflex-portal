@@ -1747,7 +1747,8 @@ export interface CommsAudiencePreview {
 export interface CommsPreview {
   category: string; counts: CommsCounts; largeSendThreshold: number;
   example: { memberName: string | null; title: string; body: string; ctaLabel: string | null; deepLink: CommsDeepLink } | null;
-  warnings: Array<{ code: string; count?: number; channel?: CommsChannel }>;
+  /** `empty_value`: placeholder `variable` is blank for `count` of `of` recipients. */
+  warnings: Array<{ code: string; count?: number; channel?: CommsChannel; variable?: string; of?: number }>;
 }
 
 // ── Partner KYC / KYB ────────────────────────────────────────────────────
