@@ -121,10 +121,23 @@ export async function signInWithGoogleIdToken() {
   return signInWithFirebasePopupIdToken(auth);
 }
 
+/** The sign-in password the app derives from a PIN. */
+const passwordForPin = (pin: string) => `fitflex-pin:${pin}`;
+const WRONG_PASSWORD = new Set(['auth/invalid-credential', 'auth/wrong-password', 'auth/invalid-login-credentials']);
+
 export async function signInWithEmailPasswordIdToken(email: string, password: string) {
   const auth = getFirebaseAuth();
-  const credential = await signInWithEmailAndPassword(auth, email, password);
-  return credential.user.getIdToken();
+  try {
+    const credential = await signInWithEmailAndPassword(auth, email, password);
+    return credential.user.getIdToken();
+  } catch (err) {
+    // Gym owners and staff sign in with the PIN they use in the app, which
+    // the app stores in its own form. Portal-only accounts use a password.
+    const code = typeof err === 'object' && err && 'code' in err ? String((err as { code?: string }).code) : '';
+    if (!WRONG_PASSWORD.has(code) || !/^[0-9]{4,8}$/.test(password)) throw err;
+    const credential = await signInWithEmailAndPassword(auth, email, passwordForPin(password));
+    return credential.user.getIdToken();
+  }
 }
 
 // ─── Email verification (Identity V2 · I0) ─────────────────────────────────

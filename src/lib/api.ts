@@ -23,6 +23,19 @@ export function setOnUnauthorized(cb: (() => void) | null) {
 // The backend ignores the header unless its V2 flags are on.
 export const IDENTITY_V2_CLIENT = 'identity-v2';
 
+type SessionResult = { token: string; user: { id: string; userType: string; gymId?: string; email?: string; portalUser?: boolean; aclPermissions?: string[] } };
+
+// The portal never registers anyone. It asks for an admin profile first (as it
+// always has), then for an existing gym owner profile, then an existing gym
+// staff profile. Only "no such profile" moves on to the next role; any other
+// refusal (suspended, email not verified, …) is final.
+const PORTAL_SIGN_IN_ROLES = [
+  { requestedRole: 'admin' },
+  { requestedRole: 'gym_operator', existingOnly: true },
+  { requestedRole: 'gym_staff', existingOnly: true },
+];
+const NO_SUCH_PROFILE = new Set(['admin_self_registration_not_allowed', 'profile_not_found']);
+
 /** A persona (User row) of the signed-in Person, as the backend returns it. */
 export interface PersonaSummary {
   id: string;
@@ -102,6 +115,19 @@ export const api = {
     request<{ token: string; user: { id: string; userType: string; gymId?: string; email?: string; portalUser?: boolean; aclPermissions?: string[] } }>(
       '/auth/firebase/session', { method: 'POST', body: JSON.stringify({ idToken, requestedRole }) }
     ),
+  portalSession: async (idToken: string): Promise<SessionResult> => {
+    let refused: unknown;
+    for (const role of PORTAL_SIGN_IN_ROLES) {
+      try {
+        return await request<SessionResult>('/auth/firebase/session', { method: 'POST', body: JSON.stringify({ idToken, ...role }) });
+      } catch (err) {
+        const code = err instanceof ApiError ? (err.body as { error?: string } | null)?.error : undefined;
+        if (!code || !NO_SUCH_PROFILE.has(code)) throw err;
+        refused = err;
+      }
+    }
+    throw refused;
+  },
   // ─── Identity V2 personas (404 while the backend flags are off) ───
   myPersonas: (token: string) =>
     request<{ personas: PersonaSummary[]; activePersonaId: string }>('/me/personas', {}, token),

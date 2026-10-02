@@ -32,7 +32,7 @@ export default function LoginPage() {
   function mapError(err: unknown): string {
     if (err instanceof ApiError) {
       const body = err.body as any;
-      if (body?.error === 'admin_self_registration_not_allowed')
+      if (body?.error === 'admin_self_registration_not_allowed' || body?.error === 'profile_not_found')
         return t('login.adminRequired');
       if (body?.error === 'account_suspended')
         return t('login.suspended');
@@ -64,7 +64,7 @@ export default function LoginPage() {
     setBusy(true);
     try {
       const idToken = await signInWithGoogleIdToken();
-      const { token, user } = await api.firebaseSession(idToken, 'admin');
+      const { token, user } = await api.portalSession(idToken);
       handleSuccess(token, user);
     } catch (err) {
       if (needsEmailVerification(err)) return startVerification();
@@ -80,7 +80,7 @@ export default function LoginPage() {
     setBusy(true);
     try {
       const idToken = await signInWithEmailPasswordIdToken(email, password);
-      const { token, user } = await api.firebaseSession(idToken, 'admin');
+      const { token, user } = await api.portalSession(idToken);
       handleSuccess(token, user);
     } catch (err) {
       if (needsEmailVerification(err)) return startVerification();
@@ -122,7 +122,7 @@ export default function LoginPage() {
         setNotice(t('login.verifyNotYet'));
         return;
       }
-      const { token, user } = await api.firebaseSession(idToken, 'admin');
+      const { token, user } = await api.portalSession(idToken);
       handleSuccess(token, user);
     } catch (err) {
       if (needsEmailVerification(err)) setNotice(t('login.verifyNotYet'));
