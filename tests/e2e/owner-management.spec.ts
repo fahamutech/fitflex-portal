@@ -12,6 +12,7 @@ test.beforeEach(async ({ page }) => {
 
 test('owner web portal manages members, gym, staff, trainers and access', async ({ page }) => {
   const createdMembers: any[] = [];
+  const createdStaff: any[] = [];
   await page.route(`${API}/**`, async route => {
     const request = route.request();
     const url = new URL(request.url());
@@ -23,7 +24,7 @@ test('owner web portal manages members, gym, staff, trainers and access', async 
     if (url.pathname === '/owner/trainers') return route.fulfill({ json: [{ id: 'trainer-1', displayName: 'Verified Trainer', verified: true, gymIds: ['gym-1'], specialties: [], hourlyRateTzs: 10000, status: 'active' }] });
     if (url.pathname.startsWith('/owner/trainers/') && url.pathname.endsWith('/decision')) return route.fulfill({ json: { id: 'trainer-pending' } });
     if (url.pathname.startsWith('/owner/gyms/') && request.method() === 'PUT') return route.fulfill({ json: request.postDataJSON() });
-    if (url.pathname === '/owner/staff' && request.method() === 'POST') return route.fulfill({ status: 201, json: { id: 'staff-2', ...request.postDataJSON() } });
+    if (url.pathname === '/owner/staff' && request.method() === 'POST') { createdStaff.push(request.postDataJSON()); return route.fulfill({ status: 201, json: { id: 'staff-2', ...request.postDataJSON() } }); }
     return route.fulfill({ json: {} });
   });
 
@@ -40,10 +41,26 @@ test('owner web portal manages members, gym, staff, trainers and access', async 
   await page.getByLabel('Owner member PIN').fill('2468');
   await page.getByRole('button', { name: 'Save' }).first().click();
   await expect.poll(() => createdMembers.length).toBe(1);
-  expect(createdMembers[0]).toMatchObject({ displayName: 'Amina Said', initialPassword: '2468', durationUnit: 'M', gymId: 'gym-1' });
+  expect(createdMembers[0]).toMatchObject({ displayName: 'Amina Said', initialPassword: 'fitflex-pin:2468', durationUnit: 'M', gymId: 'gym-1' });
 
   await page.getByLabel('Bulk members CSV').fill('Bulk One,bulk1@example.com,0711000000,1357,W\nBulk Two,bulk2@example.com,0711000001,8642,D');
   await page.getByRole('button', { name: 'Bulk add' }).click();
   await expect.poll(() => createdMembers.length).toBe(3);
-  expect(createdMembers.slice(1).map(m => m.initialPassword)).toEqual(['1357', '8642']);
+  expect(createdMembers.slice(1).map(m => m.initialPassword)).toEqual(['fitflex-pin:1357', 'fitflex-pin:8642']);
+
+  // A PIN is exactly four digits: a longer one is refused before anything is sent.
+  await page.getByLabel('Bulk members CSV').fill('Bulk Three,bulk3@example.com,0711000002,123456,M');
+  await page.getByRole('button', { name: 'Bulk add' }).click();
+  await expect(page.getByText('The request could not be completed.')).toBeVisible();
+  expect(createdMembers.length).toBe(3);
+
+  // Staff: the backend reads `password`, in the same form the app signs in with.
+  const staffForm = page.locator('form').filter({ has: page.getByLabel('Staff PIN') });
+  await staffForm.locator('input').nth(0).fill('Desk Two');
+  await staffForm.locator('input[type="email"]').fill('desk2@example.com');
+  await page.getByLabel('Staff PIN').fill('4321');
+  await page.getByRole('button', { name: 'Add staff' }).click();
+  await expect.poll(() => createdStaff.length).toBe(1);
+  expect(createdStaff[0]).toMatchObject({ displayName: 'Desk Two', email: 'desk2@example.com', password: 'fitflex-pin:4321', gymIds: ['gym-1'] });
+  expect(createdStaff[0].initialPassword).toBeUndefined();
 });
