@@ -488,6 +488,14 @@ export const api = {
   updateTrainerBooking: (token: string, id: string, status: 'confirmed' | 'completed' | 'cancelled') =>
     request<TrainerBooking>(`/admin/trainer-bookings/${id}`, { method: 'POST', body: JSON.stringify({ status }) }, token),
   paymentRequests: (token: string) => request<PaymentRequest[]>('/admin/payment-requests', {}, token),
+  refunds: (token: string, status?: RefundStatus) =>
+    request<{ refunds: Refund[] }>(`/admin/refunds${status ? `?status=${status}` : ''}`, {}, token),
+  raiseRefund: (token: string, body: { paymentRequestId: string; amountTzs?: number; note?: string }) =>
+    request<{ refund: Refund }>('/admin/refunds', { method: 'POST', body: JSON.stringify(body) }, token),
+  decideRefund: (token: string, id: string, body: { decision: 'approve' | 'reject'; note?: string; amountTzs?: number; endAccess?: boolean }) =>
+    request<{ refund: Refund }>(`/admin/refunds/${encodeURIComponent(id)}/decision`, { method: 'POST', body: JSON.stringify(body) }, token),
+  markRefundPaid: (token: string, id: string, body: { paymentReference: string; paidTo?: string }) =>
+    request<{ refund: Refund }>(`/admin/refunds/${encodeURIComponent(id)}/paid`, { method: 'POST', body: JSON.stringify(body) }, token),
   decidePayment: (token: string, id: string, decision: 'approve' | 'reject', reference?: string, note?: string) =>
     request<PaymentRequest>(`/admin/payment-requests/${id}/decision`, {
       method: 'POST',
@@ -855,6 +863,35 @@ export interface Invoice {
   createdAt: string;
   createdBy: string;
   paidAt: string | null;
+}
+
+export type RefundStatus = 'requested' | 'approved' | 'paid' | 'rejected';
+export type RefundKind = 'subscription' | 'trainer_booking' | 'shop_order';
+
+/** Money FitFlex owes back to a payer: requested → approved → paid, or rejected. */
+export interface Refund {
+  id: string;
+  memberId: string;
+  kind: RefundKind;
+  subscriptionId: string | null;
+  bookingId: string | null;
+  orderId: string | null;
+  paymentRequestId: string | null;
+  amountTzs: number;
+  currency: string;
+  reasonCode: string;
+  note: string | null;
+  status: RefundStatus;
+  requestedBy: string | null;
+  requestedRole: string | null;
+  decidedBy: string | null;
+  decidedAt: string | null;
+  decisionNote: string | null;
+  paidAt: string | null;
+  paymentReference: string | null;
+  paidTo: string | null;
+  createdAt: string;
+  member?: { id: string; displayName: string | null; phone: string | null; email: string | null } | null;
 }
 
 export interface PaymentRequest {

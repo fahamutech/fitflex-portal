@@ -1,8 +1,8 @@
 'use client';
 import { useEffect, useState } from 'react';
-import { RefreshCw, CheckCircle2, XCircle, Ban } from 'lucide-react';
+import { RefreshCw, CheckCircle2, XCircle, Ban, Undo2 } from 'lucide-react';
 import { useApp } from '../../providers';
-import { api, PaymentRequest } from '@/lib/api';
+import { api, ApiError, PaymentRequest } from '@/lib/api';
 import { Badge, Button, PageHeader, Alert, Spinner, Card, Field } from '@/components/shared';
 import { DataTable, ColumnDef } from '@/components/data-table';
 import { Dialog, DialogFooter, ConfirmDialog } from '@/components/dialog';
@@ -37,6 +37,11 @@ export default function PaymentsPage() {
   const [actionTarget, setActionTarget] = useState<{ payment: PaymentRequest; action: 'approved' | 'rejected' | 'cancelled' } | null>(null);
   const [editTarget, setEditTarget] = useState<PaymentRequest | null>(null);
   const [editFields, setEditFields] = useState<{ reference: string; note: string }>({ reference: '', note: '' });
+  // Refunding a confirmed pass or plan payment (sessions and orders are refunded by cancelling them).
+  const [refundTarget, setRefundTarget] = useState<PaymentRequest | null>(null);
+  const [refundFields, setRefundFields] = useState<{ amount: string; note: string }>({ amount: '', note: '' });
+  const [refundError, setRefundError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
 
   const load = async () => {
     if (!token) return;
@@ -86,6 +91,23 @@ export default function PaymentsPage() {
     }
   }
 
+  async function handleRefund() {
+    if (!token || !refundTarget) return;
+    setBusy(true);
+    try {
+      await api.raiseRefund(token, { paymentRequestId: refundTarget.id, amountTzs: Number(refundFields.amount), note: refundFields.note.trim() || undefined });
+      setRefundTarget(null);
+      setNotice('Refund raised. Record the payment under Refunds once you have sent it.');
+    } catch (e) {
+      const code = e instanceof ApiError ? (e.body as { error?: string } | null)?.error : undefined;
+      setRefundError(code === 'refund_already_requested' ? 'This payment already has a refund. See Refunds.'
+        : code === 'amount_exceeds_payment' ? 'The refund can\'t be more than the payment.'
+        : e instanceof Error ? e.message : 'The refund was not raised. Try again.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
   if (!token || user?.userType !== 'admin') return null;
 
   const columns: ColumnDef<PaymentRequest>[] = [
@@ -127,6 +149,7 @@ export default function PaymentsPage() {
       />
 
       {error && <Alert tone="error">{error}</Alert>}
+      {notice && <Alert tone="success">{notice}</Alert>}
 
       {loading && !payments.length ? (
         <div className="flex h-64 items-center justify-center"><Spinner className="h-8 w-8" /></div>
@@ -181,6 +204,14 @@ export default function PaymentsPage() {
                       </Button>
                     </>
                   )}
+                  {payment.status === 'approved' && payment.subscriptionId && (
+                    <Button
+                      variant="ghost" size="sm" title="Refund this payment" data-testid="payment-refund"
+                      onClick={() => { setRefundTarget(payment); setRefundError(null); setNotice(null); setRefundFields({ amount: String(payment.amountTzs), note: '' }); }}
+                    >
+                      <Undo2 className="h-3.5 w-3.5" />
+                    </Button>
+                  )}
                   <Button variant="ghost" size="sm" onClick={() => { setEditTarget(payment); setEditFields({ reference: payment.reference || '', note: payment.note || '' }); }}>
                     Edit
                   </Button>
@@ -201,6 +232,28 @@ export default function PaymentsPage() {
         tone={actionTarget?.action === 'approved' ? 'primary' : 'danger'}
         busy={busy}
       />
+
+      <Dialog
+        open={!!refundTarget}
+        onClose={() => setRefundTarget(null)}
+        title="Refund this payment"
+        description={refundTarget ? `${refundTarget.member?.displayName || refundTarget.memberId} · ${paymentTierLabel(refundTarget)} · paid ${money(refundTarget.amountTzs)}` : ''}
+        size="sm"
+      >
+        <div className="space-y-4">
+          {refundError && <Alert tone="error">{refundError}</Alert>}
+          <Field label="Amount to refund (TZS)">
+            <input className="ui-input" inputMode="numeric" value={refundFields.amount} onChange={e => setRefundFields({ ...refundFields, amount: e.target.value.replace(/[^0-9]/g, '') })} />
+          </Field>
+          <Field label="Why" hint="For example: charged twice on 1 October.">
+            <textarea className="ui-input min-h-[70px]" value={refundFields.note} onChange={e => setRefundFields({ ...refundFields, note: e.target.value })} />
+          </Field>
+        </div>
+        <DialogFooter>
+          <Button variant="secondary" size="md" onClick={() => setRefundTarget(null)} disabled={busy}>Cancel</Button>
+          <Button variant="primary" size="md" onClick={handleRefund} disabled={busy || !(Number(refundFields.amount) > 0)}>{busy ? 'Saving...' : 'Raise refund'}</Button>
+        </DialogFooter>
+      </Dialog>
 
       <Dialog open={!!editTarget} onClose={() => setEditTarget(null)} title="Edit payment details" size="sm">
         <div className="space-y-4">
