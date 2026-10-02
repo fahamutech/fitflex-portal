@@ -77,7 +77,10 @@ export default function AdminB2BUsagePage() {
       await load();
     } catch (err) {
       const code = err instanceof ApiError ? (err.body as { error?: string })?.error : null;
-      setError(code === 'reason_required' ? 'Say why it is being reversed.' : 'Could not reverse that record.');
+      setError(code === 'reason_required' ? 'Say why it is being reversed.'
+        : code === 'acl_forbidden' ? 'Reversing a gym visit also voids the visit. You need the Payments permission for that.'
+        : code === 'checkin_not_voided' ? 'The visit could not be voided, so nothing was reversed.'
+        : 'Could not reverse that record.');
     } finally {
       setBusy(false);
     }
@@ -213,6 +216,9 @@ export default function AdminB2BUsagePage() {
                     <input className="ui-input" placeholder="Why is it being reversed? (required)" value={reason} onChange={e => setReason(e.target.value)} data-testid="reverse-reason" />
                     <Button variant="secondary" size="sm" disabled={busy || !reason.trim()} onClick={reverse} data-testid="reverse-button"><Undo2 className="h-4 w-4" />Reverse</Button>
                     <p className="text-xs text-[var(--color-fg-quaternary)]">The record is kept and marked reversed. The member gets the allowance back, and it leaves the sponsor’s total.</p>
+                    {c.sourceType === 'gym_checkin' && (
+                      <p className="text-xs text-[var(--color-fg-quaternary)]" data-testid="reverse-voids-visit">This also voids the gym visit, which can’t be undone. The gym isn’t paid for it; if it was already paid, the amount is taken off its next statement.</p>
+                    )}
                   </div>
                 )}
               </CardContent>
