@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react';
 import { api, ApiError, B2BPassEntitlement, B2BProgram, B2BSponsorInvoice, B2BSponsorInvoiceLine } from '@/lib/api';
 import { Alert, Badge, Button, Spinner } from '@/components/shared';
+import { useApp } from '../../app/providers';
 
 const ERRORS: Record<string, string> = {
   period_not_open: 'Flat fees can only be prepared for this month or next month.',
@@ -13,6 +14,8 @@ const ERRORS: Record<string, string> = {
   payment_reference_required: 'Enter the sponsor’s payment reference.',
   reason_required: 'Say why the invoice is being voided.',
   invalid_transition: 'That isn’t possible for an invoice in this state.',
+  cannot_settle_own_invoice: 'You issued this invoice, so someone else has to record the payment.',
+  period_seat_billed: 'This company already has a seat bill for that month, so it isn’t invoiced again here.',
 };
 const message = (err: unknown, fallback: string) =>
   err instanceof ApiError ? ERRORS[(err.body as { error?: string })?.error ?? ''] ?? fallback : fallback;
@@ -46,6 +49,7 @@ function months() {
  */
 export function B2BBilling({ token, program, hasPass }: { token: string; program: B2BProgram; hasPass: boolean }) {
   const { last, current, next } = months();
+  const { user } = useApp();
   const [invoices, setInvoices] = useState<B2BSponsorInvoice[] | null>(null);
   const [covered, setCovered] = useState<{ counts: Record<string, number>; entitlements: B2BPassEntitlement[] } | null>(null);
   const [open, setOpen] = useState<{ invoice: B2BSponsorInvoice; lines: B2BSponsorInvoiceLine[] } | null>(null);
@@ -101,6 +105,8 @@ export function B2BBilling({ token, program, hasPass }: { token: string; program
   }, fallback);
 
   const inv = open?.invoice;
+  // Maker-checker: the API refuses the issuer too; this only explains it.
+  const issuedByMe = !!inv?.issuedBy && inv.issuedBy === user?.id;
   return (
     <div className="space-y-3 rounded-lg border border-[var(--color-border-secondary)] p-3" data-testid="billing-panel">
       {error && <Alert tone="error">{error}</Alert>}
@@ -164,6 +170,9 @@ export function B2BBilling({ token, program, hasPass }: { token: string; program
               </li>
             ))}
           </ul>
+          {inv.status === 'issued' && issuedByMe && (
+            <p className="text-xs text-[var(--color-fg-quaternary)]" data-testid="invoice-second-person">You issued this invoice. Someone else has to record the sponsor’s payment.</p>
+          )}
           {inv.status === 'paid' && <p className="text-xs text-[var(--color-fg-quaternary)]">Paid, reference {inv.paymentReference}.</p>}
           {inv.status === 'void' && <p className="text-xs text-[var(--color-fg-quaternary)]">Voided: {inv.voidReason}</p>}
           {(inv.status === 'draft' || inv.status === 'issued') && (
@@ -175,7 +184,7 @@ export function B2BBilling({ token, program, hasPass }: { token: string; program
                   onClick={() => act(() => api.issueB2BInvoice(token, inv.id, Math.round(Number(input) * 100)), 'Could not issue the invoice.')}>Issue</Button>
               )}
               {inv.status === 'issued' && (
-                <Button size="sm" disabled={busy || !input.trim()} data-testid="invoice-pay"
+                <Button size="sm" disabled={busy || !input.trim() || issuedByMe} data-testid="invoice-pay"
                   onClick={() => act(() => api.payB2BInvoice(token, inv.id, input.trim()), 'Could not record the payment.')}>Mark paid</Button>
               )}
               <Button size="sm" variant="secondary" disabled={busy || !input.trim()} data-testid="invoice-void"

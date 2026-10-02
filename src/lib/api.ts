@@ -1552,6 +1552,8 @@ export interface B2BSponsorInvoice {
   vatRateBps: number | null;
   vatTzs: number | null;
   issuedAt: string | null;
+  /** Who issued it (FitFlex admin views only). The same person can't record it as paid. */
+  issuedBy?: string | null;
   paidAt: string | null;
   paymentReference: string | null;
   voidReason: string | null;
