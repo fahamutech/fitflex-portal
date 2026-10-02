@@ -278,7 +278,7 @@ function CampaignList({ t, campaigns, onOpen }: { t: T; campaigns: CommsCampaign
           className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-[var(--color-bg-secondary)]">
           <Megaphone className="h-4 w-4 shrink-0 text-[var(--color-fg-quaternary)]" />
           <div className="min-w-0 flex-1">
-            <p className="truncate text-sm font-medium">{c.title || c.content?.title || t('comms.untitled')}</p>
+            <p className="truncate text-sm font-medium">{c.title || c.name || t('comms.untitled')}</p>
             <p className="text-xs text-[var(--color-fg-quaternary)]">
               {[t(`comms.purpose.${c.purpose}`),
                 c.status === 'scheduled' ? fill(t('comms.scheduledFor'), { when: when(c.scheduledAt) }) : when(c.createdAt),
@@ -826,7 +826,7 @@ function Detail({ scope, token, t, id, onBack, onEdit, onOpenMember }: {
   const delivered = !['draft', 'scheduled', 'cancelled'].includes(c.status);
   return (
     <div data-testid="comms-detail">
-      <PageHeader title={c.content?.title || t('comms.untitled')} description={[t(`comms.purpose.${c.purpose}`), c.status === 'scheduled' ? fill(t('comms.scheduledFor'), { when: when(c.scheduledAt) }) : when(c.createdAt)].join(' · ')} actions={back} />
+      <PageHeader title={c.title || c.name || t('comms.untitled')} description={[t(`comms.purpose.${c.purpose}`), c.status === 'scheduled' ? fill(t('comms.scheduledFor'), { when: when(c.scheduledAt) }) : when(c.createdAt)].join(' · ')} actions={back} />
       {error && <Alert tone="error" className="mb-4">{error}</Alert>}
       <div className="mb-4 flex flex-wrap items-center gap-2">
         <Badge tone={STATUS_TONE[c.status]} dot={c.status === 'sending'}>{t(`comms.status.${c.status}`)}</Badge>

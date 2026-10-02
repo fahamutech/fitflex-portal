@@ -104,6 +104,12 @@ function qs(params: object): string {
   return s ? `?${s}` : '';
 }
 
+/** A PIN is always exactly four digits. */
+export const isPin = (pin: string) => /^[0-9]{4}$/.test(pin);
+
+/** The sign-in password the app derives from a PIN; the portal must send the same. */
+export const passwordForPin = (pin: string) => `fitflex-pin:${pin}`;
+
 export const api = {
   firebaseSession: (idToken: string, requestedRole: 'member' | 'trainer' | 'gym_owner' | 'gym_operator' | 'admin' = 'gym_operator') =>
     request<{ token: string; user: { id: string; userType: string; gymId?: string; email?: string; portalUser?: boolean; aclPermissions?: string[] } }>(
@@ -589,7 +595,7 @@ export const api = {
   ownerCreateMember: (token: string, data: { displayName: string; email?: string; phone?: string; initialPassword?: string; gymId?: string; paidAmount?: number; durationUnit: 'D' | 'W' | 'M'; startDate: string; endDate: string; tier?: string }) =>
     request<{ member: any; subscription: any }>('/owner/members', { method: 'POST', body: JSON.stringify(data) }, token),
   ownerStaff: (token: string) => request<any[]>('/owner/staff', {}, token),
-  ownerCreateStaff: (token: string, data: { displayName: string; email: string; initialPassword: string; gymIds: string[]; aclPermissions: string[] }) =>
+  ownerCreateStaff: (token: string, data: { displayName: string; email: string; password: string; gymIds: string[]; aclPermissions: string[] }) =>
     request<any>('/owner/staff', { method: 'POST', body: JSON.stringify(data) }, token),
   ownerTrainers: (token: string, gymId?: string) =>
     request<TrainerProfile[]>(`/owner/trainers${gymId ? `?gymId=${encodeURIComponent(gymId)}` : ''}`, {}, token),
