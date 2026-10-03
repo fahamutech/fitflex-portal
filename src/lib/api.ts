@@ -514,21 +514,21 @@ export const api = {
   updateProductListing: (token: string, id: string, listing: { homepageVisible: boolean; homepagePriority: number; approvalStatus?: 'pending' | 'approved' | 'rejected' }) =>
     request<ShopProduct>(`/admin/products/${id}/listing`, { method: 'PUT', body: JSON.stringify(listing) }, token),
   adminVendors: (token: string) => request<VendorSummary[]>('/admin/vendors', {}, token),
-  updateAdminVendor: (token: string, id: string, patch: Partial<Pick<VendorSummary, 'approvalStatus' | 'accountStatus' | 'approvalNote'>>) =>
+  updateAdminVendor: (token: string, id: string, patch: Partial<Pick<VendorSummary, 'approvalStatus' | 'accountStatus' | 'approvalNote' | 'commissionPct'>>) =>
     request<VendorSummary>(`/admin/vendors/${id}`, { method: 'PUT', body: JSON.stringify(patch) }, token),
   trainerBookings: (token: string) => request<TrainerBooking[]>('/admin/trainer-bookings', {}, token),
   updateTrainerBooking: (token: string, id: string, status: 'confirmed' | 'completed' | 'cancelled') =>
     request<TrainerBooking>(`/admin/trainer-bookings/${id}`, { method: 'POST', body: JSON.stringify({ status }) }, token),
   paymentRequests: (token: string) => request<PaymentRequest[]>('/admin/payment-requests', {}, token),
-  // Trainer payouts: weekly statements on the same path as gym statements.
-  trainerSettlements: (token: string) => request<{ statements: TrainerSettlement[] }>('/admin/trainer-settlements', {}, token),
-  trainerSettlement: (token: string, id: string) =>
-    request<TrainerSettlementDetail>(`/admin/trainer-settlements/${encodeURIComponent(id)}`, {}, token),
-  prepareTrainerSettlements: (token: string, periodStart?: string) =>
+  // Trainer and vendor payouts: weekly statements on the same path as gym statements.
+  partnerSettlements: (token: string, kind: PayoutKind) => request<{ statements: PartnerSettlement[] }>(`/admin/${kind}-settlements`, {}, token),
+  partnerSettlement: (token: string, kind: PayoutKind, id: string) =>
+    request<PartnerSettlementDetail>(`/admin/${kind}-settlements/${encodeURIComponent(id)}`, {}, token),
+  preparePartnerSettlements: (token: string, kind: PayoutKind, periodStart?: string) =>
     request<{ periodStartDate: string; periodEndDate: string; prepared: number; rebuilt: number; skipped: number; removed: number }>(
-      '/admin/trainer-settlements/prepare', { method: 'POST', body: JSON.stringify(periodStart ? { periodStart } : {}) }, token),
-  trainerSettlementAction: (token: string, id: string, action: TrainerSettlementAction, body: { reason?: string; paymentReference?: string } = {}) =>
-    request<{ statement: TrainerSettlement }>(`/admin/trainer-settlements/${encodeURIComponent(id)}/${action}`, { method: 'POST', body: JSON.stringify(body) }, token),
+      `/admin/${kind}-settlements/prepare`, { method: 'POST', body: JSON.stringify(periodStart ? { periodStart } : {}) }, token),
+  partnerSettlementAction: (token: string, kind: PayoutKind, id: string, action: PartnerSettlementAction, body: { reason?: string; paymentReference?: string } = {}) =>
+    request<{ statement: PartnerSettlement }>(`/admin/${kind}-settlements/${encodeURIComponent(id)}/${action}`, { method: 'POST', body: JSON.stringify(body) }, token),
   refunds: (token: string, status?: RefundStatus) =>
     request<{ refunds: Refund[] }>(`/admin/refunds${status ? `?status=${status}` : ''}`, {}, token),
   raiseRefund: (token: string, body: { paymentRequestId: string; amountTzs?: number; note?: string }) =>
@@ -906,17 +906,14 @@ export interface Invoice {
   paidAt: string | null;
 }
 
-export type TrainerSettlementAction = 'submit' | 'reject' | 'approve' | 'hold' | 'release' | 'payable' | 'pay' | 'void';
+export type PayoutKind = 'trainer' | 'vendor';
+export type PartnerSettlementAction = 'submit' | 'reject' | 'approve' | 'hold' | 'release' | 'payable' | 'pay' | 'void';
 
-/** A trainer's weekly payout statement. */
-export interface TrainerSettlement {
+/** A trainer's or vendor's weekly payout statement. */
+export interface PartnerSettlement {
   id: string;
-  trainerId: string;
-  trainer: { id: string; displayName: string | null; userId: string | null } | null;
   periodStartDate: string;
   periodEndDate: string;
-  sessionCount: number;
-  listTzs: number;
   commissionTzs: number;
   finalNetTzs: number;
   status: GymSettlementStatus;
@@ -927,27 +924,41 @@ export interface TrainerSettlement {
   paymentReference: string | null;
   paidAt: string | null;
   destinationSnapshot: { method?: string | null; provider?: string | null; accountName?: string | null; accountLast4?: string | null } | null;
+  // Trainer statements.
+  trainer?: { id: string; displayName: string | null; userId: string | null } | null;
+  sessionCount?: number;
+  listTzs?: number;
+  // Vendor statements.
+  vendor?: { id: string; businessName: string | null } | null;
+  orderCount?: number;
+  salesTzs?: number;
 }
 
-export interface TrainerSettlementLine {
+export interface PartnerSettlementLine {
   id: string;
-  bookingId: string;
-  memberName: string | null;
-  date: string;
-  slot: string | null;
-  basis: 'completed' | 'took_place';
-  listPriceTzs: number;
-  memberPaidTzs: number;
   commissionTzs: number;
   payoutTzs: number;
   voided: boolean;
+  // A trainer's session.
+  bookingId?: string;
+  memberName?: string | null;
+  date?: string;
+  slot?: string | null;
+  basis?: 'completed' | 'took_place';
+  listPriceTzs?: number;
+  memberPaidTzs?: number;
+  // A vendor's share of a delivered order.
+  orderId?: string;
+  deliveredOn?: string;
+  itemCount?: number;
+  salesTzs?: number;
 }
 
-export interface TrainerSettlementDetail {
-  statement: TrainerSettlement;
-  lines: TrainerSettlementLine[];
-  /** Whether the trainer can be paid right now, and why not. */
-  payout: { ok: boolean; reason?: string; until?: string | null; destination?: TrainerSettlement['destinationSnapshot'] };
+export interface PartnerSettlementDetail {
+  statement: PartnerSettlement;
+  lines: PartnerSettlementLine[];
+  /** Whether the partner can be paid right now, and why not. */
+  payout: { ok: boolean; reason?: string; until?: string | null; destination?: PartnerSettlement['destinationSnapshot'] };
 }
 
 export type RefundStatus = 'requested' | 'approved' | 'paid' | 'rejected';
@@ -1131,6 +1142,8 @@ export interface VendorSummary {
   kycStatus?: KycCaseStatus | null;
   /** Existing vendors predate KYC and keep working without it. */
   kycExempt?: boolean;
+  /** The marketplace commission FitFlex takes on this vendor's sales (percent). */
+  commissionPct?: number;
   productCount: number;
   pendingProductCount: number;
   createdAt?: string;
