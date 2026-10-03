@@ -1431,6 +1431,8 @@ export interface B2BProgramReference {
   benefitTypes: Record<string, { label: string; fulfilledBy: string; providerKeys: string[] }>;
   benefitStatuses: Record<string, string[]>;
   fundingTypes: Record<string, string>;
+  /** Funding each benefit type may have; a per-use benefit is fully sponsored. Absent on an older API. */
+  fundingByBenefitType?: Record<string, string[]>;
   usagePeriods: string[];
   eligibilityScopes: string[];
 }

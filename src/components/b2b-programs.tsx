@@ -26,6 +26,7 @@ const ERRORS: Record<string, string> = {
   no_active_benefits: 'Activate at least one benefit first.',
   invalid_transition: 'That status change isn’t allowed now.',
   invalid_sponsor_amount: 'Enter the sponsor amount in whole TZS.',
+  member_share_needs_pass: 'A per-use benefit is fully sponsored. To split the cost with the member, add a sponsored pass instead: the member unlocks it by paying their share.',
   invalid_sponsor_share: 'The sponsor share must be between 0% and 100%.',
   invalid_sponsor_cap: 'Enter the cap in whole TZS.',
   invalid_beneficiary_amount: 'Enter the copay in whole TZS.',
@@ -285,19 +286,26 @@ export function B2BPrograms({ token, org, beneficiaries, onChanged }: { token: s
   );
 
   const bf = benefitForm;
+  /** Funding a benefit type may have (from the API; an older API sends no list, so offer them all). */
+  const fundingFor = (benefitType: string) => ref?.fundingByBenefitType?.[benefitType] ?? Object.keys(ref?.fundingTypes ?? {});
   const providerKeys = bf ? ref?.benefitTypes[bf.benefitType]?.providerKeys ?? [] : [];
   const benefitFormView = bf && (
     <form onSubmit={saveBenefit} className="grid gap-3 rounded-lg border border-[var(--color-border-secondary)] p-3 sm:grid-cols-2" data-testid="benefit-form">
       <Field label="Benefit name"><input className="ui-input" required value={bf.name} onChange={e => setBenefitForm({ ...bf, name: e.target.value })} data-testid="benefit-name" /></Field>
       <Field label="Type">
-        <select className="ui-input" value={bf.benefitType} onChange={e => setBenefitForm({ ...bf, benefitType: e.target.value, providerScope: 'all' })} data-testid="benefit-type">
+        <select className="ui-input" value={bf.benefitType} onChange={e => {
+          const benefitType = e.target.value;
+          const allowed = fundingFor(benefitType);
+          setBenefitForm({ ...bf, benefitType, providerScope: 'all', fundingType: allowed.includes(bf.fundingType) ? bf.fundingType : allowed[0] });
+        }} data-testid="benefit-type">
           {ref && Object.entries(ref.benefitTypes).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
         </select>
       </Field>
       <Field label="Who pays">
         <select className="ui-input" value={bf.fundingType} onChange={e => setBenefitForm({ ...bf, fundingType: e.target.value })} data-testid="benefit-funding">
-          {ref && Object.entries(ref.fundingTypes).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+          {ref && Object.entries(ref.fundingTypes).filter(([k]) => fundingFor(bf.benefitType).includes(k)).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
         </select>
+        {bf.benefitType !== FLAT_FEE && <span className="text-xs text-[var(--color-fg-quaternary)]">Per-use benefits are fully sponsored. To share the cost with members, add a sponsored pass.</span>}
       </Field>
       {bf.benefitType === FLAT_FEE && (
         <Field label="Pass tier">
