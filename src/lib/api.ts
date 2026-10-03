@@ -520,6 +520,15 @@ export const api = {
   updateTrainerBooking: (token: string, id: string, status: 'confirmed' | 'completed' | 'cancelled') =>
     request<TrainerBooking>(`/admin/trainer-bookings/${id}`, { method: 'POST', body: JSON.stringify({ status }) }, token),
   paymentRequests: (token: string) => request<PaymentRequest[]>('/admin/payment-requests', {}, token),
+  // Trainer payouts: weekly statements on the same path as gym statements.
+  trainerSettlements: (token: string) => request<{ statements: TrainerSettlement[] }>('/admin/trainer-settlements', {}, token),
+  trainerSettlement: (token: string, id: string) =>
+    request<TrainerSettlementDetail>(`/admin/trainer-settlements/${encodeURIComponent(id)}`, {}, token),
+  prepareTrainerSettlements: (token: string, periodStart?: string) =>
+    request<{ periodStartDate: string; periodEndDate: string; prepared: number; rebuilt: number; skipped: number; removed: number }>(
+      '/admin/trainer-settlements/prepare', { method: 'POST', body: JSON.stringify(periodStart ? { periodStart } : {}) }, token),
+  trainerSettlementAction: (token: string, id: string, action: TrainerSettlementAction, body: { reason?: string; paymentReference?: string } = {}) =>
+    request<{ statement: TrainerSettlement }>(`/admin/trainer-settlements/${encodeURIComponent(id)}/${action}`, { method: 'POST', body: JSON.stringify(body) }, token),
   refunds: (token: string, status?: RefundStatus) =>
     request<{ refunds: Refund[] }>(`/admin/refunds${status ? `?status=${status}` : ''}`, {}, token),
   raiseRefund: (token: string, body: { paymentRequestId: string; amountTzs?: number; note?: string }) =>
@@ -895,6 +904,50 @@ export interface Invoice {
   createdAt: string;
   createdBy: string;
   paidAt: string | null;
+}
+
+export type TrainerSettlementAction = 'submit' | 'reject' | 'approve' | 'hold' | 'release' | 'payable' | 'pay' | 'void';
+
+/** A trainer's weekly payout statement. */
+export interface TrainerSettlement {
+  id: string;
+  trainerId: string;
+  trainer: { id: string; displayName: string | null; userId: string | null } | null;
+  periodStartDate: string;
+  periodEndDate: string;
+  sessionCount: number;
+  listTzs: number;
+  commissionTzs: number;
+  finalNetTzs: number;
+  status: GymSettlementStatus;
+  submittedBy: string | null;
+  holdReason: string | null;
+  rejectReason: string | null;
+  voidReason: string | null;
+  paymentReference: string | null;
+  paidAt: string | null;
+  destinationSnapshot: { method?: string | null; provider?: string | null; accountName?: string | null; accountLast4?: string | null } | null;
+}
+
+export interface TrainerSettlementLine {
+  id: string;
+  bookingId: string;
+  memberName: string | null;
+  date: string;
+  slot: string | null;
+  basis: 'completed' | 'took_place';
+  listPriceTzs: number;
+  memberPaidTzs: number;
+  commissionTzs: number;
+  payoutTzs: number;
+  voided: boolean;
+}
+
+export interface TrainerSettlementDetail {
+  statement: TrainerSettlement;
+  lines: TrainerSettlementLine[];
+  /** Whether the trainer can be paid right now, and why not. */
+  payout: { ok: boolean; reason?: string; until?: string | null; destination?: TrainerSettlement['destinationSnapshot'] };
 }
 
 export type RefundStatus = 'requested' | 'approved' | 'paid' | 'rejected';
