@@ -24,7 +24,7 @@ const KIND: Record<string, string> = { subscription: 'Pass or plan', trainer_boo
 const REASON: Record<string, string> = {
   member_cancelled: 'Cancelled by the member', trainer_cancelled: 'Cancelled by the trainer', vendor_cancelled: 'Cancelled by the vendor',
   cancelled_by_fitflex: 'Cancelled by FitFlex', charged_twice: 'Charged twice', not_activated: 'Never activated',
-  payment_error: 'Payment error', other: 'Other',
+  payment_error: 'Payment error', sponsor_paid: 'Covered by the member’s sponsor', other: 'Other',
 };
 const ERRORS: Record<string, string> = {
   already_decided: 'This refund has already been decided. Refresh to see it.',
