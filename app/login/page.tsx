@@ -24,9 +24,9 @@ export default function LoginPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
 
-  function handleSuccess(token: string, user: { id: string; userType: string; gymId?: string; portalUser?: boolean; aclPermissions?: string[]; email?: string }) {
+  function handleSuccess(token: string, user: { id: string; userType: string; gymId?: string; portalUser?: boolean; aclPermissions?: string[]; email?: string; organizationUser?: boolean }) {
     signIn(token, user);
-    router.replace(user.userType === 'admin' ? '/admin' : user.userType === 'corporate_hr' ? '/hr' : '/dashboard');
+    router.replace(user.userType === 'admin' ? '/admin' : user.organizationUser ? '/org' : user.userType === 'corporate_hr' ? '/hr' : '/dashboard');
   }
 
   function mapError(err: unknown): string {

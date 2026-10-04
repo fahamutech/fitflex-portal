@@ -11,6 +11,8 @@ export interface PortalAppUser {
   email?: string;
   portalUser?: boolean;
   aclPermissions?: string[];
+  /** Signed in to look after a B2B organisation's billing (not FitFlex staff, not a gym). */
+  organizationUser?: boolean;
 }
 
 interface AppCtx {

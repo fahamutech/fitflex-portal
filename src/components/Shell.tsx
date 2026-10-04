@@ -35,7 +35,7 @@ import {
   Star,
   HandCoins,
   SlidersHorizontal,
-  Undo2,
+  Undo2, Receipt
 } from 'lucide-react';
 import { useApp } from '../../app/providers';
 import { cn } from '@/lib/cn';
@@ -49,10 +49,17 @@ type NavItem = {
   icon: React.ElementType;
   groupKey?: string;
   aclScope?: string; // required ACL scope for portal staff; undefined = super-admin only
+  aclAny?: string[]; // other scopes that also open the page
 };
+const scopesOf = (item: NavItem) => [item.aclScope, ...(item.aclAny ?? [])].filter(Boolean) as string[];
 
 // Section roots highlight only on themselves, not on their sub-pages.
 const ROOTS = new Set(['/admin', '/hr']);
+
+// Someone who looks after a B2B organisation's billing: that, and nothing else.
+const ORG_NAV: NavItem[] = [
+  { href: '/org', labelKey: 'org.nav.billing', icon: Receipt },
+];
 
 // Company HR: their company's wellness challenges, nothing else.
 const HR_NAV: NavItem[] = [
@@ -94,6 +101,7 @@ const ADMIN_NAV: NavItem[] = [
   { href: '/admin/settlements',   labelKey: 'admin.nav.settlements',    icon: HandCoins,       groupKey: 'nav.group.finance',  aclScope: 'payments' },
   { href: '/admin/trainer-settlements', labelKey: 'admin.nav.trainerSettlements', icon: Dumbbell, groupKey: 'nav.group.finance', aclScope: 'payments' },
   { href: '/admin/settlement-config', labelKey: 'admin.nav.settlementConfig', icon: SlidersHorizontal, groupKey: 'nav.group.finance', aclScope: 'payments' },
+  { href: '/admin/b2b-billing',   labelKey: 'admin.nav.b2bBilling',     icon: Receipt,         groupKey: 'nav.group.finance',  aclScope: 'b2b_billing', aclAny: ['b2b', 'b2b_billing_approve', 'b2b_payments'] },
   { href: '/admin/book-keeping',  labelKey: 'admin.nav.bookkeeping',    icon: BookOpen,        groupKey: 'nav.group.finance',  aclScope: 'payments' },
   { href: '/admin/payments',      labelKey: 'admin.nav.payments',       icon: CreditCard,      groupKey: 'nav.group.operations', aclScope: 'payments' },
   { href: '/admin/refunds',       labelKey: 'admin.nav.refunds',        icon: Undo2,           groupKey: 'nav.group.operations', aclScope: 'payments' },
@@ -177,7 +185,7 @@ function SidebarContent({
         <div className="flex-1 min-w-0">
           <p className="truncate text-sm font-semibold text-white">FitFlex Af</p>
           <p className="truncate text-xs text-[var(--color-gray-500)]">
-            {user?.userType === 'admin' ? 'Pilot Console' : user?.userType === 'corporate_hr' ? 'FitFlex for Business' : 'Operator Portal'}
+            {user?.userType === 'admin' ? 'Pilot Console' : user?.userType === 'corporate_hr' || user?.organizationUser ? 'FitFlex for Business' : 'Operator Portal'}
           </p>
         </div>
       </div>
@@ -291,6 +299,7 @@ export function Shell({ children }: { children: ReactNode }) {
 
   const isAdminUser   = token && user?.userType === 'admin';
   const isHr          = token && user?.userType === 'corporate_hr';
+  const isOrgUser     = token && user?.organizationUser === true && user?.userType !== 'admin';
   const isPortalStaff = isAdminUser && user?.portalUser === true;
 
   // Build the visible nav — portal staff only see items their ACL permits.
@@ -299,14 +308,19 @@ export function Shell({ children }: { children: ReactNode }) {
     ? ADMIN_NAV.filter(item => {
         if (!item.aclScope) return true;             // no scope = super-admin only (overview)
         if (!isPortalStaff) return true;             // super-admin sees everything
-        return hasPermission(item.aclScope);         // portal staff: check ACL
+        return scopesOf(item).some(hasPermission);   // portal staff: check ACL
       })
+    : isOrgUser ? ORG_NAV
     : isHr ? HR_NAV
     : OPERATOR_NAV.filter(item => !item.aclScope || user?.userType !== 'gym_staff' || hasPermission(item.aclScope));
 
   useEffect(() => {
     if (!ready) return;
     if (!token && pathname !== '/login' && pathname !== '/') router.replace('/login');
+
+    // Someone signed in for an organisation's billing only ever sees /org; nobody else does.
+    if (token && isOrgUser && !pathname.startsWith('/org')) { router.replace('/org'); return; }
+    if (token && !isOrgUser && pathname.startsWith('/org')) { router.replace(user?.userType === 'admin' ? '/admin' : user?.userType === 'corporate_hr' ? '/hr' : '/dashboard'); return; }
 
     // Company HR only ever sees /hr; nobody else does.
     if (token && user?.userType === 'corporate_hr' && !pathname.startsWith('/hr')) { router.replace('/hr'); return; }
@@ -323,13 +337,13 @@ export function Shell({ children }: { children: ReactNode }) {
       const matchedItem = ADMIN_NAV.find(item =>
         ROOTS.has(item.href) ? pathname.replace(/\/$/, '') === item.href : pathname.startsWith(item.href)
       );
-      if (matchedItem?.aclScope && !hasPermission(matchedItem.aclScope)) {
+      if (matchedItem?.aclScope && !scopesOf(matchedItem).some(hasPermission)) {
         // Redirect to the first permitted page, or just /admin overview
-        const firstAllowed = ADMIN_NAV.find(i => !i.aclScope || hasPermission(i.aclScope));
+        const firstAllowed = ADMIN_NAV.find(i => !i.aclScope || scopesOf(i).some(hasPermission));
         router.replace(firstAllowed?.href ?? '/admin');
       }
     }
-  }, [ready, token, user, isPortalStaff, pathname, router, hasPermission]);
+  }, [ready, token, user, isPortalStaff, isOrgUser, pathname, router, hasPermission]);
 
   /* Close mobile drawer on route change */
   useEffect(() => { setMobileOpen(false); }, [pathname]);
@@ -384,10 +398,10 @@ export function Shell({ children }: { children: ReactNode }) {
   }
 
   return (
-    <div className="flex h-screen overflow-hidden bg-[var(--color-bg-secondary)]">
+    <div className="flex h-screen overflow-hidden bg-[var(--color-bg-secondary)] print:block print:h-auto print:overflow-visible print:bg-white">
 
       {/* ── Desktop sidebar ── */}
-      <aside className="hidden lg:flex lg:w-64 lg:flex-col lg:shrink-0 bg-[var(--color-sidebar-bg)]">
+      <aside className="hidden lg:flex lg:w-64 lg:flex-col lg:shrink-0 bg-[var(--color-sidebar-bg)] print:!hidden">
         <SidebarContent nav={visibleNav} />
       </aside>
 
@@ -405,10 +419,10 @@ export function Shell({ children }: { children: ReactNode }) {
       </aside>
 
       {/* ── Main area ── */}
-      <div className="flex flex-1 flex-col overflow-hidden">
+      <div className="flex flex-1 flex-col overflow-hidden print:block print:overflow-visible">
 
         {/* Mobile top bar */}
-        <header className="flex h-14 shrink-0 items-center justify-between gap-3 border-b border-[var(--color-border-secondary)] bg-[var(--color-bg-primary)] px-4 lg:hidden">
+        <header className="flex h-14 shrink-0 items-center justify-between gap-3 border-b border-[var(--color-border-secondary)] bg-[var(--color-bg-primary)] px-4 lg:hidden print:hidden">
           <button
             onClick={() => setMobileOpen(v => !v)}
             className="text-[var(--color-fg-tertiary)] hover:text-[var(--color-fg-primary)] transition-colors"
@@ -425,7 +439,7 @@ export function Shell({ children }: { children: ReactNode }) {
         </header>
 
         {/* Page content */}
-        <main className="flex-1 overflow-y-auto px-4 py-6 sm:px-6 lg:px-8">
+        <main className="flex-1 overflow-y-auto px-4 py-6 sm:px-6 lg:px-8 print:overflow-visible print:p-0">
           {children}
         </main>
 

@@ -15,13 +15,15 @@ const ERRORS: Record<string, string> = {
   reason_required: 'Say why the invoice is being voided.',
   invalid_transition: 'That isn’t possible for an invoice in this state.',
   cannot_settle_own_invoice: 'You issued this invoice, so someone else has to record the payment.',
+  payment_reference_in_use: 'That reference is already recorded as a payment. Apply that payment under B2B billing instead.',
+  invoice_has_payments: 'Money is already applied to this invoice. Reverse the payment first, or correct it with a note under B2B billing.',
   period_seat_billed: 'This company already has a seat bill for that month, so it isn’t invoiced again here.',
 };
 const message = (err: unknown, fallback: string) =>
   err instanceof ApiError ? ERRORS[(err.body as { error?: string })?.error ?? ''] ?? fallback : fallback;
 
 const TONE: Record<string, 'success' | 'warning' | 'gray' | 'danger'> = {
-  draft: 'gray', issued: 'warning', paid: 'success', void: 'danger',
+  draft: 'gray', issued: 'warning', partially_paid: 'warning', paid: 'success', void: 'danger',
   active: 'success', awaiting_member: 'warning', awaiting_link: 'warning', scheduled: 'gray', invoiced: 'gray',
 };
 const PASS_STATE: Record<string, string> = {
@@ -31,6 +33,7 @@ const PASS_STATE: Record<string, string> = {
   awaiting_member: 'Waiting for the member’s share',
   active: 'Pass running',
 };
+const KIND: Record<string, string> = { prepaid: 'Flat fees', usage: 'Per use', fee: 'Platform fee', credit_note: 'Credit note', debit_note: 'Debit note' };
 const tzs = (n?: number | null) => (n == null ? '—' : `TZS ${n.toLocaleString('en-US')}`);
 /** This month and its neighbours as "YYYY-MM", in East Africa Time. */
 function months() {
@@ -145,7 +148,7 @@ export function B2BBilling({ token, program, hasPass }: { token: string; program
             {invoices.map(i => (
               <li key={i.id}>
                 <button className={`flex w-full flex-wrap items-center justify-between gap-2 py-2 text-left ${inv?.id === i.id ? 'text-[var(--color-fg-brand)]' : ''}`} onClick={() => inspect(i)} data-testid={`invoice-${i.id}`}>
-                  <span><span className="font-medium">{i.number}</span> <span className="text-xs text-[var(--color-fg-quaternary)]">{i.kind === 'prepaid' ? 'Flat fees' : 'Per use'} · {i.period}</span></span>
+                  <span><span className="font-medium">{i.number}</span> <span className="text-xs text-[var(--color-fg-quaternary)]">{KIND[i.kind] ?? i.kind} · {i.period}</span></span>
                   <span className="flex items-center gap-2"><span className="text-xs">{tzs(i.totalTzs)}</span><Badge tone={TONE[i.status] ?? 'gray'}>{i.status}</Badge></span>
                 </button>
               </li>
