@@ -80,7 +80,7 @@ export default function OrganizationBillingPage() {
         <PageHeader title="Billing" description={org ? `${org.name} · what you owe FitFlex, your invoices and payments.` : 'Your organisation’s billing with FitFlex.'} />
       </div>
       {error && <Alert tone="error">{error}</Alert>}
-      {orgs.length === 0 && !error && <Alert tone="info">You don’t look after billing for any organisation. Ask its owner or admin to give you the finance role.</Alert>}
+      {orgs.length === 0 && !error && <Alert tone="info">Your role doesn’t include billing. The organisation’s owner or admin can give you the finance role.</Alert>}
       {orgs.length > 1 && (
         <select className="ui-input !w-auto print:hidden" value={orgId} onChange={e => setOrgId(e.target.value)} data-testid="org-picker">
           {orgs.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}

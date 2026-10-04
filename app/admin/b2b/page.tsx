@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { BarChart3, Building2, Plus, RefreshCw, UserPlus, Users } from 'lucide-react';
 import { useApp } from '../../providers';
 import {
-  api, ApiError, B2BBeneficiary, B2BOrganization, B2BOrganizationUser, B2BProgram, B2BReference,
+  api, ApiError, B2BBeneficiary, B2BOrganization, B2BOrganizationUser, B2BProgram, B2BReference, userContact,
 } from '@/lib/api';
 import { Alert, Badge, Button, Card, CardContent, CardHeader, Field, PageHeader, Spinner } from '@/components/shared';
 import { B2BPrograms } from '@/components/b2b-programs';
@@ -13,12 +13,14 @@ const ERRORS: Record<string, string> = {
   invalid_organization_type: 'Choose an organisation type.',
   legal_name_required: 'Enter the legal name.',
   invalid_email: 'Enter a valid email.',
-  invalid_phone: 'Enter a valid phone number.',
+  invalid_phone: 'Enter a valid phone number, for example 0712 345 678 or +255712345678.',
   registration_number_in_use: 'Another organisation already has that registration number.',
   tax_number_in_use: 'Another organisation already has that TIN.',
   managed_by_corporate: 'This organisation is a company from Companies. Change it there.',
   invalid_transition: 'That status change isn’t allowed from the current status.',
-  user_not_found: 'No FitFlex user has that ID.',
+  user_not_found: 'Nobody has a FitFlex account with that email, number or ID. They need to sign up in the app first.',
+  ambiguous_user: 'Several accounts share that email or number and none is a member account. Use the user ID of the one you mean.',
+  user_contact_required: 'Enter their email, mobile number or user ID.',
   already_organization_user: 'That user is already on this organisation.',
   beneficiary_must_be_member: 'Beneficiaries must be FitFlex members.',
   already_enrolled: 'That member is already enrolled (change their status instead).',
@@ -140,7 +142,7 @@ export default function AdminB2BPage() {
     e.preventDefault();
     if (!token || !selected) return;
     return run(async () => {
-      const { organizationUser } = await api.addB2BOrganizationUser(token, selected.id, { userId: userForm.userId.trim(), role: userForm.role });
+      const { organizationUser } = await api.addB2BOrganizationUser(token, selected.id, { ...userContact(userForm.userId), role: userForm.role });
       setOrgUsers(list => [...(list ?? []), organizationUser]);
       setUserForm({ userId: '', role: userForm.role });
     }, 'Could not add the user.');
@@ -156,7 +158,8 @@ export default function AdminB2BPage() {
   const enroll = (e: React.FormEvent) => {
     e.preventDefault();
     if (!token || !selected) return;
-    const body = Object.fromEntries(Object.entries({ ...benForm, userId: benForm.userId.trim() }).filter(([, v]) => v !== '')) as { userId: string };
+    const { userId: typed, ...rest } = benForm;
+    const body = { ...userContact(typed), ...Object.fromEntries(Object.entries(rest).filter(([, v]) => v !== '')) };
     return run(async () => {
       const { beneficiary } = await api.enrollB2BBeneficiary(token, selected.id, body);
       setBeneficiaries(list => [...(list ?? []), beneficiary]);
@@ -356,11 +359,12 @@ export default function AdminB2BPage() {
                     </ul>
                   )}
                   <form onSubmit={addUser} className="grid gap-2 sm:grid-cols-3" data-testid="b2b-user-form">
-                    <input className="ui-input sm:col-span-1" placeholder="FitFlex user ID (usr_…)" required value={userForm.userId} onChange={e => setUserForm({ ...userForm, userId: e.target.value })} data-testid="b2b-user-id" />
+                    <input className="ui-input sm:col-span-1" placeholder="Their email, mobile number or user ID" required value={userForm.userId} onChange={e => setUserForm({ ...userForm, userId: e.target.value })} data-testid="b2b-user-id" />
                     <select className="ui-input" value={userForm.role} onChange={e => setUserForm({ ...userForm, role: e.target.value })} aria-label="Role" data-testid="b2b-user-role">
                       {ref?.organizationUserRoles.map(r => <option key={r} value={r}>{r}</option>)}
                     </select>
                     <Button type="submit" disabled={busy} data-testid="b2b-user-add">Add user</Button>
+                    <p className="text-xs text-[var(--color-fg-quaternary)] sm:col-span-3">They sign in to this portal with the FitFlex account they already have. Owner, admin and finance see billing; HR and managers see people and programmes.</p>
                   </form>
                 </CardContent>
               </Card>
@@ -394,7 +398,7 @@ export default function AdminB2BPage() {
                   )}
                   {!mapped && (
                     <form onSubmit={enroll} className="grid gap-2 sm:grid-cols-2" data-testid="b2b-beneficiary-form">
-                      <input className="ui-input" placeholder="Member's FitFlex user ID (usr_…)" required value={benForm.userId} onChange={e => setBenForm({ ...benForm, userId: e.target.value })} data-testid="b2b-ben-user-id" />
+                      <input className="ui-input" placeholder="Member’s email, mobile number or user ID" required value={benForm.userId} onChange={e => setBenForm({ ...benForm, userId: e.target.value })} data-testid="b2b-ben-user-id" />
                       <select className="ui-input" value={benForm.beneficiaryType} onChange={e => setBenForm({ ...benForm, beneficiaryType: e.target.value })} aria-label="Beneficiary type">
                         {ref && Object.entries(ref.beneficiaryTypes).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
                       </select>

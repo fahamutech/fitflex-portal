@@ -23,7 +23,7 @@ export function setOnUnauthorized(cb: (() => void) | null) {
 // The backend ignores the header unless its V2 flags are on.
 export const IDENTITY_V2_CLIENT = 'identity-v2';
 
-type SessionResult = { token: string; user: { id: string; userType: string; gymId?: string; email?: string; portalUser?: boolean; aclPermissions?: string[]; organizationUser?: boolean } };
+type SessionResult = { token: string; user: { id: string; userType: string; gymId?: string; email?: string; portalUser?: boolean; aclPermissions?: string[]; organizationUser?: boolean; organizationRoles?: string[] } };
 
 // The portal never registers anyone. It asks for an admin profile first (as it
 // always has), then for an existing gym owner profile, then an existing gym
@@ -37,6 +37,17 @@ const PORTAL_SIGN_IN_ROLES = [
 const NO_SUCH_PROFILE = new Set(['admin_self_registration_not_allowed', 'profile_not_found']);
 /** Roles in a B2B organisation that see its billing (invoices, payments, statement). */
 export const ORG_BILLING_ROLES = new Set(['owner', 'admin', 'finance']);
+/** Roles that see the organisation's people (beneficiaries). Everyone sees its programmes. */
+export const ORG_PEOPLE_ROLES = new Set(['owner', 'admin', 'manager', 'hr', 'analyst']);
+
+/** How a person is named when adding them: the email or mobile number of their FitFlex account, or their user id. */
+export type UserContact = { userId?: string; email?: string; phone?: string };
+export function userContact(text: string): UserContact {
+  const value = text.trim();
+  if (value.includes('@')) return { email: value };
+  if (/^usr_/i.test(value)) return { userId: value };
+  return { phone: value };
+}
 
 /** A persona (User row) of the signed-in Person, as the backend returns it. */
 export interface PersonaSummary {
@@ -134,7 +145,8 @@ export const api = {
     try {
       const session = await request<SessionResult>('/auth/firebase/session', { method: 'POST', body: JSON.stringify({ idToken, requestedRole: 'member', existingOnly: true }) });
       const { organizations } = await request<{ organizations: Array<{ id: string; role: string }> }>('/b2b/me/organizations', {}, session.token);
-      if (organizations.some(o => ORG_BILLING_ROLES.has(o.role))) return { token: session.token, user: { ...session.user, organizationUser: true } };
+      // Any role in an organisation opens its area; what each role sees is decided there and on the server.
+      if (organizations.length) return { token: session.token, user: { ...session.user, organizationUser: true, organizationRoles: [...new Set(organizations.map(o => o.role))] } };
     } catch (err) {
       const code = err instanceof ApiError ? (err.body as { error?: string } | null)?.error : undefined;
       if (code && !NO_SUCH_PROFILE.has(code)) throw err;
@@ -407,6 +419,13 @@ export const api = {
   /** HR: the company's staff (for eligibility by department or person). */
   corporateStaff: (token: string) =>
     request<{ employees: CorporateEmployee[] }>('/corporate/staff', {}, token),
+  provisionCorporateStaff: (token: string, body: { displayName: string; phone?: string; email?: string; department?: string }) =>
+    request<{ employee: CorporateEmployee }>('/corporate/staff', { method: 'POST', body: JSON.stringify(body) }, token),
+  setCorporateStaffStatus: (token: string, employeeId: string, status: string) =>
+    request<{ employee: CorporateEmployee }>(`/corporate/staff/${encodeURIComponent(employeeId)}/status`, { method: 'POST', body: JSON.stringify({ status }) }, token),
+  /** Link an employee to their FitFlex member account (by email, mobile number or user id); `null` unlinks. */
+  linkCorporateStaff: (token: string, employeeId: string, contact: UserContact | null) =>
+    request<{ employee: CorporateEmployee }>(`/corporate/staff/${encodeURIComponent(employeeId)}/link`, { method: 'POST', body: JSON.stringify(contact ?? { userId: null }) }, token),
   /** HR sign-in: email + password (not Firebase). */
   hrLogin: (email: string, password: string) =>
     request<{ token: string; user: { id: string; userType: string; email?: string; displayName?: string; corporateId?: string } }>(
@@ -437,13 +456,13 @@ export const api = {
     request<{ created: number; existing: number }>('/admin/b2b/corporate-sync', { method: 'POST' }, token),
   b2bOrganizationUsers: (token: string, id: string, params: { status?: string; limit?: number } = {}) =>
     request<Paged<B2BOrganizationUser>>(`/b2b/organizations/${encodeURIComponent(id)}/users${qs(params)}`, {}, token),
-  addB2BOrganizationUser: (token: string, id: string, body: { userId: string; role: string; permissions?: string[] }) =>
+  addB2BOrganizationUser: (token: string, id: string, body: UserContact & { role: string; permissions?: string[] }) =>
     request<{ organizationUser: B2BOrganizationUser }>(`/b2b/organizations/${encodeURIComponent(id)}/users`, { method: 'POST', body: JSON.stringify(body) }, token),
   updateB2BOrganizationUser: (token: string, id: string, orgUserId: string, body: { role?: string; status?: string; permissions?: string[] }) =>
     request<{ organizationUser: B2BOrganizationUser }>(`/b2b/organizations/${encodeURIComponent(id)}/users/${encodeURIComponent(orgUserId)}`, { method: 'PUT', body: JSON.stringify(body) }, token),
   b2bBeneficiaries: (token: string, id: string, params: { status?: string; search?: string; limit?: number } = {}) =>
     request<Paged<B2BBeneficiary>>(`/b2b/organizations/${encodeURIComponent(id)}/beneficiaries${qs(params)}`, {}, token),
-  enrollB2BBeneficiary: (token: string, id: string, body: { userId: string; beneficiaryType?: string; externalReference?: string; groupName?: string; status?: string }) =>
+  enrollB2BBeneficiary: (token: string, id: string, body: UserContact & { beneficiaryType?: string; externalReference?: string; groupName?: string; status?: string }) =>
     request<{ beneficiary: B2BBeneficiary }>(`/b2b/organizations/${encodeURIComponent(id)}/beneficiaries`, { method: 'POST', body: JSON.stringify(body) }, token),
   setB2BBeneficiaryStatus: (token: string, id: string, beneficiaryId: string, status: string) =>
     request<{ beneficiary: B2BBeneficiary }>(`/b2b/organizations/${encodeURIComponent(id)}/beneficiaries/${encodeURIComponent(beneficiaryId)}/status`, { method: 'POST', body: JSON.stringify({ status }) }, token),
@@ -1470,6 +1489,9 @@ export interface CorporateEmployee {
   displayName: string;
   department?: string | null;
   email?: string | null;
+  phone?: string | null;
+  /** Their FitFlex member account, once linked; benefits only work for a linked employee. */
+  userId?: string | null;
   status: string;
 }
 export interface CorporateAccount {

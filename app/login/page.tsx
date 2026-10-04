@@ -2,7 +2,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useApp } from '../providers';
-import { api, ApiError } from '@/lib/api';
+import { api, ApiError, ORG_BILLING_ROLES, ORG_PEOPLE_ROLES } from '@/lib/api';
 import {
   signInWithGoogleIdToken,
   signInWithEmailPasswordIdToken,
@@ -24,9 +24,12 @@ export default function LoginPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
 
-  function handleSuccess(token: string, user: { id: string; userType: string; gymId?: string; portalUser?: boolean; aclPermissions?: string[]; email?: string; organizationUser?: boolean }) {
+  function handleSuccess(token: string, user: { id: string; userType: string; gymId?: string; portalUser?: boolean; aclPermissions?: string[]; email?: string; organizationUser?: boolean; organizationRoles?: string[] }) {
     signIn(token, user);
-    router.replace(user.userType === 'admin' ? '/admin' : user.organizationUser ? '/org' : user.userType === 'corporate_hr' ? '/hr' : '/dashboard');
+    // An organisation user lands on what their role is for: its people, else its billing, else its programmes.
+    const roles = user.organizationRoles ?? [];
+    const orgHome = roles.some(r => ORG_PEOPLE_ROLES.has(r)) ? '/org/people' : roles.some(r => ORG_BILLING_ROLES.has(r)) ? '/org' : '/org/programmes';
+    router.replace(user.userType === 'admin' ? '/admin' : user.organizationUser ? orgHome : user.userType === 'corporate_hr' ? '/hr' : '/dashboard');
   }
 
   function mapError(err: unknown): string {
