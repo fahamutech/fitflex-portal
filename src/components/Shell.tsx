@@ -54,11 +54,16 @@ type NavItem = {
 const scopesOf = (item: NavItem) => [item.aclScope, ...(item.aclAny ?? [])].filter(Boolean) as string[];
 
 // Section roots highlight only on themselves, not on their sub-pages.
-const ROOTS = new Set(['/admin', '/hr']);
+const ROOTS = new Set(['/admin', '/hr', '/org']);
 
 // Someone who looks after a B2B organisation's billing: that, and nothing else.
-const ORG_NAV: NavItem[] = [
-  { href: '/org', labelKey: 'org.nav.billing', icon: Receipt },
+// What each role is offered; the server decides what each page shows.
+const ORG_PEOPLE = new Set(['owner', 'admin', 'manager', 'hr', 'analyst']);
+const ORG_BILLING = new Set(['owner', 'admin', 'finance']);
+const orgNav = (roles?: string[]): NavItem[] => [
+  ...(!roles || roles.some(r => ORG_PEOPLE.has(r)) ? [{ href: '/org/people', labelKey: 'org.nav.people', icon: Users }] : []),
+  { href: '/org/programmes', labelKey: 'org.nav.programmes', icon: Network },
+  ...(!roles || roles.some(r => ORG_BILLING.has(r)) ? [{ href: '/org', labelKey: 'org.nav.billing', icon: Receipt }] : []),
 ];
 
 // Company HR: their company's wellness challenges, nothing else.
@@ -66,6 +71,8 @@ const HR_NAV: NavItem[] = [
   { href: '/hr', labelKey: 'hr.nav.challenges', icon: Trophy },
   { href: '/hr/rewards', labelKey: 'hr.nav.rewards', icon: Gift },
   { href: '/hr/groups', labelKey: 'hr.nav.groups', icon: Users },
+  { href: '/hr/people', labelKey: 'hr.nav.people', icon: UserCheck },
+  { href: '/hr/programmes', labelKey: 'hr.nav.programmes', icon: Network },
 ];
 
 const OPERATOR_NAV: NavItem[] = [
@@ -310,7 +317,7 @@ export function Shell({ children }: { children: ReactNode }) {
         if (!isPortalStaff) return true;             // super-admin sees everything
         return scopesOf(item).some(hasPermission);   // portal staff: check ACL
       })
-    : isOrgUser ? ORG_NAV
+    : isOrgUser ? orgNav(user?.organizationRoles)
     : isHr ? HR_NAV
     : OPERATOR_NAV.filter(item => !item.aclScope || user?.userType !== 'gym_staff' || hasPermission(item.aclScope));
 
@@ -319,7 +326,7 @@ export function Shell({ children }: { children: ReactNode }) {
     if (!token && pathname !== '/login' && pathname !== '/') router.replace('/login');
 
     // Someone signed in for an organisation's billing only ever sees /org; nobody else does.
-    if (token && isOrgUser && !pathname.startsWith('/org')) { router.replace('/org'); return; }
+    if (token && isOrgUser && !pathname.startsWith('/org')) { router.replace(orgNav(user?.organizationRoles)[0].href); return; }
     if (token && !isOrgUser && pathname.startsWith('/org')) { router.replace(user?.userType === 'admin' ? '/admin' : user?.userType === 'corporate_hr' ? '/hr' : '/dashboard'); return; }
 
     // Company HR only ever sees /hr; nobody else does.

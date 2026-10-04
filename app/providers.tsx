@@ -13,6 +13,8 @@ export interface PortalAppUser {
   aclPermissions?: string[];
   /** Signed in to look after a B2B organisation's billing (not FitFlex staff, not a gym). */
   organizationUser?: boolean;
+  /** Their roles across the organisations they belong to (which screens to offer; the server decides what each shows). */
+  organizationRoles?: string[];
 }
 
 interface AppCtx {
