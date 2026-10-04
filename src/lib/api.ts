@@ -23,7 +23,7 @@ export function setOnUnauthorized(cb: (() => void) | null) {
 // The backend ignores the header unless its V2 flags are on.
 export const IDENTITY_V2_CLIENT = 'identity-v2';
 
-type SessionResult = { token: string; user: { id: string; userType: string; gymId?: string; email?: string; portalUser?: boolean; aclPermissions?: string[] } };
+type SessionResult = { token: string; user: { id: string; userType: string; gymId?: string; email?: string; portalUser?: boolean; aclPermissions?: string[]; organizationUser?: boolean } };
 
 // The portal never registers anyone. It asks for an admin profile first (as it
 // always has), then for an existing gym owner profile, then an existing gym
@@ -35,6 +35,8 @@ const PORTAL_SIGN_IN_ROLES = [
   { requestedRole: 'gym_staff', existingOnly: true },
 ];
 const NO_SUCH_PROFILE = new Set(['admin_self_registration_not_allowed', 'profile_not_found']);
+/** Roles in a B2B organisation that see its billing (invoices, payments, statement). */
+export const ORG_BILLING_ROLES = new Set(['owner', 'admin', 'finance']);
 
 /** A persona (User row) of the signed-in Person, as the backend returns it. */
 export interface PersonaSummary {
@@ -125,6 +127,17 @@ export const api = {
         if (!code || !NO_SUCH_PROFILE.has(code)) throw err;
         refused = err;
       }
+    }
+    // Not FitFlex staff and not a gym: someone who looks after billing for a B2B
+    // organisation signs in with the account they already have. Nothing is
+    // created, and an account with no such organisation is refused as before.
+    try {
+      const session = await request<SessionResult>('/auth/firebase/session', { method: 'POST', body: JSON.stringify({ idToken, requestedRole: 'member', existingOnly: true }) });
+      const { organizations } = await request<{ organizations: Array<{ id: string; role: string }> }>('/b2b/me/organizations', {}, session.token);
+      if (organizations.some(o => ORG_BILLING_ROLES.has(o.role))) return { token: session.token, user: { ...session.user, organizationUser: true } };
+    } catch (err) {
+      const code = err instanceof ApiError ? (err.body as { error?: string } | null)?.error : undefined;
+      if (code && !NO_SUCH_PROFILE.has(code)) throw err;
     }
     throw refused;
   },
@@ -465,6 +478,55 @@ export const api = {
     request<{ consumption: B2BConsumption; sourceEvent: Record<string, unknown> | null; settlementCandidate: Record<string, unknown> }>(`/admin/b2b/consumptions/${encodeURIComponent(id)}`, {}, token),
   reverseB2BConsumption: (token: string, id: string, reason: string) =>
     request<{ consumption: B2BConsumption }>(`/admin/b2b/consumptions/${encodeURIComponent(id)}/reverse`, { method: 'POST', body: JSON.stringify({ reason }) }, token),
+  // ── B2B billing and financial management (Phase 5) ──
+  adminB2BBilling: (token: string, period?: string) => request<B2BBillingDashboard>(`/admin/b2b/billing${qs({ period })}`, {}, token),
+  adminB2BAgreements: (token: string, orgId: string) =>
+    request<{ agreements: B2BAgreement[]; inForce: B2BAgreement | null }>(`/admin/b2b/organizations/${encodeURIComponent(orgId)}/agreements`, {}, token),
+  createB2BAgreement: (token: string, orgId: string, body: B2BAgreementInput) =>
+    request<{ agreement: B2BAgreement }>(`/admin/b2b/organizations/${encodeURIComponent(orgId)}/agreements`, { method: 'POST', body: JSON.stringify(body) }, token),
+  activateB2BAgreement: (token: string, id: string) =>
+    request<{ agreement: B2BAgreement }>(`/admin/b2b/agreements/${encodeURIComponent(id)}/activate`, { method: 'POST', body: '{}' }, token),
+  endB2BAgreement: (token: string, id: string, effectiveTo?: string) =>
+    request<{ agreement: B2BAgreement }>(`/admin/b2b/agreements/${encodeURIComponent(id)}/end`, { method: 'POST', body: JSON.stringify({ effectiveTo }) }, token),
+  adminB2BBillingAccount: (token: string, orgId: string) =>
+    request<{ account: B2BBillingAccount }>(`/admin/b2b/organizations/${encodeURIComponent(orgId)}/billing-account`, {}, token),
+  setB2BBillingAccount: (token: string, orgId: string, body: Partial<Pick<B2BBillingAccount, 'contactName' | 'email' | 'phone'>>) =>
+    request<{ account: B2BBillingAccount }>(`/admin/b2b/organizations/${encodeURIComponent(orgId)}/billing-account`, { method: 'PUT', body: JSON.stringify(body) }, token),
+  prepareB2BFee: (token: string, orgId: string, period: string) =>
+    request<{ invoice: B2BSponsorInvoice | null; added: number; reason?: string }>(`/admin/b2b/organizations/${encodeURIComponent(orgId)}/invoices/prepare-fee`, { method: 'POST', body: JSON.stringify({ period }) }, token),
+  adminB2BStatement: (token: string, orgId: string, range: { from?: string; to?: string } = {}) =>
+    request<B2BStatement>(`/admin/b2b/organizations/${encodeURIComponent(orgId)}/statement${qs(range)}`, {}, token),
+  adminB2BPayments: (token: string, organizationId?: string) =>
+    request<{ items: B2BPayment[]; total: number }>(`/admin/b2b/payments${qs({ organizationId, limit: 200 })}`, {}, token),
+  recordB2BPayment: (token: string, orgId: string, body: B2BPaymentInput) =>
+    request<{ payment: B2BPayment; invoices?: B2BSponsorInvoice[]; existing?: boolean; skipped?: Array<{ invoiceId: string; reason: string }> }>(
+      `/admin/b2b/organizations/${encodeURIComponent(orgId)}/payments`, { method: 'POST', body: JSON.stringify(body) }, token),
+  allocateB2BPayment: (token: string, paymentId: string, allocations: Array<{ invoiceId: string; amountTzs: number }>) =>
+    request<{ payment: B2BPayment }>(`/admin/b2b/payments/${encodeURIComponent(paymentId)}/allocate`, { method: 'POST', body: JSON.stringify({ allocations }) }, token),
+  reverseB2BPayment: (token: string, paymentId: string, reason: string) =>
+    request<{ payment: B2BPayment }>(`/admin/b2b/payments/${encodeURIComponent(paymentId)}/reverse`, { method: 'POST', body: JSON.stringify({ reason }) }, token),
+  createB2BNote: (token: string, invoiceId: string, body: { type: 'credit' | 'debit'; amountTzs: number; reason: string }) =>
+    request<{ note: B2BSponsorInvoice }>(`/admin/b2b/invoices/${encodeURIComponent(invoiceId)}/notes`, { method: 'POST', body: JSON.stringify(body) }, token),
+  issueB2BNote: (token: string, noteId: string) =>
+    request<{ note: B2BSponsorInvoice }>(`/admin/b2b/notes/${encodeURIComponent(noteId)}/issue`, { method: 'POST', body: '{}' }, token),
+  applyB2BCredit: (token: string, noteId: string, allocations: Array<{ invoiceId: string; amountTzs: number }>) =>
+    request<{ invoices: B2BSponsorInvoice[] }>(`/admin/b2b/notes/${encodeURIComponent(noteId)}/apply`, { method: 'POST', body: JSON.stringify({ allocations }) }, token),
+  adminB2BInvoiceDetail: (token: string, invoiceId: string) =>
+    request<B2BInvoiceDetail>(`/admin/b2b/invoices/${encodeURIComponent(invoiceId)}`, {}, token),
+  adminB2BReconciliation: (token: string, invoiceId: string) =>
+    request<B2BReconciliation>(`/admin/b2b/invoices/${encodeURIComponent(invoiceId)}/reconciliation`, {}, token),
+  // The organisation's own billing (billing.read: owner, admin, finance).
+  myB2BOrganizations: (token: string) =>
+    request<{ organizations: Array<{ id: string; legalName: string; tradingName?: string | null; role: string; status: string }> }>('/b2b/me/organizations', {}, token),
+  orgBilling: (token: string, orgId: string) => request<B2BOrgBilling>(`/b2b/organizations/${encodeURIComponent(orgId)}/billing`, {}, token),
+  orgInvoices: (token: string, orgId: string) =>
+    request<{ items: B2BSponsorInvoice[]; total: number }>(`/b2b/organizations/${encodeURIComponent(orgId)}/invoices${qs({ limit: 100 })}`, {}, token),
+  orgInvoice: (token: string, orgId: string, invoiceId: string) =>
+    request<B2BInvoiceDetail>(`/b2b/organizations/${encodeURIComponent(orgId)}/invoices/${encodeURIComponent(invoiceId)}`, {}, token),
+  orgPayments: (token: string, orgId: string) =>
+    request<{ items: B2BPayment[]; total: number }>(`/b2b/organizations/${encodeURIComponent(orgId)}/payments${qs({ limit: 200 })}`, {}, token),
+  orgStatement: (token: string, orgId: string, range: { from?: string; to?: string } = {}) =>
+    request<B2BStatement>(`/b2b/organizations/${encodeURIComponent(orgId)}/statement${qs(range)}`, {}, token),
   // ── B2B sponsor billing (FitFlex admin) ──
   prepareB2BInvoice: (token: string, programId: string, kind: 'prepaid' | 'usage', period: string) =>
     request<{ invoice: B2BSponsorInvoice | null; added: number; credited?: number }>(`/admin/b2b/programs/${encodeURIComponent(programId)}/invoices/prepare`, { method: 'POST', body: JSON.stringify({ kind, period }) }, token),
@@ -1598,10 +1660,19 @@ export interface B2BSponsorInvoice {
   id: string;
   number: string;
   organizationId: string;
-  programId: string;
+  programId: string | null;
   period: string;
-  kind: 'prepaid' | 'usage';
-  status: 'draft' | 'issued' | 'paid' | 'void';
+  kind: 'prepaid' | 'usage' | 'fee' | 'credit_note' | 'debit_note';
+  status: 'draft' | 'issued' | 'partially_paid' | 'paid' | 'void';
+  /** EAT day the invoice falls due; null for a credit. */
+  dueDate?: string | null;
+  amountPaidTzs?: number;
+  /** What is still owed (negative: credit still to apply). */
+  outstandingTzs?: number;
+  overdue?: boolean;
+  relatedInvoiceId?: string | null;
+  reason?: string | null;
+  createdBy?: string | null;
   /** VAT-inclusive. */
   totalTzs: number;
   vatRateBps: number | null;
@@ -2175,4 +2246,84 @@ export interface SettlementClawbacks {
   raised: SettlementClawbackItem[];
   pending: SettlementClawbackItem[];
   skipped: Array<{ memberCycleSettlementId: string; memberId: string; reason: string }>;
+}
+
+// ── B2B billing and financial management (Phase 5) ──
+export type B2BAging = Record<'current' | 'days1to30' | 'days31to60' | 'days61to90' | 'over90', number>;
+export interface B2BBalances {
+  outstandingTzs: number; overdueTzs: number; seatBillsTzs: number; creditTzs: number; balanceTzs: number;
+  unallocatedPaymentsTzs: number; unappliedCreditNotesTzs: number; aging: B2BAging; asOf: string;
+}
+export interface B2BAgreement {
+  id: string; organizationId: string; reference: string; contractReference: string | null;
+  status: 'draft' | 'active' | 'ended'; effectiveFrom: string; effectiveTo: string | null;
+  billingCycle: string; currency: string; prepaidTermsDays: number; usageTermsDays: number;
+  platformFeeTzs: number | null; vatRateBps: number | null; notes: string | null;
+}
+export interface B2BAgreementInput {
+  effectiveFrom: string; effectiveTo?: string | null; prepaidTermsDays?: number; usageTermsDays?: number;
+  platformFeeTzs?: number | null; vatRateBps?: number | null; contractReference?: string | null;
+}
+export interface B2BBillingAccount {
+  organizationId: string; contactName: string | null; email: string | null; phone: string | null;
+  taxIdentificationNumber: string | null; registrationNumber: string | null; currency: string;
+  source: 'billing_account' | 'corporate_account' | 'organization';
+}
+export interface B2BPayment {
+  id: string; number: string; organizationId: string; amountTzs: number; method: string; reference: string;
+  receivedAt: string; status: 'received' | 'reversed'; allocatedTzs: number; unallocatedTzs: number;
+  reversalReason?: string | null; note?: string | null; recordedBy?: string | null;
+}
+export interface B2BPaymentInput {
+  amountTzs: number; method: string; reference: string; receivedAt?: string; note?: string;
+  autoAllocate?: boolean; allocations?: Array<{ invoiceId: string; amountTzs: number }>;
+}
+export interface B2BStatementEntry {
+  at: string; day: string; type: 'invoice' | 'credit_note' | 'debit_note' | 'payment' | 'payment_reversal' | 'seat_bill' | 'seat_bill_payment';
+  reference: string; description: string; status: string; dueDate?: string | null; invoiceId?: string;
+  chargeTzs: number; creditTzs: number; balanceTzs: number;
+}
+export interface B2BStatement extends B2BBalances {
+  organization: { id: string; name: string }; from: string | null; to: string | null;
+  openingBalanceTzs: number; closingBalanceTzs: number; entries: B2BStatementEntry[];
+  totals: { chargesTzs: number; creditsTzs: number };
+}
+export interface B2BInvoiceSettlement {
+  id: string; amountTzs: number; createdAt: string; paymentNumber: string | null; method: string | null;
+  reference: string | null; receivedAt: string | null; creditNoteNumber: string | null;
+}
+export interface B2BInvoiceDetail {
+  invoice: B2BSponsorInvoice;
+  lines: Array<{ kind: string; description?: string | null; beneficiaryName?: string | null; quantity: number; amountTzs: number; benefitId?: string | null }>;
+  settlements: B2BInvoiceSettlement[];
+  relatedInvoice: { id: string; number: string } | null;
+  notes: Array<{ id: string; number: string; kind: string; status: string; totalTzs: number; reason: string | null }>;
+}
+export interface B2BOrgBilling extends B2BBalances {
+  organization: { id: string; name: string };
+  account: B2BBillingAccount;
+  terms: { reference: string | null; contractReference?: string | null; billingCycle: string; prepaidTermsDays: number; usageTermsDays: number; platformFeeTzs: number | null; effectiveFrom?: string; effectiveTo?: string | null };
+  recentInvoices: B2BSponsorInvoice[];
+}
+export interface B2BBillingDashboard {
+  asOf: string;
+  totals: { invoicedTzs: number; creditNotesTzs: number; collectedTzs: number; outstandingTzs: number; overdueTzs: number; creditTzs: number };
+  aging: B2BAging;
+  organizations: Array<{ organizationId: string; name: string; status: string; invoicedTzs: number; creditNotesTzs: number; collectedTzs: number; outstandingTzs: number; overdueTzs: number; creditTzs: number; aging: B2BAging }>;
+  currentPeriod: { period: string; draftInvoices: number; draftTotalTzs: number };
+  billedAgainstProviders: {
+    period: string; billedTzs: number; differenceTzs: number; note: string;
+    providerObligations: { gymVisitsTzs: number; sponsoredPassesTzs: number; trainerSessionsTzs: number; totalTzs: number };
+  };
+}
+export interface B2BReconciliation {
+  invoice: B2BSponsorInvoice;
+  lines: Array<{
+    lineId: string; kind: string; description: string; amountTzs: number; active: boolean;
+    consumption: { id: string; status: string; businessDate: string; sourceType: string; sourceId: string; providerType: string; providerId: string; grossTzs: number; sponsorTzs: number; beneficiaryTzs: number } | null;
+    entitlement: { id: string; status: string; passTier: string; listPriceTzs: number; discountBps: number; feeTzs: number; sponsorTzs: number; memberTzs: number; subscriptionId: string | null } | null;
+    provider: { outcome?: string; statementId?: string | null; statementStatus?: string | null; gymsOwedTzs?: number; collectedForPassTzs?: number } | null;
+  }>;
+  settlements: B2BInvoiceSettlement[];
+  checks: { linesAddUp: boolean; linesTotalTzs: number; invoiceTotalTzs: number; usageMatchesLedger: boolean; reversedSinceInvoiced: string[]; amountPaidTzs: number; outstandingTzs: number };
 }
