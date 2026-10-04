@@ -117,6 +117,9 @@ function qs(params: object): string {
   return s ? `?${s}` : '';
 }
 
+/** Group routes of a company's HR, or of a B2B organisation's own users. */
+const groupsBase = (orgId?: string) => (orgId ? `/b2b/organizations/${encodeURIComponent(orgId)}/groups` : '/corporate/groups');
+
 /** A PIN is always exactly four digits. */
 export const isPin = (pin: string) => /^[0-9]{4}$/.test(pin);
 
@@ -296,17 +299,17 @@ export const api = {
     request<{ ok: boolean }>(`/owner/communications/templates/${encodeURIComponent(id)}/archive`, { method: 'POST' }, token),
 
   // ── Challenges: FitFlex admin (scope 'admin') and company HR ('corporate') ──
-  creatorChallenges: (token: string, scope: ChallengeScope) =>
+  creatorChallenges: (token: string, scope: ChallengeApiScope) =>
     request<{ challenges: ManagedChallenge[] }>(`/${scope}/challenges`, {}, token),
-  createChallenge: (token: string, scope: ChallengeScope, body: ChallengeInput) =>
+  createChallenge: (token: string, scope: ChallengeApiScope, body: ChallengeInput) =>
     request<{ challenge: ManagedChallenge }>(`/${scope}/challenges`, { method: 'POST', body: JSON.stringify(body) }, token),
-  updateChallenge: (token: string, scope: ChallengeScope, id: string, body: Partial<ChallengeInput>) =>
+  updateChallenge: (token: string, scope: ChallengeApiScope, id: string, body: Partial<ChallengeInput>) =>
     request<{ challenge: ManagedChallenge }>(`/${scope}/challenges/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(body) }, token),
-  challengeAction: (token: string, scope: ChallengeScope, id: string, action: 'cancel' | 'close' | 'archive') =>
+  challengeAction: (token: string, scope: ChallengeApiScope, id: string, action: 'cancel' | 'close' | 'archive') =>
     request<{ challenge: ManagedChallenge }>(`/${scope}/challenges/${encodeURIComponent(id)}/${action}`, { method: 'POST' }, token),
-  challengeParticipation: (token: string, scope: ChallengeScope, id: string) =>
+  challengeParticipation: (token: string, scope: ChallengeApiScope, id: string) =>
     request<ChallengeParticipation>(`/${scope}/challenges/${encodeURIComponent(id)}/participants`, {}, token),
-  challengeStandings: (token: string, scope: ChallengeScope, id: string) =>
+  challengeStandings: (token: string, scope: ChallengeApiScope, id: string) =>
     request<ChallengeStandings>(`/${scope}/challenges/${encodeURIComponent(id)}/leaderboard`, {}, token),
   // ─── Gym settlements (admin; reads need 'payments', each step its own scope) ───
   settlementRuns: (token: string, mode?: SettlementMode) =>
@@ -381,27 +384,27 @@ export const api = {
     return res.blob();
   },
   /** Earned rewards to hand out: FitFlex admin ('admin') or company HR ('corporate'). */
-  rewardQueue: (token: string, scope: ChallengeScope, filters: { status?: RewardStatus; challengeId?: string } = {}) => {
+  rewardQueue: (token: string, scope: ChallengeApiScope, filters: { status?: RewardStatus; challengeId?: string } = {}) => {
     const q = new URLSearchParams();
     if (filters.status) q.set('status', filters.status);
     if (filters.challengeId) q.set('challengeId', filters.challengeId);
     const s = q.toString();
     return request<RewardQueue>(`/${scope}/rewards${s ? '?' + s : ''}`, {}, token);
   },
-  setRewardStatus: (token: string, scope: ChallengeScope, id: string, body: { status: RewardStatus; reference?: string; note?: string }) =>
+  setRewardStatus: (token: string, scope: ChallengeApiScope, id: string, body: { status: RewardStatus; reference?: string; note?: string }) =>
     request<{ reward: RewardAward }>(`/${scope}/rewards/${encodeURIComponent(id)}/status`, { method: 'POST', body: JSON.stringify(body) }, token),
-  // ── Groups (company HR) and moderation (admin) ──
-  corporateGroups: (token: string) => request<{ groups: SocialGroup[] }>('/corporate/groups', {}, token),
-  createCorporateGroup: (token: string, body: GroupInput) =>
-    request<{ group: SocialGroup }>('/corporate/groups', { method: 'POST', body: JSON.stringify(body) }, token),
-  corporateGroup: (token: string, id: string) =>
-    request<{ group: SocialGroup; members: GroupMember[] }>(`/corporate/groups/${encodeURIComponent(id)}`, {}, token),
-  updateCorporateGroup: (token: string, id: string, body: Partial<GroupInput>) =>
-    request<{ group: SocialGroup; members: GroupMember[] }>(`/corporate/groups/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(body) }, token),
-  archiveCorporateGroup: (token: string, id: string) =>
-    request<{ archived: boolean }>(`/corporate/groups/${encodeURIComponent(id)}/archive`, { method: 'POST' }, token),
-  corporateGroupMember: (token: string, id: string, userId: string, action: GroupMemberAction) =>
-    request<{ group: SocialGroup; members: GroupMember[] }>(`/corporate/groups/${encodeURIComponent(id)}/members/${encodeURIComponent(userId)}/${action}`, { method: 'POST' }, token),
+  // ── Groups (company HR, or a B2B organisation's own users with `orgId`) and moderation (admin) ──
+  corporateGroups: (token: string, orgId?: string) => request<{ groups: SocialGroup[] }>(groupsBase(orgId), {}, token),
+  createCorporateGroup: (token: string, body: GroupInput, orgId?: string) =>
+    request<{ group: SocialGroup }>(groupsBase(orgId), { method: 'POST', body: JSON.stringify(body) }, token),
+  corporateGroup: (token: string, id: string, orgId?: string) =>
+    request<{ group: SocialGroup; members: GroupMember[] }>(`${groupsBase(orgId)}/${encodeURIComponent(id)}`, {}, token),
+  updateCorporateGroup: (token: string, id: string, body: Partial<GroupInput>, orgId?: string) =>
+    request<{ group: SocialGroup; members: GroupMember[] }>(`${groupsBase(orgId)}/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(body) }, token),
+  archiveCorporateGroup: (token: string, id: string, orgId?: string) =>
+    request<{ archived: boolean }>(`${groupsBase(orgId)}/${encodeURIComponent(id)}/archive`, { method: 'POST' }, token),
+  corporateGroupMember: (token: string, id: string, userId: string, action: GroupMemberAction, orgId?: string) =>
+    request<{ group: SocialGroup; members: GroupMember[] }>(`${groupsBase(orgId)}/${encodeURIComponent(id)}/members/${encodeURIComponent(userId)}/${action}`, { method: 'POST' }, token),
   socialReports: (token: string, status: SocialReportStatus) =>
     request<{ reports: SocialReport[] }>(`/admin/social/reports?${new URLSearchParams({ status })}`, {}, token),
   resolveSocialReport: (token: string, id: string, action: 'remove' | 'dismiss') =>
@@ -1329,6 +1332,8 @@ export interface AnalyticsOverview {
 
 // ── Challenge management (admin + HR) ───────────────────────────────────
 export type ChallengeScope = 'admin' | 'corporate';
+/** Where the challenge and reward routes live: FitFlex admin, a company's HR, or a B2B organisation's own users. */
+export type ChallengeApiScope = ChallengeScope | `b2b/organizations/${string}`;
 export type ChallengeType = 'steps' | 'distance_km' | 'workouts' | 'active_minutes' | 'consistency' | 'gym_attendance';
 export type ChallengeMode = 'individual' | 'teams' | 'gym_vs_gym' | 'department';
 export type RewardFunding = 'fitflex' | 'company' | 'partner';

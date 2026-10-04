@@ -63,6 +63,12 @@ const ORG_BILLING = new Set(['owner', 'admin', 'finance']);
 const orgNav = (roles?: string[]): NavItem[] => [
   ...(!roles || roles.some(r => ORG_PEOPLE.has(r)) ? [{ href: '/org/people', labelKey: 'org.nav.people', icon: Users }] : []),
   { href: '/org/programmes', labelKey: 'org.nav.programmes', icon: Network },
+  // Challenges, the rewards they earn, and groups: the same roles that see people.
+  ...(!roles || roles.some(r => ORG_PEOPLE.has(r)) ? [
+    { href: '/org/challenges', labelKey: 'hr.nav.challenges', icon: Trophy },
+    { href: '/org/rewards', labelKey: 'hr.nav.rewards', icon: Gift },
+    { href: '/org/groups', labelKey: 'hr.nav.groups', icon: UserCheck },
+  ] : []),
   ...(!roles || roles.some(r => ORG_BILLING.has(r)) ? [{ href: '/org', labelKey: 'org.nav.billing', icon: Receipt }] : []),
 ];
 
