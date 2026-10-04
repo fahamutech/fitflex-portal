@@ -8,6 +8,7 @@ import {
 } from '@/lib/api';
 import { Alert, Badge, Button, Card, CardContent, Field, PageHeader, Segmented, Spinner } from '@/components/shared';
 import { Aging, Balances, InvoiceDocument, InvoiceStatus, PrintButton, StatementTable, INVOICE_KIND, PAYMENT_METHOD, day } from '@/components/b2b-finance';
+import { CollectionsPanel } from '@/components/b2b-collections';
 import { money } from '@/lib/admin-utils';
 
 type Tab = 'invoices' | 'payments' | 'statement' | 'agreement';
@@ -98,6 +99,7 @@ export default function B2BBillingPage() {
             ))}
           </div>
           <Aging aging={dash.aging} />
+          <CollectionsPanel token={token} can={can} onOpenOrganization={setOrg} onChanged={load} />
 
           <Card>
             <CardContent className="space-y-2 py-4 text-sm">

@@ -5,9 +5,10 @@ import { useApp } from '../providers';
 import { api, ApiError, ORG_BILLING_ROLES, B2BInvoiceDetail, B2BOrgBilling, B2BPayment, B2BSponsorInvoice, B2BStatement } from '@/lib/api';
 import { Alert, Badge, Button, Card, CardContent, PageHeader, Segmented, Spinner } from '@/components/shared';
 import { Aging, Balances, InvoiceDocument, InvoiceStatus, PrintButton, StatementTable, INVOICE_KIND, PAYMENT_METHOD, day } from '@/components/b2b-finance';
+import { OrgPaying } from '@/components/b2b-collections';
 import { money } from '@/lib/admin-utils';
 
-type Tab = 'overview' | 'invoices' | 'payments' | 'statement';
+type Tab = 'overview' | 'invoices' | 'pay' | 'payments' | 'statement';
 type Org = { id: string; name: string; role: string };
 
 const failed = (e: unknown, fallback: string) =>
@@ -15,8 +16,9 @@ const failed = (e: unknown, fallback: string) =>
 
 /**
  * An organisation's own billing: what it owes, its invoices and what each one
- * charges for, the payments FitFlex has recorded, and its statement. Read
- * only; FitFlex raises invoices and records payments.
+ * charges for, the payments FitFlex has recorded, its statement, and where
+ * to pay. The organisation tells FitFlex when it has paid; FitFlex raises
+ * invoices and records a payment once the money is confirmed.
  */
 export default function OrganizationBillingPage() {
   const { token } = useApp();
@@ -29,6 +31,8 @@ export default function OrganizationBillingPage() {
   const [statement, setStatement] = useState<B2BStatement | null>(null);
   const [open, setOpen] = useState<B2BInvoiceDetail | null>(null);
   const [range, setRange] = useState({ from: '', to: '' });
+  // The invoice a payment notice was started from.
+  const [payFor, setPayFor] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -52,6 +56,10 @@ export default function OrganizationBillingPage() {
     api.orgPayments(token, orgId).then(r => setPayments(r.items)).catch(() => setPayments([]));
     api.orgStatement(token, orgId).then(setStatement).catch(() => undefined);
   }, [token, orgId]);
+  const reload = () => {
+    if (!token || !orgId) return;
+    api.orgInvoices(token, orgId).then(r => setInvoices(r.items)).catch(() => undefined);
+  };
 
   const openInvoice = async (invoiceId: string) => {
     if (!token) return;
@@ -92,6 +100,9 @@ export default function OrganizationBillingPage() {
           <CardContent className="space-y-3 py-5">
             <Button variant="secondary" size="sm" onClick={() => setOpen(null)} className="print:hidden"><ArrowLeft className="h-4 w-4" />Back</Button>
             <InvoiceDocument detail={open} organizationName={org.name} />
+            {(open.invoice.outstandingTzs ?? 0) > 0 && (
+              <Button size="sm" className="print:hidden" onClick={() => { setPayFor(open.invoice.id); setOpen(null); setTab('pay'); }} data-testid="pay-this-invoice">I’ve paid this invoice</Button>
+            )}
             <p className="text-xs text-[var(--color-fg-quaternary)] print:hidden">
               Sponsored passes are listed per person. Per-use benefits are totalled per benefit and person; FitFlex doesn’t show when or where a member trained.
             </p>
@@ -102,7 +113,7 @@ export default function OrganizationBillingPage() {
       {org && !open && (
         <>
           <Segmented className="print:hidden w-fit" value={tab} onChange={v => setTab(v as Tab)}
-            options={[['overview', 'Overview'], ['invoices', 'Invoices'], ['payments', 'Payments'], ['statement', 'Statement']]} />
+            options={[['overview', 'Overview'], ['invoices', 'Invoices'], ['pay', 'Pay'], ['payments', 'Payments'], ['statement', 'Statement']]} />
 
           {tab === 'overview' && (overview ? (
             <div className="space-y-4">
@@ -133,6 +144,8 @@ export default function OrganizationBillingPage() {
           ) : <Spinner className="h-6 w-6" />)}
 
           {tab === 'invoices' && (invoices ? <InvoiceList invoices={invoices} onOpen={openInvoice} empty="No invoices yet." /> : <Spinner className="h-6 w-6" />)}
+
+          {tab === 'pay' && (invoices ? <OrgPaying token={token} orgId={orgId} invoices={invoices} preselect={payFor} onChanged={reload} /> : <Spinner className="h-6 w-6" />)}
 
           {tab === 'payments' && (payments ? (
             <Card>
