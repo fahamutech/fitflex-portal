@@ -7,6 +7,9 @@ import {
 } from '@/lib/api';
 import { Alert, Badge, Button, Card, CardContent, Field, PageHeader, Spinner } from '@/components/shared';
 import { money } from '@/lib/admin-utils';
+import { ChallengeManager } from '@/components/challenge-manager';
+import { RewardQueue } from '@/components/reward-queue';
+import { GroupManager } from '@/components/group-manager';
 
 /**
  * The organisation's own screens for the people it covers and its
@@ -72,14 +75,16 @@ function useMyOrganization() {
   return { token, orgs, orgId, setOrgId, mine, error };
 }
 
-function OrgFrame({ title, description, state, children }: {
+function OrgFrame({ title, description, state, bare = false, children }: {
   title: string; description: string; state: ReturnType<typeof useMyOrganization>; children: (mine: Mine, token: string) => React.ReactNode;
+  /** The screen inside brings its own heading. */
+  bare?: boolean;
 }) {
   const { token, orgs, orgId, setOrgId, mine, error } = state;
   if (!token) return null;
   return (
     <div className="space-y-5">
-      <PageHeader title={title} description={mine ? `${mine.organization.tradingName || mine.organization.legalName} · ${description}` : description} />
+      {!bare && <PageHeader title={title} description={mine ? `${mine.organization.tradingName || mine.organization.legalName} · ${description}` : description} />}
       {error && <Alert tone="error">{error}</Alert>}
       {orgs && orgs.length === 0 && !error && <Alert tone="info">You aren’t part of any organisation on FitFlex yet.</Alert>}
       {orgs && orgs.length > 1 && (
@@ -439,5 +444,44 @@ function Programmes({ token, mine }: { token: string; mine: Mine }) {
       ))}
       <p className="text-xs text-[var(--color-fg-quaternary)]">Programmes and their benefits are set up and changed by FitFlex. Contact FitFlex to change one.</p>
     </div>
+  );
+}
+
+// ── Challenges, rewards and groups ───────────────────────────────────────────
+
+const NO_ENGAGEMENT = <Alert tone="info">Your role doesn’t include challenges and groups. Ask your organisation’s owner or admin.</Alert>;
+
+/** Challenges an organisation runs for its own people. It sees totals, never anyone's activity. */
+export function OrgChallengesPage() {
+  const state = useMyOrganization();
+  return (
+    <OrgFrame bare title="Challenges" description="" state={state}>
+      {mine => (mine.permissions.includes('engagement.read') ? (
+        <ChallengeManager scope="corporate" organizationId={mine.organization.id} rewardsHref="/org/rewards"
+          title="Wellness challenges"
+          description={`Challenges for ${mine.organization.tradingName || mine.organization.legalName}’s people. You see participation, completion and group progress, never anyone’s personal activity.`} />
+      ) : NO_ENGAGEMENT)}
+    </OrgFrame>
+  );
+}
+
+export function OrgRewardsPage() {
+  const state = useMyOrganization();
+  return (
+    <OrgFrame bare title="Rewards" description="" state={state}>
+      {mine => (mine.permissions.includes('engagement.read') ? (
+        <RewardQueue scope="corporate" organizationId={mine.organization.id} title="Rewards"
+          description="Rewards your organisation funds that your people have earned. Approve, then mark issued once handed over. Rewards FitFlex funds are handed out by FitFlex." />
+      ) : NO_ENGAGEMENT)}
+    </OrgFrame>
+  );
+}
+
+export function OrgGroupsPage() {
+  const state = useMyOrganization();
+  return (
+    <OrgFrame bare title="Groups" description="" state={state}>
+      {mine => (mine.permissions.includes('engagement.read') ? <GroupManager organizationId={mine.organization.id} /> : NO_ENGAGEMENT)}
+    </OrgFrame>
   );
 }
