@@ -67,5 +67,5 @@ test('UAT 55: admin controls product homepage visibility and priority in a real 
   await page.evaluate(() => localStorage.setItem('locale', 'sw'));
   await page.reload();
   await expect(page.getByRole('heading', { name: 'Orodha za bidhaa' })).toBeVisible();
-  await expect(page.getByText('Onyesha kwenye orodha za wanachama').first()).toBeVisible();
+  await expect(page.getByText('Ionekane kwa wanachama').first()).toBeVisible();
 });

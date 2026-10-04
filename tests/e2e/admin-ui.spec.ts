@@ -52,6 +52,6 @@ test('admin portal exposes localized management console', async ({ page }) => {
   await page.evaluate(() => localStorage.setItem('locale', 'sw'));
   await page.goto('/admin');
   await expect(page.getByRole('heading', { name: 'Overview' })).toBeVisible();
-  await page.getByRole('link', { name: 'Makocha' }).first().click();
+  await page.getByRole('link', { name: 'Ma-trainer' }).first().click();
   await expect(page.getByRole('heading', { name: 'Trainers' })).toBeVisible();
 });

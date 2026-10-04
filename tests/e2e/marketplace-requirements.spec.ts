@@ -201,5 +201,5 @@ test('marketplace requirements: portal approval connects vendor, every buyer rol
 
   await page.evaluate(() => localStorage.setItem('locale', 'sw'));
   await page.reload();
-  await expect(page.getByText('Idhini ya orodha').first()).toBeVisible();
+  await expect(page.getByText('Idhini ya bidhaa').first()).toBeVisible();
 });
