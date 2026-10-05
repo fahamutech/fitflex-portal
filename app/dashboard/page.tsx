@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import { useApp } from '../providers';
 import { api, DashboardResponse } from '@/lib/api';
+import { fill } from '@/components/communication-shared';
 import {
   MetricCard,
   Card,
@@ -24,7 +25,7 @@ import {
 export default function DashboardPage() {
   const { token, t } = useApp();
   const [data, setData] = useState<DashboardResponse | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState(false);
   const [loading, setLoading] = useState(true);
   const [gymId, setGymId] = useState('');
   const [memberType, setMemberType] = useState<'all' | 'direct' | 'fitflex'>('all');
@@ -39,7 +40,7 @@ export default function DashboardPage() {
     setLoading(true);
     api.dashboard(token, { gymId, periodStart, periodEnd, memberType })
       .then(setData)
-      .catch((e) => setError(String(e)))
+      .catch(() => setError(true))
       .finally(() => setLoading(false));
   };
 
@@ -55,14 +56,17 @@ export default function DashboardPage() {
     );
   }
 
-  if (error) return <Alert tone="error">{error}</Alert>;
+  if (error) return <Alert tone="error">{t('ownerDash.loadFailed')}</Alert>;
   if (!data)  return null;
 
   const payoutLabel = data.payout.flatFee
-    ? 'Flat monthly fee'
-    : `${data.payout.commissionPct ?? 0}% commission · ${
-        data.payout.payoutDelayDays === 0 ? 'instant' : `T+${data.payout.payoutDelayDays}d`
-      }`;
+    ? t('ownerDash.flatMonthlyFee')
+    : fill(t('ownerDash.commissionSummary'), {
+        pct: data.payout.commissionPct ?? 0,
+        timing: data.payout.payoutDelayDays === 0
+          ? t('ownerDash.instantShort')
+          : fill(t('ownerDash.delayShort'), { n: data.payout.payoutDelayDays ?? '' }),
+      });
   const activeMemberType = data.memberType ?? memberType;
   const activeMemberTypeLabel =
     activeMemberType === 'direct'
@@ -77,7 +81,7 @@ export default function DashboardPage() {
       {/* Page header */}
       <PageHeader
         title={data.gym.name}
-        description={`${data.gym.tier} gym`}
+        description={fill(t('ownerDash.tierGym'), { tier: data.gym.tier })}
         actions={
           <Button variant="secondary" size="sm" onClick={load} disabled={loading}>
             <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
@@ -89,13 +93,13 @@ export default function DashboardPage() {
       {/* Gym identity strip */}
       <Card>
         <CardContent className="flex flex-wrap items-center gap-3">
-          <Badge tone="brand" dot>{data.gym.tier} tier</Badge>
+          <Badge tone="brand" dot>{fill(t('ownerDash.tierBadge'), { tier: data.gym.tier })}</Badge>
           <span className="text-sm text-[var(--color-fg-quaternary)]">·</span>
           <span className="text-sm text-[var(--color-fg-tertiary)]">
-            TZS {data.gym.perVisitRate.toLocaleString()} / visit
+            {fill(t('ownerDash.perVisit'), { amount: data.gym.perVisitRate.toLocaleString() })}
           </span>
           <span className="text-sm text-[var(--color-fg-quaternary)]">·</span>
-          <Badge tone="gray">Band {data.payout.band}</Badge>
+          <Badge tone="gray">{fill(t('ownerDash.bandValue'), { band: data.payout.band })}</Badge>
           <span className="text-sm text-[var(--color-fg-quaternary)] hidden sm:inline">{payoutLabel}</span>
         </CardContent>
       </Card>
@@ -149,7 +153,7 @@ export default function DashboardPage() {
         />
         <MetricCard
           label={t('dash.band')}
-          value={`Band ${data.payout.band}`}
+          value={fill(t('ownerDash.bandValue'), { band: data.payout.band })}
           icon={<TrendingUp className="h-5 w-5" />}
           sub={`${t('dash.band.sub')} · ${payoutLabel}`}
         />
@@ -210,37 +214,37 @@ export default function DashboardPage() {
           label={t('dash.netPayout')}
           value={`TZS ${data.payout.net.toLocaleString()}`}
           icon={<Banknote className="h-5 w-5" />}
-          sub="Estimated net — subject to reconciliation"
+          sub={t('ownerDash.netHint')}
         />
       )}
 
       {/* Payout details */}
       <Card>
         <CardHeader>
-          <h2 className="text-sm font-semibold text-[var(--color-fg-primary)]">Payout details</h2>
+          <h2 className="text-sm font-semibold text-[var(--color-fg-primary)]">{t('ownerDash.payoutDetails')}</h2>
         </CardHeader>
         <CardContent>
           <dl className="grid gap-y-3 sm:grid-cols-2 text-sm">
             <div>
-              <dt className="text-[var(--color-fg-quaternary)]">Band</dt>
+              <dt className="text-[var(--color-fg-quaternary)]">{t('ownerDash.band')}</dt>
               <dd className="mt-0.5 font-medium text-[var(--color-fg-primary)]">{data.payout.band}</dd>
             </div>
             <div>
-              <dt className="text-[var(--color-fg-quaternary)]">Commission</dt>
+              <dt className="text-[var(--color-fg-quaternary)]">{t('ownerDash.commission')}</dt>
               <dd className="mt-0.5 font-medium text-[var(--color-fg-primary)]">
                 {data.payout.flatFee ? '—' : `${data.payout.commissionPct ?? 0}%`}
               </dd>
             </div>
             <div>
-              <dt className="text-[var(--color-fg-quaternary)]">Payout timing</dt>
+              <dt className="text-[var(--color-fg-quaternary)]">{t('ownerDash.payoutTiming')}</dt>
               <dd className="mt-0.5 font-medium text-[var(--color-fg-primary)]">
-                {data.payout.payoutDelayDays === 0 ? 'Instant' : `T+${data.payout.payoutDelayDays} days`}
+                {data.payout.payoutDelayDays === 0 ? t('ownerDash.instant') : fill(t('ownerDash.delayDays'), { n: data.payout.payoutDelayDays ?? '' })}
               </dd>
             </div>
             <div>
-              <dt className="text-[var(--color-fg-quaternary)]">Fee structure</dt>
+              <dt className="text-[var(--color-fg-quaternary)]">{t('ownerDash.feeStructure')}</dt>
               <dd className="mt-0.5 font-medium text-[var(--color-fg-primary)]">
-                {data.payout.flatFee ? 'Flat monthly' : 'Per-visit commission'}
+                {data.payout.flatFee ? t('ownerDash.flatMonthly') : t('ownerDash.perVisitCommission')}
               </dd>
             </div>
           </dl>

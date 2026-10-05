@@ -79,20 +79,20 @@ export default function ScanPage() {
   }
 
   const failureMsg = last?.failure
-    ? (FAILURE_KEYS[last.failure] ? t(FAILURE_KEYS[last.failure]) : last.failure)
+    ? t(FAILURE_KEYS[last.failure] ?? 'ownerScan.failGeneric')
     : '';
 
   return (
     <div className="space-y-6">
       <PageHeader
         title={t('scan.heading')}
-        description="Point the camera at the member's QR code to record a check-in."
+        description={t('ownerScan.description')}
       />
 
       {/* Camera card */}
       <Card>
         <CardHeader>
-          <h2 className="text-sm font-semibold text-[var(--color-fg-primary)]">Camera</h2>
+          <h2 className="text-sm font-semibold text-[var(--color-fg-primary)]">{t('ownerScan.camera')}</h2>
           {streaming
             ? (
               <Button variant="secondary" size="sm" onClick={stopCamera}>
@@ -118,7 +118,7 @@ export default function ScanPage() {
           {!streaming && (
             <div className="flex h-full flex-col items-center justify-center gap-3 text-[var(--color-gray-600)]">
               <Camera className="h-10 w-10" />
-              <p className="text-sm">Camera is off</p>
+              <p className="text-sm">{t('ownerScan.cameraOff')}</p>
             </div>
           )}
           {/* Scan overlay guide lines */}
@@ -135,10 +135,10 @@ export default function ScanPage() {
       {/* Manual token input */}
       <Card>
         <CardHeader>
-          <h2 className="text-sm font-semibold text-[var(--color-fg-primary)]">Manual entry</h2>
+          <h2 className="text-sm font-semibold text-[var(--color-fg-primary)]">{t('ownerScan.manual')}</h2>
         </CardHeader>
         <CardContent>
-          <Field label="QR token (for testing)" hint="Format: usr_xxx.<bucket>.<sig>">
+          <Field label={t('ownerScan.tokenLabel')} hint={t('ownerScan.tokenHint')}>
             <div className="flex gap-2">
               <Input
                 data-testid="manual-token"
@@ -152,7 +152,7 @@ export default function ScanPage() {
                 onClick={() => manual && submit(manual)}
                 disabled={!manual}
               >
-                Submit
+                {t('ownerScan.submit')}
               </Button>
             </div>
           </Field>
@@ -183,11 +183,11 @@ export default function ScanPage() {
                 <div className="grid gap-1.5 text-sm text-[var(--color-success-800)]">
                   <div className="flex items-center gap-1.5">
                     <Hash className="h-3.5 w-3.5 opacity-60" />
-                    Visit #{last.checkin.visitNumberInCycle ?? '—'}
+                    {t('ownerScan.visitNumber').replace('{n}', String(last.checkin.visitNumberInCycle ?? '—'))}
                   </div>
                   <div className="flex items-center gap-1.5">
                     <Tag className="h-3.5 w-3.5 opacity-60" />
-                    {last.checkin.passTier ?? 'Direct subscription'}
+                    {last.checkin.passTier ?? t('ownerScan.directSubscription')}
                   </div>
                   <div className="flex items-center gap-1.5">
                     <User className="h-3.5 w-3.5 opacity-60" />
@@ -205,7 +205,7 @@ export default function ScanPage() {
 
       {/* Inline error from camera failure */}
       {last && !last.ok && !last.failure && (
-        <Alert tone="error">Camera or network error — try manual entry.</Alert>
+        <Alert tone="error">{t('ownerScan.cameraError')}</Alert>
       )}
     </div>
   );
