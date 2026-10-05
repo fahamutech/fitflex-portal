@@ -3,6 +3,7 @@ import { ReactNode, useState, useMemo } from 'react';
 import { ChevronUp, ChevronDown, ChevronsUpDown, ChevronLeft, ChevronRight, Search } from 'lucide-react';
 import { cn } from '@/lib/cn';
 import { Button, Input } from './shared';
+import { useApp } from '../../app/providers';
 
 export type ColumnDef<T> = {
   key: string;
@@ -24,7 +25,7 @@ export function DataTable<T extends Record<string, any>>({
   data,
   keyFn,
   actions,
-  filterPlaceholder = 'Search…',
+  filterPlaceholder,
   emptyState,
   pageSize: defaultPageSize = 10,
   extraFilters,
@@ -40,6 +41,7 @@ export function DataTable<T extends Record<string, any>>({
   extraFilters?: ReactNode;
   onRowClick?: (row: T) => void;
 }) {
+  const { t } = useApp();
   const [query, setQuery]         = useState('');
   const [sortKey, setSortKey]     = useState<string | null>(null);
   const [sortDir, setSortDir]     = useState<SortDir>(null);
@@ -108,7 +110,7 @@ export function DataTable<T extends Record<string, any>>({
           <Input
             value={query}
             onChange={e => { setQuery(e.target.value); setPage(1); }}
-            placeholder={filterPlaceholder}
+            placeholder={filterPlaceholder ?? t('ui.table.search')}
             className="!pl-9"
           />
         </div>
@@ -138,7 +140,7 @@ export function DataTable<T extends Record<string, any>>({
                 </th>
               ))}
               {hasActions && (
-                <th className="text-right w-px whitespace-nowrap">Actions</th>
+                <th className="text-right w-px whitespace-nowrap">{t('ui.table.actions')}</th>
               )}
             </tr>
           </thead>
@@ -149,7 +151,7 @@ export function DataTable<T extends Record<string, any>>({
                   colSpan={visibleColumns.length + (hasActions ? 1 : 0)}
                   className="py-16 text-center text-sm text-[var(--color-fg-quaternary)]"
                 >
-                  {emptyState ?? 'No records found.'}
+                  {emptyState ?? t('ui.table.empty')}
                 </td>
               </tr>
             ) : (
@@ -187,7 +189,7 @@ export function DataTable<T extends Record<string, any>>({
       {/* Pagination */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between text-sm text-[var(--color-fg-tertiary)]">
         <div className="flex items-center gap-2">
-          <span>Rows per page:</span>
+          <span>{t('ui.table.rowsPerPage')}</span>
           <select
             value={pageSize}
             onChange={e => { setPageSize(Number(e.target.value)); setPage(1); }}
@@ -196,7 +198,9 @@ export function DataTable<T extends Record<string, any>>({
             {PAGE_SIZES.map(s => <option key={s} value={s}>{s}</option>)}
           </select>
           <span className="hidden sm:inline">
-            {sorted.length === 0 ? '0' : `${(safePage - 1) * pageSize + 1}–${Math.min(safePage * pageSize, sorted.length)}`} of {sorted.length}
+            {t('ui.table.rangeOf')
+              .replace('{range}', sorted.length === 0 ? '0' : `${(safePage - 1) * pageSize + 1}–${Math.min(safePage * pageSize, sorted.length)}`)
+              .replace('{total}', String(sorted.length))}
           </span>
         </div>
         <div className="flex items-center gap-1">

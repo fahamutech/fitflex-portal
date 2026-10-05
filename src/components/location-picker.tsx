@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
+import { useApp } from '../../app/providers';
 
 // Fix default marker icon path issue in Leaflet + bundlers
 const DefaultIcon = L.icon({
@@ -22,6 +23,7 @@ interface LocationPickerProps {
 }
 
 export function LocationPicker({ lat, lng, onChange, height = '260px' }: LocationPickerProps) {
+  const { t } = useApp();
   const mapRef = useRef<HTMLDivElement>(null);
   const mapInstance = useRef<L.Map | null>(null);
   const markerRef = useRef<L.Marker | null>(null);
@@ -107,7 +109,7 @@ export function LocationPicker({ lat, lng, onChange, height = '260px' }: Locatio
       <div className="flex gap-2">
         <input
           className="ui-input flex-1"
-          placeholder="Search location..."
+          placeholder={t('ui.location.placeholder')}
           value={searchQuery}
           onChange={e => setSearchQuery(e.target.value)}
           onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleSearch(); } }}
@@ -118,13 +120,13 @@ export function LocationPicker({ lat, lng, onChange, height = '260px' }: Locatio
           disabled={searching}
           className="px-3 py-1.5 text-xs font-medium rounded-[var(--radius-md)] bg-[var(--color-brand-600)] text-white hover:bg-[var(--color-brand-700)] disabled:opacity-50 transition-colors"
         >
-          {searching ? 'Searching...' : 'Search'}
+          {searching ? t('ui.location.searching') : t('ui.location.search')}
         </button>
       </div>
       <div ref={mapRef} style={{ height, width: '100%', borderRadius: 'var(--radius-lg)', overflow: 'hidden', border: '1px solid var(--color-border-secondary)', position: 'relative', zIndex: 0 }} />
       {lat != null && lng != null && (
         <p className="text-xs text-[var(--color-fg-quaternary)]">
-          Coordinates: {lat.toFixed(5)}, {lng.toFixed(5)}
+          {t('ui.location.coordinates').replace('{lat}', lat.toFixed(5)).replace('{lng}', lng.toFixed(5))}
         </p>
       )}
     </div>

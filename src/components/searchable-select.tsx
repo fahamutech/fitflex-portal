@@ -2,6 +2,7 @@
 import { useState, useRef, useEffect, ReactNode } from 'react';
 import { Search, Plus, X, Check } from 'lucide-react';
 import { cn } from '@/lib/cn';
+import { useApp } from '../../app/providers';
 
 export interface SelectOption {
   value: string;
@@ -26,14 +27,16 @@ export function SearchableSelect({
   options,
   value,
   onChange,
-  placeholder = 'Search...',
+  placeholder: placeholderProp,
   multiple = false,
   allowCreate = false,
-  createLabel = 'Create new',
+  createLabel,
   onCreateNew,
   disabled = false,
   className,
 }: SearchableSelectProps) {
+  const { t } = useApp();
+  const placeholder = placeholderProp ?? t('ui.select.search');
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState('');
   const containerRef = useRef<HTMLDivElement>(null);
@@ -145,7 +148,7 @@ export function SearchableSelect({
           <div className="max-h-[200px] overflow-y-auto">
             {filtered.length === 0 && (
               <div className="px-3 py-4 text-center text-sm text-[var(--color-fg-quaternary)]">
-                No results found
+                {t('ui.select.noResults')}
               </div>
             )}
             {filtered.map((opt) => {
@@ -186,7 +189,7 @@ export function SearchableSelect({
               className="w-full flex items-center gap-2 px-3 py-2.5 text-sm font-medium text-[var(--color-brand-700)] border-t border-[var(--color-border-secondary)] hover:bg-[var(--color-brand-50)] transition-colors"
             >
               <Plus className="h-4 w-4" />
-              {createLabel}
+              {createLabel ?? t('ui.select.createNew')}
             </button>
           )}
         </div>

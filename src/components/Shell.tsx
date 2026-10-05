@@ -39,6 +39,7 @@ import {
 } from 'lucide-react';
 import { useApp } from '../../app/providers';
 import { cn } from '@/lib/cn';
+import type { MessageKey } from '@/lib/i18n';
 import { Avatar, Badge } from './shared';
 import { BrandLogo } from './brand-logo';
 
@@ -167,6 +168,13 @@ function resolveLabel(t: (key: any) => string, key: string): string {
   return resolved === key ? key.split('.').pop()?.replace(/([A-Z])/g, ' $1').trim() || key : resolved;
 }
 
+/** The signed-in role as shown beside the user's name. English keeps the raw role, as before. */
+function roleLabel(t: (key: MessageKey) => string, userType?: string) {
+  if (userType === 'corporate_hr') return t('nav.personaHr');
+  if (userType === 'gym_operator' || userType === 'gym_staff' || userType === 'admin') return t(`shell.role.${userType}`);
+  return userType;
+}
+
 /* ── Sidebar content (shared by mobile drawer + desktop) ─── */
 function SidebarContent({
   nav,
@@ -203,7 +211,7 @@ function SidebarContent({
         <div className="flex-1 min-w-0">
           <p className="truncate text-sm font-semibold text-white">FitFlex Af</p>
           <p className="truncate text-xs text-[var(--color-gray-500)]">
-            {user?.userType === 'admin' ? 'Pilot Console' : user?.userType === 'corporate_hr' || user?.organizationUser ? 'FitFlex for Business' : 'Operator Portal'}
+            {user?.userType === 'admin' ? 'Pilot Console' : user?.userType === 'corporate_hr' || user?.organizationUser ? 'FitFlex for Business' : t('shell.operatorPortal')}
           </p>
         </div>
       </div>
@@ -293,7 +301,7 @@ function SidebarContent({
           <Avatar name={(user as any)?.displayName || user?.email || user?.id || 'User'} size="sm" />
           <div className="flex-1 min-w-0">
             <p className="truncate text-xs font-medium text-white">{(user as any)?.displayName || user?.email || user?.id || '—'}</p>
-            <p className="truncate text-xs text-[var(--color-gray-500)] capitalize">{user?.userType === 'corporate_hr' ? 'Company HR' : user?.userType}{user?.portalUser ? ' · staff' : ''}</p>
+            <p className={cn('truncate text-xs text-[var(--color-gray-500)]', locale !== 'sw' && 'capitalize')}>{roleLabel(t, user?.userType)}{user?.portalUser ? t('shell.staffSuffix') : ''}</p>
           </div>
           <button
             onClick={() => { signOut(); router.replace('/login'); }}
@@ -310,7 +318,7 @@ function SidebarContent({
 
 /* ── Shell ───────────────────────────────────────────────── */
 export function Shell({ children }: { children: ReactNode }) {
-  const { ready, token, user, hasPermission, locale, setLocale } = useApp();
+  const { ready, token, user, hasPermission, locale, setLocale, t } = useApp();
   const pathname = usePathname();
   const router = useRouter();
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -401,7 +409,7 @@ export function Shell({ children }: { children: ReactNode }) {
           </div>
           <select
             data-testid="locale-select"
-            aria-label="Language"
+            aria-label={t('shell.language')}
             value={locale}
             onChange={e => setLocale(e.target.value as 'en' | 'sw')}
             className="ui-input w-24 text-xs"
@@ -453,7 +461,7 @@ export function Shell({ children }: { children: ReactNode }) {
             </div>
             <span className="text-sm font-semibold text-[var(--color-fg-primary)]">FitFlex Af</span>
           </div>
-          <Badge tone="brand">{user?.userType === 'corporate_hr' ? 'Company HR' : user?.userType}</Badge>
+          <Badge tone="brand">{roleLabel(t, user?.userType)}</Badge>
         </header>
 
         {/* Page content */}
