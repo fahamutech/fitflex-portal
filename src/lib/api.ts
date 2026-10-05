@@ -555,6 +555,25 @@ export const api = {
     request<{ notice: B2BPaymentNotice; existing?: boolean }>(`/b2b/organizations/${encodeURIComponent(orgId)}/payment-notices`, { method: 'POST', body: JSON.stringify(body) }, token),
   withdrawPaymentNotice: (token: string, orgId: string, noticeId: string) =>
     request<{ notice: B2BPaymentNotice }>(`/b2b/organizations/${encodeURIComponent(orgId)}/payment-notices/${encodeURIComponent(noticeId)}/withdraw`, { method: 'POST', body: '{}' }, token),
+  // Analytics and reporting. `query` carries the period (period= or from=&to=) and filters.
+  orgDashboard: (token: string, orgId: string, query: B2BAnalyticsQuery = {}) =>
+    request<B2BDashboard>(`/b2b/organizations/${encodeURIComponent(orgId)}/analytics/dashboard${qs(query)}`, {}, token),
+  orgPeopleAnalytics: (token: string, orgId: string, query: B2BAnalyticsQuery & { search?: string; activity?: string; sort?: string; limit?: number; cursor?: number } = {}) =>
+    request<{ period: B2BPeriod; items: B2BPersonRow[]; total: number; nextCursor: number | null }>(`/b2b/organizations/${encodeURIComponent(orgId)}/analytics/people${qs(query)}`, {}, token),
+  orgPersonAnalytics: (token: string, orgId: string, beneficiaryId: string, query: B2BAnalyticsQuery = {}) =>
+    request<B2BPersonDetail>(`/b2b/organizations/${encodeURIComponent(orgId)}/analytics/people/${encodeURIComponent(beneficiaryId)}${qs(query)}`, {}, token),
+  orgProgramAnalytics: (token: string, orgId: string, query: B2BAnalyticsQuery = {}) =>
+    request<{ period: B2BPeriod; items: B2BProgramAnalytics[] }>(`/b2b/organizations/${encodeURIComponent(orgId)}/analytics/programs${qs(query)}`, {}, token),
+  orgBenefitAnalytics: (token: string, orgId: string, query: B2BAnalyticsQuery = {}) =>
+    request<{ period: B2BPeriod; items: B2BBenefitAnalytics[] }>(`/b2b/organizations/${encodeURIComponent(orgId)}/analytics/benefits${qs(query)}`, {}, token),
+  orgProviderAnalytics: (token: string, orgId: string, query: B2BAnalyticsQuery = {}) =>
+    request<{ period: B2BPeriod; items: B2BProviderAnalytics[]; totals: { providers: number; visits: number; serviceValueTzs: number } }>(`/b2b/organizations/${encodeURIComponent(orgId)}/analytics/providers${qs(query)}`, {}, token),
+  orgFinanceAnalytics: (token: string, orgId: string, query: B2BAnalyticsQuery = {}) =>
+    request<B2BFinanceAnalytics>(`/b2b/organizations/${encodeURIComponent(orgId)}/analytics/finance${qs(query)}`, {}, token),
+  orgExport: (token: string, orgId: string, report: string, query: B2BAnalyticsQuery = {}) =>
+    request<{ filename: string; title: string; rows: number; csv: string }>(`/b2b/organizations/${encodeURIComponent(orgId)}/analytics/export/${encodeURIComponent(report)}${qs(query)}`, {}, token),
+  adminB2BAnalytics: (token: string, query: B2BAnalyticsQuery = {}) => request<B2BAnalyticsOverview>(`/admin/b2b/analytics${qs(query)}`, {}, token),
+  adminB2BDataQuality: (token: string) => request<B2BDataQuality>('/admin/b2b/analytics/data-quality', {}, token),
   // Collections (FitFlex staff).
   adminB2BCollections: (token: string) => request<B2BCollectionsQueue>('/admin/b2b/collections', {}, token),
   adminB2BPaymentInstructions: (token: string) => request<{ instructions: B2BPaymentInstructions; configured: boolean }>('/admin/b2b/payment-instructions', {}, token),
@@ -2317,6 +2336,73 @@ export interface B2BBillingAccount {
   source: 'billing_account' | 'corporate_account' | 'organization';
   onHold?: boolean; holdReason?: string | null;
 }
+export interface B2BAnalyticsQuery { period?: string; from?: string; to?: string; programId?: string; benefitId?: string; providerId?: string; group?: string }
+export interface B2BPeriod { preset: string; from: string; to: string; days: number; previous: { from: string; to: string }; bucket: 'day' | 'week' | 'month'; timezone: string }
+export interface B2BUsageMoney { uses: number; grossTzs: number; sponsorTzs: number; beneficiaryTzs: number }
+export interface B2BDashboard {
+  organization: { id: string; name: string }; period: B2BPeriod; freshness: string; generatedAt: string;
+  beneficiaries: { total: number; enrolled: number; pending: number; suspended: number; inactive: number; linkedToAccount: number; enrolledInPeriod: number; groups: string[] };
+  participation: { activeBeneficiaries: number; previousActiveBeneficiaries: number; changePct: number | null; utilisationRatePct: number | null; inactiveBeneficiaries: number };
+  usage: B2BUsageMoney & { passCheckins: number; sponsoredVisits: number; usesChangePct: number | null; averagePerActiveBeneficiary: number | null };
+  spend: {
+    sponsorPerUseTzs: number; sponsorPassFeesTzs: number; sponsorTotalTzs: number; memberPerUseTzs: number; memberPassSharesTzs: number; serviceValueTzs: number;
+    passes: number; passesStarted: number; costPerActiveBeneficiaryTzs: number | null; costPerSponsoredVisitTzs: number | null;
+  };
+  benefits: { active: number; usedInPeriod: number; endingWithin30Days: number; total: number };
+  providers: { used: number; top: Array<{ providerType: string; providerId: string; name: string | null; visits: number; uses: number; passCheckins: number; sponsorTzs: number }> };
+  engagement: { peopleWithActivity: number; activities: number; workouts: number; steps: number; distanceKm: number; activeMinutes: number; gymCheckins: number; peopleInChallenges: number };
+  trend: Array<{ bucket: string; uses: number; sponsorTzs: number; passCheckins: number; activities: number; activeBeneficiaries: number }>;
+  billing?: { invoicedTzs: number; invoices: number; paidTzs: number; payments: number; outstandingTzs: number; overdueTzs: number; creditTzs: number; aging: B2BAging; asOf: string };
+}
+export interface B2BPersonRow {
+  beneficiaryId: string; name: string | null; externalReference: string | null; group: string | null; beneficiaryType: string; status: string; enrolledAt: string | null;
+  linkedToAccount: boolean; active: boolean; sponsoredUses: number; passCheckins: number; sponsorTzs: number; memberTzs: number; serviceValueTzs: number;
+  gymCheckins: number; activities: number; workouts: number; steps: number; activeMinutes: number; lastActiveDay: string | null;
+}
+export interface B2BPersonDetail {
+  period: B2BPeriod;
+  beneficiary: { id: string; name: string | null; externalReference: string | null; group: string | null; beneficiaryType: string; status: string; enrolledAt: string | null; linkedToAccount: boolean };
+  totals: B2BUsageMoney & { passCheckins: number; activities: number; otherGymVisits: number; capped: boolean };
+  byBenefit: Array<B2BUsageMoney & { benefitId: string; benefitName: string | null }>;
+  passes: Array<{ period: string; passTier: string; status: string; sponsorTzs: number; memberTzs: number; benefitName: string | null; startedAt: string | null }>;
+  sponsoredUsage: Array<{ id: string; day: string; benefitName: string | null; serviceType: string; providerType: string; provider: string | null; quantity: number; serviceValueTzs: number; sponsorTzs: number; memberTzs: number }>;
+  passCheckins: Array<{ id: string; day: string; gym: string | null; passTier: string | null; benefitName: string | null }>;
+  otherGymVisits: Array<{ id: string; day: string; gym: string | null }>;
+  activities: Array<{ id: string; day: string; type: string; source: string; durationMinutes: number | null; distanceKm: number | null; steps: number | null; activeMinutes: number | null; intensity: string | null; gym: string | null }>;
+  challenges: Array<{ id: string; name: string; type: string; target: number; endDate: string; phase: string; progress: number; completed: boolean }>;
+  notShown: string[];
+}
+export interface B2BBenefitAnalytics {
+  benefitId: string; name: string; benefitType: string; status: string; programId: string; programName: string | null; fundingType: string;
+  usageLimit: number | null; usagePeriod: string | null; eligible: number; users: number; uses: number; reachPct: number | null; averageUsesPerUser: number | null;
+  serviceValueTzs: number; sponsorTzs: number; memberTzs: number; passes: number | null; passesStarted: number | null;
+  allowance: { windowStart: string; windowEnd: string | null; consumedUnits: number; availableUnits: number; usedPct: number | null; peopleAtLimit: number; peopleNearLimit: number } | null;
+}
+export interface B2BProgramAnalytics {
+  programId: string; name: string; programType: string; status: string; startDate: string; endDate: string | null; benefits: number; activeBenefits: number;
+  eligible: number; activeBeneficiaries: number; participationPct: number | null; uses: number; passCheckins: number; serviceValueTzs: number;
+  sponsorPerUseTzs: number; sponsorPassFeesTzs: number; sponsorTotalTzs: number; memberTzs: number;
+  budget: { budgetTzs: number | null; committedTzs: number; remainingTzs: number | null; usedPct: number | null };
+}
+export interface B2BProviderAnalytics {
+  providerType: string; providerId: string; name: string | null; location: string | null; visits: number; uses: number; passCheckins: number; people: number; repeatPeople: number;
+  serviceValueTzs: number; sponsorTzs: number; memberTzs: number; settlement?: { perUseVisits: number; inLiveSettlement: number; notYetSettled: number };
+}
+export interface B2BFinanceAnalytics {
+  period: B2BPeriod; billing: NonNullable<B2BDashboard['billing']>; note: string;
+  months: Array<{ month: string; invoicedTzs: number; creditNotesTzs: number; collectedTzs: number; sponsorPerUseTzs: number; sponsorPassFeesTzs: number; memberTzs: number; serviceValueTzs: number }>;
+}
+export interface B2BAnalyticsOverview {
+  period: B2BPeriod; generatedAt: string;
+  organizations: { total: number; active: number; createdInPeriod: number; withUsage: number; byStatus: Array<{ status: string; count: number }>; byType: Array<{ organizationType: string; count: number }> };
+  beneficiaries: { total: number; enrolled: number; linkedToAccount: number; active: number; utilisationRatePct: number | null };
+  usage: B2BUsageMoney & { passCheckins: number; usesChangePct: number | null };
+  billing: { invoicedTzs: number; collectedTzs: number };
+  topOrganizations: Array<B2BUsageMoney & { organizationId: string; name: string | null; passCheckins: number; activeBeneficiaries: number }>;
+  topProviders: Array<B2BUsageMoney & { providerType: string; providerId: string; name: string | null; people: number; organizations: number }>;
+  trend: Array<{ bucket: string; uses: number; sponsorTzs: number }>;
+}
+export interface B2BDataQuality { checkedAt: string; issues: number; checks: Array<{ key: string; severity: 'low' | 'medium' | 'high'; title: string; count: number; examples: string[] }> }
 export interface B2BPaymentInstructions {
   bankName: string | null; accountName: string | null; accountNumber: string | null; branch: string | null; swiftCode: string | null;
   lipaNamba: string | null; lipaNambaName: string | null; notes: string | null; updatedAt?: string | null;
