@@ -549,6 +549,26 @@ export const api = {
     request<{ items: B2BPayment[]; total: number }>(`/b2b/organizations/${encodeURIComponent(orgId)}/payments${qs({ limit: 200 })}`, {}, token),
   orgStatement: (token: string, orgId: string, range: { from?: string; to?: string } = {}) =>
     request<B2BStatement>(`/b2b/organizations/${encodeURIComponent(orgId)}/statement${qs(range)}`, {}, token),
+  // Paying (Phase 6): where to pay, "we have paid" notices, the hold.
+  orgPaying: (token: string, orgId: string) => request<B2BOrgPaying>(`/b2b/organizations/${encodeURIComponent(orgId)}/paying`, {}, token),
+  submitPaymentNotice: (token: string, orgId: string, body: B2BPaymentNoticeInput) =>
+    request<{ notice: B2BPaymentNotice; existing?: boolean }>(`/b2b/organizations/${encodeURIComponent(orgId)}/payment-notices`, { method: 'POST', body: JSON.stringify(body) }, token),
+  withdrawPaymentNotice: (token: string, orgId: string, noticeId: string) =>
+    request<{ notice: B2BPaymentNotice }>(`/b2b/organizations/${encodeURIComponent(orgId)}/payment-notices/${encodeURIComponent(noticeId)}/withdraw`, { method: 'POST', body: '{}' }, token),
+  // Collections (FitFlex staff).
+  adminB2BCollections: (token: string) => request<B2BCollectionsQueue>('/admin/b2b/collections', {}, token),
+  adminB2BPaymentInstructions: (token: string) => request<{ instructions: B2BPaymentInstructions; configured: boolean }>('/admin/b2b/payment-instructions', {}, token),
+  setB2BPaymentInstructions: (token: string, body: Partial<B2BPaymentInstructions>) =>
+    request<{ instructions: B2BPaymentInstructions; configured: boolean }>('/admin/b2b/payment-instructions', { method: 'PUT', body: JSON.stringify(body) }, token),
+  confirmB2BPaymentNotice: (token: string, noticeId: string, body: { amountTzs?: number; note?: string } = {}) =>
+    request<{ notice: B2BPaymentNotice; payment?: B2BPayment; skipped?: Array<{ invoiceId: string; reason: string }> }>(
+      `/admin/b2b/payment-notices/${encodeURIComponent(noticeId)}/confirm`, { method: 'POST', body: JSON.stringify(body) }, token),
+  rejectB2BPaymentNotice: (token: string, noticeId: string, reason: string) =>
+    request<{ notice: B2BPaymentNotice }>(`/admin/b2b/payment-notices/${encodeURIComponent(noticeId)}/reject`, { method: 'POST', body: JSON.stringify({ reason }) }, token),
+  remindB2BInvoice: (token: string, invoiceId: string) =>
+    request<{ sent: boolean; recipients?: number; emailedTo?: string | null }>(`/admin/b2b/invoices/${encodeURIComponent(invoiceId)}/remind`, { method: 'POST', body: '{}' }, token),
+  setB2BBillingHold: (token: string, orgId: string, body: { onHold: boolean; reason?: string }) =>
+    request<{ organizationId: string; onHold: boolean; holdReason: string | null }>(`/admin/b2b/organizations/${encodeURIComponent(orgId)}/billing-hold`, { method: 'POST', body: JSON.stringify(body) }, token),
   // ── B2B sponsor billing (FitFlex admin) ──
   prepareB2BInvoice: (token: string, programId: string, kind: 'prepaid' | 'usage', period: string) =>
     request<{ invoice: B2BSponsorInvoice | null; added: number; credited?: number }>(`/admin/b2b/programs/${encodeURIComponent(programId)}/invoices/prepare`, { method: 'POST', body: JSON.stringify({ kind, period }) }, token),
@@ -2295,6 +2315,33 @@ export interface B2BBillingAccount {
   organizationId: string; contactName: string | null; email: string | null; phone: string | null;
   taxIdentificationNumber: string | null; registrationNumber: string | null; currency: string;
   source: 'billing_account' | 'corporate_account' | 'organization';
+  onHold?: boolean; holdReason?: string | null;
+}
+export interface B2BPaymentInstructions {
+  bankName: string | null; accountName: string | null; accountNumber: string | null; branch: string | null; swiftCode: string | null;
+  lipaNamba: string | null; lipaNambaName: string | null; notes: string | null; updatedAt?: string | null;
+}
+export interface B2BPaymentNotice {
+  id: string; organizationId: string; organizationName?: string | null; amountTzs: number; method: string; reference: string; paidOn: string;
+  invoiceIds: string[]; invoices?: Array<{ id: string; number: string; totalTzs: number; outstandingTzs: number; status: string; dueDate: string | null }>;
+  note: string | null; proofUrl: string | null; status: 'submitted' | 'confirmed' | 'rejected' | 'withdrawn';
+  submittedAt: string; decidedAt: string | null; decisionNote: string | null; paymentId: string | null;
+}
+export interface B2BPaymentNoticeInput {
+  amountTzs: number; method: string; reference: string; paidOn?: string; invoiceIds?: string[]; note?: string; proofUrl?: string;
+}
+export interface B2BOrgPaying {
+  instructions: B2BPaymentInstructions; configured: boolean; canPay: boolean; onHold: boolean; holdReason: string | null; notices: B2BPaymentNotice[];
+}
+export interface B2BCollectionsQueue {
+  today: string;
+  notices: B2BPaymentNotice[];
+  overdue: Array<{
+    id: string; number: string; kind: string; organizationId: string; organizationName: string | null; dueDate: string; daysOverdue: number;
+    totalTzs: number; outstandingTzs: number; lastReminder: { stage: string; sentAt: string; count: number } | null; onHold: boolean;
+  }>;
+  onHold: Array<{ organizationId: string; organizationName: string | null; holdReason: string | null; holdAt: string | null }>;
+  totals: { noticesToCheck: number; overdueInvoices: number; overdueTzs: number; organizationsOnHold: number };
 }
 export interface B2BPayment {
   id: string; number: string; organizationId: string; amountTzs: number; method: string; reference: string;
