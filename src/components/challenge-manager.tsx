@@ -8,94 +8,66 @@ import {
   ChallengeStandings, ChallengeType, CorporateEmployee, Eligibility, ManagedChallenge,
   Rate, RewardFunding, RewardItem, RewardItemInput, RewardQueue, RewardRule, RewardType,
 } from '@/lib/api';
-import { REWARD_TYPES, RULES, ruleLabel, STATUS, typeLabel } from '@/lib/rewards';
+import { REWARD_TYPES, RULES, STATUS } from '@/lib/rewards';
 import {
   Alert, Badge, Button, Card, CardContent, CardHeader, Field, MetricCard, PageHeader, Spinner,
 } from '@/components/shared';
 import { Dialog } from '@/components/dialog';
+import { OrgT, useOrgT } from '@/lib/org-i18n';
 
-const TYPES: { value: ChallengeType; label: string; unit: string }[] = [
-  { value: 'steps', label: 'Steps', unit: 'steps' },
-  { value: 'distance_km', label: 'Distance', unit: 'km' },
-  { value: 'workouts', label: 'Workouts', unit: 'workouts' },
-  { value: 'active_minutes', label: 'Active minutes', unit: 'minutes' },
-  { value: 'consistency', label: 'Active days', unit: 'active days' },
-  { value: 'gym_attendance', label: 'Gym visits', unit: 'visit days' },
-];
+const TYPES: ChallengeType[] = ['steps', 'distance_km', 'workouts', 'active_minutes', 'consistency', 'gym_attendance'];
+// Tier names are product names and stay in English.
 const TIERS = [
   { value: 'basic', label: 'Basic' },
   { value: 'pro', label: 'Pro' },
   { value: 'premium', label: 'Premium' },
   { value: 'executive', label: 'Executive' },
 ];
-const FUNDERS: Record<ChallengeScope, { value: RewardFunding; label: string }[]> = {
-  admin: [{ value: 'fitflex', label: 'FitFlex' }, { value: 'partner', label: 'A partner' }],
-  corporate: [{ value: 'company', label: 'Your company' }, { value: 'fitflex', label: 'FitFlex' }, { value: 'partner', label: 'A partner' }],
+const FUNDERS: Record<ChallengeScope, RewardFunding[]> = {
+  admin: ['fitflex', 'partner'],
+  corporate: ['company', 'fitflex', 'partner'],
 };
-const MODES: Record<ChallengeScope, { value: ChallengeMode; label: string; hint: string }[]> = {
-  admin: [
-    { value: 'individual', label: 'Individual', hint: 'Everyone works toward their own target.' },
-    { value: 'teams', label: 'Teams', hint: 'You name the teams; members pick one.' },
-    { value: 'gym_vs_gym', label: 'Gym vs gym', hint: 'Each member represents their gym.' },
-  ],
-  corporate: [
-    { value: 'individual', label: 'Individual', hint: 'Everyone works toward their own target.' },
-    { value: 'teams', label: 'Teams', hint: 'You name the teams; employees pick one.' },
-    { value: 'department', label: 'Departments', hint: 'Each employee represents their department.' },
-  ],
+const MODES: Record<ChallengeScope, ChallengeMode[]> = {
+  admin: ['individual', 'teams', 'gym_vs_gym'],
+  corporate: ['individual', 'teams', 'department'],
 };
 
-const ERRORS: Record<string, string> = {
-  invalid_name: 'Give the challenge a name.',
-  invalid_type: 'Choose what the challenge measures.',
-  invalid_dates: 'The end date must be on or after the start date.',
-  too_long: 'A challenge can run for up to 92 days.',
-  ends_in_past: 'The end date has already passed.',
-  invalid_target: 'That target is outside what the challenge length allows.',
-  invalid_teams: 'Add at least two different team names.',
-  invalid_rewards: 'Up to 5 rewards, each with a name of up to 80 characters.',
-  invalid_reward_type: 'Choose what kind of reward each one is.',
-  invalid_reward_rule: 'Choose who earns each reward.',
-  invalid_reward_top_n: 'Top places must be a whole number from 1 to 100.',
-  team_reward_needs_teams: 'A winning-team reward needs a team, gym or department format.',
-  reward_locked: 'Someone has already earned one of these rewards, so it can’t be removed or changed (you can still rename it).',
-  invalid_eligibility: 'Choose at least one tier, department or employee.',
-  invalid_reward_funding: 'Choose who funds the rewards.',
-  mode_not_allowed: 'That challenge format is not available here.',
-  measure_locked: 'What it measures can’t change once it has started or someone has joined.',
-  start_locked: 'The start date can’t change once the challenge has started.',
-  not_editable: 'Only running or upcoming challenges can be edited.',
-  still_running: 'Close or cancel the challenge before archiving it.',
-  not_started_cancel_instead: 'It hasn’t started yet — cancel it instead.',
-};
-const message = (e: unknown) =>
-  e instanceof ApiError ? ERRORS[(e.body as any)?.error] ?? 'That didn’t work. Please try again.' : 'That didn’t work. Please try again.';
+const message = (o: OrgT, e: unknown) => o.err('org.challenges.err', e, 'org.challenges.err.generic');
 
 const pct = (r: Rate | undefined) => (r == null ? '—' : `${Math.round(r * 100)}%`);
 const num = (n: number | null | undefined) => (n == null ? '—' : n.toLocaleString('en-US'));
-const day = (d: string) => new Date(`${d}T00:00:00Z`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' });
-const range = (c: { startDate: string; endDate: string }) => `${day(c.startDate)} – ${day(c.endDate)}`;
-const unitFor = (t: ChallengeType) => TYPES.find(x => x.value === t)?.unit ?? '';
+const range = (o: OrgT, c: { startDate: string; endDate: string }) => `${o.shortDay(c.startDate)} – ${o.shortDay(c.endDate)}`;
+const unitFor = (o: OrgT, t: ChallengeType) => o.label('org.challenges.unit', t, '');
+const targetText = (o: OrgT, c: { target: number; type: ChallengeType }) => o.t('org.challenges.target', { n: num(c.target), unit: unitFor(o, c.type) });
 const phaseTone = (c: ManagedChallenge): 'default' | 'success' | 'brand' | 'danger' | 'gray' =>
   c.status === 'archived' ? 'gray' : c.phase === 'active' ? 'success' : c.phase === 'upcoming' ? 'brand' : c.phase === 'cancelled' ? 'danger' : 'default';
-const phaseLabel = (c: ManagedChallenge) =>
-  c.status === 'archived' ? 'Archived' : c.status === 'closed' ? 'Closed early' : { active: 'Running', upcoming: 'Upcoming', ended: 'Ended', cancelled: 'Cancelled' }[c.phase];
+const phaseLabel = (o: OrgT, c: ManagedChallenge) =>
+  o.label('org.challenges.phase', c.status === 'archived' ? 'archived' : c.status === 'closed' ? 'closed' : c.phase);
 
 /**
  * A company has employees in departments; a B2B organisation (an insurer, a
- * club, a school) has people in groups. Same screens, its own words.
+ * club, a school) has people in groups. Same screens, its own words: message
+ * keys end in `.co` for a company and `.org` for an organisation.
  */
-const wordsFor = (org: boolean) => (org
-  ? { person: 'person', people: 'people', unit: 'group', units: 'groups', Unit: 'Group', owner: 'Your organisation', list: 'people list' }
-  : { person: 'employee', people: 'employees', unit: 'department', units: 'departments', Unit: 'Department', owner: 'Your company', list: 'staff list' });
+const variant = (org: boolean) => (org ? 'org' : 'co') as 'org' | 'co';
 const isOrg = (apiScope: ChallengeApiScope) => apiScope.startsWith('b2b/');
+const funderLabel = (o: OrgT, funder: string, org: boolean) =>
+  (funder === 'company' ? o.t(`org.challenges.funder.company.${variant(org)}`) : o.label('org.challenges.funder', funder));
+const modeText = (o: OrgT, scope: ChallengeScope, org: boolean, mode: ChallengeMode) => {
+  const who = scope === 'admin' ? 'admin' : variant(org);
+  if (mode === 'teams') return { label: o.t('org.challenges.mode.teams'), hint: o.label('org.challenges.mode.teams.hint', who) };
+  if (mode === 'department') return { label: o.t(`org.challenges.mode.department.${variant(org)}`), hint: o.t(`org.challenges.mode.department.hint.${variant(org)}`) };
+  return { label: o.label('org.challenges.mode', mode), hint: o.label(`org.challenges.mode.${mode}`, 'hint') };
+};
+/** Who earns it, in words: "Everyone who finishes", "Top 3", "Winning team". */
+const ruleLabel = (o: OrgT, r: Pick<RewardItem, 'rule' | 'topN'>) =>
+  (r.rule === 'top' ? (r.topN ? o.t('org.rewards.rule.topN', { n: r.topN }) : o.t('org.rewards.rule.topBare')) : o.label('org.rewards.rule', r.rule));
 
-function eligibilityText(e: Eligibility | null, scope: ChallengeScope, staff: CorporateEmployee[], org = false) {
-  const w = wordsFor(org);
-  if (!e || e.kind === 'all') return scope === 'admin' ? 'All FitFlex members' : org ? 'Everyone' : 'All employees';
-  if (e.kind === 'tiers') return `Members on ${e.tiers.map(t => TIERS.find(x => x.value === t)?.label ?? t).join(', ')} passes`;
+function eligibilityText(o: OrgT, e: Eligibility | null, scope: ChallengeScope, org = false) {
+  if (!e || e.kind === 'all') return o.t(`org.challenges.elig.all.${scope === 'admin' ? 'admin' : variant(org)}`);
+  if (e.kind === 'tiers') return o.t('org.challenges.elig.tiers', { tiers: e.tiers.map(t => TIERS.find(x => x.value === t)?.label ?? t).join(', ') });
   if (e.kind === 'departments') return e.departments.join(', ');
-  return `${e.employeeIds.length} chosen ${e.employeeIds.length === 1 ? w.person : w.people}`;
+  return o.n(`org.challenges.elig.chosen.${variant(org)}`, e.employeeIds.length);
 }
 
 /**
@@ -109,7 +81,8 @@ export function ChallengeManager({ scope, title, description, organizationId, re
   /** A B2B organisation's own users: its routes and its people list are used instead of the company HR ones. */
   organizationId?: string; rewardsHref?: string;
 }) {
-  const { token } = useApp();
+  const { token, t } = useApp();
+  const o = useOrgT();
   const apiScope: ChallengeApiScope = organizationId ? `b2b/organizations/${organizationId}` : scope;
   const rewardsBase = rewardsHref ?? `${scope === 'admin' ? '/admin' : '/hr'}/rewards`;
   const [rows, setRows] = useState<ManagedChallenge[] | null>(null);
@@ -127,7 +100,7 @@ export function ChallengeManager({ scope, title, description, organizationId, re
         organizationId
           // The organisation's people; their group stands in for a department.
           ? api.b2bBeneficiaries(token, organizationId, { status: 'active', limit: 100 })
-            .then(r => ({ employees: r.items.map(b => ({ id: b.id, displayName: b.displayName ?? 'Unnamed', department: b.groupName, status: b.status })) }))
+            .then(r => ({ employees: r.items.map(b => ({ id: b.id, displayName: b.displayName ?? o.t('org.challenges.unnamed'), department: b.groupName, status: b.status })) }))
             .catch(() => ({ employees: [] }))
           : scope === 'corporate' ? api.corporateStaff(token).catch(() => ({ employees: [] })) : Promise.resolve({ employees: [] }),
       ]);
@@ -135,7 +108,7 @@ export function ChallengeManager({ scope, title, description, organizationId, re
       setStaff(s.employees);
       setError(null);
     } catch (e) {
-      setError(message(e));
+      setError(message(o, e));
       setRows([]);
     }
   };
@@ -154,18 +127,18 @@ export function ChallengeManager({ scope, title, description, organizationId, re
         description={description}
         actions={
           <>
-            <Button variant="secondary" size="sm" onClick={load}><RefreshCw className="h-4 w-4" />Refresh</Button>
-            <Button size="sm" onClick={() => setEditing('new')} data-testid="challenge-new"><Plus className="h-4 w-4" />New challenge</Button>
+            <Button variant="secondary" size="sm" onClick={load}><RefreshCw className="h-4 w-4" />{t('admin.action.refresh')}</Button>
+            <Button size="sm" onClick={() => setEditing('new')} data-testid="challenge-new"><Plus className="h-4 w-4" />{o.t('org.challenges.new')}</Button>
           </>
         }
       />
       {error && <Alert tone="error">{error}</Alert>}
 
       <div role="tablist" className="inline-flex rounded-[var(--radius-lg)] border border-[var(--color-border-primary)] p-0.5">
-        {([['live', 'Running & upcoming'], ['ended', 'Ended'], ['closed', 'Cancelled & archived']] as const).map(([k, label]) => (
+        {(['live', 'ended', 'closed'] as const).map(k => (
           <button key={k} role="tab" aria-selected={tab === k} onClick={() => setTab(k)}
             className={`rounded-[var(--radius-md)] px-3 py-1 text-sm font-medium ${tab === k ? 'bg-[var(--color-brand-600)] text-white' : 'text-[var(--color-fg-tertiary)]'}`}>
-            {label}
+            {o.t(`org.challenges.tab.${k}`)}
           </button>
         ))}
       </div>
@@ -175,7 +148,7 @@ export function ChallengeManager({ scope, title, description, organizationId, re
       ) : shown.length === 0 ? (
         <Card><CardContent className="py-12 text-center text-sm text-[var(--color-fg-quaternary)]">
           <Trophy className="mx-auto mb-2 h-6 w-6" />
-          {tab === 'live' ? 'No running or upcoming challenges. Create one to get started.' : 'Nothing here yet.'}
+          {tab === 'live' ? o.t('org.challenges.emptyLive') : o.t('org.challenges.empty')}
         </CardContent></Card>
       ) : (
         <div className="grid gap-3">
@@ -187,12 +160,12 @@ export function ChallengeManager({ scope, title, description, organizationId, re
                   <div className="min-w-0">
                     <p className="font-semibold text-[var(--color-fg-primary)]">{c.name}</p>
                     <p className="text-sm text-[var(--color-fg-tertiary)]">
-                      {num(c.target)} {unitFor(c.type)} · {range(c)} · {eligibilityText(c.eligibility, scope, staff, isOrg(apiScope))}
+                      {targetText(o, c)} · {range(o, c)} · {eligibilityText(o, c.eligibility, scope, isOrg(apiScope))}
                     </p>
                   </div>
                   <div className="flex items-center gap-3">
                     <span className="flex items-center gap-1 text-sm tabular-nums text-[var(--color-fg-secondary)]"><Users className="h-4 w-4" />{num(c.participantCount)}</span>
-                    <Badge tone={phaseTone(c)}>{phaseLabel(c)}</Badge>
+                    <Badge tone={phaseTone(c)}>{phaseLabel(o, c)}</Badge>
                   </div>
                 </CardContent>
               </Card>
@@ -248,30 +221,31 @@ const MAX_REWARDS = 5;
 function RewardEditor({ items, teamsOk, onChange }: {
   items: RewardItemInput[]; teamsOk: boolean; onChange: (v: RewardItemInput[]) => void;
 }) {
+  const o = useOrgT();
   const edit = (i: number, patch: Partial<RewardItemInput>) => onChange(items.map((r, j) => (j === i ? { ...r, ...patch } : r)));
   return (
     <fieldset className="space-y-2" data-testid="challenge-rewards">
-      <legend className="text-sm font-medium text-[var(--color-fg-secondary)]">Rewards (optional)</legend>
+      <legend className="text-sm font-medium text-[var(--color-fg-secondary)]">{o.t('org.challenges.rewardEditor.title')}</legend>
       <p className="text-xs text-[var(--color-fg-quaternary)]">
-        Earning a reward isn’t the same as receiving it: each one starts as pending fulfilment and is approved, then issued, from the Rewards page.
+        {o.t('org.challenges.rewardEditor.note')}
       </p>
       {items.map((r, i) => {
-        const hint = REWARD_TYPES.find(t => t.value === r.type)?.valueHint;
+        const hint = o.label('org.rewards.hint', r.type, '');
         return (
           <div key={r.id ?? `new_${i}`} className="grid gap-2 rounded-[var(--radius-lg)] border border-[var(--color-border-secondary)] p-3 sm:grid-cols-12" data-testid={`reward-row-${i}`}>
-            <select className="ui-input sm:col-span-3" aria-label="Reward type" value={r.type} onChange={e => edit(i, { type: e.target.value as RewardType })}>
-              {REWARD_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+            <select className="ui-input sm:col-span-3" aria-label={o.t('org.challenges.rewardEditor.type')} value={r.type} onChange={e => edit(i, { type: e.target.value as RewardType })}>
+              {REWARD_TYPES.map(t => <option key={t.value} value={t.value}>{o.label('org.rewards.type', t.value)}</option>)}
             </select>
-            <input className="ui-input sm:col-span-4" aria-label="Reward name" placeholder="e.g. 7-day FitFlex Gym Pass" maxLength={80} value={r.label} onChange={e => edit(i, { label: e.target.value })} />
-            <input className="ui-input sm:col-span-2" aria-label="Reward value" placeholder={hint || 'Value'} maxLength={40} value={r.value ?? ''} onChange={e => edit(i, { value: e.target.value })} />
+            <input className="ui-input sm:col-span-4" aria-label={o.t('org.challenges.rewardEditor.name')} placeholder={o.t('org.challenges.rewardEditor.namePlaceholder')} maxLength={80} value={r.label} onChange={e => edit(i, { label: e.target.value })} />
+            <input className="ui-input sm:col-span-2" aria-label={o.t('org.challenges.rewardEditor.value')} placeholder={hint || o.t('org.challenges.rewardEditor.valuePlaceholder')} maxLength={40} value={r.value ?? ''} onChange={e => edit(i, { value: e.target.value })} />
             <div className="flex gap-2 sm:col-span-3">
-              <select className="ui-input min-w-0 flex-1" aria-label="Who earns it" value={r.rule} onChange={e => edit(i, { rule: e.target.value as RewardRule, topN: e.target.value === 'top' ? r.topN ?? 3 : null })}>
-                {RULES.filter(x => x.value !== 'team' || teamsOk || r.rule === 'team').map(x => <option key={x.value} value={x.value}>{x.label}</option>)}
+              <select className="ui-input min-w-0 flex-1" aria-label={o.t('org.challenges.rewardEditor.who')} value={r.rule} onChange={e => edit(i, { rule: e.target.value as RewardRule, topN: e.target.value === 'top' ? r.topN ?? 3 : null })}>
+                {RULES.filter(x => x.value !== 'team' || teamsOk || r.rule === 'team').map(x => <option key={x.value} value={x.value}>{o.label('org.rewards.rule', x.value)}</option>)}
               </select>
               {r.rule === 'top' && (
-                <input className="ui-input w-16" type="number" min={1} max={100} aria-label="How many top places" value={r.topN ?? ''} onChange={e => edit(i, { topN: e.target.value === '' ? null : Number(e.target.value) })} />
+                <input className="ui-input w-16" type="number" min={1} max={100} aria-label={o.t('org.challenges.rewardEditor.topPlaces')} value={r.topN ?? ''} onChange={e => edit(i, { topN: e.target.value === '' ? null : Number(e.target.value) })} />
               )}
-              <button type="button" className="shrink-0 rounded-md p-2 text-[var(--color-fg-quaternary)] hover:bg-[var(--color-bg-secondary)]" aria-label={`Remove ${r.label || 'reward'}`} onClick={() => onChange(items.filter((_, j) => j !== i))}>
+              <button type="button" className="shrink-0 rounded-md p-2 text-[var(--color-fg-quaternary)] hover:bg-[var(--color-bg-secondary)]" aria-label={o.t('org.challenges.rewardEditor.remove', { name: r.label || o.t('org.challenges.rewardEditor.reward') })} onClick={() => onChange(items.filter((_, j) => j !== i))}>
                 <X className="h-4 w-4" />
               </button>
             </div>
@@ -280,7 +254,7 @@ function RewardEditor({ items, teamsOk, onChange }: {
       })}
       {items.length < MAX_REWARDS && (
         <Button type="button" variant="secondary" size="sm" onClick={() => onChange([...items, { type: 'badge', label: '', value: null, rule: 'finishers', topN: null }])} data-testid="reward-add">
-          <Gift className="h-4 w-4" />Add a reward
+          <Gift className="h-4 w-4" />{o.t('org.challenges.rewardEditor.add')}
         </Button>
       )}
     </fieldset>
@@ -294,6 +268,8 @@ function ChallengeDetail({ scope, apiScope, rewardsBase, staff, challenge: c, on
   onClose: () => void; onEdit: () => void; onChanged: (c: ManagedChallenge) => Promise<void>;
 }) {
   const { token } = useApp();
+  const o = useOrgT();
+  const org = isOrg(apiScope);
   const [p, setP] = useState<ChallengeParticipation | null>(null);
   const [standings, setStandings] = useState<ChallengeStandings | null>(null);
   const [rewardCounts, setRewardCounts] = useState<RewardQueue['counts'] | null>(null);
@@ -304,7 +280,7 @@ function ChallengeDetail({ scope, apiScope, rewardsBase, staff, challenge: c, on
 
   useEffect(() => {
     if (!token) return;
-    api.challengeParticipation(token, apiScope, c.id).then(setP).catch(e => setError(message(e)));
+    api.challengeParticipation(token, apiScope, c.id).then(setP).catch(e => setError(message(o, e)));
     if (teamed) api.challengeStandings(token, apiScope, c.id).then(setStandings).catch(() => setStandings(null));
     if (ownRewards) api.rewardQueue(token, apiScope, { challengeId: c.id }).then(q => setRewardCounts(q.counts)).catch(() => setRewardCounts(null));
   }, [token, apiScope, c.id, teamed, ownRewards]);
@@ -316,7 +292,7 @@ function ChallengeDetail({ scope, apiScope, rewardsBase, staff, challenge: c, on
       const r = await api.challengeAction(token, apiScope, c.id, action);
       await onChanged({ ...c, ...r.challenge });
     } catch (e) {
-      setError(message(e));
+      setError(message(o, e));
     } finally {
       setBusy(false);
     }
@@ -328,42 +304,42 @@ function ChallengeDetail({ scope, apiScope, rewardsBase, staff, challenge: c, on
   const s = p?.summary;
 
   return (
-    <Dialog open onClose={onClose} title={c.name} description={`${num(c.target)} ${unitFor(c.type)} · ${range(c)}`} size="xl">
+    <Dialog open onClose={onClose} title={c.name} description={`${targetText(o, c)} · ${range(o, c)}`} size="xl">
       <div className="space-y-5" data-testid="challenge-detail">
         {error && <Alert tone="error">{error}</Alert>}
         <div className="flex flex-wrap items-center gap-2">
-          <Badge tone={phaseTone(c)}>{phaseLabel(c)}</Badge>
-          <span className="text-sm text-[var(--color-fg-tertiary)]">Open to: {eligibilityText(c.eligibility, scope, staff, isOrg(apiScope))}</span>
+          <Badge tone={phaseTone(c)}>{phaseLabel(o, c)}</Badge>
+          <span className="text-sm text-[var(--color-fg-tertiary)]">{o.t('org.challenges.openTo', { who: eligibilityText(o, c.eligibility, scope, org) })}</span>
         </div>
 
         {!s ? (
           <div className="flex h-24 items-center justify-center"><Spinner className="h-6 w-6" /></div>
         ) : (
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            <MetricCard label="Taking part" value={num(s.joined)} sub={s.eligible == null ? undefined : `${pct(s.participationRate)} of ${num(s.eligible)} eligible`} />
-            <MetricCard label="Completed" value={num(s.completed)} sub={`${pct(s.completionRate)} of those taking part`} />
-            <MetricCard label="Average progress" value={pct(s.averageProgress)} sub="Toward the target" />
-            <MetricCard label="Eligible" value={num(s.eligible)} sub={eligibilityText(c.eligibility, scope, staff, isOrg(apiScope))} />
+            <MetricCard label={o.t('org.challenges.takingPart')} value={num(s.joined)} sub={s.eligible == null ? undefined : o.t('org.challenges.takingPart.sub', { pct: pct(s.participationRate), n: num(s.eligible) })} />
+            <MetricCard label={o.t('org.challenges.completed')} value={num(s.completed)} sub={o.t('org.challenges.completed.sub', { pct: pct(s.completionRate) })} />
+            <MetricCard label={o.t('org.challenges.avgProgress')} value={pct(s.averageProgress)} sub={o.t('org.challenges.avgProgress.sub')} />
+            <MetricCard label={o.t('org.challenges.eligible')} value={num(s.eligible)} sub={eligibilityText(o, c.eligibility, scope, org)} />
           </div>
         )}
 
         {p?.byDepartment && p.byDepartment.length > 0 && (
           <Card>
-            <CardHeader><span className="text-sm font-semibold">By {wordsFor(isOrg(apiScope)).unit}</span></CardHeader>
+            <CardHeader><span className="text-sm font-semibold">{o.t(`org.challenges.byUnit.${variant(org)}`)}</span></CardHeader>
             <CardContent>
               <div className="overflow-x-auto">
                 <table className="w-full text-sm" data-testid="department-table">
                   <thead><tr className="text-left text-xs text-[var(--color-fg-quaternary)]">
-                    <th className="py-2 font-medium">{wordsFor(isOrg(apiScope)).Unit}</th>
-                    <th className="py-2 text-right font-medium">Taking part</th>
-                    <th className="py-2 text-right font-medium">Completed</th>
-                    <th className="py-2 text-right font-medium">Avg progress</th>
+                    <th className="py-2 font-medium">{o.t(`org.challenges.unitCol.${variant(org)}`)}</th>
+                    <th className="py-2 text-right font-medium">{o.t('org.challenges.takingPart')}</th>
+                    <th className="py-2 text-right font-medium">{o.t('org.challenges.completed')}</th>
+                    <th className="py-2 text-right font-medium">{o.t('org.challenges.avgProgressShort')}</th>
                   </tr></thead>
                   <tbody className="divide-y divide-[var(--color-border-secondary)]">
                     {p.byDepartment.map((d, i) => (
                       <tr key={i}>
-                        <td className="py-2">{d.other ? `Smaller groups (under ${p.minGroupSize ?? 3})` : d.department}</td>
-                        <td className="py-2 text-right tabular-nums">{num(d.joined)} of {num(d.eligible)} ({pct(d.participationRate)})</td>
+                        <td className="py-2">{d.other ? o.t('org.challenges.smallerGroups', { n: p.minGroupSize ?? 3 }) : d.department}</td>
+                        <td className="py-2 text-right tabular-nums">{o.t('org.challenges.joinedOf', { joined: num(d.joined), eligible: num(d.eligible), pct: pct(d.participationRate) })}</td>
                         <td className="py-2 text-right tabular-nums">{d.completed == null ? '—' : num(d.completed)}</td>
                         <td className="py-2 text-right tabular-nums">{d.averageProgress == null ? '—' : pct(d.averageProgress)}</td>
                       </tr>
@@ -372,7 +348,7 @@ function ChallengeDetail({ scope, apiScope, rewardsBase, staff, challenge: c, on
                 </table>
               </div>
               <p className="mt-2 text-xs text-[var(--color-fg-quaternary)]">
-                Progress and completion show only for groups of {p.minGroupSize ?? 3} or more taking part, so the table stays readable. Each person’s progress is under Insights.
+                {o.t('org.challenges.groupNote', { n: p.minGroupSize ?? 3 })}
               </p>
             </CardContent>
           </Card>
@@ -380,22 +356,22 @@ function ChallengeDetail({ scope, apiScope, rewardsBase, staff, challenge: c, on
 
         {teamed && standings && (
           <Card>
-            <CardHeader><span className="text-sm font-semibold">Team standings</span></CardHeader>
+            <CardHeader><span className="text-sm font-semibold">{o.t('org.challenges.standings')}</span></CardHeader>
             <CardContent>
               {standings.teams.length === 0 ? (
-                <p className="text-sm text-[var(--color-fg-quaternary)]">Standings appear once a team has {standings.minTeamSize} members.</p>
+                <p className="text-sm text-[var(--color-fg-quaternary)]">{o.t('org.challenges.standingsEmpty', { n: standings.minTeamSize })}</p>
               ) : (
                 <ol className="space-y-2" data-testid="team-standings">
                   {standings.teams.map(t => (
                     <li key={t.teamId} className="flex items-center justify-between text-sm">
-                      <span><span className="mr-2 font-semibold tabular-nums">{t.rank}</span>{t.name} · {t.members} members</span>
+                      <span><span className="mr-2 font-semibold tabular-nums">{t.rank}</span>{o.t('org.challenges.teamLine', { name: t.name, n: t.members })}</span>
                       <span className="tabular-nums">{pct(t.averageCompletion)}</span>
                     </li>
                   ))}
                 </ol>
               )}
               {standings.hiddenTeams > 0 && (
-                <p className="mt-2 text-xs text-[var(--color-fg-quaternary)]">{standings.hiddenTeams} smaller {standings.hiddenTeams === 1 ? 'team is' : 'teams are'} hidden until they reach {standings.minTeamSize} members.</p>
+                <p className="mt-2 text-xs text-[var(--color-fg-quaternary)]">{o.n('org.challenges.hiddenTeams', standings.hiddenTeams, { min: standings.minTeamSize })}</p>
               )}
             </CardContent>
           </Card>
@@ -403,38 +379,38 @@ function ChallengeDetail({ scope, apiScope, rewardsBase, staff, challenge: c, on
 
         <div className="grid gap-3 sm:grid-cols-2">
           <div>
-            <p className="text-xs font-medium text-[var(--color-fg-tertiary)]">Rewards</p>
-            {rewardItemsOf(c).length === 0 ? <p className="text-sm">None</p> : (
+            <p className="text-xs font-medium text-[var(--color-fg-tertiary)]">{o.t('org.challenges.rewards')}</p>
+            {rewardItemsOf(c).length === 0 ? <p className="text-sm">{o.t('org.challenges.none')}</p> : (
               <ul className="space-y-1 text-sm" data-testid="challenge-reward-list">
                 {rewardItemsOf(c).map(r => (
                   <li key={r.id}>
                     <span className="font-medium">{r.label}</span>
-                    <span className="text-[var(--color-fg-quaternary)]"> · {typeLabel(r.type)}{r.value ? ` · ${r.value}` : ''} · {ruleLabel(r)}</span>
+                    <span className="text-[var(--color-fg-quaternary)]"> · {o.label('org.rewards.type', r.type)}{r.value ? ` · ${r.value}` : ''} · {ruleLabel(o, r)}</span>
                   </li>
                 ))}
               </ul>
             )}
             {c.rewards.length > 0 && c.rewardFunding && (
-              <p className="text-xs text-[var(--color-fg-quaternary)]">Funded by {c.rewardFunding === 'company' ? wordsFor(isOrg(apiScope)).owner : FUNDERS[scope].find(f => f.value === c.rewardFunding)?.label ?? c.rewardFunding}</p>
+              <p className="text-xs text-[var(--color-fg-quaternary)]">{o.t('org.challenges.fundedBy', { who: funderLabel(o, c.rewardFunding, org) })}</p>
             )}
             {rewardCounts && rewardItemsOf(c).length > 0 && (
               <p className="mt-1 flex flex-wrap items-center gap-1.5 text-xs" data-testid="challenge-reward-counts">
                 {(['pending', 'approved', 'issued', 'rejected'] as const).filter(k => rewardCounts[k] > 0).map(k => (
-                  <Badge key={k} tone={STATUS[k].tone}>{rewardCounts[k]} {STATUS[k].label.toLowerCase()}</Badge>
+                  <Badge key={k} tone={STATUS[k].tone}>{o.t(`org.rewards.count.${k}`, { n: rewardCounts[k] })}</Badge>
                 ))}
-                {Object.values(rewardCounts).every(n => n === 0) && <span className="text-[var(--color-fg-quaternary)]">Nobody has earned one yet.</span>}
+                {Object.values(rewardCounts).every(n => n === 0) && <span className="text-[var(--color-fg-quaternary)]">{o.t('org.challenges.nobodyEarned')}</span>}
                 {Object.values(rewardCounts).some(n => n > 0) && (
-                  <Link className="font-medium text-[var(--color-fg-brand)] underline-offset-2 hover:underline" href={`${rewardsBase}?challengeId=${encodeURIComponent(c.id)}`}>Hand out rewards</Link>
+                  <Link className="font-medium text-[var(--color-fg-brand)] underline-offset-2 hover:underline" href={`${rewardsBase}?challengeId=${encodeURIComponent(c.id)}`}>{o.t('org.challenges.handOut')}</Link>
                 )}
               </p>
             )}
             {!rewardCounts && rewardItemsOf(c).length > 0 && c.rewardFunding && !handledHere(scope, c) && (
-              <p className="mt-1 text-xs text-[var(--color-fg-quaternary)]">FitFlex hands these out.</p>
+              <p className="mt-1 text-xs text-[var(--color-fg-quaternary)]">{o.t('org.challenges.fitflexHandsOut')}</p>
             )}
           </div>
           {c.description && (
             <div>
-              <p className="text-xs font-medium text-[var(--color-fg-tertiary)]">Description</p>
+              <p className="text-xs font-medium text-[var(--color-fg-tertiary)]">{o.t('org.challenges.descriptionLabel')}</p>
               <p className="text-sm">{c.description}</p>
             </div>
           )}
@@ -442,14 +418,14 @@ function ChallengeDetail({ scope, apiScope, rewardsBase, staff, challenge: c, on
 
         <p className="flex items-start gap-2 text-xs text-[var(--color-fg-quaternary)]">
           <Lock className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-          You see totals only: who is taking part, completion and average progress. Individual activity, workouts and health information are never shown here.
+          {o.t('org.challenges.privacy')}
         </p>
 
         <div className="flex flex-wrap justify-end gap-2 border-t border-[var(--color-border-secondary)] pt-4">
-          {(running || upcoming) && <Button variant="secondary" onClick={onEdit} data-testid="challenge-edit">Edit</Button>}
-          {running && <Button variant="secondary" disabled={busy} onClick={() => act('close', 'End this challenge today? Results so far are kept.')} data-testid="challenge-close">Close now</Button>}
-          {(running || upcoming) && <Button variant="secondary" disabled={busy} onClick={() => act('cancel', 'Cancel this challenge? It disappears for members.')} data-testid="challenge-cancel">Cancel</Button>}
-          {over && <Button variant="secondary" disabled={busy} onClick={() => act('archive', 'Archive this challenge? It stays in the history of those who took part.')} data-testid="challenge-archive">Archive</Button>}
+          {(running || upcoming) && <Button variant="secondary" onClick={onEdit} data-testid="challenge-edit">{o.t('org.common.edit')}</Button>}
+          {running && <Button variant="secondary" disabled={busy} onClick={() => act('close', o.t('org.challenges.closeConfirm'))} data-testid="challenge-close">{o.t('org.challenges.closeNow')}</Button>}
+          {(running || upcoming) && <Button variant="secondary" disabled={busy} onClick={() => act('cancel', o.t('org.challenges.cancelConfirm'))} data-testid="challenge-cancel">{o.t('org.challenges.cancel')}</Button>}
+          {over && <Button variant="secondary" disabled={busy} onClick={() => act('archive', o.t('org.challenges.archiveConfirm'))} data-testid="challenge-archive">{o.t('org.challenges.archive')}</Button>}
         </div>
       </div>
     </Dialog>
@@ -465,8 +441,9 @@ function ChallengeForm({ scope, apiScope, staff, existing, onClose, onSaved }: {
   onClose: () => void; onSaved: (c: ManagedChallenge) => Promise<void>;
 }) {
   const org = isOrg(apiScope);
-  const w = wordsFor(org);
-  const { token } = useApp();
+  const v = variant(org);
+  const { token, t } = useApp();
+  const o = useOrgT();
   const started = !!existing && existing.phase !== 'upcoming';
   const locked = !!existing && (started || existing.participantCount > 0);
   const [f, setF] = useState(() => ({
@@ -479,7 +456,7 @@ function ChallengeForm({ scope, apiScope, staff, existing, onClose, onSaved }: {
     mode: existing?.mode ?? 'individual' as ChallengeMode,
     teams: '',
     rewards: rewardItemsOf(existing).map(r => ({ ...r })) as RewardItemInput[],
-    rewardFunding: (existing?.rewardFunding ?? FUNDERS[scope][0].value) as RewardFunding,
+    rewardFunding: (existing?.rewardFunding ?? FUNDERS[scope][0]) as RewardFunding,
     eligKind: (existing?.eligibility?.kind ?? 'all') as Eligibility['kind'],
     tiers: existing?.eligibility?.kind === 'tiers' ? existing.eligibility.tiers : [] as string[],
     departments: existing?.eligibility?.kind === 'departments' ? existing.eligibility.departments : [] as string[],
@@ -523,43 +500,43 @@ function ChallengeForm({ scope, apiScope, staff, existing, onClose, onSaved }: {
         : await api.createChallenge(token, apiScope, body);
       await onSaved(r.challenge);
     } catch (err) {
-      setError(message(err));
+      setError(message(o, err));
       setBusy(false);
     }
   };
 
   return (
-    <Dialog open onClose={onClose} title={existing ? 'Edit challenge' : 'New challenge'} size="lg">
+    <Dialog open onClose={onClose} title={existing ? o.t('org.challenges.form.editTitle') : o.t('org.challenges.new')} size="lg">
       <form onSubmit={save} className="space-y-4" data-testid="challenge-form">
         {error && <Alert tone="error">{error}</Alert>}
-        <Field label="Name">
+        <Field label={o.t('org.common.name')}>
           <input className="ui-input" value={f.name} onChange={e => set('name', e.target.value)} maxLength={80} required
-            placeholder={scope === 'admin' ? 'FitFlex 50K Steps Challenge' : org ? 'Wellness Challenge' : 'Company Wellness Challenge'} data-testid="challenge-name" />
+            placeholder={o.t(`org.challenges.form.name.${scope === 'admin' ? 'admin' : v}`)} data-testid="challenge-name" />
         </Field>
-        <Field label="Description (optional)">
+        <Field label={o.t('org.common.descriptionOptional')}>
           <textarea className="ui-input" rows={2} value={f.description} onChange={e => set('description', e.target.value)} maxLength={500} />
         </Field>
         <div className="grid gap-4 sm:grid-cols-2">
-          <Field label="Measures">
+          <Field label={o.t('org.challenges.form.measures')}>
             <select className="ui-input" value={f.type} disabled={locked} onChange={e => set('type', e.target.value as ChallengeType)} data-testid="challenge-type">
-              {TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+              {TYPES.map(k => <option key={k} value={k}>{o.label('org.challenges.type', k)}</option>)}
             </select>
           </Field>
-          <Field label={`Target (${unitFor(f.type)})`}>
+          <Field label={o.t('org.challenges.form.target', { unit: unitFor(o, f.type) })}>
             <input className="ui-input" type="number" min={1} step="any" value={f.target} onChange={e => set('target', e.target.value)} required data-testid="challenge-target" />
           </Field>
-          <Field label="Starts">
+          <Field label={o.t('org.challenges.form.starts')}>
             <input className="ui-input" type="date" value={f.startDate} disabled={started} onChange={e => set('startDate', e.target.value)} required data-testid="challenge-start" />
           </Field>
-          <Field label="Ends">
+          <Field label={o.t('org.challenges.form.ends')}>
             <input className="ui-input" type="date" value={f.endDate} onChange={e => set('endDate', e.target.value)} required data-testid="challenge-end" />
           </Field>
         </div>
-        {locked && <p className="text-xs text-[var(--color-fg-quaternary)]">What it measures{started ? ', its format and its start date' : ' and its format'} are fixed now that it has {started ? 'started' : 'participants'}.</p>}
+        {locked && <p className="text-xs text-[var(--color-fg-quaternary)]">{o.t(started ? 'org.challenges.form.lockedStarted' : 'org.challenges.form.lockedJoined')}</p>}
 
-        <Field label="Format">
+        <Field label={o.t('org.challenges.form.format')}>
           <div className="grid gap-2 sm:grid-cols-3">
-            {MODES[scope].map(m => (org ? { ...m, label: m.value === 'department' ? 'Groups' : m.label, hint: m.hint.replace('employees pick', 'people pick').replace('Each employee represents their department', 'Each person represents their group') } : m)).map(m => (
+            {MODES[scope].map(value => ({ value, ...modeText(o, scope, org, value) })).map(m => (
               <label key={m.value} className={`cursor-pointer rounded-[var(--radius-lg)] border p-3 text-sm ${f.mode === m.value ? 'border-[var(--color-brand-600)] bg-[var(--color-brand-50)]' : 'border-[var(--color-border-primary)]'} ${locked ? 'opacity-60' : ''}`}>
                 <input type="radio" className="sr-only" name="mode" aria-label={m.label} disabled={locked} checked={f.mode === m.value} onChange={() => set('mode', m.value)} />
                 <span className="font-medium">{m.label}</span>
@@ -569,16 +546,16 @@ function ChallengeForm({ scope, apiScope, staff, existing, onClose, onSaved }: {
           </div>
         </Field>
         {!existing && f.mode === 'teams' && (
-          <Field label="Team names (comma separated)">
-            <input className="ui-input" value={f.teams} onChange={e => set('teams', e.target.value)} placeholder="Red, Blue, Green" data-testid="challenge-teams" />
+          <Field label={o.t('org.challenges.form.teamNames')}>
+            <input className="ui-input" value={f.teams} onChange={e => set('teams', e.target.value)} placeholder={o.t('org.challenges.form.teamNamesPlaceholder')} data-testid="challenge-teams" />
           </Field>
         )}
 
-        <Field label="Who can join">
+        <Field label={o.t('org.challenges.form.whoCanJoin')}>
           <div className="space-y-2" data-testid="challenge-eligibility">
             {(scope === 'admin'
-              ? [['all', 'All FitFlex members'], ['tiers', 'Members on chosen passes']]
-              : [['all', org ? 'Everyone' : 'All employees'], ['departments', `Chosen ${w.units}`], ['employees', `Chosen ${w.people}`]]
+              ? [['all', o.t('org.challenges.elig.all.admin')], ['tiers', o.t('org.challenges.form.tiers')]]
+              : [['all', o.t(`org.challenges.elig.all.${v}`)], ['departments', o.t(`org.challenges.form.chosenUnits.${v}`)], ['employees', o.t(`org.challenges.form.chosenPeople.${v}`)]]
             ).map(([k, label]) => (
               <label key={k} className="flex items-center gap-2 text-sm">
                 <input type="radio" name="elig" aria-label={label} checked={f.eligKind === k} onChange={() => set('eligKind', k as Eligibility['kind'])} data-testid={`elig-${k}`} />
@@ -596,7 +573,7 @@ function ChallengeForm({ scope, apiScope, staff, existing, onClose, onSaved }: {
             )}
             {f.eligKind === 'departments' && (
               <div className="flex flex-wrap gap-3 pl-6">
-                {departments.length === 0 && <p className="text-xs text-[var(--color-fg-quaternary)]">No {w.units} on your {w.list} yet.</p>}
+                {departments.length === 0 && <p className="text-xs text-[var(--color-fg-quaternary)]">{o.t(`org.challenges.form.noUnits.${v}`)}</p>}
                 {departments.map(d => (
                   <label key={d} className="flex items-center gap-1.5 text-sm">
                     <input type="checkbox" aria-label={d} checked={f.departments.includes(d)} onChange={() => toggle('departments', d)} data-testid={`dept-${d}`} />{d}
@@ -606,7 +583,7 @@ function ChallengeForm({ scope, apiScope, staff, existing, onClose, onSaved }: {
             )}
             {f.eligKind === 'employees' && (
               <div className="space-y-2 pl-6">
-                <input className="ui-input" aria-label={`Search ${w.people}`} placeholder={`Search ${w.people}`} value={search} onChange={e => setSearch(e.target.value)} />
+                <input className="ui-input" aria-label={o.t(`org.challenges.form.searchPeople.${v}`)} placeholder={o.t(`org.challenges.form.searchPeople.${v}`)} value={search} onChange={e => setSearch(e.target.value)} />
                 <div className="max-h-48 space-y-1 overflow-y-auto rounded-[var(--radius-md)] border border-[var(--color-border-secondary)] p-2">
                   {people.map(p => (
                     <label key={p.id} className="flex items-center gap-2 text-sm">
@@ -614,9 +591,9 @@ function ChallengeForm({ scope, apiScope, staff, existing, onClose, onSaved }: {
                       {p.displayName}{p.department ? <span className="text-xs text-[var(--color-fg-quaternary)]">· {p.department}</span> : null}
                     </label>
                   ))}
-                  {people.length === 0 && <p className="text-xs text-[var(--color-fg-quaternary)]">No matching {w.people}.</p>}
+                  {people.length === 0 && <p className="text-xs text-[var(--color-fg-quaternary)]">{o.t(`org.challenges.form.noMatch.${v}`)}</p>}
                 </div>
-                <p className="text-xs text-[var(--color-fg-quaternary)]">{f.employeeIds.length} chosen</p>
+                <p className="text-xs text-[var(--color-fg-quaternary)]">{o.t('org.challenges.form.chosenCount', { n: f.employeeIds.length })}</p>
               </div>
             )}
           </div>
@@ -624,16 +601,16 @@ function ChallengeForm({ scope, apiScope, staff, existing, onClose, onSaved }: {
 
         <RewardEditor items={f.rewards} teamsOk={f.mode !== 'individual'} onChange={v => set('rewards', v)} />
         <div className="grid gap-4 sm:grid-cols-2">
-          <Field label="Rewards funded by">
+          <Field label={o.t('org.challenges.form.fundedBy')}>
             <select className="ui-input" value={f.rewardFunding} onChange={e => set('rewardFunding', e.target.value as RewardFunding)} data-testid="challenge-funding">
-              {FUNDERS[scope].map(x => <option key={x.value} value={x.value}>{x.value === 'company' ? w.owner : x.label}</option>)}
+              {FUNDERS[scope].map(x => <option key={x} value={x}>{funderLabel(o, x, org)}</option>)}
             </select>
           </Field>
         </div>
 
         <div className="flex justify-end gap-2 border-t border-[var(--color-border-secondary)] pt-4">
-          <Button type="button" variant="secondary" onClick={onClose}>Cancel</Button>
-          <Button type="submit" disabled={busy} data-testid="challenge-save">{existing ? 'Save changes' : 'Create challenge'}</Button>
+          <Button type="button" variant="secondary" onClick={onClose}>{t('admin.action.cancel')}</Button>
+          <Button type="submit" disabled={busy} data-testid="challenge-save">{existing ? o.t('org.challenges.form.saveChanges') : o.t('org.challenges.form.create')}</Button>
         </div>
       </form>
     </Dialog>

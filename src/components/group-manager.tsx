@@ -2,16 +2,12 @@
 import { useEffect, useState } from 'react';
 import { Copy, Lock, Plus, RefreshCw, Users } from 'lucide-react';
 import { useApp } from '../../app/providers';
-import { api, ApiError, GroupInput, GroupMember, GroupMemberAction, SocialGroup } from '@/lib/api';
+import { api, GroupInput, GroupMember, GroupMemberAction, SocialGroup } from '@/lib/api';
 import { Alert, Badge, Button, Card, CardContent, Field, PageHeader, Spinner } from '@/components/shared';
 import { Dialog } from '@/components/dialog';
+import { OrgT, useOrgT } from '@/lib/org-i18n';
 
-const ERRORS: Record<string, string> = {
-  invalid_name: 'Give the group a name.',
-  not_found: 'That group isn’t available any more.',
-};
-const message = (err: unknown) =>
-  err instanceof ApiError ? ERRORS[(err.body as { error?: string })?.error ?? ''] ?? 'Something went wrong.' : 'Something went wrong.';
+const message = (o: OrgT, err: unknown) => o.err('org.groups.err', err, 'org.common.failed');
 
 /**
  * Company HR: groups for employees. Employees join with the invite code
@@ -19,14 +15,14 @@ const message = (err: unknown) =>
  * group. HR manages the group but does not see what members post to it.
  */
 export function GroupManager({ organizationId }: { organizationId?: string }) {
-  const { token } = useApp();
+  const { token, t } = useApp();
+  const o = useOrgT();
   const [groups, setGroups] = useState<SocialGroup[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState<SocialGroup | 'new' | null>(null);
   const [open, setOpen] = useState<string | null>(null);
   // A company has employees; a B2B organisation (an insurer, a club) has people.
-  const people = organizationId ? 'people' : 'employees';
-  const place = organizationId ? 'your organisation' : 'the company';
+  const v = organizationId ? 'org' : 'co';
 
   const load = async () => {
     if (!token) return;
@@ -34,7 +30,7 @@ export function GroupManager({ organizationId }: { organizationId?: string }) {
     try {
       setGroups((await api.corporateGroups(token, organizationId)).groups);
     } catch (err) {
-      setError(message(err));
+      setError(message(o, err));
       setGroups([]);
     }
   };
@@ -44,12 +40,12 @@ export function GroupManager({ organizationId }: { organizationId?: string }) {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Groups"
-        description={`Groups your ${people} join to share activities with each other: a walking club, a team, a floor.`}
+        title={t('hr.nav.groups')}
+        description={o.t(`org.groups.description.${v}`)}
         actions={
           <div className="flex gap-2">
-            <Button variant="secondary" size="sm" onClick={load}><RefreshCw className="h-4 w-4" />Refresh</Button>
-            <Button size="sm" onClick={() => setEditing('new')} data-testid="group-new"><Plus className="h-4 w-4" />New group</Button>
+            <Button variant="secondary" size="sm" onClick={load}><RefreshCw className="h-4 w-4" />{t('admin.action.refresh')}</Button>
+            <Button size="sm" onClick={() => setEditing('new')} data-testid="group-new"><Plus className="h-4 w-4" />{o.t('org.groups.new')}</Button>
           </div>
         }
       />
@@ -57,7 +53,7 @@ export function GroupManager({ organizationId }: { organizationId?: string }) {
       <Card>
         <CardContent className="p-0">
           {groups == null ? <div className="p-6"><Spinner className="h-6 w-6" /></div> : groups.length === 0 ? (
-            <p className="p-10 text-center text-sm text-[var(--color-fg-quaternary)]">No groups yet. Create one and share its invite code with your {people}.</p>
+            <p className="p-10 text-center text-sm text-[var(--color-fg-quaternary)]">{o.t(`org.groups.empty.${v}`)}</p>
           ) : (
             <ul className="divide-y divide-[var(--color-border-secondary)]" data-testid="group-list">
               {groups.map(g => (
@@ -66,11 +62,11 @@ export function GroupManager({ organizationId }: { organizationId?: string }) {
                     <span>
                       <span className="flex items-center gap-2 font-medium"><Users className="h-4 w-4" />{g.name}</span>
                       <span className="text-xs text-[var(--color-fg-quaternary)]">
-                        {g.memberCount} members · {g.joinPolicy === 'open' ? `Anyone at ${place} can join` : 'You approve members'}{g.discoverable ? ' · Listed in the app' : ''}
+                        {o.t('org.groups.memberCount', { n: g.memberCount })} · {g.joinPolicy === 'open' ? o.t(`org.groups.anyone.${v}`) : o.t('org.groups.youApprove')}{g.discoverable ? ` · ${o.t('org.groups.listed')}` : ''}
                       </span>
                     </span>
                     <span className="flex items-center gap-2">
-                      {(g.pending ?? 0) > 0 && <Badge tone="warning">{g.pending} waiting</Badge>}
+                      {(g.pending ?? 0) > 0 && <Badge tone="warning">{o.t('org.groups.waitingCount', { n: g.pending })}</Badge>}
                       {g.inviteCode && <span className="font-mono text-sm">{g.inviteCode}</span>}
                     </span>
                   </button>
@@ -82,7 +78,7 @@ export function GroupManager({ organizationId }: { organizationId?: string }) {
       </Card>
       <p className="flex items-start gap-2 text-xs text-[var(--color-fg-quaternary)]">
         <Lock className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-        These groups are for your {people} only. Members see what they choose to share with each other; you see who is in the group, not what they post to it.
+        {o.t(`org.groups.privacy.${v}`)}
       </p>
       {editing && token && (
         <GroupForm org={!!organizationId} existing={editing === 'new' ? null : editing} onClose={() => setEditing(null)}
@@ -109,28 +105,31 @@ function GroupForm({ org, existing, onClose, onSave }: { org: boolean; existing:
   });
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const { t } = useApp();
+  const o = useOrgT();
+  const v = org ? 'org' : 'co';
   return (
-    <Dialog open onClose={onClose} title={existing ? 'Edit group' : 'New group'} size="md">
+    <Dialog open onClose={onClose} title={existing ? o.t('org.groups.form.editTitle') : o.t('org.groups.new')} size="md">
       <form className="space-y-4" data-testid="group-form" onSubmit={async e => {
         e.preventDefault();
         setBusy(true);
         setError(null);
-        try { await onSave({ ...f, name: f.name.trim(), description: f.description?.trim() }); } catch (err) { setError(message(err)); setBusy(false); }
+        try { await onSave({ ...f, name: f.name.trim(), description: f.description?.trim() }); } catch (err) { setError(message(o, err)); setBusy(false); }
       }}>
         {error && <Alert tone="error">{error}</Alert>}
-        <Field label="Name"><input className="ui-input" required maxLength={60} value={f.name} onChange={e => setF({ ...f, name: e.target.value })} placeholder="Finance walking club" data-testid="group-name" /></Field>
-        <Field label="Description (optional)"><textarea className="ui-input" rows={2} maxLength={300} value={f.description} onChange={e => setF({ ...f, description: e.target.value })} /></Field>
+        <Field label={o.t('org.common.name')}><input className="ui-input" required maxLength={60} value={f.name} onChange={e => setF({ ...f, name: e.target.value })} placeholder={o.t('org.groups.form.namePlaceholder')} data-testid="group-name" /></Field>
+        <Field label={o.t('org.common.descriptionOptional')}><textarea className="ui-input" rows={2} maxLength={300} value={f.description} onChange={e => setF({ ...f, description: e.target.value })} /></Field>
         <label className="flex items-start gap-2 text-sm">
-          <input type="checkbox" aria-label={`Anyone at ${org ? 'your organisation' : 'the company'} can join`} checked={f.joinPolicy === 'open'} onChange={e => setF({ ...f, joinPolicy: e.target.checked ? 'open' : 'approval' })} />
-          <span>Anyone at {org ? 'your organisation' : 'the company'} can join<span className="block text-xs text-[var(--color-fg-quaternary)]">Off: you approve each request. People with the invite code always get in.</span></span>
+          <input type="checkbox" aria-label={o.t(`org.groups.anyone.${v}`)} checked={f.joinPolicy === 'open'} onChange={e => setF({ ...f, joinPolicy: e.target.checked ? 'open' : 'approval' })} />
+          <span>{o.t(`org.groups.anyone.${v}`)}<span className="block text-xs text-[var(--color-fg-quaternary)]">{o.t('org.groups.form.anyoneHint')}</span></span>
         </label>
         <label className="flex items-start gap-2 text-sm">
-          <input type="checkbox" aria-label="Listed in the app" checked={f.discoverable} onChange={e => setF({ ...f, discoverable: e.target.checked })} />
-          <span>Listed in the app<span className="block text-xs text-[var(--color-fg-quaternary)]">{org ? 'Your people' : 'Employees'} can find it under Groups. Off: invite code only.</span></span>
+          <input type="checkbox" aria-label={o.t('org.groups.listed')} checked={f.discoverable} onChange={e => setF({ ...f, discoverable: e.target.checked })} />
+          <span>{o.t('org.groups.listed')}<span className="block text-xs text-[var(--color-fg-quaternary)]">{o.t(`org.groups.form.listedHint.${v}`)}</span></span>
         </label>
         <div className="flex justify-end gap-2 border-t border-[var(--color-border-secondary)] pt-4">
-          <Button type="button" variant="secondary" onClick={onClose}>Cancel</Button>
-          <Button type="submit" disabled={busy} data-testid="group-save">{existing ? 'Save' : 'Create group'}</Button>
+          <Button type="button" variant="secondary" onClick={onClose}>{t('admin.action.cancel')}</Button>
+          <Button type="submit" disabled={busy} data-testid="group-save">{existing ? o.t('org.common.save') : o.t('org.groups.form.create')}</Button>
         </div>
       </form>
     </Dialog>
@@ -139,6 +138,7 @@ function GroupForm({ org, existing, onClose, onSave }: { org: boolean; existing:
 
 function GroupDetail({ id, organizationId, onClose, onEdit }: { id: string; organizationId?: string; onClose: () => void; onEdit: (g: SocialGroup) => void }) {
   const { token } = useApp();
+  const o = useOrgT();
   const [g, setG] = useState<SocialGroup | null>(null);
   const [members, setMembers] = useState<GroupMember[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -150,7 +150,7 @@ function GroupDetail({ id, organizationId, onClose, onEdit }: { id: string; orga
       const r = await api.corporateGroup(token, id, organizationId);
       setG(r.group);
       setMembers(r.members);
-    } catch (err) { setError(message(err)); }
+    } catch (err) { setError(message(o, err)); }
   };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { load(); }, [token, id]);
@@ -161,17 +161,17 @@ function GroupDetail({ id, organizationId, onClose, onEdit }: { id: string; orga
       const r = await api.corporateGroupMember(token, id, userId, action, organizationId);
       setMembers(r.members);
       setG(r.group);
-    } catch (err) { setError(message(err)); }
+    } catch (err) { setError(message(o, err)); }
   };
 
   const close = async () => {
-    if (!token || !window.confirm('Close this group? Members lose it, and what they shared with it is no longer shown to each other.')) return;
+    if (!token || !window.confirm(o.t('org.groups.closeConfirm'))) return;
     await api.archiveCorporateGroup(token, id, organizationId);
     onClose();
   };
 
   return (
-    <Dialog open onClose={onClose} title={g?.name ?? 'Group'} description={g?.description ?? undefined} size="lg">
+    <Dialog open onClose={onClose} title={g?.name ?? o.t('org.common.group')} description={g?.description ?? undefined} size="lg">
       {error && <Alert tone="error">{error}</Alert>}
       {!g ? <Spinner className="h-6 w-6" /> : (
         <div className="space-y-4" data-testid="group-detail">
@@ -179,32 +179,32 @@ function GroupDetail({ id, organizationId, onClose, onEdit }: { id: string; orga
             <Card>
               <CardContent className="flex items-center justify-between gap-3">
                 <div>
-                  <p className="text-xs font-medium text-[var(--color-fg-tertiary)]">Invite code</p>
+                  <p className="text-xs font-medium text-[var(--color-fg-tertiary)]">{o.t('org.groups.inviteCode')}</p>
                   <p className="font-mono text-2xl font-bold tracking-widest" data-testid="group-code">{g.inviteCode}</p>
-                  <p className="text-xs text-[var(--color-fg-quaternary)]">{organizationId ? 'Your people' : 'Employees'} enter it in the FitFlex app under Friends &amp; groups → Groups → Join with code.</p>
+                  <p className="text-xs text-[var(--color-fg-quaternary)]">{o.t(`org.groups.inviteHint.${organizationId ? 'org' : 'co'}`)}</p>
                 </div>
                 <Button variant="secondary" size="sm" onClick={() => { navigator.clipboard?.writeText(g.inviteCode!); setCopied(true); }}>
-                  <Copy className="h-4 w-4" />{copied ? 'Copied' : 'Copy'}
+                  <Copy className="h-4 w-4" />{copied ? o.t('org.groups.copied') : o.t('org.groups.copy')}
                 </Button>
               </CardContent>
             </Card>
           )}
           <div>
-            <p className="mb-2 text-sm font-semibold">Members ({g.memberCount})</p>
-            {members.length === 0 ? <p className="text-sm text-[var(--color-fg-quaternary)]">No one yet. Share the invite code.</p> : (
+            <p className="mb-2 text-sm font-semibold">{o.t('org.groups.members', { n: g.memberCount })}</p>
+            {members.length === 0 ? <p className="text-sm text-[var(--color-fg-quaternary)]">{o.t('org.groups.noMembers')}</p> : (
               <ul className="divide-y divide-[var(--color-border-secondary)] text-sm" data-testid="group-members">
                 {members.map(m => (
                   <li key={m.id} className="flex items-center justify-between gap-2 py-2">
                     <span>
-                      <span className="font-medium">{m.displayName ?? 'Member'}</span>
-                      {m.role === 'admin' && <Badge tone="brand">Admin</Badge>}
-                      {m.status === 'pending' && <Badge tone="warning">Waiting</Badge>}
+                      <span className="font-medium">{m.displayName ?? o.t('org.common.member')}</span>
+                      {m.role === 'admin' && <Badge tone="brand">{o.t('org.groups.admin')}</Badge>}
+                      {m.status === 'pending' && <Badge tone="warning">{o.t('org.groups.waiting')}</Badge>}
                     </span>
                     <span className="flex gap-2">
-                      {m.status === 'pending' && <Button size="sm" onClick={() => act(m.id, 'approve')} data-testid={`approve-${m.id}`}>Approve</Button>}
-                      {m.status === 'active' && m.role !== 'admin' && <Button size="sm" variant="secondary" onClick={() => act(m.id, 'make_admin')}>Make admin</Button>}
-                      {m.role === 'admin' && <Button size="sm" variant="secondary" onClick={() => act(m.id, 'make_member')}>Remove admin</Button>}
-                      <Button size="sm" variant="secondary" onClick={() => act(m.id, 'remove')}>Remove</Button>
+                      {m.status === 'pending' && <Button size="sm" onClick={() => act(m.id, 'approve')} data-testid={`approve-${m.id}`}>{o.t('org.common.approve')}</Button>}
+                      {m.status === 'active' && m.role !== 'admin' && <Button size="sm" variant="secondary" onClick={() => act(m.id, 'make_admin')}>{o.t('org.groups.makeAdmin')}</Button>}
+                      {m.role === 'admin' && <Button size="sm" variant="secondary" onClick={() => act(m.id, 'make_member')}>{o.t('org.groups.removeAdmin')}</Button>}
+                      <Button size="sm" variant="secondary" onClick={() => act(m.id, 'remove')}>{o.t('org.common.remove')}</Button>
                     </span>
                   </li>
                 ))}
@@ -213,11 +213,11 @@ function GroupDetail({ id, organizationId, onClose, onEdit }: { id: string; orga
           </div>
           <p className="flex items-start gap-2 text-xs text-[var(--color-fg-quaternary)]">
             <Lock className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-            Member admins can approve people from the app too. You never see what members share with the group.
+            {o.t('org.groups.detailNote')}
           </p>
           <div className="flex justify-end gap-2 border-t border-[var(--color-border-secondary)] pt-4">
-            <Button variant="secondary" onClick={() => onEdit(g)}>Edit</Button>
-            <Button variant="secondary" onClick={close}>Close group</Button>
+            <Button variant="secondary" onClick={() => onEdit(g)}>{o.t('org.common.edit')}</Button>
+            <Button variant="secondary" onClick={close}>{o.t('org.groups.close')}</Button>
           </div>
         </div>
       )}
