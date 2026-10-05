@@ -6,6 +6,8 @@
 import { FormEvent, useCallback, useEffect, useState } from 'react';
 import { api, ApiError, GymInvitation, GymInvitationInput, InviteRole } from '@/lib/api';
 import { Alert, Badge, Button, Field } from '@/components/shared';
+import { fill } from '@/components/communication-shared';
+import { useApp } from '../../app/providers';
 
 // The app opens the invitation; it is the same link the app itself shares.
 export const INVITE_LINK_BASE = process.env.NEXT_PUBLIC_APP_URL || 'https://fitflex-af-app.web.app';
@@ -15,75 +17,48 @@ const STAFF_SCOPES = ['members', 'checkins', 'trainers', 'gyms'];
 const PLAN_DAYS = { D: 1, W: 7, M: 30 } as const;
 type Plan = keyof typeof PLAN_DAYS;
 
-const EN = {
-  body: 'They join with their own FitFlex account. You never set a PIN or password for them.',
-  contact: 'Phone number or email', plan: 'Plan', D: 'One day', W: 'One week', M: 'One month',
-  paid: 'Paid at the desk (TZS)', paidHint: 'Leave empty if nothing was paid. The plan runs from today once they accept.',
-  check: 'Check if they use FitFlex', found: (name: string) => `${name} uses FitFlex.`,
-  notFound: 'Not found yet. They will get the invitation when they sign up with this phone or email and verify it.',
-  send: 'Send invitation', sent: 'Invitation sent.', alreadySent: 'An invitation is already open for this person.',
-  linkLabel: 'Invitation link', copy: 'Copy invitation link', copied: 'Link copied.',
-  linkOnce: 'Share this link with them. It is shown only once.',
-  bulk: 'Invite many', bulkHint: 'One row: phone or email,plan (D/W/M),amount paid', bulkDone: (n: number) => `${n} invitations sent.`,
-  sentTitle: 'Invitations sent', sentEmpty: 'No invitations sent yet.',
-  lapsed: (amount: string) => `Paid TZS ${amount} but never accepted. Send it again or record a refund.`,
-  resend: 'New link', cancel: 'Cancel', reissue: 'Send again', refunded: 'Refunded', done: 'Done.',
-  roles: { member: 'Member', staff: 'Staff', trainer: 'Trainer' } as Record<InviteRole, string>,
-  status: { pending: 'Waiting', claimed: 'Opened', accepted: 'Accepted', declined: 'Declined', cancelled: 'Cancelled', expired: 'Expired' } as Record<string, string>,
-  failed: 'The request could not be completed.',
-  errors: {
-    trainer_persona_required: 'This person must add the trainer role to their FitFlex account first.',
-    already_staff_elsewhere: 'This person is already staff at another gym, so this one cannot be added yet.',
-    already_a_member: 'This person already belongs to this gym.',
-    already_owner: 'This person already belongs to this gym.',
-    invitation_not_open: 'This invitation is no longer open.',
-    invitation_not_found: 'Invitation not found.',
-    nothing_to_resolve: 'This invitation has already been dealt with.',
-    one_phone_or_email_required: 'Enter one phone number or email.',
-    lookup_rate_limited: 'Too many checks. Try again later.',
-    lookup_cooldown: 'Too many checks. Try again later.',
-    resend_too_soon: 'A new link was sent recently. Try again later.',
-    resend_limit_reached: 'A new link was sent recently. Try again later.',
-    owner_only: 'Only the gym owner can send this invitation.',
-  } as Record<string, string>,
-};
+/** The invitation texts in the selected language. */
+function useInviteCopy() {
+  const { t } = useApp();
+  return {
+    body: t('invites.body'),
+    contact: t('invites.contact'), plan: t('invites.plan'), D: t('invites.plan.D'), W: t('invites.plan.W'), M: t('invites.plan.M'),
+    paid: t('invites.paid'), paidHint: t('invites.paidHint'),
+    check: t('invites.check'), found: (name: string) => fill(t('invites.found'), { name }),
+    notFound: t('invites.notFound'),
+    send: t('invites.send'), sent: t('invites.sent'), alreadySent: t('invites.alreadySent'),
+    linkLabel: t('invites.linkLabel'), copy: t('invites.copy'), copied: t('invites.copied'),
+    linkOnce: t('invites.linkOnce'),
+    bulk: t('invites.bulk'), bulkHint: t('invites.bulkHint'), bulkAria: t('invites.bulkAria'), bulkDone: (n: number) => fill(t('invites.bulkDone'), { n }),
+    sentTitle: t('invites.sentTitle'), sentEmpty: t('invites.sentEmpty'),
+    lapsed: (amount: string) => fill(t('invites.lapsed'), { amount }),
+    resend: t('invites.resend'), cancel: t('admin.action.cancel'), reissue: t('invites.reissue'), refunded: t('invites.refunded'), done: t('invites.done'),
+    roles: { member: t('invites.role.member'), staff: t('invites.role.staff'), trainer: t('invites.role.trainer') } as Record<InviteRole, string>,
+    status: {
+      pending: t('invites.status.pending'), claimed: t('invites.status.claimed'), accepted: t('invites.status.accepted'),
+      declined: t('invites.status.declined'), cancelled: t('invites.status.cancelled'), expired: t('invites.status.expired'),
+    } as Record<string, string>,
+    failed: t('comms.error.generic'),
+    errors: {
+      trainer_persona_required: t('invites.err.trainer_persona_required'),
+      already_staff_elsewhere: t('invites.err.already_staff_elsewhere'),
+      already_a_member: t('invites.err.already_a_member'),
+      already_owner: t('invites.err.already_a_member'),
+      invitation_not_open: t('invites.err.invitation_not_open'),
+      invitation_not_found: t('invites.err.invitation_not_found'),
+      nothing_to_resolve: t('invites.err.nothing_to_resolve'),
+      one_phone_or_email_required: t('invites.err.one_phone_or_email_required'),
+      lookup_rate_limited: t('invites.err.lookup_limited'),
+      lookup_cooldown: t('invites.err.lookup_limited'),
+      resend_too_soon: t('invites.err.resend_limited'),
+      resend_limit_reached: t('invites.err.resend_limited'),
+      owner_only: t('invites.err.owner_only'),
+    } as Record<string, string>,
+  };
+}
+type Copy = ReturnType<typeof useInviteCopy>;
 
-const SW: typeof EN = {
-  body: 'Atajiunga kwa akaunti yake mwenyewe ya FitFlex. Hutamwekea PIN wala nenosiri.',
-  contact: 'Namba ya simu au barua pepe', plan: 'Mpango', D: 'Siku moja', W: 'Wiki moja', M: 'Mwezi mmoja',
-  paid: 'Amelipa mapokezi (TZS)', paidHint: 'Acha wazi kama hakuna malipo. Mpango unaanza leo pindi atakapokubali.',
-  check: 'Angalia kama anatumia FitFlex', found: name => `${name} anatumia FitFlex.`,
-  notFound: 'Bado hajapatikana. Atapata mwaliko atakapojisajili kwa simu au barua pepe hii na kuithibitisha.',
-  send: 'Tuma mwaliko', sent: 'Mwaliko umetumwa.', alreadySent: 'Tayari kuna mwaliko ulio wazi kwa mtu huyu.',
-  linkLabel: 'Kiungo cha mwaliko', copy: 'Nakili kiungo cha mwaliko', copied: 'Kiungo kimenakiliwa.',
-  linkOnce: 'Mtumie kiungo hiki. Kinaonyeshwa mara moja tu.',
-  bulk: 'Alika wengi', bulkHint: 'Mstari mmoja: simu au barua pepe,mpango (D/W/M),kiasi kilicholipwa', bulkDone: n => `Mialiko ${n} imetumwa.`,
-  sentTitle: 'Mialiko iliyotumwa', sentEmpty: 'Bado hakuna mialiko iliyotumwa.',
-  lapsed: amount => `Amelipa TZS ${amount} lakini hakukubali. Tuma tena au rekodi marejesho.`,
-  resend: 'Kiungo kipya', cancel: 'Ghairi', reissue: 'Tuma tena', refunded: 'Amerudishiwa', done: 'Imekamilika.',
-  roles: { member: 'Mwanachama', staff: 'Mfanyakazi', trainer: 'Mkufunzi' },
-  status: { pending: 'Unasubiri', claimed: 'Umefunguliwa', accepted: 'Umekubaliwa', declined: 'Umekataliwa', cancelled: 'Umeghairiwa', expired: 'Umeisha muda' },
-  failed: 'Ombi halikukamilika.',
-  errors: {
-    trainer_persona_required: 'Mtu huyu lazima aongeze nafasi ya mkufunzi kwenye akaunti yake ya FitFlex kwanza.',
-    already_staff_elsewhere: 'Tayari ni mfanyakazi wa jimu nyingine, kwa hiyo hii haiwezi kuongezwa bado.',
-    already_a_member: 'Mtu huyu tayari yuko kwenye jimu hii.',
-    already_owner: 'Mtu huyu tayari yuko kwenye jimu hii.',
-    invitation_not_open: 'Mwaliko huu haupo wazi tena.',
-    invitation_not_found: 'Mwaliko haujapatikana.',
-    nothing_to_resolve: 'Mwaliko huu umeshashughulikiwa.',
-    one_phone_or_email_required: 'Weka namba moja ya simu au barua pepe.',
-    lookup_rate_limited: 'Umeangalia mara nyingi mno. Jaribu tena baadaye.',
-    lookup_cooldown: 'Umeangalia mara nyingi mno. Jaribu tena baadaye.',
-    resend_too_soon: 'Kiungo kipya kimetumwa hivi karibuni. Jaribu tena baadaye.',
-    resend_limit_reached: 'Kiungo kipya kimetumwa hivi karibuni. Jaribu tena baadaye.',
-    owner_only: 'Mmiliki wa jimu pekee ndiye anayeweza kutuma mwaliko huu.',
-  },
-};
-
-const copyFor = (sw: boolean) => (sw ? SW : EN);
-
-function errorText(copy: typeof EN, error: unknown) {
+function errorText(copy: Copy, error: unknown) {
   const code = error instanceof ApiError ? (error.body as { error?: string } | null)?.error : undefined;
   return (code && copy.errors[code]) || copy.failed;
 }
@@ -103,7 +78,7 @@ export function memberPlan(plan: Plan, paid?: string) {
   return { durationUnit: plan, startDate: start.toISOString(), endDate: end.toISOString(), ...(amount > 0 ? { paidAmount: amount } : {}) };
 }
 
-function LinkBox({ copy, token }: { copy: typeof EN; token: string }) {
+function LinkBox({ copy, token }: { copy: Copy; token: string }) {
   const [copied, setCopied] = useState(false);
   const link = inviteLink(token);
   return <div className="space-y-2 rounded-[var(--radius-lg)] border border-[var(--color-border-secondary)] p-3" data-testid="invite-link">
@@ -113,8 +88,8 @@ function LinkBox({ copy, token }: { copy: typeof EN; token: string }) {
   </div>;
 }
 
-export function InviteForm({ token, gymId, role, sw, onSent }: { token: string; gymId: string; role: InviteRole; sw: boolean; onSent?: () => void }) {
-  const copy = copyFor(sw);
+export function InviteForm({ token, gymId, role, onSent }: { token: string; gymId: string; role: InviteRole; onSent?: () => void }) {
+  const copy = useInviteCopy();
   const [contact, setContact] = useState('');
   const [plan, setPlan] = useState<Plan>('M');
   const [paid, setPaid] = useState('');
@@ -165,8 +140,8 @@ export function InviteForm({ token, gymId, role, sw, onSent }: { token: string; 
 }
 
 /** Bulk member invitations: one row per person, no names and no PINs. */
-export function BulkInvite({ token, gymId, sw, onSent }: { token: string; gymId: string; sw: boolean; onSent?: () => void }) {
-  const copy = copyFor(sw);
+export function BulkInvite({ token, gymId, onSent }: { token: string; gymId: string; onSent?: () => void }) {
+  const copy = useInviteCopy();
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<{ tone: 'success' | 'error'; text: string } | null>(null);
@@ -189,7 +164,7 @@ export function BulkInvite({ token, gymId, sw, onSent }: { token: string; gymId:
   }
 
   return <div className="space-y-3">
-    <textarea aria-label="Bulk invitations CSV" className="ui-input min-h-36" placeholder={copy.bulkHint} value={text} onChange={e => setText(e.target.value)} />
+    <textarea aria-label={copy.bulkAria} className="ui-input min-h-36" placeholder={copy.bulkHint} value={text} onChange={e => setText(e.target.value)} />
     <Button onClick={submit} disabled={busy || !text.trim()}>{copy.bulk}</Button>
     {notice && <Alert tone={notice.tone}>{notice.text}</Alert>}
     {links.length > 0 && <div className="space-y-2">
@@ -204,8 +179,8 @@ const STATUS_TONE: Record<string, 'success' | 'danger' | 'warning' | 'brand' | '
 };
 
 /** What the gym has sent: open invitations, answers, and paid ones that lapsed. */
-export function InvitationsSent({ token, gymId, sw, refreshKey = 0 }: { token: string; gymId: string; sw: boolean; refreshKey?: number }) {
-  const copy = copyFor(sw);
+export function InvitationsSent({ token, gymId, refreshKey = 0 }: { token: string; gymId: string; refreshKey?: number }) {
+  const copy = useInviteCopy();
   const [rows, setRows] = useState<GymInvitation[]>([]);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [notice, setNotice] = useState<{ tone: 'success' | 'error'; text: string } | null>(null);

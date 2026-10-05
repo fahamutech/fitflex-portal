@@ -3,6 +3,7 @@ import React, { ReactNode, useEffect, useRef } from 'react';
 import { X } from 'lucide-react';
 import { cn } from '@/lib/cn';
 import { Button } from './shared';
+import { useApp } from '../../app/providers';
 
 /* ── Overlay Dialog ──────────────────────────────────────── */
 export function Dialog({
@@ -103,8 +104,8 @@ export function ConfirmDialog({
   onConfirm,
   title,
   description,
-  confirmLabel = 'Confirm',
-  cancelLabel = 'Cancel',
+  confirmLabel,
+  cancelLabel,
   tone = 'danger',
   busy = false,
 }: {
@@ -118,6 +119,7 @@ export function ConfirmDialog({
   tone?: 'danger' | 'primary';
   busy?: boolean;
 }) {
+  const { t } = useApp();
   if (!open) return null;
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -152,7 +154,7 @@ export function ConfirmDialog({
 
         <div className="flex gap-3 px-6 pb-6">
           <Button variant="secondary" size="md" className="flex-1" onClick={onClose} disabled={busy}>
-            {cancelLabel}
+            {cancelLabel ?? t('admin.action.cancel')}
           </Button>
           <Button
             variant={tone === 'danger' ? 'destructive' : 'primary'}
@@ -161,7 +163,7 @@ export function ConfirmDialog({
             onClick={onConfirm}
             disabled={busy}
           >
-            {busy ? 'Please wait…' : confirmLabel}
+            {busy ? t('ui.pleaseWait') : (confirmLabel ?? t('ui.confirm'))}
           </Button>
         </div>
       </div>
