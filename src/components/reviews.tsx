@@ -1,12 +1,14 @@
 'use client';
 import type { ReviewSummary } from '@/lib/api';
+import { useApp } from '../../app/providers';
 
 /** Five stars filled in proportion to the rating, so an average of 4.5 shows four and a half. */
 export function Stars({ rating, className }: { rating: number; className?: string }) {
+  const { t } = useApp();
   const value = Math.max(0, Math.min(5, rating));
   const label = Number.isInteger(value) ? `${value}` : value.toFixed(1);
   return (
-    <span role="img" aria-label={`${label} out of 5 stars`} className={`relative inline-block whitespace-nowrap tracking-tight ${className ?? ''}`}>
+    <span role="img" aria-label={t('ui.stars').replace('{n}', label)} className={`relative inline-block whitespace-nowrap tracking-tight ${className ?? ''}`}>
       <span className="text-[var(--color-gray-300)]">★★★★★</span>
       <span aria-hidden className="absolute inset-y-0 left-0 overflow-hidden text-[var(--color-warning-500)]" style={{ width: `${(value / 5) * 100}%` }}>★★★★★</span>
     </span>
