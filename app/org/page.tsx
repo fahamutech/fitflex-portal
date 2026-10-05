@@ -104,7 +104,7 @@ export default function OrganizationBillingPage() {
               <Button size="sm" className="print:hidden" onClick={() => { setPayFor(open.invoice.id); setOpen(null); setTab('pay'); }} data-testid="pay-this-invoice">I’ve paid this invoice</Button>
             )}
             <p className="text-xs text-[var(--color-fg-quaternary)] print:hidden">
-              Sponsored passes are listed per person. Per-use benefits are totalled per benefit and person; FitFlex doesn’t show when or where a member trained.
+              Sponsored passes are listed per person. Per-use benefits are totalled per benefit and person. Each visit, with its date and place, is under Insights.
             </p>
           </CardContent>
         </Card>

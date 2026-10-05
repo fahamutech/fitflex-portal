@@ -101,7 +101,8 @@ function eligibilityText(e: Eligibility | null, scope: ChallengeScope, staff: Co
 /**
  * Challenge management for FitFlex admins (`scope="admin"`) and company HR
  * (`scope="corporate"`). Both only ever see totals: participation,
- * completion and average progress, never a person's activity.
+ * completion and average progress. An organisation sees each person's
+ * progress elsewhere, under Insights.
  */
 export function ChallengeManager({ scope, title, description, organizationId, rewardsHref }: {
   scope: ChallengeScope; title: string; description: string;
@@ -371,7 +372,7 @@ function ChallengeDetail({ scope, apiScope, rewardsBase, staff, challenge: c, on
                 </table>
               </div>
               <p className="mt-2 text-xs text-[var(--color-fg-quaternary)]">
-                Progress and completion show only for groups of {p.minGroupSize ?? 3} or more taking part, so no one person’s results can be worked out.
+                Progress and completion show only for groups of {p.minGroupSize ?? 3} or more taking part, so the table stays readable. Each person’s progress is under Insights.
               </p>
             </CardContent>
           </Card>

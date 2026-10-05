@@ -16,7 +16,7 @@ const message = (err: unknown) =>
 /**
  * Company HR: groups for employees. Employees join with the invite code
  * (or find a listed group in the app) and can share activities with the
- * group. HR manages the group but never sees anyone's activity through it.
+ * group. HR manages the group but does not see what members post to it.
  */
 export function GroupManager({ organizationId }: { organizationId?: string }) {
   const { token } = useApp();
@@ -82,7 +82,7 @@ export function GroupManager({ organizationId }: { organizationId?: string }) {
       </Card>
       <p className="flex items-start gap-2 text-xs text-[var(--color-fg-quaternary)]">
         <Lock className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-        These groups are for your {people} only. Members see what they choose to share with each other; you see who is in the group, never anyone’s activity.
+        These groups are for your {people} only. Members see what they choose to share with each other; you see who is in the group, not what they post to it.
       </p>
       {editing && token && (
         <GroupForm org={!!organizationId} existing={editing === 'new' ? null : editing} onClose={() => setEditing(null)}
