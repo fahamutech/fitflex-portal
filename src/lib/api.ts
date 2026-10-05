@@ -352,6 +352,16 @@ export const api = {
   ownerSettlement: (token: string, id: string) =>
     request<OwnerStatementDetail>(`/owner/settlements/${encodeURIComponent(id)}`, {}, token),
 
+  // ─── Account recovery (admin, 'account_recovery' scope; 404 not_found while the backend flag is off) ───
+  recoveries: (token: string, status: RecoveryFilter = 'open') =>
+    request<{ recoveries: RecoveryRow[] }>(`/admin/account-recoveries${qs({ status })}`, {}, token),
+  recovery: (token: string, id: string) =>
+    request<RecoveryDetail>(`/admin/account-recoveries/${encodeURIComponent(id)}`, {}, token),
+  recoveryNote: (token: string, id: string, note: string) =>
+    request<{ added: boolean }>(`/admin/account-recoveries/${encodeURIComponent(id)}/note`, { method: 'POST', body: JSON.stringify({ note }) }, token),
+  recoveryDecide: (token: string, id: string, body: { decision: 'approve' | 'refuse'; reason?: RecoveryRefusalReason; note?: string }) =>
+    request<{ status: 'completed' | 'refused' }>(`/admin/account-recoveries/${encodeURIComponent(id)}/decision`, { method: 'POST', body: JSON.stringify(body) }, token),
+
   // ─── Partner KYC / KYB review (admin, 'kyc' scope) ───
   kycCases: (token: string, filters: { status?: KycCaseStatus; partnerType?: KycPartnerType } = {}) => {
     const q = new URLSearchParams();
@@ -2401,3 +2411,31 @@ export interface B2BReconciliation {
   settlements: B2BInvoiceSettlement[];
   checks: { linesAddUp: boolean; linesTotalTzs: number; invoiceTotalTzs: number; usageMatchesLedger: boolean; reversedSinceInvoiced: string[]; amountPaidTzs: number; outstandingTzs: number };
 }
+
+export type RecoveryStatus = 'open' | 'cancelled' | 'refused' | 'completed';
+export type RecoveryFilter = RecoveryStatus | 'all';
+export type RecoveryRefusalReason = 'evidence_insufficient' | 'details_do_not_match' | 'other';
+export type RecoveryRow = {
+  id: string; status: RecoveryStatus; tier: string | null; claimedName: string; accountName: string | null;
+  newIdentifierType: 'phone' | 'email'; createdAt: string; waitUntil: string; ready: boolean; answered: boolean;
+};
+export type RecoveryDetail = {
+  recovery: {
+    id: string; status: RecoveryStatus; tier: string | null; claimedName: string;
+    oldIdentifier: { type: string; masked: string };
+    newIdentifier: { type: 'phone' | 'email'; value: string };
+    evidence: { homeGym?: string; plan?: string; lastCheckin?: string; paymentRef?: string; other?: string };
+    createdAt: string; waitUntil: string; ready: boolean;
+    cancelledBy: string | null; decisionReason: string | null; decisionNote: string | null;
+    decidedBy: string | null; decidedAt: string | null; requestIp: string | null;
+  };
+  account: {
+    registeredAt: string | null;
+    personas: Array<{ id: string; userType: string; displayName: string | null; approvalStatus: string | null }>;
+    subscription: { type: string | null; tier: string | null; status: string | null; startedAt: string | null; expiresAt: string | null; homeGym: string | null; paymentRef: string | null } | null;
+    lastCheckins: Array<{ at: string; gym: string | null }>;
+    payments: Array<{ reference: string; amountTzs: number; status: string; at: string }>;
+    identifiers: Array<{ type: string; masked: string; status: string; verified: boolean }>;
+  };
+  events: Array<{ kind: string; actor: string | null; detail: Record<string, unknown> | null; createdAt: string }>;
+};
