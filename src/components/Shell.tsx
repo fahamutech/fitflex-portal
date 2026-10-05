@@ -60,7 +60,9 @@ const ROOTS = new Set(['/admin', '/hr', '/org']);
 // What each role is offered; the server decides what each page shows.
 const ORG_PEOPLE = new Set(['owner', 'admin', 'manager', 'hr', 'analyst']);
 const ORG_BILLING = new Set(['owner', 'admin', 'finance']);
+const ORG_INSIGHTS = new Set(['owner', 'admin', 'manager', 'hr', 'finance', 'analyst']);
 const orgNav = (roles?: string[]): NavItem[] => [
+  ...(!roles || roles.some(r => ORG_INSIGHTS.has(r)) ? [{ href: '/org/insights', labelKey: 'org.nav.insights', icon: LineChart }] : []),
   ...(!roles || roles.some(r => ORG_PEOPLE.has(r)) ? [{ href: '/org/people', labelKey: 'org.nav.people', icon: Users }] : []),
   { href: '/org/programmes', labelKey: 'org.nav.programmes', icon: Network },
   // Challenges, the rewards they earn, and groups: the same roles that see people.
@@ -79,6 +81,7 @@ const HR_NAV: NavItem[] = [
   { href: '/hr/groups', labelKey: 'hr.nav.groups', icon: Users },
   { href: '/hr/people', labelKey: 'hr.nav.people', icon: UserCheck },
   { href: '/hr/programmes', labelKey: 'hr.nav.programmes', icon: Network },
+  { href: '/hr/insights', labelKey: 'org.nav.insights', icon: LineChart },
 ];
 
 const OPERATOR_NAV: NavItem[] = [
@@ -107,6 +110,7 @@ const ADMIN_NAV: NavItem[] = [
   { href: '/admin/communications', labelKey: 'admin.nav.communications', icon: Megaphone,     groupKey: 'nav.group.platform', aclScope: 'communications' },
   { href: '/admin/corporate',     labelKey: 'admin.nav.corporate',      icon: Building,        groupKey: 'nav.group.platform', aclScope: 'corporate' },
   { href: '/admin/b2b',           labelKey: 'admin.nav.b2b',            icon: Network,         groupKey: 'nav.group.platform', aclScope: 'b2b' },
+  { href: '/admin/b2b-analytics', labelKey: 'admin.nav.b2bAnalytics',   icon: LineChart,       groupKey: 'nav.group.platform', aclScope: 'b2b' },
   { href: '/admin/trainers',      labelKey: 'admin.nav.trainers',       icon: Dumbbell,        groupKey: 'nav.group.platform', aclScope: 'trainers' },
   { href: '/admin/products',      labelKey: 'admin.nav.products',       icon: ShoppingBag,     groupKey: 'nav.group.platform', aclScope: 'shop' },
   { href: '/admin/vendors',       labelKey: 'admin.nav.vendors',        icon: Store,           groupKey: 'nav.group.platform', aclScope: 'shop' },

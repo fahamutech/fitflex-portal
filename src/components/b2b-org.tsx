@@ -18,7 +18,7 @@ import { GroupManager } from '@/components/group-manager';
  * screens only hide what would be refused.
  */
 
-type Mine = { organization: B2BOrganization; role: string; permissions: string[] };
+export type Mine = { organization: B2BOrganization; role: string; permissions: string[] };
 
 const ERRORS: Record<string, string> = {
   user_not_found: 'Nobody has a FitFlex account with that email or number. They need to sign up in the app first.',
@@ -47,7 +47,7 @@ const TONE: Record<string, 'success' | 'warning' | 'gray' | 'danger' | 'brand'> 
 const day = (v?: string | null) => (v ? new Date(`${v}T00:00:00`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : '—');
 
 /** The organisations the signed-in person belongs to, the one chosen, and what they may do there. */
-function useMyOrganization() {
+export function useMyOrganization() {
   const { token } = useApp();
   const [orgs, setOrgs] = useState<Array<{ id: string; name: string }> | null>(null);
   const [orgId, setOrgId] = useState('');
@@ -75,7 +75,7 @@ function useMyOrganization() {
   return { token, orgs, orgId, setOrgId, mine, error };
 }
 
-function OrgFrame({ title, description, state, bare = false, children }: {
+export function OrgFrame({ title, description, state, bare = false, children }: {
   title: string; description: string; state: ReturnType<typeof useMyOrganization>; children: (mine: Mine, token: string) => React.ReactNode;
   /** The screen inside brings its own heading. */
   bare?: boolean;
@@ -451,7 +451,7 @@ function Programmes({ token, mine }: { token: string; mine: Mine }) {
 
 const NO_ENGAGEMENT = <Alert tone="info">Your role doesn’t include challenges and groups. Ask your organisation’s owner or admin.</Alert>;
 
-/** Challenges an organisation runs for its own people. It sees totals, never anyone's activity. */
+/** Challenges an organisation runs for its own people. Totals here; each person's progress is under Insights. */
 export function OrgChallengesPage() {
   const state = useMyOrganization();
   return (
@@ -459,7 +459,7 @@ export function OrgChallengesPage() {
       {mine => (mine.permissions.includes('engagement.read') ? (
         <ChallengeManager scope="corporate" organizationId={mine.organization.id} rewardsHref="/org/rewards"
           title="Wellness challenges"
-          description={`Challenges for ${mine.organization.tradingName || mine.organization.legalName}’s people. You see participation, completion and group progress, never anyone’s personal activity.`} />
+          description={`Challenges for ${mine.organization.tradingName || mine.organization.legalName}’s people. This page shows participation, completion and group progress; each person’s progress is under Insights.`} />
       ) : NO_ENGAGEMENT)}
     </OrgFrame>
   );

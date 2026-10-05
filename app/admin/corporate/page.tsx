@@ -152,7 +152,7 @@ export default function AdminCorporatePage() {
                     </div>
                   </form>
                   <p className="mt-3 text-xs text-[var(--color-fg-quaternary)]">
-                    HR signs in to this portal under “Company HR”. They manage their company’s challenges and see participation, completion and team progress, never an employee’s personal activity.
+                    HR signs in to this portal under “Company HR”. They manage their company’s challenges and see what each employee does on FitFlex under Insights. Weight, height and anything another sponsor gives the employee are never shown.
                   </p>
                 </CardContent>
               </Card>

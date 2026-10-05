@@ -141,7 +141,7 @@ export function RewardQueue({ scope: role, title, description, organizationId }:
 
       <p className="flex items-start gap-2 text-xs text-[var(--color-fg-quaternary)]">
         <Lock className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-        To hand a reward over you see who earned it and why (finished, top place or winning team), never their activity or health information.
+        To hand a reward over you see who earned it and why (finished, top place or winning team).
         Marking a reward issued records what was handed over; it doesn’t create passes, bookings or payments.
       </p>
 
