@@ -1,12 +1,14 @@
 // Lightweight i18n for English + Swahili. All user-facing strings live here.
 
 import { ownerMessages } from './i18n-owner';
+import { orgMessages } from './i18n-org';
 
 export type Locale = 'en' | 'sw';
 
 export const messages = {
   en: {
     ...ownerMessages.en,
+    ...orgMessages.en,
     'app.title': 'FitFlex Af — Operator Portal',
     'login.heading': 'Operator / Admin login',
     'login.email': 'Email',
@@ -1048,6 +1050,7 @@ export const messages = {
   },
   sw: {
     ...ownerMessages.sw,
+    ...orgMessages.sw,
     'app.title': 'FitFlex Af — Portal ya Waendeshaji',
     'login.heading': 'Ingia kama mwendeshaji / admin',
     'login.email': 'Barua pepe',
