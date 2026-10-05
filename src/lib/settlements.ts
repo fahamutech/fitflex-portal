@@ -41,6 +41,7 @@ export const visitReason = (code: string) => VISIT_REASON[code] ?? code.replace(
 
 const SKIP_REASON: Record<string, string> = {
   no_approved_payment: 'No approved payment for the subscription',
+  no_pass_tier_version: 'The pass had no settlement price in force when this cycle started',
   rule_missing: 'A settlement rule is missing',
   held_visits: 'Has disputed, flagged or unrated visits',
 };
