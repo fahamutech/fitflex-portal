@@ -1527,9 +1527,12 @@ export interface ChallengeSummary {
   eligible: number | null;
   joined: number;
   participationRate: Rate;
-  completed: number;
+  /** null (with `resultsHidden`) while too few people take part for results to be shown. */
+  completed: number | null;
   completionRate: Rate;
-  averageProgress: number;
+  averageProgress: number | null;
+  /** Company challenges: completion and progress are withheld until `minGroupSize` people take part. */
+  resultsHidden?: boolean;
 }
 export interface DepartmentParticipation {
   department: string | null;
