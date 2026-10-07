@@ -341,8 +341,18 @@ function ChallengeDetail({ scope, apiScope, rewardsBase, staff, challenge: c, on
         ) : (
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <MetricCard label="Taking part" value={num(s.joined)} sub={s.eligible == null ? undefined : `${pct(s.participationRate)} of ${num(s.eligible)} eligible`} />
-            <MetricCard label="Completed" value={num(s.completed)} sub={`${pct(s.completionRate)} of those taking part`} />
-            <MetricCard label="Average progress" value={pct(s.averageProgress)} sub="Toward the target" />
+            {s.resultsHidden || s.completed == null || s.averageProgress == null ? (
+              // Too few people for results to be shown without pointing at someone.
+              <>
+                <MetricCard label="Completed" value="—" sub={`Shown once ${p?.minGroupSize ?? 3} or more take part`} />
+                <MetricCard label="Average progress" value="—" sub={`Shown once ${p?.minGroupSize ?? 3} or more take part`} />
+              </>
+            ) : (
+              <>
+                <MetricCard label="Completed" value={num(s.completed)} sub={`${pct(s.completionRate)} of those taking part`} />
+                <MetricCard label="Average progress" value={pct(s.averageProgress)} sub="Toward the target" />
+              </>
+            )}
             <MetricCard label="Eligible" value={num(s.eligible)} sub={eligibilityText(c.eligibility, scope, staff, isOrg(apiScope))} />
           </div>
         )}
