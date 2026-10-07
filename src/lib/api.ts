@@ -584,6 +584,19 @@ export const api = {
     request<{ filename: string; title: string; rows: number; csv: string }>(`/b2b/organizations/${encodeURIComponent(orgId)}/analytics/export/${encodeURIComponent(report)}${qs(query)}`, {}, token),
   adminB2BAnalytics: (token: string, query: B2BAnalyticsQuery = {}) => request<B2BAnalyticsOverview>(`/admin/b2b/analytics${qs(query)}`, {}, token),
   adminB2BDataQuality: (token: string) => request<B2BDataQuality>('/admin/b2b/analytics/data-quality', {}, token),
+  // Operations: recurring jobs, exceptions and work waiting on a person.
+  adminB2BOps: (token: string) => request<B2BOpsOverview>('/admin/b2b/ops', {}, token),
+  adminB2BJobRuns: (token: string, job: string) => request<{ job: string; items: B2BJobRun[] }>(`/admin/b2b/ops/jobs/${encodeURIComponent(job)}/runs${qs({ limit: 20 })}`, {}, token),
+  runB2BJob: (token: string, job: string) =>
+    request<{ job: string; outcome?: 'ok' | 'failed'; failure?: string | null; skipped?: string; processed?: number; succeeded?: number; failed?: number }>(`/admin/b2b/ops/jobs/${encodeURIComponent(job)}/run`, { method: 'POST', body: '{}' }, token),
+  pauseB2BJob: (token: string, job: string, body: { paused: boolean; reason?: string }) =>
+    request<{ job: string; paused: boolean }>(`/admin/b2b/ops/jobs/${encodeURIComponent(job)}/pause`, { method: 'POST', body: JSON.stringify(body) }, token),
+  adminB2BExceptions: (token: string, query: { status?: string; severity?: string; type?: string; limit?: number } = {}) =>
+    request<{ items: B2BOpsException[]; total: number }>(`/admin/b2b/ops/exceptions${qs(query)}`, {}, token),
+  setB2BExceptionStatus: (token: string, id: string, body: { status: 'open' | 'investigating' | 'resolved' | 'ignored'; resolution?: string }) =>
+    request<{ exception: B2BOpsException }>(`/admin/b2b/ops/exceptions/${encodeURIComponent(id)}/status`, { method: 'POST', body: JSON.stringify(body) }, token),
+  retryB2BException: (token: string, id: string) =>
+    request<{ exception: B2BOpsException; run: { outcome?: 'ok' | 'failed'; failure?: string | null; skipped?: string } }>(`/admin/b2b/ops/exceptions/${encodeURIComponent(id)}/retry`, { method: 'POST', body: '{}' }, token),
   // Collections (FitFlex staff).
   adminB2BCollections: (token: string) => request<B2BCollectionsQueue>('/admin/b2b/collections', {}, token),
   adminB2BPaymentInstructions: (token: string) => request<{ instructions: B2BPaymentInstructions; configured: boolean }>('/admin/b2b/payment-instructions', {}, token),
@@ -2414,6 +2427,31 @@ export interface B2BAnalyticsOverview {
   topOrganizations: Array<B2BUsageMoney & { organizationId: string; name: string | null; passCheckins: number; activeBeneficiaries: number }>;
   topProviders: Array<B2BUsageMoney & { providerType: string; providerId: string; name: string | null; people: number; organizations: number }>;
   trend: Array<{ bucket: string; uses: number; sponsorTzs: number }>;
+}
+export interface B2BJobRun {
+  id: string; job: string; status: 'running' | 'ok' | 'failed'; slot: string | null; trigger: 'schedule' | 'catch_up' | 'retry' | 'manual' | null; triggeredBy: string | null;
+  attempt: number; startedAt: string; finishedAt: string | null; processed: number | null; succeeded: number | null; failed: number | null; error: string | null;
+}
+export interface B2BJobStatus {
+  name: string; title: string; description: string | null; domain: 'finance' | 'operations'; schedule: { type: 'daily'; utc: string } | { type: 'every'; minutes: number };
+  state: 'ok' | 'running' | 'delayed' | 'retrying' | 'failed' | 'paused'; paused: boolean; pauseReason: string | null; currentSlotDone: boolean | null; attemptsThisSlot: number;
+  nextDue: string; lastSuccessAt: string | null;
+  lastRun: { id: string; status: string; trigger: string | null; startedAt: string; finishedAt: string | null; processed: number | null; succeeded: number | null; failed: number | null; error: string | null } | null;
+}
+export interface B2BOpsException {
+  id: string; type: string; severity: 'low' | 'medium' | 'high'; status: 'open' | 'investigating' | 'retrying' | 'resolved' | 'ignored' | 'permanently_failed'; title: string;
+  job: string | null; entityType: string | null; entityId: string | null; organizationId: string | null; detail: Record<string, unknown> | null;
+  occurrences: number; retryCount: number; detectedAt: string; lastSeenAt: string; resolvedAt: string | null; resolution: string | null; resolvedBy: string | null;
+}
+export interface B2BOpsOverview {
+  generatedAt: string;
+  jobs: { total: number; ok: number; running: number; delayed: number; retrying: number; failed: number; paused: number; items: B2BJobStatus[] };
+  exceptions: { live: number; bySeverity: Record<string, number>; byStatus: Record<string, number>; oldestDetectedAt: string | null; mostUrgent: B2BOpsException[] };
+  pending: {
+    billing: { draftInvoices: number; draftsOlderThan7Days: number; paymentNoticesToCheck: number; overdueInvoices: number; organizationsOnHold: number; paymentsNotFullyApplied: number };
+    usage: { holdsOlderThan1Hour: number; passesAwaitingMemberPayment: number; passesAwaitingAccountLink: number };
+    people: { beneficiariesPending: number; employeesNotLinked: number };
+  };
 }
 export interface B2BDataQuality { checkedAt: string; issues: number; checks: Array<{ key: string; severity: 'low' | 'medium' | 'high'; title: string; count: number; examples: string[] }> }
 export interface B2BPaymentInstructions {
