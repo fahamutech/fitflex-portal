@@ -475,6 +475,15 @@ export const api = {
     request<{ organizationUser: B2BOrganizationUser }>(`/b2b/organizations/${encodeURIComponent(id)}/users/${encodeURIComponent(orgUserId)}`, { method: 'PUT', body: JSON.stringify(body) }, token),
   b2bBeneficiaries: (token: string, id: string, params: { status?: string; search?: string; limit?: number } = {}) =>
     request<Paged<B2BBeneficiary>>(`/b2b/organizations/${encodeURIComponent(id)}/beneficiaries${qs(params)}`, {}, token),
+  // Many people at once; those who have not joined FitFlex yet are invited.
+  importB2BBeneficiaries: (token: string, id: string, body: { rawText: string; dryRun?: boolean }) =>
+    request<B2BImportResult>(`/b2b/organizations/${encodeURIComponent(id)}/beneficiaries/import`, { method: 'POST', body: JSON.stringify(body) }, token),
+  b2bBeneficiaryInvites: (token: string, id: string) =>
+    request<{ items: B2BBeneficiaryInvite[]; invited: number; emailConfigured: boolean }>(`/b2b/organizations/${encodeURIComponent(id)}/beneficiary-invites`, {}, token),
+  cancelB2BBeneficiaryInvite: (token: string, id: string, inviteId: string) =>
+    request<{ invite: B2BBeneficiaryInvite }>(`/b2b/organizations/${encodeURIComponent(id)}/beneficiary-invites/${encodeURIComponent(inviteId)}/cancel`, { method: 'POST', body: '{}' }, token),
+  resendB2BBeneficiaryInvite: (token: string, id: string, inviteId: string) =>
+    request<{ invite: B2BBeneficiaryInvite; sent: boolean; emailConfigured: boolean }>(`/b2b/organizations/${encodeURIComponent(id)}/beneficiary-invites/${encodeURIComponent(inviteId)}/resend`, { method: 'POST', body: '{}' }, token),
   enrollB2BBeneficiary: (token: string, id: string, body: UserContact & { beneficiaryType?: string; externalReference?: string; groupName?: string; status?: string }) =>
     request<{ beneficiary: B2BBeneficiary }>(`/b2b/organizations/${encodeURIComponent(id)}/beneficiaries`, { method: 'POST', body: JSON.stringify(body) }, token),
   setB2BBeneficiaryStatus: (token: string, id: string, beneficiaryId: string, status: string) =>
@@ -2428,6 +2437,15 @@ export interface B2BAnalyticsOverview {
   topProviders: Array<B2BUsageMoney & { providerType: string; providerId: string; name: string | null; people: number; organizations: number }>;
   trend: Array<{ bucket: string; uses: number; sponsorTzs: number }>;
 }
+export interface B2BImportResult {
+  dryRun?: boolean; importId?: string; total: number; enrolled: number; invited: number; unchanged: number; rejected: number; withoutEmail: number;
+  problems: Array<{ line: number; name: string | null; contact: string | null; problem: string }>;
+}
+export interface B2BBeneficiaryInvite {
+  id: string; organizationId: string; email: string | null; phone: string | null; displayName: string | null; externalReference: string | null; groupName: string | null;
+  beneficiaryType: string; status: 'invited' | 'enrolled' | 'cancelled'; invitedAt: string; emailsSent: number; lastEmailAt: string | null; nextEmailAt: string | null;
+  emailFailures: number; lastEmailError: string | null; canResend: boolean;
+}
 export interface B2BJobRun {
   id: string; job: string; status: 'running' | 'ok' | 'failed'; slot: string | null; trigger: 'schedule' | 'catch_up' | 'retry' | 'manual' | null; triggeredBy: string | null;
   attempt: number; startedAt: string; finishedAt: string | null; processed: number | null; succeeded: number | null; failed: number | null; error: string | null;
@@ -2450,7 +2468,7 @@ export interface B2BOpsOverview {
   pending: {
     billing: { draftInvoices: number; draftsOlderThan7Days: number; paymentNoticesToCheck: number; overdueInvoices: number; organizationsOnHold: number; paymentsNotFullyApplied: number };
     usage: { holdsOlderThan1Hour: number; passesAwaitingMemberPayment: number; passesAwaitingAccountLink: number };
-    people: { beneficiariesPending: number; employeesNotLinked: number };
+    people: { beneficiariesPending: number; employeesNotLinked: number; invitesWaiting?: number; invitesEmailFailed?: number; importsWithRejectedRowsLast7Days?: number };
   };
 }
 export interface B2BDataQuality { checkedAt: string; issues: number; checks: Array<{ key: string; severity: 'low' | 'medium' | 'high'; title: string; count: number; examples: string[] }> }

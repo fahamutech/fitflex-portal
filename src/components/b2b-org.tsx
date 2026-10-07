@@ -8,6 +8,7 @@ import {
 import { Alert, Badge, Button, Card, CardContent, Field, PageHeader, Spinner } from '@/components/shared';
 import { money } from '@/lib/admin-utils';
 import { ChallengeManager } from '@/components/challenge-manager';
+import { PeopleImport } from '@/components/b2b-people-import';
 import { RewardQueue } from '@/components/reward-queue';
 import { GroupManager } from '@/components/group-manager';
 
@@ -190,6 +191,7 @@ function Beneficiaries({ token, mine, readOnlyNote }: { token: string; mine: Min
           </CardContent>
         </Card>
       )}
+      {!readOnlyNote && <PeopleImport token={token} orgId={orgId} canManage={canManage} onChanged={() => load().catch(() => undefined)} />}
       <Card>
         <CardContent className="space-y-3 py-4">
           <div className="flex flex-wrap items-center justify-between gap-2">
