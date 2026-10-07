@@ -43,6 +43,7 @@ const failed = (e: unknown, fallback: string) => {
   if (body?.error === 'forbidden') return 'Your role doesn’t include this. Ask your organisation’s owner or admin.';
   if (body?.error === 'date_range_too_long') return 'That range is too long. Choose 800 days or fewer.';
   if (body?.error === 'invalid_date_range') return 'Choose a start date and an end date, in that order.';
+  if (body?.error === 'report_too_large') return 'That report is too big to download in one file (over 50,000 rows). Choose a shorter period, or one programme or group.';
   return fallback;
 };
 const change = (v: number | null): { direction: 'up' | 'down' | 'neutral'; label: string } | undefined =>
