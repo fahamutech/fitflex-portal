@@ -452,7 +452,9 @@ function ChallengeDetail({ scope, apiScope, rewardsBase, staff, challenge: c, on
 
         <p className="flex items-start gap-2 text-xs text-[var(--color-fg-quaternary)]">
           <Lock className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-          You see totals only: who is taking part, completion and average progress. Individual activity, workouts and health information are never shown here.
+          {scope === 'admin'
+            ? 'You see totals only: who is taking part, completion and average progress. Individual activity, workouts and health information are never shown here.'
+            : 'This page shows totals: who is taking part, completion and average progress. Each person’s progress is under Insights.'}
         </p>
 
         <div className="flex flex-wrap justify-end gap-2 border-t border-[var(--color-border-secondary)] pt-4">
