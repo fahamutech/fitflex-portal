@@ -19,9 +19,9 @@ const ERRORS: Record<string, string> = {
   organization_not_active: 'Your organisation isn’t active yet, so people can’t be added.',
   managed_by_corporate: 'Your company’s staff list is managed by its HR login.',
   forbidden: 'Your role doesn’t include adding people.',
-  sent_recently: 'An email went to them less than an hour ago.',
-  email_limit_reached: 'They have been emailed six times. Tell them directly.',
-  invite_has_no_email: 'They were listed by mobile number only, so there is no email to send. Tell them to join FitFlex with that number.',
+  sent_recently: 'A message went to them less than an hour ago.',
+  message_limit_reached: 'They have had every message FitFlex will send. Tell them directly.',
+  sms_not_available: 'They were listed by mobile number only and FitFlex can’t send SMS at the moment. Tell them to join FitFlex with that number.',
   invite_already_used: 'They have joined, or the invite was cancelled.',
 };
 const said = (e: unknown, fallback: string) => {
@@ -43,11 +43,12 @@ export function PeopleImport({ token, orgId, canManage, onChanged }: { token: st
   const [done, setDone] = useState<B2BImportResult | null>(null);
   const [invites, setInvites] = useState<B2BBeneficiaryInvite[] | null>(null);
   const [emailConfigured, setEmailConfigured] = useState(true);
+  const [smsConfigured, setSmsConfigured] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const loadInvites = () => api.b2bBeneficiaryInvites(token, orgId).then((r) => { setInvites(r.items); setEmailConfigured(r.emailConfigured); }).catch(() => setInvites([]));
+  const loadInvites = () => api.b2bBeneficiaryInvites(token, orgId).then((r) => { setInvites(r.items); setEmailConfigured(r.emailConfigured); setSmsConfigured(r.smsConfigured); }).catch(() => setInvites([]));
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { setInvites(null); setPreview(null); setDone(null); setText(''); loadInvites(); }, [token, orgId]);
 
@@ -82,7 +83,13 @@ export function PeopleImport({ token, orgId, canManage, onChanged }: { token: st
           </div>
         ))}
       </div>
-      {r.invited > 0 && r.withoutEmail > 0 && <p className="text-xs text-[var(--color-fg-tertiary)]">People listed with a mobile number only get no email from FitFlex. Tell them to join the app with that number.</p>}
+      {r.invited > 0 && (
+        <p className="text-xs text-[var(--color-fg-tertiary)]">
+          {r.smsConfigured ? 'Invited people get an email, an SMS, or both, depending on what you listed for them.' : 'Invited people with an email address get an email.'}
+          {!r.smsConfigured && r.withoutEmail > 0 && ' People listed with a mobile number only get no message from FitFlex: tell them to join the app with that number.'}
+          {!r.emailConfigured && ' FitFlex can’t send email at the moment.'}
+        </p>
+      )}
       {r.problems.length > 0 && (
         <table className="w-full text-sm" data-testid="import-problems">
           <thead><tr className="border-b border-[var(--color-border-secondary)] text-left text-xs text-[var(--color-fg-quaternary)]"><th className="py-1.5 pr-3">Line</th><th className="py-1.5 pr-3">Who</th><th className="py-1.5">Why it can’t be used</th></tr></thead>
@@ -135,12 +142,12 @@ export function PeopleImport({ token, orgId, canManage, onChanged }: { token: st
         <Card>
           <CardContent className="space-y-2 py-4">
             <div className="text-sm font-semibold">{invites.length} invited, not joined yet</div>
-            {!emailConfigured && <Alert tone="warning">FitFlex can’t send invitation emails at the moment. People are still added when they join; tell them to sign up with the email or number you listed.</Alert>}
+            {(!emailConfigured || !smsConfigured) && <Alert tone="warning">FitFlex can’t send invitations by {!emailConfigured && !smsConfigured ? 'email or SMS' : !emailConfigured ? 'email' : 'SMS'} at the moment. People are still added when they join; tell them to sign up with the email or number you listed.</Alert>}
             <div className="overflow-x-auto">
               <table className="w-full text-sm" data-testid="org-invites">
                 <thead>
                   <tr className="border-b border-[var(--color-border-secondary)] text-left text-xs text-[var(--color-fg-quaternary)]">
-                    <th className="py-2 pr-3">Name</th><th className="py-2 pr-3">Listed as</th><th className="py-2 pr-3">Group</th><th className="py-2 pr-3">Invited</th><th className="py-2 pr-3">Emails</th><th className="py-2" />
+                    <th className="py-2 pr-3">Name</th><th className="py-2 pr-3">Listed as</th><th className="py-2 pr-3">Group</th><th className="py-2 pr-3">Invited</th><th className="py-2 pr-3">Messages</th><th className="py-2" />
                   </tr>
                 </thead>
                 <tbody>
@@ -151,14 +158,13 @@ export function PeopleImport({ token, orgId, canManage, onChanged }: { token: st
                       <td className="py-2 pr-3">{i.groupName ?? ''}</td>
                       <td className="py-2 pr-3 whitespace-nowrap">{day(i.invitedAt)}</td>
                       <td className="py-2 pr-3 text-xs">
-                        {!i.email ? <span className="text-[var(--color-fg-quaternary)]">No email: tell them yourself</span>
-                          : i.emailFailures >= 3 ? <Badge tone="danger">Email not delivered</Badge>
-                            : i.emailsSent === 0 ? 'Being sent' : `${i.emailsSent} sent · last ${day(i.lastEmailAt)}${i.nextEmailAt ? ` · next ${day(i.nextEmailAt)}` : ''}`}
+                        {i.email && <div>Email: {i.emailFailures >= 3 ? <Badge tone="danger">not delivered</Badge> : i.emailsSent === 0 ? (emailConfigured ? 'being sent' : 'waiting') : `${i.emailsSent} sent · last ${day(i.lastEmailAt)}${i.nextEmailAt ? ` · next ${day(i.nextEmailAt)}` : ''}`}</div>}
+                        {i.phone && <div>SMS: {i.smsFailures >= 3 ? <Badge tone="danger">not delivered</Badge> : i.smsSent === 0 ? (smsConfigured ? 'being sent' : <span className="text-[var(--color-fg-quaternary)]">not sent: tell them yourself</span>) : `${i.smsSent} sent · last ${day(i.lastSmsAt)}${i.nextSmsAt ? ` · next ${day(i.nextSmsAt)}` : ''}`}</div>}
                       </td>
                       <td className="py-2 text-right whitespace-nowrap">
                         {canManage && (
                           <span className="inline-flex gap-2">
-                            {i.canResend && <Button size="sm" variant="secondary" disabled={busy} onClick={() => act(async () => { const r = await api.resendB2BBeneficiaryInvite(token, orgId, i.id); return r.sent ? 'Email sent again.' : 'The email could not be sent just now.'; })}>Send again</Button>}
+                            {i.canResend && <Button size="sm" variant="secondary" disabled={busy} onClick={() => act(async () => { const r = await api.resendB2BBeneficiaryInvite(token, orgId, i.id); const how = [r.sent.email && 'email', r.sent.sms && 'SMS'].filter(Boolean).join(' and '); return how ? `Sent again by ${how}.` : 'It could not be sent just now.'; })}>Send again</Button>}
                             <Button size="sm" variant="secondary" disabled={busy} onClick={() => act(async () => { await api.cancelB2BBeneficiaryInvite(token, orgId, i.id); return 'Invite cancelled.'; })}>Cancel</Button>
                           </span>
                         )}
@@ -168,7 +174,7 @@ export function PeopleImport({ token, orgId, canManage, onChanged }: { token: st
                 </tbody>
               </table>
             </div>
-            <p className="text-xs text-[var(--color-fg-quaternary)]">They are added to your list the moment they join FitFlex as a member with the email or number shown. FitFlex emails the invitation, then a reminder after 3 days and another after 10.</p>
+            <p className="text-xs text-[var(--color-fg-quaternary)]">They are added to your list the moment they join FitFlex as a member with the email or number shown. FitFlex sends the invitation by email (then reminders after 3 and 10 days) and by SMS to a listed mobile number (then one reminder after 3 days).</p>
           </CardContent>
         </Card>
       )}
