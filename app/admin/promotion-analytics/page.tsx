@@ -12,7 +12,7 @@ import { MetricTiles, NotTrackedNotice, PromotionPerformanceView } from '@/compo
 
 const ENTITY_TYPES: ModerationEntityType[] = ['gym', 'trainer', 'vendor', 'product'];
 const PRESETS: Array<{ days: number; key: MessageKey }> = [{ days: 7, key: 'pan.last7' }, { days: 30, key: 'pan.last30' }, { days: 90, key: 'pan.last90' }];
-const num = (n: number) => new Intl.NumberFormat('en-US').format(n);
+const num = (n: number | null | undefined) => new Intl.NumberFormat('en-US').format(Number(n || 0));
 const FILTERS = ['type', 'placement', 'entityType', 'campaignId'] as const;
 
 /**
@@ -104,7 +104,7 @@ export default function PromotionAnalyticsPage() {
               {PRESETS.map(p => (
                 <button key={p.days} type="button" aria-pressed={activePreset === p.days} data-testid={`pan-preset-${p.days}`}
                   onClick={() => update(q => { q.set('to', today); q.set('from', addDays(today, -(p.days - 1))); })}
-                  className={`rounded-md px-3 py-1.5 text-sm ${activePreset === p.days ? 'bg-[var(--color-bg-primary)] font-semibold shadow-sm' : 'text-[var(--color-fg-tertiary)]'}`}>{t(p.key)}</button>
+                  className={`min-h-10 rounded-md px-3 py-1.5 text-sm ${activePreset === p.days ? 'bg-[var(--color-bg-primary)] font-semibold shadow-sm' : 'text-[var(--color-fg-tertiary)]'}`}>{t(p.key)}</button>
               ))}
             </div>
           </div>
@@ -122,19 +122,19 @@ export default function PromotionAnalyticsPage() {
         </CardContent>
       </Card>
 
-      {error && <Alert tone="error">{error}</Alert>}
+      {error && <Alert tone="error"><span className="flex flex-wrap items-center justify-between gap-2">{error}<Button size="sm" variant="secondary" onClick={() => setTick(n => n + 1)} data-testid="pan-retry">{t('pro.retry')}</Button></span></Alert>}
       {!data && !error && <Spinner className="h-6 w-6" />}
       {data && (
         <>
-          <MetricTiles totals={data.totals} />
-          <NotTrackedNotice items={data.notTracked} />
+          <MetricTiles totals={data.totals ?? {}} />
+          <NotTrackedNotice items={data.notTracked ?? []} />
           <Card>
             <CardContent className="p-0">
               <div className="border-b border-[var(--color-border-secondary)] px-4 py-3">
                 <h2 className="font-semibold">{t('pan.perPromotion')}</h2>
                 <p className="text-xs text-[var(--color-fg-quaternary)]">{t('pan.tableHint')} {t('pan.noRate')}</p>
               </div>
-              {data.items.length === 0 ? <p className="p-10 text-center text-sm text-[var(--color-fg-quaternary)]" data-testid="pan-empty">{t('pan.empty')}</p> : (
+              {(data.items ?? []).length === 0 ? <p className="p-10 text-center text-sm text-[var(--color-fg-quaternary)]" data-testid="pan-empty">{t('pan.empty')}</p> : (
                 <div className="overflow-x-auto">
                   <table className="w-full min-w-[900px] text-sm" data-testid="pan-table">
                     <thead className="text-left text-xs text-[var(--color-fg-tertiary)]"><tr className="border-b border-[var(--color-border-secondary)]">
@@ -142,11 +142,11 @@ export default function PromotionAnalyticsPage() {
                       {(['impressions', 'clicks', 'ctr', 'views', 'saves', 'actionClicks', 'purchases'] as const).map(c => <th key={c} className="px-4 py-2.5 text-right font-medium">{t(`pan.col.${c}` as MessageKey)}</th>)}
                     </tr></thead>
                     <tbody className="divide-y divide-[var(--color-border-secondary)]">
-                      {data.items.map(r => (
+                      {(data.items ?? []).map(r => (
                         <tr key={r.promotion.id} tabIndex={0} className="cursor-pointer hover:bg-[var(--color-bg-secondary)]" data-testid={`pan-row-${r.promotion.id}`}
                           onClick={() => update(q => q.set('item', r.promotion.id))}
                           onKeyDown={e => { if (e.key === 'Enter') update(q => q.set('item', r.promotion.id)); }}>
-                          <td className="px-4 py-3"><span className="font-medium">{r.promotion.entityName ?? r.promotion.entityId}</span>
+                          <td className="max-w-[18rem] px-4 py-3 [overflow-wrap:anywhere]"><span className="font-medium">{r.promotion.entityName ?? r.promotion.entityId}</span>
                             <p className="text-xs text-[var(--color-fg-quaternary)]">{t(ENTITY_TYPE_KEY[r.promotion.entityType])}</p></td>
                           <td className="px-4 py-3">{t(TYPE_KEY[r.promotion.type])}</td>
                           <td className="px-4 py-3"><Badge tone={STATUS_TONE[r.promotion.status] ?? 'gray'} dot>{STATUS_KEY[r.promotion.status] ? t(STATUS_KEY[r.promotion.status]) : r.promotion.status}</Badge></td>

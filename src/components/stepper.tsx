@@ -11,16 +11,17 @@ export function Stepper({ steps, current, maxReached, onStep }: {
   steps: Array<{ key: string; label: string }>; current: number; maxReached: number; onStep: (index: number) => void;
 }) {
   return (
-    <ol className="flex flex-wrap gap-x-1 gap-y-2" aria-label="Steps" data-testid="stepper">
+    <div>
+    <ol className="flex gap-1 sm:flex-wrap sm:gap-x-1 sm:gap-y-2" aria-label="Steps" data-testid="stepper">
       {steps.map((s, i) => {
         const done = i < current;
         const reachable = i <= maxReached;
         return (
-          <li key={s.key}>
+          <li key={s.key} className="min-w-0 flex-1 sm:flex-none">
             <button type="button" disabled={!reachable} onClick={() => onStep(i)} aria-current={i === current ? 'step' : undefined}
-              data-testid={`step-${s.key}`}
+              data-testid={`step-${s.key}`} aria-label={`${i + 1}. ${s.label}`}
               className={cn(
-                'flex items-center gap-2 rounded-full px-3 py-1.5 text-sm transition-colors',
+                'flex h-10 w-full items-center sm:w-auto justify-center gap-2 rounded-full text-sm transition-colors sm:px-3',
                 i === current ? 'bg-[var(--color-brand-600)] font-semibold text-white'
                   : reachable ? 'bg-[var(--color-bg-secondary)] text-[var(--color-fg-secondary)] hover:bg-[var(--color-bg-tertiary)]'
                     : 'text-[var(--color-fg-quaternary)]',
@@ -35,5 +36,7 @@ export function Stepper({ steps, current, maxReached, onStep }: {
         );
       })}
     </ol>
+    <p className="mt-2 text-sm font-medium sm:hidden" aria-hidden data-testid="stepper-current">{current + 1} / {steps.length} · {steps[current]?.label}</p>
+    </div>
   );
 }

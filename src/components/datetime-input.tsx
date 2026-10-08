@@ -17,3 +17,4 @@ export function DateTimeInput({ value, onChange, min, ...rest }: {
       onChange={e => { setText(e.target.value); onChange(fromLocalInput(e.target.value)); }} {...rest} />
   );
 }
+DateTimeInput.acceptsId = true;

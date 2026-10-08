@@ -35,28 +35,28 @@ export function ModerationEntityView({ entityType, entityId, onBack, onChanged }
 
   return (
     <div className="space-y-6" data-testid="moderation-entity">
-      <button onClick={onBack} className="flex items-center gap-1.5 text-sm text-[var(--color-fg-tertiary)] hover:text-[var(--color-fg-primary)]" data-testid="moderation-back">
+      <button onClick={onBack} className="-ml-2 flex min-h-10 items-center gap-1.5 px-2 text-sm text-[var(--color-fg-tertiary)] hover:text-[var(--color-fg-primary)]" data-testid="moderation-back">
         <ArrowLeft className="h-4 w-4" />{t('mod.back')}
       </button>
-      {error && <Alert tone="error">{error}</Alert>}
+      {error && <Alert tone="error"><span className="flex flex-wrap items-center justify-between gap-2">{error}<Button size="sm" variant="secondary" onClick={load} data-testid="moderation-retry">{t('pro.retry')}</Button></span></Alert>}
       {notice && <Alert tone="success">{notice}</Alert>}
       {!data && !error && <Spinner className="h-6 w-6" />}
       {data && (
         <>
           <div className="flex flex-wrap items-start justify-between gap-3">
-            <div>
+            <div className="min-w-0 max-w-full [overflow-wrap:anywhere]">
               <p className="text-xs uppercase tracking-wide text-[var(--color-fg-quaternary)]">{t(TYPE_KEY[data.entityType])}</p>
-              <h1 className="text-xl font-semibold text-[var(--color-fg-primary)]" data-testid="moderation-name">{data.summary.name}</h1>
-              {data.summary.subtitle && <p className="text-sm text-[var(--color-fg-tertiary)]">{data.summary.subtitle}</p>}
+              <h1 className="text-xl font-semibold text-[var(--color-fg-primary)]" data-testid="moderation-name">{data.summary?.name ?? entityId}</h1>
+              {data.summary?.subtitle && <p className="text-sm text-[var(--color-fg-tertiary)]">{data.summary.subtitle}</p>}
             </div>
             <Badge tone={STATUS_TONE[data.moderationStatus]} dot>{t(STATUS_KEY[data.moderationStatus])}</Badge>
           </div>
 
-          <div className="grid gap-6 lg:grid-cols-2">
+          <div className="grid gap-6 lg:grid-cols-2 [&>*]:min-w-0">
             <Card>
               <CardHeader><h2 className="font-semibold">{t('mod.eligibility.title')}</h2></CardHeader>
               <CardContent>
-                {data.eligibility.ok ? (
+                {data.eligibility?.ok ? (
                   <p className="flex items-start gap-2 text-sm" data-testid="moderation-eligible">
                     <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-[var(--color-success-600)]" />{t('mod.eligibility.yes')}
                   </p>
@@ -64,12 +64,12 @@ export function ModerationEntityView({ entityType, entityId, onBack, onChanged }
                   <div className="text-sm" data-testid="moderation-ineligible">
                     <p className="flex items-center gap-2 font-medium"><XCircle className="h-4 w-4 text-[var(--color-error-600)]" />{t('mod.eligibility.no')}</p>
                     <ul className="mt-2 list-disc space-y-1 pl-6 text-[var(--color-fg-tertiary)]">
-                      {data.eligibility.reasons.map(code => { const k = whyKey(code); return <li key={code}>{k ? t(k) : code}</li>; })}
+                      {(data.eligibility?.reasons ?? []).map(code => { const k = whyKey(code); return <li key={code}>{k ? t(k) : code}</li>; })}
                     </ul>
                   </div>
                 )}
                 {data.reason && data.moderationStatus !== 'approved' && (
-                  <p className="mt-3 rounded-[var(--radius-md)] bg-[var(--color-bg-secondary)] p-3 text-sm">{data.reason}</p>
+                  <p className="mt-3 rounded-[var(--radius-md)] bg-[var(--color-bg-secondary)] p-3 text-sm [overflow-wrap:anywhere]">{data.reason}</p>
                 )}
               </CardContent>
             </Card>
@@ -79,11 +79,11 @@ export function ModerationEntityView({ entityType, entityId, onBack, onChanged }
               <CardContent>
                 {!canDecide ? (
                   <p className="text-sm text-[var(--color-fg-quaternary)]" data-testid="moderation-view-only">{t('mod.viewOnly')}</p>
-                ) : data.allowedActions.length === 0 ? (
+                ) : (data.allowedActions ?? []).length === 0 ? (
                   <p className="text-sm text-[var(--color-fg-quaternary)]">{t('mod.noActions')}</p>
                 ) : (
                   <div className="flex flex-wrap gap-2">
-                    {data.allowedActions.map(a => (
+                    {(data.allowedActions ?? []).map(a => (
                       <Button key={a.action} size="sm" variant={DESTRUCTIVE.includes(a.action) ? 'secondary' : 'primary'}
                         onClick={() => { setNotice(null); setPending(a); }} data-testid={`moderation-action-${a.action}`}>
                         {t(ACTION_KEY[a.action])}
@@ -98,12 +98,12 @@ export function ModerationEntityView({ entityType, entityId, onBack, onChanged }
           <Card>
             <CardHeader><h2 className="font-semibold">{t('mod.history')}</h2></CardHeader>
             <CardContent>
-              {data.history.length === 0 ? (
+              {(data.history ?? []).length === 0 ? (
                 <p className="text-sm text-[var(--color-fg-quaternary)]">{t('mod.history.empty')}</p>
               ) : (
                 <ol className="space-y-3" data-testid="moderation-history">
-                  {data.history.map(h => (
-                    <li key={h.id} className="border-l-2 border-[var(--color-border-secondary)] pl-3 text-sm">
+                  {(data.history ?? []).map(h => (
+                    <li key={h.id} className="border-l-2 border-[var(--color-border-secondary)] pl-3 text-sm [overflow-wrap:anywhere]">
                       <p className="font-medium">
                         {t(ACTION_KEY[h.action])}
                         <span className="ml-2 font-normal text-[var(--color-fg-tertiary)]">
@@ -146,7 +146,7 @@ function DecisionDialog({ entityType, entityId, action, reasonRequired, onClose,
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!token) return;
+    if (!token || busy) return;
     setBusy(true);
     setError(null);
     try {

@@ -9,7 +9,7 @@ import { TYPE_KEY as ENTITY_TYPE_KEY } from '@/lib/moderation';
 import { PLACEMENT_KEY, STATUS_KEY, STATUS_TONE, TYPE_KEY, errorKey, pct, ratio, ymdLabel } from '@/lib/promotions';
 import { money } from '@/lib/admin-utils';
 import type { MessageKey } from '@/lib/i18n';
-import { Alert, Badge, Card, CardContent, CardHeader, Spinner } from '@/components/shared';
+import { Alert, Badge, Button, Card, CardContent, CardHeader, Spinner } from '@/components/shared';
 
 // Colour-blind-safe pair (Okabe-Ito blue and vermillion) that also differ by line style and marker.
 const C_IMPRESSIONS = '#0072B2';
@@ -19,7 +19,8 @@ const INK = 'var(--color-fg-quaternary)';
 const num = (n: number | null | undefined) => new Intl.NumberFormat('en-US').format(Number(n || 0));
 
 /** The headline numbers. A rate with nothing to divide by is a dash, never 0%. */
-export function MetricTiles({ totals, testId = 'pan-tiles' }: { totals: PromotionMetrics; testId?: string }) {
+export function MetricTiles({ totals: raw, testId = 'pan-tiles' }: { totals: Partial<PromotionMetrics> | null | undefined; testId?: string }) {
+  const totals = (raw ?? {}) as PromotionMetrics;
   const { t } = useApp();
   const tiles: Array<{ key: string; label: MessageKey; value: string; sub?: string }> = [
     { key: 'impressions', label: 'pan.tile.impressions', value: num(totals.impressions) },
@@ -38,8 +39,8 @@ export function MetricTiles({ totals, testId = 'pan-tiles' }: { totals: Promotio
       {tiles.map(tile => (
         <div key={tile.key} className="min-w-0 rounded-[var(--radius-lg)] border border-[var(--color-border-secondary)] p-4" data-testid={`pan-tile-${tile.key}`}>
           <p className="text-sm text-[var(--color-fg-tertiary)]">{t(tile.label)}</p>
-          <p className="mt-1 truncate text-2xl font-semibold tabular-nums" data-testid={`pan-value-${tile.key}`}>{tile.value}</p>
-          {tile.sub && <p className="mt-0.5 truncate text-xs text-[var(--color-fg-quaternary)]" data-testid={`pan-sub-${tile.key}`}>{tile.sub}</p>}
+          <p className="mt-1 text-xl font-semibold tabular-nums [overflow-wrap:anywhere] sm:text-2xl" data-testid={`pan-value-${tile.key}`}>{tile.value}</p>
+          {tile.sub && <p className="mt-0.5 text-xs [overflow-wrap:anywhere] text-[var(--color-fg-quaternary)]" data-testid={`pan-sub-${tile.key}`}>{tile.sub}</p>}
         </div>
       ))}
     </div>
@@ -47,8 +48,9 @@ export function MetricTiles({ totals, testId = 'pan-tiles' }: { totals: Promotio
 }
 
 /** What the apps cannot see yet, driven by the server's own list. */
-export function NotTrackedNotice({ items }: { items: string[] }) {
+export function NotTrackedNotice({ items: raw }: { items: string[] | null | undefined }) {
   const { t } = useApp();
+  const items = raw ?? [];
   if (!items.length) return null;
   const names = items.map(i => { const k = `pan.notTracked.${i}` as MessageKey; const label = t(k); return label === k ? i.replace(/_/g, ' ') : label; });
   return (
@@ -71,6 +73,7 @@ export function PromotionPerformanceView({ id, from, to, onBack }: { id: string;
   const { token, t } = useApp();
   const [data, setData] = useState<PromotionAnalyticsDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [tick, setTick] = useState(0);
 
   useEffect(() => {
     if (!token) return;
@@ -80,7 +83,7 @@ export function PromotionPerformanceView({ id, from, to, onBack }: { id: string;
       .then(d => { if (live) setData(d); })
       .catch(err => { if (live) setError(t(errorKey(err))); });
     return () => { live = false; };
-  }, [token, id, from, to, t]);
+  }, [token, id, from, to, t, tick]);
 
   const p = data?.promotion;
   const daily = (data?.daily ?? []).map(d => ({ day: d.day, impressions: d.impressions ?? 0, clicks: d.clicks ?? 0 }));
@@ -89,21 +92,21 @@ export function PromotionPerformanceView({ id, from, to, onBack }: { id: string;
 
   return (
     <div className="space-y-6" data-testid="pan-detail">
-      <button onClick={onBack} className="flex items-center gap-1.5 text-sm text-[var(--color-fg-tertiary)] hover:text-[var(--color-fg-primary)]" data-testid="pan-back">
+      <button onClick={onBack} className="-ml-2 flex min-h-10 items-center gap-1.5 px-2 text-sm text-[var(--color-fg-tertiary)] hover:text-[var(--color-fg-primary)]" data-testid="pan-back">
         <ArrowLeft className="h-4 w-4" />{t('pro.back')}
       </button>
-      {error && <Alert tone="error">{error}</Alert>}
+      {error && <Alert tone="error"><span className="flex flex-wrap items-center justify-between gap-2">{error}<Button size="sm" variant="secondary" onClick={() => setTick(n => n + 1)} data-testid="pan-detail-retry">{t('pro.retry')}</Button></span></Alert>}
       {!data && !error && <Spinner className="h-6 w-6" />}
       {data && p && (
         <>
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div className="min-w-0">
               <p className="text-xs uppercase tracking-wide text-[var(--color-fg-quaternary)]">{t(ENTITY_TYPE_KEY[p.entityType])} · {t(TYPE_KEY[p.type])}</p>
-              <h1 className="break-words text-xl font-semibold" data-testid="pan-name">{p.entityName ?? p.entityId}</h1>
+              <h1 className="[overflow-wrap:anywhere] text-xl font-semibold" data-testid="pan-name">{p.entityName ?? p.entityId}</h1>
               <p className="mt-1 text-sm text-[var(--color-fg-tertiary)]" data-testid="pan-period">{t('pan.detail.period').replace('{from}', ymdLabel(data.range.from)).replace('{to}', ymdLabel(data.range.to))}</p>
             </div>
             <div className="flex items-center gap-2">
-              <Link href={`/admin/promotions?item=${encodeURIComponent(p.id)}`} className="text-sm text-[var(--color-fg-brand)] hover:underline" data-testid="pan-open-promotion">{t('pan.openPromotion')}</Link>
+              <Link href={`/admin/promotions?item=${encodeURIComponent(p.id)}`} className="inline-flex min-h-10 items-center text-sm text-[var(--color-fg-brand)] hover:underline" data-testid="pan-open-promotion">{t('pan.openPromotion')}</Link>
               <Badge tone={STATUS_TONE[p.status] ?? 'gray'} dot><span data-testid="pan-status">{STATUS_KEY[p.status] ? t(STATUS_KEY[p.status]) : p.status}</span></Badge>
             </div>
           </div>
@@ -142,7 +145,7 @@ export function PromotionPerformanceView({ id, from, to, onBack }: { id: string;
             </CardContent>
           </Card>
 
-          <div className="grid gap-6 lg:grid-cols-2">
+          <div className="grid gap-6 lg:grid-cols-2 [&>*]:min-w-0">
             <Card>
               <CardHeader><div><h2 className="font-semibold">{t('pan.detail.funnel')}</h2><p className="mt-1 text-xs text-[var(--color-fg-quaternary)]">{t('pan.detail.funnelHint')}</p></div></CardHeader>
               <CardContent>
@@ -171,14 +174,14 @@ export function PromotionPerformanceView({ id, from, to, onBack }: { id: string;
             <Card>
               <CardHeader><h2 className="font-semibold">{t('pan.detail.placements')}</h2></CardHeader>
               <CardContent className="p-0">
-                {data.byPlacement.length === 0 ? <p className="p-6 text-sm text-[var(--color-fg-quaternary)]" data-testid="pan-placements-empty">{t('pan.detail.noPlacements')}</p> : (
+                {(data.byPlacement ?? []).length === 0 ? <p className="p-6 text-sm text-[var(--color-fg-quaternary)]" data-testid="pan-placements-empty">{t('pan.detail.noPlacements')}</p> : (
                   <div className="overflow-x-auto">
                     <table className="w-full min-w-[420px] text-sm" data-testid="pan-placements">
                       <thead className="text-left text-xs text-[var(--color-fg-tertiary)]"><tr className="border-b border-[var(--color-border-secondary)]">
                         <th className="px-4 py-2.5 font-medium">{t('pan.col.placement')}</th><th className="px-4 py-2.5 text-right font-medium">{t('pan.col.impressions')}</th>
                         <th className="px-4 py-2.5 text-right font-medium">{t('pan.col.clicks')}</th><th className="px-4 py-2.5 text-right font-medium">{t('pan.col.ctr')}</th></tr></thead>
                       <tbody className="divide-y divide-[var(--color-border-secondary)]">
-                        {data.byPlacement.map(r => (
+                        {(data.byPlacement ?? []).map(r => (
                           <tr key={r.placement} data-testid={`pan-placement-${r.placement}`}>
                             <td className="px-4 py-3">{PLACEMENT_KEY[r.placement] ? t(PLACEMENT_KEY[r.placement]) : r.placement}</td>
                             <td className="px-4 py-3 text-right tabular-nums">{num(r.impressions)}</td>
