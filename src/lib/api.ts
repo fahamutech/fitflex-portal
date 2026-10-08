@@ -211,17 +211,17 @@ export type PromotionAnalyticsRef = {
 };
 export type PromotionAnalyticsItem = PromotionMetrics & { promotion: PromotionAnalyticsRef };
 export type PromotionAnalyticsRange = { from: string; to: string };
-export type PromotionAnalytics = { range: PromotionAnalyticsRange; totals: PromotionMetrics; items: PromotionAnalyticsItem[]; notTracked: string[] };
+export type PromotionAnalytics = { range: PromotionAnalyticsRange; totals: PromotionMetrics; items: PromotionAnalyticsItem[]; notTracked: string[]; unverifiedEvents?: number };
 export type PromotionAnalyticsFilters = { from?: string; to?: string; type?: PromotionType; entityType?: ModerationEntityType; campaignId?: string; placement?: PromotionPlacement };
 export type PromotionFunnelStep = { step: 'impressions' | 'clicks' | 'detailViews' | 'actionClicks' | 'conversions'; count: number };
 export type PromotionAnalyticsDetail = {
   promotion: PromotionAnalyticsRef; range: PromotionAnalyticsRange; totals: PromotionMetrics;
   daily: Array<{ day: string } & Partial<PromotionMetrics>>; byPlacement: Array<{ placement: PromotionPlacement } & PromotionMetrics>;
-  funnel: PromotionFunnelStep[]; notTracked: string[];
+  funnel: PromotionFunnelStep[]; notTracked: string[]; unverifiedEvents?: number;
 };
 export type CampaignAnalytics = {
   campaign: { id: string; name: string; status: string; startsAt: string; endsAt: string }; range: PromotionAnalyticsRange;
-  totals: PromotionMetrics; items: PromotionAnalyticsItem[]; notTracked: string[];
+  totals: PromotionMetrics; items: PromotionAnalyticsItem[]; notTracked: string[]; unverifiedEvents?: number;
 };
 export type GeoArea = { id: string; level: 'country' | 'region' | 'city' | 'district'; name: string; parentId: string | null };
 export type EntityMatch = {

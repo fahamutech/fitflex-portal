@@ -64,6 +64,23 @@ export function NotTrackedNotice({ items: raw }: { items: string[] | null | unde
   );
 }
 
+/** Events the apps could not prove (older builds, forged); the server leaves them out of every total. Missing or 0 shows nothing. */
+export function UnverifiedNotice({ count: raw }: { count: number | null | undefined }) {
+  const { t } = useApp();
+  const count = Number(raw);
+  if (!Number.isFinite(count) || count <= 0) return null;
+  const body = t(count === 1 ? 'pan.unverified.bodyOne' : 'pan.unverified.bodyMany').replace('{count}', num(count));
+  return (
+    <div role="note" className="flex gap-3 rounded-[var(--radius-lg)] border border-[var(--color-border-secondary)] bg-[var(--color-bg-secondary)] p-4 text-sm" data-testid="pan-unverified">
+      <Info className="mt-0.5 h-4 w-4 shrink-0 text-[var(--color-fg-tertiary)]" aria-hidden />
+      <div className="min-w-0">
+        <p className="font-medium">{t('pan.unverified.title')}</p>
+        <p className="mt-1 text-[var(--color-fg-tertiary)]" data-testid="pan-unverified-body">{body} {t('pan.unverified.note')}</p>
+      </div>
+    </div>
+  );
+}
+
 const FUNNEL_KEY: Record<string, MessageKey> = {
   impressions: 'pan.funnel.impressions', clicks: 'pan.funnel.clicks', detailViews: 'pan.funnel.detailViews', actionClicks: 'pan.funnel.actionClicks', conversions: 'pan.funnel.conversions',
 };
@@ -113,6 +130,7 @@ export function PromotionPerformanceView({ id, from, to, onBack }: { id: string;
 
           <MetricTiles totals={data.totals} />
           <NotTrackedNotice items={data.notTracked} />
+          <UnverifiedNotice count={data.unverifiedEvents} />
 
           <Card>
             <CardHeader><h2 className="font-semibold">{t('pan.detail.daily')}</h2></CardHeader>
