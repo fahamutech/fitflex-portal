@@ -73,7 +73,7 @@ const ERRORS: Record<string, MessageKey> = {
   promotion_not_found: 'pro.err.promotion_not_found', partner_not_found: 'pro.err.partner_not_found', unknown_geo_area: 'pro.err.unknown_geo_area',
   promotions_outside_period: 'pro.err.promotions_outside_period', name_required: 'pro.err.name_required', invalid_max_slots: 'pro.err.invalid_max_slots',
   invalid_range: 'pro.err.invalid_range', range_too_long: 'pro.err.range_too_long',
-  acl_forbidden: 'pro.err.acl_forbidden', invalid_priority: 'pro.err.invalid_priority', invalid_start: 'pro.err.invalid_start', invalid_end: 'pro.err.invalid_end',
+  acl_forbidden: 'pro.err.acl_forbidden', ranking_change_requires_approver: 'pro.err.ranking_change_requires_approver', invalid_priority: 'pro.err.invalid_priority', invalid_start: 'pro.err.invalid_start', invalid_end: 'pro.err.invalid_end',
 };
 export function errorKey(err: unknown): MessageKey {
   const code = (err as { body?: { error?: string } })?.body?.error ?? '';

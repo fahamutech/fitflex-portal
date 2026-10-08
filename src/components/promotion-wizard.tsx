@@ -1,5 +1,5 @@
 'use client';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowLeft, ArrowRight, Check, Search, XCircle } from 'lucide-react';
 import { useApp } from '../../app/providers';
 import {
@@ -50,6 +50,9 @@ export function PromotionWizard({ editId, onClose, onSaved }: { editId?: string 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const saving = useRef(false);
+  const [reload, setReload] = useState(0);
+  const contentRef = useRef<HTMLDivElement>(null);
   const [preview, setPreview] = useState<PromotionPreview | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const set = (patch: Partial<Draft>) => setD(prev => ({ ...prev, ...patch }));
@@ -57,6 +60,7 @@ export function PromotionWizard({ editId, onClose, onSaved }: { editId?: string 
   // Reference data, and the draft being edited.
   useEffect(() => {
     if (!token) return;
+    setLoading(true); setError(null);
     (async () => {
       try {
         const [r, g, c] = await Promise.all([api.promotionReference(token), api.geoAreas(token), api.promotionCampaigns(token)]);
@@ -67,7 +71,7 @@ export function PromotionWizard({ editId, onClose, onSaved }: { editId?: string 
           setD({
             entity: { entityType: p.entityType, id: p.entityId, name: p.entity?.name ?? p.entityId, subtitle: p.entity?.subtitle ?? null, status: p.entity?.status ?? '', moderationStatus: 'approved', promotable: true, reasons: [],
               placements: (Object.entries(r.placements) as Array<[PromotionPlacement, { entityTypes: ModerationEntityType[] }]>).filter(([, v]) => v.entityTypes.includes(p.entityType)).map(([k]) => k) },
-            type: p.type, placements: p.placements, areaIds: p.geoScope?.areaIds ?? [], categories: (p.categories ?? []).join(', '),
+            type: p.type, placements: p.placements ?? [], areaIds: p.geoScope?.areaIds ?? [], categories: (p.categories ?? []).join(', '),
             startsAt: p.startsAt, endsAt: p.endsAt, priority: String(p.priority), boostWeight: String(p.boostWeight),
             isCommercial: p.isCommercial, relationshipType: p.relationshipType ?? (p.isCommercial ? 'paid_advertising' : 'editorial'), partner, commercialRef: p.commercialRef ?? '',
             campaignId: p.campaignId ?? '', disclosureLabel: p.disclosureLabel ?? '', notes: p.notes ?? '',
@@ -80,7 +84,7 @@ export function PromotionWizard({ editId, onClose, onSaved }: { editId?: string 
         setLoading(false);
       }
     })();
-  }, [token, editId, t]);
+  }, [token, editId, t, reload]);
 
   const now = Date.now();
   const valid = useMemo<Record<StepKey, boolean>>(() => {
@@ -91,7 +95,7 @@ export function PromotionWizard({ editId, onClose, onSaved }: { editId?: string 
     return {
       entity: !!d.entity && (d.entity.promotable || !!editId),
       type: !!d.type,
-      placement: d.placements.length > 0 && d.placements.every(p => d.entity?.placements.includes(p)),
+      placement: d.placements.length > 0 && d.placements.every(p => d.entity?.placements?.includes(p)),
       targeting: true,
       schedule: !!d.startsAt && !!d.endsAt && new Date(d.endsAt) > new Date(d.startsAt) && new Date(d.endsAt).getTime() > now,
       priority: Number.isInteger(prio) && prio >= 1 && prio <= (ref?.maxPriority ?? 100) && Number.isFinite(weight) && weight >= 0 && weight <= 1,
@@ -124,6 +128,9 @@ export function PromotionWizard({ editId, onClose, onSaved }: { editId?: string 
   useEffect(() => { if (STEP_KEYS[step] === 'review') loadPreview(); }, [step]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const go = (i: number) => { setStep(i); setMaxReached(m => Math.max(m, i)); };
+  // After a step change, keyboard and screen-reader users land at the top of the new step, not on a button that has moved.
+  const first = useRef(true);
+  useEffect(() => { if (first.current) { first.current = false; return; } contentRef.current?.focus({ preventScroll: false }); }, [step]);
   const labels: Record<StepKey, string> = {
     entity: t('pro.wiz.step.entity'), type: t('pro.wiz.step.type'), placement: t('pro.wiz.step.placement'), targeting: t('pro.wiz.step.targeting'),
     schedule: t('pro.wiz.step.schedule'), priority: t('pro.wiz.step.priority'), commercial: t('pro.wiz.step.commercial'), review: t('pro.wiz.step.review'),
@@ -131,7 +138,8 @@ export function PromotionWizard({ editId, onClose, onSaved }: { editId?: string 
   const key = STEP_KEYS[step];
 
   const save = async (submit: boolean) => {
-    if (!token || !body) return;
+    if (!token || !body || saving.current) return;          // a second click while the first is on its way does nothing
+    saving.current = true;
     setBusy(true); setError(null);
     let id = editId ?? null;
     try {
@@ -142,21 +150,29 @@ export function PromotionWizard({ editId, onClose, onSaved }: { editId?: string 
         id = (await api.createPromotion(token, body)).promotion.id;
       }
     } catch (err) {
-      setError(t(errorKey(err))); setBusy(false); return;
+      setError(t(errorKey(err))); saving.current = false; setBusy(false); return;
     }
     if (submit && id) {
       try { await api.promotionAction(token, id, 'submit'); }
-      catch (err) { setError(`${t('pro.wiz.savedNotSubmitted')} ${t(errorKey(err))}`); setBusy(false); onSaved(id); return; }
+      catch (err) { setError(`${t('pro.wiz.savedNotSubmitted')} ${t(errorKey(err))}`); saving.current = false; setBusy(false); onSaved(id); return; }
     }
-    setBusy(false);
+    saving.current = false; setBusy(false);
     onSaved(id!);
   };
 
   if (loading) return <div className="p-6"><Spinner className="h-6 w-6" /></div>;
+  if (error && !ref) {
+    return (
+      <div className="space-y-4" data-testid="promotion-wizard">
+        <button onClick={onClose} className="-ml-2 flex min-h-10 items-center gap-1.5 px-2 text-sm text-[var(--color-fg-tertiary)] hover:text-[var(--color-fg-primary)]" data-testid="wizard-cancel"><ArrowLeft className="h-4 w-4" />{t('pro.back')}</button>
+        <Alert tone="error"><span className="flex flex-wrap items-center justify-between gap-2">{error}<Button size="sm" variant="secondary" onClick={() => setReload(n => n + 1)} data-testid="wizard-retry">{t('pro.retry')}</Button></span></Alert>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6" data-testid="promotion-wizard">
-      <button onClick={onClose} className="flex items-center gap-1.5 text-sm text-[var(--color-fg-tertiary)] hover:text-[var(--color-fg-primary)]" data-testid="wizard-cancel">
+      <button onClick={onClose} className="-ml-2 flex min-h-10 items-center gap-1.5 px-2 text-sm text-[var(--color-fg-tertiary)] hover:text-[var(--color-fg-primary)]" data-testid="wizard-cancel">
         <ArrowLeft className="h-4 w-4" />{t('pro.back')}
       </button>
       <div>
@@ -167,7 +183,7 @@ export function PromotionWizard({ editId, onClose, onSaved }: { editId?: string 
       {error && <Alert tone="error">{error}</Alert>}
 
       <Card>
-        <CardContent className="space-y-5 py-6">
+        <CardContent className="space-y-5 py-6"><div ref={contentRef} tabIndex={-1} className="space-y-5 outline-none" data-testid="wizard-step-content">
           {key === 'entity' && <EntityStep d={d} set={set} locked={!!editId} />}
           {key === 'type' && (
             <div className="space-y-3">
@@ -206,7 +222,7 @@ export function PromotionWizard({ editId, onClose, onSaved }: { editId?: string 
             <div className="space-y-4">
               <h2 className="font-semibold">{t('pro.wiz.targeting.title')}</h2>
               <Field label={t('pro.wiz.targeting.areas')} hint={t('pro.wiz.targeting.areasHint')}>
-                <AreaPicker areas={areas} value={d.areaIds} onChange={areaIds => set({ areaIds })} />
+                <AreaPicker label={t('pro.wiz.targeting.areas')} areas={areas} value={d.areaIds} onChange={areaIds => set({ areaIds })} />
               </Field>
               <Field label={t('pro.wiz.targeting.categories')} hint={t('pro.wiz.targeting.categoriesHint')}>
                 <input className="ui-input" value={d.categories} onChange={e => set({ categories: e.target.value })} maxLength={200} data-testid="wizard-categories" />
@@ -240,9 +256,9 @@ export function PromotionWizard({ editId, onClose, onSaved }: { editId?: string 
           )}
           {key === 'commercial' && <CommercialStep d={d} set={set} campaigns={campaigns} />}
           {key === 'review' && (
-            <ReviewStep d={d} body={body} areas={areas} preview={preview} previewError={previewError} />
+            <ReviewStep d={d} body={body} areas={areas} preview={preview} previewError={previewError} onRetry={loadPreview} />
           )}
-        </CardContent>
+        </div></CardContent>
       </Card>
 
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -252,7 +268,7 @@ export function PromotionWizard({ editId, onClose, onSaved }: { editId?: string 
         ) : (
           <div className="flex flex-wrap gap-2">
             <Button variant="secondary" onClick={() => save(false)} disabled={busy || !!previewError} data-testid="wizard-save-draft">{t('pro.wiz.saveDraft')}</Button>
-            <Button onClick={() => save(true)} disabled={busy || !!previewError || !!preview && !preview.eligibility.ok} data-testid="wizard-submit">
+            <Button onClick={() => save(true)} disabled={busy || !!previewError || !!preview && !preview.eligibility?.ok} data-testid="wizard-submit">
               <Check className="h-4 w-4" />{t('pro.wiz.submit')}
             </Button>
           </div>
@@ -268,6 +284,7 @@ function EntityStep({ d, set, locked }: { d: Draft; set: (p: Partial<Draft>) => 
   const [q, setQ] = useState('');
   const [results, setResults] = useState<EntityMatch[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [again, setAgain] = useState(0);
 
   useEffect(() => {
     if (!token || locked) return;
@@ -277,13 +294,13 @@ function EntityStep({ d, set, locked }: { d: Draft; set: (p: Partial<Draft>) => 
       catch (err) { setError(t(errorKey(err))); setResults([]); }
     }, q ? 250 : 0);
     return () => clearTimeout(h);
-  }, [token, type, q, locked, t]);
+  }, [token, type, q, locked, t, again]);
 
   if (locked && d.entity) {
     return (
       <div className="space-y-2">
         <h2 className="font-semibold">{t('pro.wiz.entity.title')}</h2>
-        <p className="rounded-[var(--radius-md)] bg-[var(--color-bg-secondary)] p-3 text-sm" data-testid="wizard-entity-locked">
+        <p className="rounded-[var(--radius-md)] bg-[var(--color-bg-secondary)] p-3 text-sm [overflow-wrap:anywhere]" data-testid="wizard-entity-locked">
           <span className="text-xs uppercase text-[var(--color-fg-quaternary)]">{t(ENTITY_TYPE_KEY[d.entity.entityType])}</span><br />
           <span className="font-medium">{d.entity.name}</span>
         </p>
@@ -298,7 +315,7 @@ function EntityStep({ d, set, locked }: { d: Draft; set: (p: Partial<Draft>) => 
         {ENTITY_TYPES.map(ty => (
           <button key={ty} role="tab" aria-selected={type === ty} type="button" data-testid={`entity-type-${ty}`}
             onClick={() => { setType(ty); if (d.entity && d.entity.entityType !== ty) set({ entity: null, placements: [] }); }}
-            className={`rounded-full border px-3 py-1 text-sm ${type === ty ? 'border-[var(--color-brand-600)] bg-[var(--color-brand-600)] text-white' : 'border-[var(--color-border-secondary)]'}`}>
+            className={`min-h-10 rounded-full border px-4 py-1 text-sm ${type === ty ? 'border-[var(--color-brand-600)] bg-[var(--color-brand-600)] text-white' : 'border-[var(--color-border-secondary)]'}`}>
             {t(ENTITY_TYPE_KEY[ty])}
           </button>
         ))}
@@ -307,27 +324,27 @@ function EntityStep({ d, set, locked }: { d: Draft; set: (p: Partial<Draft>) => 
         <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--color-fg-quaternary)]" />
         <input className="ui-input" style={{ paddingLeft: 36 }} type="search" placeholder={t('pro.wiz.entity.search')} value={q} onChange={e => setQ(e.target.value)} data-testid="wizard-entity-search" />
       </div>
-      {error && <Alert tone="error">{error}</Alert>}
-      {results == null ? <Spinner className="h-5 w-5" /> : results.length === 0 ? (
+      {error && <Alert tone="error"><span className="flex flex-wrap items-center justify-between gap-2">{error}<Button size="sm" variant="secondary" onClick={() => setAgain(n => n + 1)} data-testid="wizard-entity-retry">{t('pro.retry')}</Button></span></Alert>}
+      {results == null ? <Spinner className="h-5 w-5" /> : results.length === 0 ? (error ? null :
         <p className="text-sm text-[var(--color-fg-quaternary)]">{t('pro.wiz.entity.none')}</p>
       ) : (
         <ul className="divide-y divide-[var(--color-border-secondary)] rounded-[var(--radius-md)] border border-[var(--color-border-secondary)]" data-testid="wizard-entity-results">
           {results.map(r => (
             <li key={r.id}>
-              <button type="button" disabled={!r.promotable} onClick={() => set({ entity: r, placements: d.placements.filter(p => r.placements.includes(p)) })}
+              <button type="button" disabled={!r.promotable} onClick={() => set({ entity: r, placements: d.placements.filter(p => (r.placements ?? []).includes(p)) })}
                 data-testid={`entity-${r.id}`}
-                className={`flex w-full items-start justify-between gap-3 p-3 text-left text-sm ${d.entity?.id === r.id ? 'bg-[var(--color-brand-50)]' : r.promotable ? 'hover:bg-[var(--color-bg-secondary)]' : 'cursor-not-allowed opacity-60'}`}>
-                <span>
+                className={`flex min-h-12 w-full items-start justify-between gap-3 p-3 text-left text-sm ${d.entity?.id === r.id ? 'bg-[var(--color-brand-50)]' : r.promotable ? 'hover:bg-[var(--color-bg-secondary)]' : 'cursor-not-allowed opacity-60'}`}>
+                <span className="min-w-0 [overflow-wrap:anywhere]">
                   <span className="font-medium">{r.name}</span>
                   {r.subtitle && <span className="block text-xs text-[var(--color-fg-quaternary)]">{r.subtitle}</span>}
                   {!r.promotable && (
                     <span className="mt-1 flex items-start gap-1 text-xs text-[var(--color-error-600)]">
                       <XCircle className="mt-0.5 h-3 w-3 shrink-0" />
-                      {r.reasons.map(c => { const k = whyKey(c); return k ? t(k) : c; }).join('; ')}
+                      {(r.reasons ?? []).map(c => { const k = whyKey(c); return k ? t(k) : c; }).join('; ')}
                     </span>
                   )}
                 </span>
-                {d.entity?.id === r.id ? <Badge tone="brand">{t('pro.wiz.entity.selected')}</Badge> : !r.promotable ? <Badge tone="gray">{t('pro.wiz.entity.notPromotable')}</Badge> : null}
+                <span className="shrink-0">{d.entity?.id === r.id ? <Badge tone="brand">{t('pro.wiz.entity.selected')}</Badge> : !r.promotable ? <Badge tone="gray">{t('pro.wiz.entity.notPromotable')}</Badge> : null}</span>
               </button>
             </li>
           ))}
@@ -378,15 +395,15 @@ function CommercialStep({ d, set, campaigns }: { d: Draft; set: (p: Partial<Draf
             <div className="space-y-2">
               {d.partner && (
                 <p className="flex items-center justify-between rounded-[var(--radius-md)] bg-[var(--color-bg-secondary)] p-2 text-sm" data-testid="wizard-partner-selected">
-                  <span>{d.partner.name}</span>
-                  <button type="button" className="text-xs text-[var(--color-fg-tertiary)] hover:underline" onClick={() => set({ partner: null })}>{t('pro.wiz.commercial.clear')}</button>
+                  <span className="min-w-0 [overflow-wrap:anywhere]">{d.partner.name}</span>
+                  <button type="button" className="min-h-10 shrink-0 px-2 text-xs text-[var(--color-fg-tertiary)] hover:underline" onClick={() => set({ partner: null })}>{t('pro.wiz.commercial.clear')}</button>
                 </p>
               )}
               <input className="ui-input" type="search" placeholder={t('pro.wiz.commercial.partnerSearch')} value={q} onChange={e => setQ(e.target.value)} data-testid="wizard-partner-search" />
               {partners.length > 0 && (
                 <ul className="max-h-40 divide-y divide-[var(--color-border-secondary)] overflow-y-auto rounded-[var(--radius-md)] border border-[var(--color-border-secondary)]">
                   {partners.map(p => (
-                    <li key={p.id}><button type="button" className="w-full p-2 text-left text-sm hover:bg-[var(--color-bg-secondary)]" onClick={() => { set({ partner: p }); setQ(''); }} data-testid={`partner-${p.id}`}>{p.name}</button></li>
+                    <li key={p.id}><button type="button" className="min-h-10 w-full p-2 text-left text-sm [overflow-wrap:anywhere] hover:bg-[var(--color-bg-secondary)]" onClick={() => { set({ partner: p }); setQ(''); }} data-testid={`partner-${p.id}`}>{p.name}</button></li>
                   ))}
                 </ul>
               )}
@@ -400,7 +417,7 @@ function CommercialStep({ d, set, campaigns }: { d: Draft; set: (p: Partial<Draf
       <Field label={d.type === 'campaign' ? t('pro.wiz.commercial.campaignRequired') : t('pro.wiz.commercial.campaign')}>
         <select className="ui-input" value={d.campaignId} onChange={e => set({ campaignId: e.target.value })} data-testid="wizard-campaign">
           <option value="">{t('pro.wiz.commercial.noCampaign')}</option>
-          {campaigns.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+          {campaigns.map(c => <option key={c.id} value={c.id}>{c.name.length > 60 ? `${c.name.slice(0, 57)}…` : c.name}</option>)}
         </select>
       </Field>
       <Field label={t('pro.wiz.commercial.label')} hint={t('pro.wiz.commercial.labelHint')}>
@@ -413,12 +430,12 @@ function CommercialStep({ d, set, campaigns }: { d: Draft; set: (p: Partial<Draf
   );
 }
 
-function ReviewStep({ d, body, areas, preview, previewError }: {
-  d: Draft; body: PromotionInput | null; areas: GeoArea[]; preview: PromotionPreview | null; previewError: string | null;
+function ReviewStep({ d, body, areas, preview, previewError, onRetry }: {
+  d: Draft; body: PromotionInput | null; areas: GeoArea[]; preview: PromotionPreview | null; previewError: string | null; onRetry: () => void;
 }) {
   const { t } = useApp();
   const row = (label: string, value: React.ReactNode) => (
-    <div className="grid gap-1 py-2 sm:grid-cols-3"><dt className="text-sm text-[var(--color-fg-tertiary)]">{label}</dt><dd className="text-sm sm:col-span-2">{value}</dd></div>
+    <div className="grid gap-1 py-2 sm:grid-cols-3 [&>*]:min-w-0 [overflow-wrap:anywhere]"><dt className="text-sm text-[var(--color-fg-tertiary)]">{label}</dt><dd className="text-sm sm:col-span-2">{value}</dd></div>
   );
   if (!body || !d.entity || !d.type) return null;
   return (
@@ -435,15 +452,15 @@ function ReviewStep({ d, body, areas, preview, previewError }: {
           ? <>{t('pro.wiz.commercial.yes')} · {t(REL_KEY[body.relationshipType ?? 'paid_advertising'])}{d.partner ? ` · ${d.partner.name}` : ''}{body.commercialRef ? ` · ${body.commercialRef}` : ''}</>
           : t('pro.wiz.commercial.no'))}
       </dl>
-      {previewError && <Alert tone="error">{previewError}</Alert>}
+      {previewError && <Alert tone="error"><span className="flex flex-wrap items-center justify-between gap-2">{previewError}<Button size="sm" variant="secondary" onClick={onRetry} data-testid="wizard-preview-retry">{t('pro.retry')}</Button></span></Alert>}
       {!preview && !previewError && <Spinner className="h-5 w-5" />}
       {preview && (
         <div className="space-y-3" data-testid="wizard-preview">
-          {preview.eligibility.ok
+          {preview.eligibility?.ok
             ? <Alert tone="success">{t('pro.wiz.review.eligible')}</Alert>
-            : <Alert tone="error">{t('pro.wiz.review.notEligible')} {preview.eligibility.reasons.map(c => { const k = whyKey(c); return k ? t(k) : c; }).join('; ')}</Alert>}
-          <CapacityList rows={preview.capacity} />
-          {preview.capacity.some(c => c.full) && <Alert tone="warning">{t('pro.wiz.review.full')}</Alert>}
+            : <Alert tone="error">{t('pro.wiz.review.notEligible')} {(preview.eligibility?.reasons ?? []).map(c => { const k = whyKey(c); return k ? t(k) : c; }).join('; ')}</Alert>}
+          <CapacityList rows={preview.capacity ?? []} />
+          {(preview.capacity ?? []).some(c => c.full) && <Alert tone="warning">{t('pro.wiz.review.full')}</Alert>}
         </div>
       )}
     </div>

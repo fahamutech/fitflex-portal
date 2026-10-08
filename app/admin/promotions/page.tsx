@@ -77,18 +77,18 @@ export default function PromotionsPage() {
           </div>
         )}
       />
-      {error && <Alert tone="error">{error}</Alert>}
+      {error && <Alert tone="error"><span className="flex flex-wrap items-center justify-between gap-2">{error}<Button size="sm" variant="secondary" onClick={load} data-testid="promotion-retry">{t('pro.retry')}</Button></span></Alert>}
       <div role="tablist" className="flex flex-wrap gap-1 rounded-[var(--radius-lg)] bg-[var(--color-bg-secondary)] p-1 w-fit max-w-full">
         {TABS.map(s => (
           <button key={s} role="tab" aria-selected={tab === s} onClick={() => setTab(s)} data-testid={`promotion-tab-${s}`}
-            className={`flex items-center gap-2 rounded-md px-3 py-1.5 text-sm ${tab === s ? 'bg-[var(--color-bg-primary)] font-semibold shadow-sm' : 'text-[var(--color-fg-tertiary)]'}`}>
+            className={`flex min-h-10 items-center gap-2 rounded-md px-3 py-1.5 text-sm ${tab === s ? 'bg-[var(--color-bg-primary)] font-semibold shadow-sm' : 'text-[var(--color-fg-tertiary)]'}`}>
             {t(TAB_KEY[s])}<span className="rounded-full bg-[var(--color-bg-tertiary)] px-1.5 text-xs tabular-nums">{rows ? counts(s) : '·'}</span>
           </button>
         ))}
       </div>
       <Card>
         <CardContent className="p-0">
-          {rows == null ? <div className="p-6"><Spinner className="h-6 w-6" /></div> : shown.length === 0 ? (
+          {rows == null ? <div className="p-6"><Spinner className="h-6 w-6" /></div> : shown.length === 0 ? (error ? null :
             <div className="flex flex-col items-center gap-2 p-10 text-center text-sm text-[var(--color-fg-quaternary)]" data-testid="promotion-empty">
               <Megaphone className="h-6 w-6" />{tab === 'requests' ? t('pro.empty.requests') : t('pro.empty.other')}
             </div>
@@ -107,13 +107,13 @@ export default function PromotionsPage() {
                 </thead>
                 <tbody className="divide-y divide-[var(--color-border-secondary)]">
                   {shown.map(p => (
-                    <tr key={p.id} className="cursor-pointer hover:bg-[var(--color-bg-secondary)]" onClick={() => go(`item=${encodeURIComponent(p.id)}`)} data-testid={`promotion-row-${p.id}`}>
-                      <td className="px-4 py-3">
+                    <tr key={p.id} tabIndex={0} onKeyDown={e => { if (e.key === 'Enter') go(`item=${encodeURIComponent(p.id)}`); }} className="cursor-pointer hover:bg-[var(--color-bg-secondary)]" onClick={() => go(`item=${encodeURIComponent(p.id)}`)} data-testid={`promotion-row-${p.id}`}>
+                      <td className="max-w-[18rem] px-4 py-3 [overflow-wrap:anywhere]">
                         <span className="font-medium">{p.entity?.name ?? p.entityId}</span>
                         <p className="text-xs text-[var(--color-fg-quaternary)]">{t(ENTITY_TYPE_KEY[p.entityType])}</p>
                       </td>
                       <td className="px-4 py-3">{t(TYPE_KEY[p.type])}{p.isCommercial && <span className="ml-2"><Badge tone="warning">{t('pro.commercial')}</Badge></span>}</td>
-                      <td className="px-4 py-3 text-xs">{p.placements.map(pl => t(PLACEMENT_KEY[pl])).join(', ')}</td>
+                      <td className="max-w-[14rem] px-4 py-3 text-xs">{(p.placements ?? []).map(pl => t(PLACEMENT_KEY[pl])).join(', ')}</td>
                       <td className="whitespace-nowrap px-4 py-3 text-xs">{dateTime(p.startsAt)}<br />→ {dateTime(p.endsAt)}</td>
                       <td className="px-4 py-3 tabular-nums">{p.priority}</td>
                       <td className="px-4 py-3"><Badge tone={STATUS_TONE[p.effectiveStatus]} dot>{t(STATUS_KEY[p.effectiveStatus])}</Badge></td>

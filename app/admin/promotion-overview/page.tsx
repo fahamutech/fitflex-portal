@@ -37,28 +37,28 @@ export default function PromotionOverviewPage() {
     <div className="space-y-6">
       <PageHeader title={t('pro.ov.title')} description={t('pro.ov.description')}
         actions={<Button variant="secondary" size="sm" onClick={load}><RefreshCw className="h-4 w-4" />{t('mod.refresh')}</Button>} />
-      {error && <Alert tone="error">{error}</Alert>}
+      {error && <Alert tone="error"><span className="flex flex-wrap items-center justify-between gap-2">{error}<Button size="sm" variant="secondary" onClick={load} data-testid="overview-retry">{t('pro.retry')}</Button></span></Alert>}
       {!data && !error && <Spinner className="h-6 w-6" />}
       {data && (
         <>
           <div className="grid grid-cols-2 gap-4 lg:grid-cols-3" data-testid="overview-tiles">
             {tiles.map(tile => (
               <Link key={tile.key} href={tile.href} data-testid={`overview-${tile.key}`}
-                className={`rounded-[var(--radius-lg)] border p-4 hover:bg-[var(--color-bg-secondary)] ${tile.attention && (tile.value ?? 0) > 0 ? 'border-[var(--color-warning-500)]' : 'border-[var(--color-border-secondary)]'}`}>
+                className={`min-w-0 rounded-[var(--radius-lg)] border p-4 hover:bg-[var(--color-bg-secondary)] ${tile.attention && (tile.value ?? 0) > 0 ? 'border-[var(--color-warning-500)]' : 'border-[var(--color-border-secondary)]'}`}>
                 <p className="text-sm text-[var(--color-fg-tertiary)]">{t(tile.label)}</p>
                 <p className="mt-1 text-3xl font-semibold tabular-nums">{tile.value ?? 0}</p>
               </Link>
             ))}
           </div>
-          <div className="grid gap-6 lg:grid-cols-2">
+          <div className="grid gap-6 lg:grid-cols-2 [&>*]:min-w-0">
             <Card>
               <CardHeader><h2 className="font-semibold">{t('pro.ov.expiring')}</h2></CardHeader>
               <CardContent>
-                {data.expiringSoon.length === 0 ? <p className="text-sm text-[var(--color-fg-quaternary)]" data-testid="overview-expiring-empty">{t('pro.ov.noneExpiring')}</p> : (
+                {(data.expiringSoon ?? []).length === 0 ? <p className="text-sm text-[var(--color-fg-quaternary)]" data-testid="overview-expiring-empty">{t('pro.ov.noneExpiring')}</p> : (
                   <ul className="divide-y divide-[var(--color-border-secondary)] text-sm" data-testid="overview-expiring">
-                    {data.expiringSoon.map(p => (
-                      <li key={p.id} className="flex items-center justify-between gap-3 py-2">
-                        <Link href={`/admin/promotions?item=${encodeURIComponent(p.id)}`} className="hover:underline">{t(ENTITY_TYPE_KEY[p.entityType])} · {t(TYPE_KEY[p.type])}</Link>
+                    {(data.expiringSoon ?? []).map(p => (
+                      <li key={p.id} className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 py-1 [overflow-wrap:anywhere]">
+                        <Link href={`/admin/promotions?item=${encodeURIComponent(p.id)}`} className="inline-flex min-h-10 items-center hover:underline">{t(ENTITY_TYPE_KEY[p.entityType])} · {t(TYPE_KEY[p.type])}</Link>
                         <span className="text-xs text-[var(--color-fg-tertiary)]">{dateTime(p.endsAt)}</span>
                       </li>
                     ))}
@@ -69,10 +69,10 @@ export default function PromotionOverviewPage() {
             <Card>
               <CardHeader><h2 className="font-semibold">{t('pro.ov.recent')}</h2></CardHeader>
               <CardContent>
-                {data.recent.length === 0 ? <p className="text-sm text-[var(--color-fg-quaternary)]">{t('pro.ov.noneRecent')}</p> : (
+                {(data.recent ?? []).length === 0 ? <p className="text-sm text-[var(--color-fg-quaternary)]">{t('pro.ov.noneRecent')}</p> : (
                   <ul className="space-y-2 text-sm" data-testid="overview-recent">
-                    {data.recent.map(e => (
-                      <li key={e.id}><span className="font-medium">{e.action.replace(/^(promotion|moderation|campaign)\./, '$1 · ').replace(/_/g, ' ')}</span>
+                    {(data.recent ?? []).map(e => (
+                      <li key={e.id} className="[overflow-wrap:anywhere]"><span className="font-medium">{e.action.replace(/^(promotion|moderation|campaign)\./, '$1 · ').replace(/_/g, ' ')}</span>
                         <span className="block text-xs text-[var(--color-fg-quaternary)]">{dateTime(e.at)} · {e.actor}</span></li>
                     ))}
                   </ul>

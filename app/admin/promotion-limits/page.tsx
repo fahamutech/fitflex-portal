@@ -29,10 +29,10 @@ export default function PromotionLimitsPage() {
     <div className="space-y-6">
       <PageHeader title={t('pro.lim.title')} description={t('pro.lim.description')}
         actions={<Button variant="secondary" size="sm" onClick={load}><RefreshCw className="h-4 w-4" />{t('mod.refresh')}</Button>} />
-      {error && <Alert tone="error">{error}</Alert>}
+      {error && <Alert tone="error"><span className="flex flex-wrap items-center justify-between gap-2">{error}<Button size="sm" variant="secondary" onClick={load} data-testid="limits-retry">{t('pro.retry')}</Button></span></Alert>}
       {notice && <Alert tone="success">{notice}</Alert>}
       {!canEdit && <Alert tone="info">{t('pro.lim.viewOnly')}</Alert>}
-      {rows == null ? <Spinner className="h-6 w-6" /> : PLACEMENTS.map(pl => (
+      {rows == null ? <Spinner className="h-6 w-6" /> : (error && rows.length === 0) ? null : PLACEMENTS.map(pl => (
         <Card key={pl}>
           <CardContent className="p-0">
             <h2 className="border-b border-[var(--color-border-secondary)] px-4 py-3 font-semibold">{t(PLACEMENT_KEY[pl])}</h2>
@@ -47,7 +47,7 @@ export default function PromotionLimitsPage() {
                     <tr key={r.promotionType} data-testid={`limit-${pl}-${r.promotionType}`}>
                       <td className="px-4 py-2.5">{t(TYPE_KEY[r.promotionType])}</td>
                       <td className="px-4 py-2.5 tabular-nums">{r.used} / {r.maxSlots} <Badge tone={r.source === 'config' ? 'brand' : 'gray'}>{r.source === 'config' ? t('pro.lim.custom') : t('pro.lim.default')}</Badge></td>
-                      <td className="px-4 py-2.5 tabular-nums">{Math.round(r.maxBoostFraction * 100)}%</td>
+                      <td className="px-4 py-2.5 tabular-nums">{Math.round((r.maxBoostFraction ?? 0) * 100)}%</td>
                       <td className="px-4 py-2.5 text-xs">{r.rotationMode === 'none' ? t('pro.lim.noRotation') : t('pro.lim.every').replace('{minutes}', String(r.rotationWindowMinutes))}</td>
                       <td className="px-4 py-2.5 text-right">{canEdit && <Button size="sm" variant="secondary" onClick={() => { setNotice(null); setEdit(r); }} data-testid={`limit-edit-${pl}-${r.promotionType}`}>{t('pro.action.edit')}</Button>}</td>
                     </tr>
@@ -74,7 +74,7 @@ function LimitDialog({ row, onClose, onDone }: { row: PlacementLimit; onClose: (
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!token) return;
+    if (!token || busy) return;
     setBusy(true); setError(null);
     try {
       await api.setPlacementLimit(token, row.placement, row.promotionType, {

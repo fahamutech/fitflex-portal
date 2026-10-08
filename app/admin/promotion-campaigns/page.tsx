@@ -1,6 +1,6 @@
 'use client';
 import Link from 'next/link';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { ArrowLeft, Plus, RefreshCw } from 'lucide-react';
 import { useApp } from '../../providers';
 import { api, CampaignAnalytics, GeoArea, Promotion, PromotionCampaign } from '@/lib/api';
@@ -58,12 +58,11 @@ export default function CampaignsPage() {
             {canManage && <Button size="sm" onClick={() => setDialog('create')} data-testid="campaign-new"><Plus className="h-4 w-4" />{t('pro.camp.new')}</Button>}
           </div>
         )} />
-      {error && <Alert tone="error">{error}</Alert>}
+      {error && <Alert tone="error"><span className="flex flex-wrap items-center justify-between gap-2">{error}<Button size="sm" variant="secondary" onClick={load} data-testid="campaign-retry">{t('pro.retry')}</Button></span></Alert>}
       <Card>
         <CardContent className="p-0">
-          {rows == null ? <div className="p-6"><Spinner className="h-6 w-6" /></div> : rows.length === 0 ? (
-            <p className="p-10 text-center text-sm text-[var(--color-fg-quaternary)]" data-testid="campaign-empty">{t('pro.camp.empty')}</p>
-          ) : (
+          {rows == null ? <div className="p-6"><Spinner className="h-6 w-6" /></div> : rows.length === 0 ? (error ? null :
+            <p className="p-10 text-center text-sm text-[var(--color-fg-quaternary)]" data-testid="campaign-empty">{t('pro.camp.empty')}</p>) : (
             <div className="overflow-x-auto">
               <table className="w-full min-w-[640px] text-sm" data-testid="campaign-table">
                 <thead className="text-left text-xs text-[var(--color-fg-tertiary)]"><tr className="border-b border-[var(--color-border-secondary)]">
@@ -71,8 +70,8 @@ export default function CampaignsPage() {
                   <th className="px-4 py-2.5 font-medium">{t('pro.camp.promotions')}</th><th className="px-4 py-2.5 font-medium">{t('pro.col.status')}</th></tr></thead>
                 <tbody className="divide-y divide-[var(--color-border-secondary)]">
                   {rows.map(c => (
-                    <tr key={c.id} className="cursor-pointer hover:bg-[var(--color-bg-secondary)]" onClick={() => open(c.id)} data-testid={`campaign-row-${c.id}`}>
-                      <td className="px-4 py-3 font-medium">{c.name}</td>
+                    <tr key={c.id} tabIndex={0} onKeyDown={e => { if (e.key === 'Enter') open(c.id); }} className="cursor-pointer hover:bg-[var(--color-bg-secondary)]" onClick={() => open(c.id)} data-testid={`campaign-row-${c.id}`}>
+                      <td className="max-w-[20rem] px-4 py-3 font-medium [overflow-wrap:anywhere]">{c.name}</td>
                       <td className="whitespace-nowrap px-4 py-3 text-xs">{dateTime(c.startsAt)}<br />→ {dateTime(c.endsAt)}</td>
                       <td className="px-4 py-3 tabular-nums">{c.promotionCount ?? 0}</td>
                       <td className="px-4 py-3"><Badge tone={STATUS_C[c.status].tone} dot>{t(STATUS_C[c.status].key)}</Badge></td>
@@ -100,6 +99,7 @@ function CampaignView({ id, areas, canManage, onBack }: { id: string; areas: Geo
 
   const load = useCallback(async () => {
     if (!token) return;
+    setError(null);
     try { setData(await api.promotionCampaign(token, id)); } catch (err) { setError(t(errorKey(err))); }
   }, [token, id, t]);
   useEffect(() => { load(); }, [load]);
@@ -115,8 +115,10 @@ function CampaignView({ id, areas, canManage, onBack }: { id: string; areas: Geo
     return () => { live = false; };
   }, [token, id, canSeePerformance]);
 
+  const acting = useRef(false);
   const act = async (action: 'start' | 'end' | 'cancel', why?: string) => {
-    if (!token) return;
+    if (!token || acting.current) return;                  // a second click while the first is on its way does nothing
+    acting.current = true;
     setBusy(true); setError(null);
     try {
       const out = await api.promotionCampaignAction(token, id, action, why);
@@ -124,20 +126,20 @@ function CampaignView({ id, areas, canManage, onBack }: { id: string; areas: Geo
       setDialog(null); setReason('');
       await load();
     } catch (err) { setError(t(errorKey(err))); }
-    setBusy(false);
+    acting.current = false; setBusy(false);
   };
 
   const c = data?.campaign;
   return (
     <div className="space-y-6" data-testid="campaign-detail">
-      <button onClick={onBack} className="flex items-center gap-1.5 text-sm text-[var(--color-fg-tertiary)] hover:text-[var(--color-fg-primary)]" data-testid="campaign-back"><ArrowLeft className="h-4 w-4" />{t('pro.back')}</button>
-      {error && <Alert tone="error">{error}</Alert>}
+      <button onClick={onBack} className="-ml-2 flex min-h-10 items-center gap-1.5 px-2 text-sm text-[var(--color-fg-tertiary)] hover:text-[var(--color-fg-primary)]" data-testid="campaign-back"><ArrowLeft className="h-4 w-4" />{t('pro.back')}</button>
+      {error && <Alert tone="error"><span className="flex flex-wrap items-center justify-between gap-2">{error}<Button size="sm" variant="secondary" onClick={load} data-testid="campaign-retry">{t('pro.retry')}</Button></span></Alert>}
       {notice && <Alert tone="success">{notice}</Alert>}
       {!data && !error && <Spinner className="h-6 w-6" />}
       {c && data && (
         <>
           <div className="flex flex-wrap items-start justify-between gap-3">
-            <div>
+            <div className="min-w-0 max-w-full [overflow-wrap:anywhere]">
               <h1 className="text-xl font-semibold" data-testid="campaign-name">{c.name}</h1>
               {c.description && <p className="text-sm text-[var(--color-fg-tertiary)]">{c.description}</p>}
               <p className="mt-1 text-sm text-[var(--color-fg-tertiary)]">{dateTime(c.startsAt)} → {dateTime(c.endsAt)} · {scopeSummary(c.geoScope, areas, t('pro.everywhere'))}</p>
@@ -157,7 +159,7 @@ function CampaignView({ id, areas, canManage, onBack }: { id: string; areas: Geo
             <Card>
               <CardHeader className="flex flex-wrap items-center justify-between gap-2">
                 <h2 className="font-semibold">{t('pan.campaign.title')}</h2>
-                <Link href={`/admin/promotion-analytics?campaignId=${encodeURIComponent(id)}`} className="text-sm text-[var(--color-fg-brand)] hover:underline" data-testid="campaign-performance-link">{t('pan.campaign.perPromotion')}</Link>
+                <Link href={`/admin/promotion-analytics?campaignId=${encodeURIComponent(id)}`} className="inline-flex min-h-10 items-center text-sm text-[var(--color-fg-brand)] hover:underline" data-testid="campaign-performance-link">{t('pan.campaign.perPromotion')}</Link>
               </CardHeader>
               <CardContent className="space-y-4" data-testid="campaign-performance">
                 <p className="text-xs text-[var(--color-fg-quaternary)]">{t('pan.last30')}</p>
@@ -169,12 +171,12 @@ function CampaignView({ id, areas, canManage, onBack }: { id: string; areas: Geo
           <Card>
             <CardHeader><h2 className="font-semibold">{t('pro.camp.promotions')}</h2></CardHeader>
             <CardContent className="p-0">
-              {data.promotions.length === 0 ? <p className="p-6 text-sm text-[var(--color-fg-quaternary)]">{t('pro.camp.noPromotions')}</p> : (
+              {(data.promotions ?? []).length === 0 ? <p className="p-6 text-sm text-[var(--color-fg-quaternary)]">{t('pro.camp.noPromotions')}</p> : (
                 <ul className="divide-y divide-[var(--color-border-secondary)] text-sm" data-testid="campaign-promotions">
-                  {data.promotions.map(p => (
+                  {(data.promotions ?? []).map(p => (
                     <li key={p.id}>
                       <a className="flex flex-wrap items-center justify-between gap-2 p-4 hover:bg-[var(--color-bg-secondary)]" href={`/admin/promotions/?item=${encodeURIComponent(p.id)}`}>
-                        <span><span className="font-medium">{p.entity?.name ?? p.entityId}</span> <span className="text-xs text-[var(--color-fg-quaternary)]">{t(ENTITY_TYPE_KEY[p.entityType])} · {t(TYPE_KEY[p.type])} · {p.placements.map(pl => t(PLACEMENT_KEY[pl])).join(', ')}</span></span>
+                        <span className="min-w-0 [overflow-wrap:anywhere]"><span className="font-medium">{p.entity?.name ?? p.entityId}</span> <span className="text-xs text-[var(--color-fg-quaternary)]">{t(ENTITY_TYPE_KEY[p.entityType])} · {t(TYPE_KEY[p.type])} · {(p.placements ?? []).map(pl => t(PLACEMENT_KEY[pl])).join(', ')}</span></span>
                         <Badge tone={STATUS_TONE[p.effectiveStatus]} dot>{t(STATUS_KEY[p.effectiveStatus])}</Badge>
                       </a>
                     </li>
@@ -187,6 +189,7 @@ function CampaignView({ id, areas, canManage, onBack }: { id: string; areas: Geo
           {dialog === 'cancel' && (
             <Dialog open onClose={() => setDialog(null)} title={t('pro.camp.cancelTitle')} description={t('pro.camp.cancelHint')} size="sm">
               <form onSubmit={e => { e.preventDefault(); act('cancel', reason); }} className="space-y-4" data-testid="campaign-cancel-dialog">
+                {error && <Alert tone="error">{error}</Alert>}
                 <Field label={t('pro.reason')}><textarea className="ui-input" rows={3} value={reason} onChange={e => setReason(e.target.value)} required maxLength={1000} data-testid="campaign-reason" /></Field>
                 <div className="flex justify-end gap-2 border-t border-[var(--color-border-secondary)] pt-4">
                   <Button type="button" variant="secondary" onClick={() => setDialog(null)}>{t('pro.cancel')}</Button>
@@ -214,7 +217,7 @@ function CampaignDialog({ campaign, areas, onClose, onDone }: { campaign?: Promo
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!token || !ok) return;
+    if (!token || !ok || busy) return;
     setBusy(true); setError(null);
     const body = { name: name.trim(), description: description.trim(), startsAt, endsAt, geoScope: { areaIds } };
     try {
@@ -235,7 +238,7 @@ function CampaignDialog({ campaign, areas, onClose, onDone }: { campaign?: Promo
           <Field label={t('pro.wiz.schedule.start')}><DateTimeInput value={startsAt} onChange={setStartsAt} data-testid="campaign-start-input" /></Field>
           <Field label={t('pro.wiz.schedule.end')}><DateTimeInput value={endsAt} onChange={setEndsAt} min={startsAt || undefined} data-testid="campaign-end-input" /></Field>
         </div>
-        <Field label={t('pro.wiz.targeting.areas')} hint={t('pro.wiz.targeting.areasHint')}><AreaPicker areas={areas} value={areaIds} onChange={setAreaIds} /></Field>
+        <Field label={t('pro.wiz.targeting.areas')} hint={t('pro.wiz.targeting.areasHint')}><AreaPicker label={t('pro.wiz.targeting.areas')} areas={areas} value={areaIds} onChange={setAreaIds} /></Field>
         <div className="flex justify-end gap-2 border-t border-[var(--color-border-secondary)] pt-4">
           <Button type="button" variant="secondary" onClick={onClose}>{t('pro.cancel')}</Button>
           <Button type="submit" disabled={busy || !ok} data-testid="campaign-save">{t('pro.save')}</Button>
