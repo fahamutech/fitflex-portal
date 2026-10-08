@@ -305,7 +305,7 @@ export const api = {
     request<{ challenge: ManagedChallenge }>(`/${scope}/challenges`, { method: 'POST', body: JSON.stringify(body) }, token),
   updateChallenge: (token: string, scope: ChallengeApiScope, id: string, body: Partial<ChallengeInput>) =>
     request<{ challenge: ManagedChallenge }>(`/${scope}/challenges/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(body) }, token),
-  challengeAction: (token: string, scope: ChallengeApiScope, id: string, action: 'cancel' | 'close' | 'archive') =>
+  challengeAction: (token: string, scope: ChallengeApiScope, id: string, action: 'cancel' | 'close' | 'archive' | 'publish' | 'pause' | 'resume') =>
     request<{ challenge: ManagedChallenge }>(`/${scope}/challenges/${encodeURIComponent(id)}/${action}`, { method: 'POST' }, token),
   challengeParticipation: (token: string, scope: ChallengeApiScope, id: string) =>
     request<ChallengeParticipation>(`/${scope}/challenges/${encodeURIComponent(id)}/participants`, {}, token),
@@ -1504,6 +1504,8 @@ export interface ChallengeInput {
   eligibility?: Eligibility;
   mode?: ChallengeMode;
   teams?: string[];
+  /** Save without publishing: nobody sees it until it is published. */
+  draft?: boolean;
 }
 export interface ManagedChallenge {
   id: string;
@@ -1518,8 +1520,9 @@ export interface ManagedChallenge {
   rewardFunding?: RewardFunding | null;
   eligibility: Eligibility | null;
   mode?: ChallengeMode;
-  status: 'active' | 'closed' | 'cancelled' | 'archived';
-  phase: 'upcoming' | 'active' | 'ended' | 'cancelled';
+  /** `paused` takes no new people; those already in carry on. */
+  status: 'draft' | 'active' | 'paused' | 'closed' | 'cancelled' | 'archived';
+  phase: 'draft' | 'upcoming' | 'active' | 'ended' | 'cancelled';
   participantCount: number;
   teams?: { id: string; name: string }[];
 }

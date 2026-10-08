@@ -64,7 +64,11 @@ const ERRORS: Record<string, string> = {
   mode_not_allowed: 'That challenge format is not available here.',
   measure_locked: 'What it measures can’t change once it has started or someone has joined.',
   start_locked: 'The start date can’t change once the challenge has started.',
-  not_editable: 'Only running or upcoming challenges can be edited.',
+  not_editable: 'Only draft, running or upcoming challenges can be edited.',
+  not_draft: 'This challenge is already published.',
+  not_running: 'Only a running or upcoming challenge can be paused or closed.',
+  not_paused: 'This challenge isn’t paused.',
+  already_paused: 'This challenge is already paused.',
   still_running: 'Close or cancel the challenge before archiving it.',
   not_started_cancel_instead: 'It hasn’t started yet — cancel it instead.',
 };
@@ -76,10 +80,14 @@ const num = (n: number | null | undefined) => (n == null ? '—' : n.toLocaleStr
 const day = (d: string) => new Date(`${d}T00:00:00Z`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' });
 const range = (c: { startDate: string; endDate: string }) => `${day(c.startDate)} – ${day(c.endDate)}`;
 const unitFor = (t: ChallengeType) => TYPES.find(x => x.value === t)?.unit ?? '';
+/** Published and not over yet: running or upcoming, paused or not. */
+const isLive = (c: ManagedChallenge) => (c.status === 'active' || c.status === 'paused') && (c.phase === 'active' || c.phase === 'upcoming');
+const isPaused = (c: ManagedChallenge) => c.status === 'paused' && isLive(c);
 const phaseTone = (c: ManagedChallenge): 'default' | 'success' | 'brand' | 'danger' | 'gray' =>
-  c.status === 'archived' ? 'gray' : c.phase === 'active' ? 'success' : c.phase === 'upcoming' ? 'brand' : c.phase === 'cancelled' ? 'danger' : 'default';
+  c.status === 'archived' || c.status === 'draft' ? 'gray' : isPaused(c) ? 'default' : c.phase === 'active' ? 'success' : c.phase === 'upcoming' ? 'brand' : c.phase === 'cancelled' ? 'danger' : 'default';
 const phaseLabel = (c: ManagedChallenge) =>
-  c.status === 'archived' ? 'Archived' : c.status === 'closed' ? 'Closed early' : { active: 'Running', upcoming: 'Upcoming', ended: 'Ended', cancelled: 'Cancelled' }[c.phase];
+  c.status === 'archived' ? 'Archived' : c.status === 'closed' ? 'Closed early' : isPaused(c) ? 'Paused'
+    : { draft: 'Draft', active: 'Running', upcoming: 'Upcoming', ended: 'Ended', cancelled: 'Cancelled' }[c.phase];
 
 /**
  * A company has employees in departments; a B2B organisation (an insurer, a
@@ -115,7 +123,7 @@ export function ChallengeManager({ scope, title, description, organizationId, re
   const [rows, setRows] = useState<ManagedChallenge[] | null>(null);
   const [staff, setStaff] = useState<CorporateEmployee[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [tab, setTab] = useState<'live' | 'ended' | 'closed'>('live');
+  const [tab, setTab] = useState<'live' | 'draft' | 'ended' | 'closed'>('live');
   const [editing, setEditing] = useState<ManagedChallenge | 'new' | null>(null);
   const [open, setOpen] = useState<ManagedChallenge | null>(null);
 
@@ -143,8 +151,9 @@ export function ChallengeManager({ scope, title, description, organizationId, re
   useEffect(() => { load(); }, [token, apiScope]);
 
   const shown = useMemo(() => (rows ?? []).filter(c =>
-    tab === 'live' ? c.status === 'active' && (c.phase === 'active' || c.phase === 'upcoming')
-      : tab === 'ended' ? (c.status === 'active' || c.status === 'closed') && c.phase === 'ended'
+    tab === 'live' ? isLive(c)
+      : tab === 'draft' ? c.status === 'draft'
+      : tab === 'ended' ? ['active', 'paused', 'closed'].includes(c.status) && c.phase === 'ended'
         : c.status === 'cancelled' || c.status === 'archived'), [rows, tab]);
 
   return (
@@ -162,8 +171,8 @@ export function ChallengeManager({ scope, title, description, organizationId, re
       {error && <Alert tone="error">{error}</Alert>}
 
       <div role="tablist" className="inline-flex rounded-[var(--radius-lg)] border border-[var(--color-border-primary)] p-0.5">
-        {([['live', 'Running & upcoming'], ['ended', 'Ended'], ['closed', 'Cancelled & archived']] as const).map(([k, label]) => (
-          <button key={k} role="tab" aria-selected={tab === k} onClick={() => setTab(k)}
+        {([['live', 'Running & upcoming'], ['draft', 'Drafts'], ['ended', 'Ended'], ['closed', 'Cancelled & archived']] as const).map(([k, label]) => (
+          <button key={k} role="tab" aria-selected={tab === k} onClick={() => setTab(k)} data-testid={`challenge-tab-${k}`}
             className={`rounded-[var(--radius-md)] px-3 py-1 text-sm font-medium ${tab === k ? 'bg-[var(--color-brand-600)] text-white' : 'text-[var(--color-fg-tertiary)]'}`}>
             {label}
           </button>
@@ -175,7 +184,8 @@ export function ChallengeManager({ scope, title, description, organizationId, re
       ) : shown.length === 0 ? (
         <Card><CardContent className="py-12 text-center text-sm text-[var(--color-fg-quaternary)]">
           <Trophy className="mx-auto mb-2 h-6 w-6" />
-          {tab === 'live' ? 'No running or upcoming challenges. Create one to get started.' : 'Nothing here yet.'}
+          {tab === 'live' ? 'No running or upcoming challenges. Create one to get started.'
+            : tab === 'draft' ? 'No drafts. Use “Save as draft” to prepare a challenge before anyone sees it.' : 'Nothing here yet.'}
         </CardContent></Card>
       ) : (
         <div className="grid gap-3">
@@ -209,7 +219,7 @@ export function ChallengeManager({ scope, title, description, organizationId, re
           staff={staff}
           existing={editing === 'new' ? null : editing}
           onClose={() => setEditing(null)}
-          onSaved={async saved => { setEditing(null); await load(); setOpen(saved); }}
+          onSaved={async saved => { setEditing(null); await load(); if (saved.status === 'draft') setTab('draft'); setOpen(saved); }}
         />
       )}
       {open && !editing && (
@@ -221,7 +231,7 @@ export function ChallengeManager({ scope, title, description, organizationId, re
           challenge={open}
           onClose={() => setOpen(null)}
           onEdit={() => setEditing(open)}
-          onChanged={async c => { await load(); setOpen(c); }}
+          onChanged={async c => { await load(); if (isLive(c)) setTab('live'); setOpen(c); }}
         />
       )}
     </div>
@@ -309,8 +319,8 @@ function ChallengeDetail({ scope, apiScope, rewardsBase, staff, challenge: c, on
     if (ownRewards) api.rewardQueue(token, apiScope, { challengeId: c.id }).then(q => setRewardCounts(q.counts)).catch(() => setRewardCounts(null));
   }, [token, apiScope, c.id, teamed, ownRewards]);
 
-  const act = async (action: 'cancel' | 'close' | 'archive', confirmText: string) => {
-    if (!token || !window.confirm(confirmText)) return;
+  const act = async (action: 'cancel' | 'close' | 'archive' | 'publish' | 'pause' | 'resume', confirmText: string | null) => {
+    if (!token || (confirmText && !window.confirm(confirmText))) return;
     setBusy(true);
     try {
       const r = await api.challengeAction(token, apiScope, c.id, action);
@@ -322,8 +332,10 @@ function ChallengeDetail({ scope, apiScope, rewardsBase, staff, challenge: c, on
     }
   };
 
-  const running = c.status === 'active' && c.phase === 'active';
-  const upcoming = c.status === 'active' && c.phase === 'upcoming';
+  const draft = c.status === 'draft';
+  const paused = isPaused(c);
+  const running = isLive(c) && c.phase === 'active';
+  const upcoming = isLive(c) && c.phase === 'upcoming';
   const over = c.phase === 'ended' && c.status !== 'archived' || c.status === 'cancelled';
   const s = p?.summary;
 
@@ -335,6 +347,8 @@ function ChallengeDetail({ scope, apiScope, rewardsBase, staff, challenge: c, on
           <Badge tone={phaseTone(c)}>{phaseLabel(c)}</Badge>
           <span className="text-sm text-[var(--color-fg-tertiary)]">Open to: {eligibilityText(c.eligibility, scope, staff, isOrg(apiScope))}</span>
         </div>
+        {draft && <Alert tone="info">This is a draft. Nobody can see or join it until you publish it.</Alert>}
+        {paused && <Alert tone="info">Paused: nobody new can join or find it. People already taking part carry on and their activity still counts. The dates and rewards are unchanged.</Alert>}
 
         {!s ? (
           <div className="flex h-24 items-center justify-center"><Spinner className="h-6 w-6" /></div>
@@ -458,9 +472,13 @@ function ChallengeDetail({ scope, apiScope, rewardsBase, staff, challenge: c, on
         </p>
 
         <div className="flex flex-wrap justify-end gap-2 border-t border-[var(--color-border-secondary)] pt-4">
-          {(running || upcoming) && <Button variant="secondary" onClick={onEdit} data-testid="challenge-edit">Edit</Button>}
+          {(running || upcoming || draft) && <Button variant="secondary" onClick={onEdit} data-testid="challenge-edit">Edit</Button>}
+          {(running || upcoming) && !paused && <Button variant="secondary" disabled={busy} onClick={() => act('pause', 'Pause this challenge? Nobody new can join until you resume it. People already taking part carry on.')} data-testid="challenge-pause">Pause</Button>}
+          {paused && <Button disabled={busy} onClick={() => act('resume', null)} data-testid="challenge-resume">Resume</Button>}
           {running && <Button variant="secondary" disabled={busy} onClick={() => act('close', 'End this challenge today? Results so far are kept.')} data-testid="challenge-close">Close now</Button>}
           {(running || upcoming) && <Button variant="secondary" disabled={busy} onClick={() => act('cancel', 'Cancel this challenge? It disappears for members.')} data-testid="challenge-cancel">Cancel</Button>}
+          {draft && <Button variant="secondary" disabled={busy} onClick={() => act('cancel', 'Delete this draft?')} data-testid="challenge-discard">Delete draft</Button>}
+          {draft && <Button disabled={busy} onClick={() => act('publish', 'Publish this challenge? The people it is open to can see and join it straight away.')} data-testid="challenge-publish">Publish</Button>}
           {over && <Button variant="secondary" disabled={busy} onClick={() => act('archive', 'Archive this challenge? It stays in the history of those who took part.')} data-testid="challenge-archive">Archive</Button>}
         </div>
       </div>
@@ -479,7 +497,8 @@ function ChallengeForm({ scope, apiScope, staff, existing, onClose, onSaved }: {
   const org = isOrg(apiScope);
   const w = wordsFor(org);
   const { token } = useApp();
-  const started = !!existing && existing.phase !== 'upcoming';
+  // A draft hasn't gone out to anyone, so nothing about it is locked yet.
+  const started = !!existing && existing.phase !== 'upcoming' && existing.phase !== 'draft';
   const locked = !!existing && (started || existing.participantCount > 0);
   const [f, setF] = useState(() => ({
     name: existing?.name ?? '',
@@ -518,6 +537,7 @@ function ChallengeForm({ scope, apiScope, staff, existing, onClose, onSaved }: {
   const save = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!token) return;
+    const asDraft = !existing && ((e.nativeEvent as SubmitEvent).submitter as HTMLButtonElement | null)?.value === 'draft';
     const rewardItems = f.rewards
       .map(r => ({ ...r, label: r.label.trim(), value: r.value?.trim() || null, topN: r.rule === 'top' ? Number(r.topN) || null : null }))
       .filter(r => r.label);
@@ -526,6 +546,7 @@ function ChallengeForm({ scope, apiScope, staff, existing, onClose, onSaved }: {
       target: Number(f.target), startDate: f.startDate, endDate: f.endDate, rewardItems,
       rewardFunding: f.rewardFunding, eligibility: eligibility(), mode: f.mode,
       ...(!existing && f.mode === 'teams' ? { teams: f.teams.split(',').map(t => t.trim()).filter(Boolean) } : {}),
+      ...(asDraft ? { draft: true } : {}),
     };
     setBusy(true);
     setError(null);
@@ -645,6 +666,7 @@ function ChallengeForm({ scope, apiScope, staff, existing, onClose, onSaved }: {
 
         <div className="flex justify-end gap-2 border-t border-[var(--color-border-secondary)] pt-4">
           <Button type="button" variant="secondary" onClick={onClose}>Cancel</Button>
+          {!existing && <Button type="submit" value="draft" variant="secondary" disabled={busy} data-testid="challenge-save-draft">Save as draft</Button>}
           <Button type="submit" disabled={busy} data-testid="challenge-save">{existing ? 'Save changes' : 'Create challenge'}</Button>
         </div>
       </form>
