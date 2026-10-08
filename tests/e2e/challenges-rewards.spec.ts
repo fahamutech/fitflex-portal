@@ -44,11 +44,17 @@ async function setup(page: Page, user: Json, scope: 'admin' | 'corporate', state
     if (req.method() !== 'GET') state.calls.push({ method: req.method(), path, body });
 
     if (path === `/${scope}/challenges` && req.method() === 'POST') {
-      const created = challenge({ id: 'chl-new', participantCount: 0, phase: 'upcoming', ...body, rewards: [] });
+      const created = challenge({ id: 'chl-new', participantCount: 0, phase: 'upcoming', ...body, rewards: [], ...(body?.draft ? { status: 'draft', phase: 'draft' } : {}) });
       state.challenges.push(created);
       return route.fulfill({ status: 201, json: { challenge: created } });
     }
     if (path === `/${scope}/challenges`) return route.fulfill({ json: { challenges: state.challenges } });
+    const step = path.match(new RegExp(`^/${scope}/challenges/([^/]+)/(publish|pause|resume)$`));
+    if (step) {
+      const c = state.challenges.find(x => x.id === step[1])!;
+      Object.assign(c, step[2] === 'pause' ? { status: 'paused' } : step[2] === 'resume' ? { status: 'active' } : { status: 'active', phase: 'upcoming' });
+      return route.fulfill({ json: { challenge: c } });
+    }
     const action = path.match(new RegExp(`^/${scope}/challenges/([^/]+)/(close|cancel|archive)$`));
     if (action) {
       const c = state.challenges.find(x => x.id === action[1])!;
@@ -77,6 +83,44 @@ async function setup(page: Page, user: Json, scope: 'admin' | 'corporate', state
 const ADMIN = { id: 'admin-1', userType: 'admin', email: 'admin@example.com', displayName: 'Local Admin' };
 const HR = { id: 'hr-1', userType: 'corporate_hr', email: 'hr@kilimo.test', displayName: 'Neema HR', corporateId: 'corp-1' };
 const fullSummary = { summary: { eligible: 574, joined: 4, participationRate: 0.007, completed: 2, completionRate: 0.5, averageProgress: 0.65 } };
+
+test('a draft stays out of sight until published; a running challenge can be paused and resumed', async ({ page }) => {
+  const state = { challenges: [challenge()], summary: fullSummary, awards: [] as Json[], calls: [] as Call[] };
+  await setup(page, ADMIN, 'admin', state);
+  page.on('dialog', d => d.accept());
+
+  await page.goto('/admin/challenges');
+  await page.getByTestId('challenge-new').click();
+  await page.getByTestId('challenge-name').fill('November Walk');
+  await page.getByTestId('challenge-save-draft').click();
+  expect(state.calls.find(c => c.method === 'POST' && c.path === '/admin/challenges')!.body).toMatchObject({ name: 'November Walk', draft: true });
+
+  // It opens as a draft, listed under Drafts and not with the running ones.
+  const detail = page.getByTestId('challenge-detail');
+  await expect(detail).toContainText('Nobody can see or join it until you publish it');
+  await expect(page.getByTestId('challenge-tab-draft')).toHaveAttribute('aria-selected', 'true');
+  await expect(page.getByTestId('challenge-row-chl-new')).toContainText('Draft');
+  await expect(page.getByTestId('challenge-row-chl-1')).toHaveCount(0);
+  await expect(page.getByTestId('challenge-pause')).toHaveCount(0);
+
+  await page.getByTestId('challenge-publish').click();
+  await expect.poll(() => state.calls.some(c => c.path === '/admin/challenges/chl-new/publish')).toBe(true);
+  await expect(page.getByTestId('challenge-tab-live')).toHaveAttribute('aria-selected', 'true');
+  await expect(page.getByTestId('challenge-row-chl-new')).toContainText('Upcoming');
+
+  // Pause the running one: it stays in the list, marked, and can be resumed.
+  await page.reload();
+  await page.getByTestId('challenge-row-chl-1').click();
+  await page.getByTestId('challenge-pause').click();
+  await expect.poll(() => state.calls.some(c => c.path === '/admin/challenges/chl-1/pause')).toBe(true);
+  await expect(detail).toContainText('People already taking part carry on');
+  await expect(page.getByTestId('challenge-row-chl-1')).toContainText('Paused');
+  await expect(page.getByTestId('challenge-edit')).toBeVisible();
+  await page.getByTestId('challenge-resume').click();
+  await expect.poll(() => state.calls.some(c => c.path === '/admin/challenges/chl-1/resume')).toBe(true);
+  await expect(page.getByTestId('challenge-row-chl-1')).toContainText('Running');
+  await expect(page.getByTestId('challenge-pause')).toBeVisible();
+});
 
 test('admin creates a challenge with a structured reward, sees totals, and closes it', async ({ page }) => {
   const state = { challenges: [challenge()], summary: fullSummary, awards: [] as Json[], calls: [] as Call[] };
