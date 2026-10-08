@@ -151,6 +151,62 @@ export type ModerationDetail = {
 };
 export type ModerationDecision = { entityType: ModerationEntityType; entityId: string; from: ModerationStatus; to: ModerationStatus; heldPromotions: number };
 
+
+// ─── Promotions (admin: 'promotions', 'promotions_approve', 'campaigns' scopes) ───
+export type PromotionType = 'featured' | 'promoted' | 'sponsored' | 'recommended' | 'campaign';
+export type PromotionStatus = 'draft' | 'pending_approval' | 'approved' | 'scheduled' | 'active' | 'paused' | 'expired' | 'completed' | 'rejected' | 'cancelled';
+export type PromotionPlacement = 'gym_discovery' | 'trainer_discovery' | 'vendor_discovery' | 'marketplace' | 'search_results' | 'home' | 'campaign_page';
+export type GeoScope = { areaIds: string[]; radius?: { lat: number; lng: number; km: number } };
+export type PromotionEntity = { id: string; name: string; subtitle: string | null; status: string };
+export type Promotion = {
+  id: string; entityType: ModerationEntityType; entityId: string; type: PromotionType; status: PromotionStatus; effectiveStatus: PromotionStatus;
+  statusReason: string | null; campaignId: string | null; partnerRef: string | null; startsAt: string; endsAt: string; priority: number; boostWeight: number;
+  geoScope: GeoScope; audience: Record<string, unknown>; categories: string[]; isCommercial: boolean; relationshipType: string | null;
+  commercialRef: string | null; disclosureLabel: string | null; notes: string | null; createdBy: string; submittedBy: string | null; approvedBy: string | null;
+  placements: PromotionPlacement[]; label: string | null; entity: PromotionEntity | null; createdAt: string; updatedAt: string;
+};
+export type PromotionList = { items: Promotion[]; total: number; nextCursor: number | null };
+export type CapacityRow = { placement: PromotionPlacement; type: PromotionType; max: number; used: number; available: number; full: boolean };
+export type AuditEntry = { id: string; at: string; actor: string; action: string; target: string; before: Record<string, unknown> | null; after: Record<string, unknown> | null };
+export type PromotionDetail = {
+  promotion: Promotion; eligibility: { ok: boolean; reasons: string[] }; capacity: CapacityRow[]; history: AuditEntry[]; allowedActions: string[];
+};
+export type PromotionPreview = {
+  entity: PromotionEntity; eligibility: { ok: boolean; reasons: string[] }; capacity: CapacityRow[]; canApprove: boolean;
+  warnings: Array<{ code: string; reasons?: string[]; capacity?: CapacityRow[] }>;
+};
+export type PromotionInput = {
+  entityType: ModerationEntityType; entityId: string; type: PromotionType; placements: PromotionPlacement[]; startsAt: string; endsAt: string;
+  priority: number; boostWeight: number; geoScope: GeoScope; categories: string[]; campaignId?: string | null; partnerRef?: string | null;
+  isCommercial: boolean; relationshipType?: string | null; commercialRef?: string | null; disclosureLabel?: string | null; notes?: string | null;
+};
+export type PromotionReference = {
+  entityTypes: ModerationEntityType[];
+  promotionTypes: Record<PromotionType, { label: string; disclosure: string; commercial: 'required' | 'forbidden' | 'either' }>;
+  relationshipTypes: Record<string, string>;
+  placements: Record<PromotionPlacement, { label: string; entityTypes: ModerationEntityType[] }>;
+  defaultLimits: Record<PromotionType, number>; defaultMaxBoostFraction: number; maxPriority: number;
+};
+export type PromotionOverview = {
+  active: number; scheduled: number; paused: number; drafts: number; pendingPromotionRequests: number; pendingModeration: number;
+  moderation: ModerationCounts; expiringSoon: Array<{ id: string; entityType: ModerationEntityType; entityId: string; type: PromotionType; endsAt: string }>;
+  recent: AuditEntry[];
+};
+export type PlacementLimit = {
+  placement: PromotionPlacement; label: string; promotionType: PromotionType; entityTypes: ModerationEntityType[]; maxSlots: number;
+  source: 'config' | 'default'; maxBoostFraction: number; rotationMode: 'none' | 'time_slice'; rotationWindowMinutes: number; used: number;
+};
+export type PromotionCampaign = {
+  id: string; name: string; description: string | null; status: 'draft' | 'active' | 'ended' | 'cancelled'; statusReason: string | null;
+  startsAt: string; endsAt: string; geoScope: GeoScope; createdBy: string; createdAt: string; updatedAt: string; promotionCount?: number;
+};
+export type GeoArea = { id: string; level: 'country' | 'region' | 'city' | 'district'; name: string; parentId: string | null };
+export type EntityMatch = {
+  entityType: ModerationEntityType; id: string; name: string; subtitle: string | null; status: string; moderationStatus: ModerationStatus;
+  promotable: boolean; reasons: string[]; placements: PromotionPlacement[];
+};
+export type PartnerMatch = { id: string; name: string; legalName: string; type: string; status: string };
+
 export const api = {
   firebaseSession: (idToken: string, requestedRole: 'member' | 'trainer' | 'gym_owner' | 'gym_operator' | 'admin' = 'gym_operator') =>
     request<{ token: string; user: { id: string; userType: string; gymId?: string; email?: string; portalUser?: boolean; aclPermissions?: string[] } }>(
@@ -403,6 +459,43 @@ export const api = {
     request<ModerationDetail>(`/admin/moderation/${entityType}/${encodeURIComponent(id)}`, {}, token),
   moderationDecide: (token: string, entityType: ModerationEntityType, id: string, action: ModerationAction, reason?: string) =>
     request<ModerationDecision>(`/admin/moderation/${entityType}/${encodeURIComponent(id)}/${action === 'require_review' ? 'require-review' : action}`,
+      { method: 'POST', body: JSON.stringify({ reason: reason?.trim() || undefined }) }, token),
+
+
+  // ─── Promotions ───
+  promotionReference: (token: string) => request<PromotionReference>('/admin/promotion-reference', {}, token),
+  promotionOverview: (token: string) => request<PromotionOverview>('/admin/promotion-overview', {}, token),
+  promotions: (token: string, f: { cursor?: number; limit?: number; campaignId?: string } = {}) => {
+    const q = new URLSearchParams();
+    if (f.cursor) q.set('cursor', String(f.cursor));
+    q.set('limit', String(f.limit ?? 100));
+    if (f.campaignId) q.set('campaignId', f.campaignId);
+    return request<PromotionList>(`/admin/promotions?${q.toString()}`, {}, token);
+  },
+  promotionDetail: (token: string, id: string) => request<PromotionDetail>(`/admin/promotions/${encodeURIComponent(id)}`, {}, token),
+  createPromotion: (token: string, body: PromotionInput) => request<{ promotion: Promotion }>('/admin/promotions', { method: 'POST', body: JSON.stringify(body) }, token),
+  updatePromotion: (token: string, id: string, body: Partial<PromotionInput> & { notes?: string | null }) =>
+    request<{ promotion: Promotion }>(`/admin/promotions/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(body) }, token),
+  promotionAction: (token: string, id: string, action: 'submit' | 'approve' | 'reject' | 'reopen' | 'schedule' | 'activate' | 'pause' | 'resume' | 'cancel' | 'complete', reason?: string) =>
+    request<{ promotion: Promotion; warnings?: Array<{ code: string }> }>(`/admin/promotions/${encodeURIComponent(id)}/${action}`,
+      { method: 'POST', body: JSON.stringify({ reason: reason?.trim() || undefined }) }, token),
+  previewPromotion: (token: string, body: { id: string } | PromotionInput) => request<PromotionPreview>('/admin/promotion-preview', { method: 'POST', body: JSON.stringify(body) }, token),
+  searchPromotionEntities: (token: string, entityType: ModerationEntityType, q: string) =>
+    request<{ items: EntityMatch[]; total: number }>(`/admin/promotion-entities?entityType=${entityType}&q=${encodeURIComponent(q)}`, {}, token),
+  searchPromotionPartners: (token: string, q: string) =>
+    request<{ items: PartnerMatch[]; total: number }>(`/admin/promotion-partners?q=${encodeURIComponent(q)}`, {}, token),
+  geoAreas: (token: string) => request<{ areas: GeoArea[] }>('/admin/geo-areas', {}, token),
+  placementLimits: (token: string) => request<{ limits: PlacementLimit[] }>('/admin/promotion-limits', {}, token),
+  setPlacementLimit: (token: string, placement: PromotionPlacement, type: PromotionType, body: { maxSlots: number; maxBoostFraction?: number | null; rotationMode?: 'none' | 'time_slice'; rotationWindowMinutes?: number }) =>
+    request<{ limit: PlacementLimit }>(`/admin/promotion-limits/${placement}/${type}`, { method: 'PUT', body: JSON.stringify(body) }, token),
+  promotionCampaigns: (token: string) => request<{ items: PromotionCampaign[]; total: number }>('/admin/promotion-campaigns?limit=100', {}, token),
+  promotionCampaign: (token: string, id: string) => request<{ campaign: PromotionCampaign; promotions: Promotion[] }>(`/admin/promotion-campaigns/${encodeURIComponent(id)}`, {}, token),
+  createPromotionCampaign: (token: string, body: { name: string; description?: string; startsAt: string; endsAt: string; geoScope: GeoScope }) =>
+    request<{ campaign: PromotionCampaign }>('/admin/promotion-campaigns', { method: 'POST', body: JSON.stringify(body) }, token),
+  updatePromotionCampaign: (token: string, id: string, body: Partial<{ name: string; description: string; startsAt: string; endsAt: string; geoScope: GeoScope }>) =>
+    request<{ campaign: PromotionCampaign }>(`/admin/promotion-campaigns/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(body) }, token),
+  promotionCampaignAction: (token: string, id: string, action: 'start' | 'end' | 'cancel', reason?: string) =>
+    request<{ campaign: PromotionCampaign; openPromotions: string[] }>(`/admin/promotion-campaigns/${encodeURIComponent(id)}/${action}`,
       { method: 'POST', body: JSON.stringify({ reason: reason?.trim() || undefined }) }, token),
 
   // ─── Partner KYC / KYB review (admin, 'kyc' scope) ───
