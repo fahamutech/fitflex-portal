@@ -1,10 +1,12 @@
 'use client';
+import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
 import { ArrowLeft, Plus, RefreshCw } from 'lucide-react';
 import { useApp } from '../../providers';
-import { api, GeoArea, Promotion, PromotionCampaign } from '@/lib/api';
+import { api, CampaignAnalytics, GeoArea, Promotion, PromotionCampaign } from '@/lib/api';
+import { MetricTiles, NotTrackedNotice } from '@/components/promotion-analytics';
 import { TYPE_KEY as ENTITY_TYPE_KEY } from '@/lib/moderation';
-import { PLACEMENT_KEY, STATUS_KEY, STATUS_TONE, TYPE_KEY, dateTime, errorBody, errorKey, scopeSummary } from '@/lib/promotions';
+import { PLACEMENT_KEY, STATUS_KEY, STATUS_TONE, TYPE_KEY, addDays, dateTime, eatToday, errorBody, errorKey, scopeSummary } from '@/lib/promotions';
 import type { MessageKey } from '@/lib/i18n';
 import { Alert, Badge, Button, Card, CardContent, CardHeader, Field, PageHeader, Spinner } from '@/components/shared';
 import { Dialog } from '@/components/dialog';
@@ -88,7 +90,7 @@ export default function CampaignsPage() {
 }
 
 function CampaignView({ id, areas, canManage, onBack }: { id: string; areas: GeoArea[]; canManage: boolean; onBack: () => void }) {
-  const { token, t } = useApp();
+  const { token, t, hasPermission } = useApp();
   const [data, setData] = useState<{ campaign: PromotionCampaign; promotions: Promotion[] } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -101,6 +103,17 @@ function CampaignView({ id, areas, canManage, onBack }: { id: string; areas: Geo
     try { setData(await api.promotionCampaign(token, id)); } catch (err) { setError(t(errorKey(err))); }
   }, [token, id, t]);
   useEffect(() => { load(); }, [load]);
+
+  // Performance over the last 30 days; a missing permission (403) just hides the section.
+  const canSeePerformance = hasPermission('promotion_analytics');
+  const [perf, setPerf] = useState<CampaignAnalytics | null>(null);
+  useEffect(() => {
+    if (!token || !canSeePerformance) return;
+    let live = true;
+    const to = eatToday();
+    api.campaignAnalytics(token, id, { from: addDays(to, -29), to }).then(r => { if (live) setPerf(r?.totals ? r : null); }).catch(() => { if (live) setPerf(null); });
+    return () => { live = false; };
+  }, [token, id, canSeePerformance]);
 
   const act = async (action: 'start' | 'end' | 'cancel', why?: string) => {
     if (!token) return;
@@ -139,6 +152,19 @@ function CampaignView({ id, areas, canManage, onBack }: { id: string; areas: Geo
               <Button size="sm" variant="secondary" onClick={() => setDialog('edit')} data-testid="campaign-edit">{t('pro.action.edit')}</Button>
               <Button size="sm" variant="secondary" onClick={() => setDialog('cancel')} data-testid="campaign-cancel">{t('pro.action.cancel')}</Button>
             </div>
+          )}
+          {canSeePerformance && perf && (
+            <Card>
+              <CardHeader className="flex flex-wrap items-center justify-between gap-2">
+                <h2 className="font-semibold">{t('pan.campaign.title')}</h2>
+                <Link href={`/admin/promotion-analytics?campaignId=${encodeURIComponent(id)}`} className="text-sm text-[var(--color-fg-brand)] hover:underline" data-testid="campaign-performance-link">{t('pan.campaign.perPromotion')}</Link>
+              </CardHeader>
+              <CardContent className="space-y-4" data-testid="campaign-performance">
+                <p className="text-xs text-[var(--color-fg-quaternary)]">{t('pan.last30')}</p>
+                <MetricTiles totals={perf.totals} testId="campaign-performance-tiles" />
+                <NotTrackedNotice items={perf.notTracked} />
+              </CardContent>
+            </Card>
           )}
           <Card>
             <CardHeader><h2 className="font-semibold">{t('pro.camp.promotions')}</h2></CardHeader>

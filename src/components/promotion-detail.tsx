@@ -1,4 +1,5 @@
 'use client';
+import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
 import { ArrowLeft, CheckCircle2, XCircle } from 'lucide-react';
 import { useApp } from '../../app/providers';
@@ -93,7 +94,10 @@ export function PromotionDetailView({ id, areas, onBack, onEdit, onChanged }: {
               <h1 className="text-xl font-semibold" data-testid="promotion-name">{p.entity?.name ?? p.entityId}</h1>
               {p.statusReason && <p className="mt-1 text-sm text-[var(--color-fg-tertiary)]">{p.statusReason}</p>}
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
+              {hasPermission('promotion_analytics') && (
+                <Link href={`/admin/promotion-analytics?item=${encodeURIComponent(p.id)}`} className="text-sm text-[var(--color-fg-brand)] hover:underline" data-testid="promotion-performance-link">{t('pan.performance')}</Link>
+              )}
               {p.isCommercial && <Badge tone="warning">{p.label ?? t('pro.commercial')}</Badge>}
               <Badge tone={STATUS_TONE[p.effectiveStatus]} dot><span data-testid="promotion-status">{t(STATUS_KEY[p.effectiveStatus])}</span></Badge>
             </div>

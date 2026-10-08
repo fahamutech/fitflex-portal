@@ -72,6 +72,7 @@ const ERRORS: Record<string, MessageKey> = {
   placements_required: 'pro.err.placements_required', entity_not_found: 'pro.err.entity_not_found', entity_type_mismatch: 'pro.err.entity_type_mismatch',
   promotion_not_found: 'pro.err.promotion_not_found', partner_not_found: 'pro.err.partner_not_found', unknown_geo_area: 'pro.err.unknown_geo_area',
   promotions_outside_period: 'pro.err.promotions_outside_period', name_required: 'pro.err.name_required', invalid_max_slots: 'pro.err.invalid_max_slots',
+  invalid_range: 'pro.err.invalid_range', range_too_long: 'pro.err.range_too_long',
   acl_forbidden: 'pro.err.acl_forbidden', invalid_priority: 'pro.err.invalid_priority', invalid_start: 'pro.err.invalid_start', invalid_end: 'pro.err.invalid_end',
 };
 export function errorKey(err: unknown): MessageKey {
@@ -114,3 +115,22 @@ export function scopeSummary(scope: { areaIds: string[]; radius?: { km: number }
   if (scope?.radius) parts.push(`${scope.radius.km} km`);
   return parts.length ? parts.join('; ') : everywhere;
 }
+
+// ─── Analytics: EAT calendar days (UTC+3, no daylight saving) and null-safe ratios ───
+const EAT_MS = 3 * 3600 * 1000;
+/** Today's calendar day in East Africa Time as YYYY-MM-DD. */
+export const eatToday = (now: number = Date.now()): string => new Date(now + EAT_MS).toISOString().slice(0, 10);
+/** A calendar day plus (or minus) some days, still as YYYY-MM-DD. */
+export function addDays(ymd: string, n: number): string {
+  const d = new Date(`${ymd}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
+}
+/** "8 Oct 2026" from a YYYY-MM-DD calendar day (no timezone shift). */
+export const ymdLabel = (ymd: string): string =>
+  new Date(`${ymd}T00:00:00Z`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' });
+export const isYmd = (v: string | null | undefined): v is string => !!v && /^\d{4}-\d{2}-\d{2}$/.test(v) && !Number.isNaN(new Date(`${v}T00:00:00Z`).getTime());
+/** A fraction 0..1 as "12.3%"; null (nothing to divide by) is a dash, never 0%. */
+export const pct = (v: number | null | undefined): string => (v == null || !Number.isFinite(v) ? '—' : `${(v * 100).toFixed(1)}%`);
+/** `part` as a share of `whole`, or null when there is no whole. */
+export const ratio = (part: number, whole: number): number | null => (whole > 0 ? part / whole : null);

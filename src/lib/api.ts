@@ -200,6 +200,29 @@ export type PromotionCampaign = {
   id: string; name: string; description: string | null; status: 'draft' | 'active' | 'ended' | 'cancelled'; statusReason: string | null;
   startsAt: string; endsAt: string; geoScope: GeoScope; createdBy: string; createdAt: string; updatedAt: string; promotionCount?: number;
 };
+export type PromotionMetrics = {
+  impressions: number; searchAppearances: number; clicks: number; detailViews: number; saves: number; bookingClicks: number; subscriptionClicks: number;
+  bookings: number; subscriptions: number; purchases: number; purchaseValueTzs: number; uniqueViewers: number;
+  clickThroughRate: number | null; viewRate: number | null; conversions: number; conversionRate: number | null;
+};
+export type PromotionAnalyticsRef = {
+  id: string; type: PromotionType; status: PromotionStatus; entityType: ModerationEntityType; entityId: string; entityName: string | null;
+  startsAt: string; endsAt: string; campaignId: string | null; isCommercial: boolean;
+};
+export type PromotionAnalyticsItem = PromotionMetrics & { promotion: PromotionAnalyticsRef };
+export type PromotionAnalyticsRange = { from: string; to: string };
+export type PromotionAnalytics = { range: PromotionAnalyticsRange; totals: PromotionMetrics; items: PromotionAnalyticsItem[]; notTracked: string[] };
+export type PromotionAnalyticsFilters = { from?: string; to?: string; type?: PromotionType; entityType?: ModerationEntityType; campaignId?: string; placement?: PromotionPlacement };
+export type PromotionFunnelStep = { step: 'impressions' | 'clicks' | 'detailViews' | 'actionClicks' | 'conversions'; count: number };
+export type PromotionAnalyticsDetail = {
+  promotion: PromotionAnalyticsRef; range: PromotionAnalyticsRange; totals: PromotionMetrics;
+  daily: Array<{ day: string } & Partial<PromotionMetrics>>; byPlacement: Array<{ placement: PromotionPlacement } & PromotionMetrics>;
+  funnel: PromotionFunnelStep[]; notTracked: string[];
+};
+export type CampaignAnalytics = {
+  campaign: { id: string; name: string; status: string; startsAt: string; endsAt: string }; range: PromotionAnalyticsRange;
+  totals: PromotionMetrics; items: PromotionAnalyticsItem[]; notTracked: string[];
+};
 export type GeoArea = { id: string; level: 'country' | 'region' | 'city' | 'district'; name: string; parentId: string | null };
 export type EntityMatch = {
   entityType: ModerationEntityType; id: string; name: string; subtitle: string | null; status: string; moderationStatus: ModerationStatus;
@@ -497,6 +520,23 @@ export const api = {
   promotionCampaignAction: (token: string, id: string, action: 'start' | 'end' | 'cancel', reason?: string) =>
     request<{ campaign: PromotionCampaign; openPromotions: string[] }>(`/admin/promotion-campaigns/${encodeURIComponent(id)}/${action}`,
       { method: 'POST', body: JSON.stringify({ reason: reason?.trim() || undefined }) }, token),
+  promotionAnalytics: (token: string, f: PromotionAnalyticsFilters = {}) => {
+    const q = new URLSearchParams();
+    for (const [k, v] of Object.entries(f)) if (v) q.set(k, String(v));
+    return request<PromotionAnalytics>(`/admin/promotion-analytics?${q.toString()}`, {}, token);
+  },
+  promotionAnalyticsDetail: (token: string, id: string, f: { from?: string; to?: string } = {}) => {
+    const q = new URLSearchParams();
+    if (f.from) q.set('from', f.from);
+    if (f.to) q.set('to', f.to);
+    return request<PromotionAnalyticsDetail>(`/admin/promotions/${encodeURIComponent(id)}/analytics?${q.toString()}`, {}, token);
+  },
+  campaignAnalytics: (token: string, id: string, f: { from?: string; to?: string } = {}) => {
+    const q = new URLSearchParams();
+    if (f.from) q.set('from', f.from);
+    if (f.to) q.set('to', f.to);
+    return request<CampaignAnalytics>(`/admin/promotion-campaigns/${encodeURIComponent(id)}/analytics?${q.toString()}`, {}, token);
+  },
 
   // ─── Partner KYC / KYB review (admin, 'kyc' scope) ───
   kycCases: (token: string, filters: { status?: KycCaseStatus; partnerType?: KycPartnerType } = {}) => {
