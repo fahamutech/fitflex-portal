@@ -232,7 +232,9 @@ function ActionDialog({ id, action, onClose, onDone }: { id: string; action: str
 }
 
 function LiveEditDialog({ p, onClose, onDone }: { p: Promotion; onClose: () => void; onDone: () => void }) {
-  const { token, t } = useApp();
+  const { token, t, hasPermission } = useApp();
+  // How strongly an approved promotion ranks was decided by the approver, so it is theirs to change.
+  const canRank = hasPermission('promotions_approve');
   const [priority, setPriority] = useState(String(p.priority));
   const [weight, setWeight] = useState(String(p.boostWeight));
   const [endsAt, setEndsAt] = useState(p.endsAt);
@@ -247,7 +249,7 @@ function LiveEditDialog({ p, onClose, onDone }: { p: Promotion; onClose: () => v
     setBusy(true); setError(null);
     try {
       await api.updatePromotion(token, p.id, {
-        priority: Number(priority), boostWeight: Number(weight), endsAt,
+        ...(canRank ? { priority: Number(priority), boostWeight: Number(weight) } : {}), endsAt,
         ...(ref.trim() ? { commercialRef: ref.trim() } : {}), ...(notes.trim() ? { notes: notes.trim() } : {}),
       });
       onDone();
@@ -260,10 +262,14 @@ function LiveEditDialog({ p, onClose, onDone }: { p: Promotion; onClose: () => v
     <Dialog open onClose={onClose} title={t('pro.action.edit_live')} description={t('pro.action.edit_live.hint')} size="md">
       <form onSubmit={submit} className="space-y-4" data-testid="promotion-live-edit">
         {error && <Alert tone="error">{error}</Alert>}
-        <div className="grid gap-4 sm:grid-cols-2">
-          <Field label={t('pro.wiz.priority.priority')}><input className="ui-input" type="number" min={1} max={100} value={priority} onChange={e => setPriority(e.target.value)} data-testid="live-priority" /></Field>
-          <Field label={t('pro.wiz.priority.weight')}><input className="ui-input" type="number" min={0} max={1} step={0.05} value={weight} onChange={e => setWeight(e.target.value)} /></Field>
-        </div>
+        {canRank ? (
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field label={t('pro.wiz.priority.priority')}><input className="ui-input" type="number" min={1} max={100} value={priority} onChange={e => setPriority(e.target.value)} data-testid="live-priority" /></Field>
+            <Field label={t('pro.wiz.priority.weight')}><input className="ui-input" type="number" min={0} max={1} step={0.05} value={weight} onChange={e => setWeight(e.target.value)} /></Field>
+          </div>
+        ) : (
+          <p className="rounded-[var(--radius-md)] bg-[var(--color-bg-secondary)] p-3 text-sm" data-testid="live-ranking-locked">{t('pro.live.rankingApprover')}</p>
+        )}
         <Field label={t('pro.wiz.schedule.end')}><DateTimeInput value={endsAt} onChange={setEndsAt} data-testid="live-end" /></Field>
         <Field label={t('pro.wiz.commercial.reference')}><input className="ui-input" value={ref} onChange={e => setRef(e.target.value)} maxLength={200} /></Field>
         <Field label={t('pro.wiz.commercial.notes')}><textarea className="ui-input" rows={2} value={notes} onChange={e => setNotes(e.target.value)} maxLength={1000} /></Field>
