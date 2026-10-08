@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { ArrowLeft, Plus, RefreshCw } from 'lucide-react';
 import { useApp } from '../../providers';
 import { api, CampaignAnalytics, GeoArea, Promotion, PromotionCampaign } from '@/lib/api';
-import { MetricTiles, NotTrackedNotice } from '@/components/promotion-analytics';
+import { MetricTiles, NotTrackedNotice, UnverifiedNotice } from '@/components/promotion-analytics';
 import { TYPE_KEY as ENTITY_TYPE_KEY } from '@/lib/moderation';
 import { PLACEMENT_KEY, STATUS_KEY, STATUS_TONE, TYPE_KEY, addDays, dateTime, eatToday, errorBody, errorKey, scopeSummary } from '@/lib/promotions';
 import type { MessageKey } from '@/lib/i18n';
@@ -165,6 +165,7 @@ function CampaignView({ id, areas, canManage, onBack }: { id: string; areas: Geo
                 <p className="text-xs text-[var(--color-fg-quaternary)]">{t('pan.last30')}</p>
                 <MetricTiles totals={perf.totals} testId="campaign-performance-tiles" />
                 <NotTrackedNotice items={perf.notTracked} />
+                <UnverifiedNotice count={perf.unverifiedEvents} />
               </CardContent>
             </Card>
           )}

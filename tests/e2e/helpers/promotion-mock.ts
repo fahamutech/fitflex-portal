@@ -18,8 +18,9 @@ export type Opts = {
   failing: RegExp | null;   // GET/POST paths matching this answer 500 until `failing` is cleared
   slow: number;             // ms to hold every write, so a double click can be tried
   manyCampaigns: boolean;
+  unverified: number | undefined; // `unverifiedEvents` on every analytics response (undefined = field missing, as from an older server)
 };
-export const defaults = (): Opts => ({ longNames: false, nullEntity: false, sparse: false, big: false, failing: null, slow: 0, manyCampaigns: false });
+export const defaults = (): Opts => ({ longNames: false, nullEntity: false, sparse: false, big: false, failing: null, slow: 0, manyCampaigns: false, unverified: undefined });
 
 export type State = {
   opts: Opts; calls: Array<{ method: string; path: string; body: Json | null }>; promos: Json[]; campaigns: Json[]; limits: Json[]; me: string;
@@ -143,7 +144,7 @@ export async function setup(page: Page, state: State, user: Json = SUPER, locale
       state.campaigns.push(c); return route.fulfill({ status: 201, json: { campaign: c } });
     }
     const analyticsCamp = path.match(/^\/admin\/promotion-campaigns\/([\w-]+)\/analytics$/);
-    if (analyticsCamp) return route.fulfill({ json: { campaign: state.campaigns[0], range: { from: sp.get('from'), to: sp.get('to') }, totals: o.big ? { ...ZERO, impressions: 12345678, clicks: 1000000 } : ZERO, items: [], notTracked: ['booking_conversions'] } });
+    if (analyticsCamp) return route.fulfill({ json: { campaign: state.campaigns[0], range: { from: sp.get('from'), to: sp.get('to') }, totals: o.big ? { ...ZERO, impressions: 12345678, clicks: 1000000 } : ZERO, items: [], notTracked: ['booking_conversions'], unverifiedEvents: o.unverified } });
     const camp = path.match(/^\/admin\/promotion-campaigns\/([\w-]+)(?:\/(start|end|cancel))?$/);
     if (camp) {
       const c = state.campaigns.find(x => x.id === camp[1]) ?? state.campaigns[0];
@@ -160,7 +161,7 @@ export async function setup(page: Page, state: State, user: Json = SUPER, locale
     if (path === '/admin/promotion-analytics') {
       const m = o.big ? { ...ZERO, impressions: 12345678, clicks: 1234567, detailViews: 999999, saves: 1000000, bookingClicks: 1000000, subscriptionClicks: 1000000, purchases: 1000000, purchaseValueTzs: 9876543210, uniqueViewers: 5000000, clickThroughRate: 0.1, viewRate: 0.8 } : ZERO;
       const ref = (id: string, name: string) => ({ id, type: 'featured', status: 'active', entityType: 'gym', entityId: `e-${id}`, entityName: o.nullEntity ? null : ENTITY_NAME(name, o), startsAt: '2026-10-01T00:00:00Z', endsAt: '2036-10-01T00:00:00Z', campaignId: null, isCommercial: false });
-      return route.fulfill({ json: { range: { from: sp.get('from'), to: sp.get('to') }, totals: m, items: [{ promotion: ref('p1', 'Zanzibar Iron'), ...m }, { promotion: ref('p2', 'Masaki Fitness'), ...ZERO }], notTracked: o.sparse ? undefined : ['booking_conversions', 'subscription_conversions'] } });
+      return route.fulfill({ json: { range: { from: sp.get('from'), to: sp.get('to') }, totals: m, items: [{ promotion: ref('p1', 'Zanzibar Iron'), ...m }, { promotion: ref('p2', 'Masaki Fitness'), ...ZERO }], notTracked: o.sparse ? undefined : ['booking_conversions', 'subscription_conversions'], unverifiedEvents: o.unverified } });
     }
     const an = path.match(/^\/admin\/promotions\/([\w-]+)\/analytics$/);
     if (an) {
@@ -168,10 +169,10 @@ export async function setup(page: Page, state: State, user: Json = SUPER, locale
       const daily: Json[] = []; for (let d = new Date(`${from}T00:00:00Z`), i = 0; d <= new Date(`${to}T00:00:00Z`) && i < 400; d.setUTCDate(d.getUTCDate() + 1), i += 1) daily.push({ day: d.toISOString().slice(0, 10), ...ZERO, impressions: o.big ? 400000 + i : 40, clicks: i % 3 ? 3 : 0 });
       const m = o.big ? { ...ZERO, impressions: 12345678, clicks: 1234567, purchaseValueTzs: 9876543210, purchases: 1000000, uniqueViewers: 5000000 } : { ...ZERO, impressions: 1200, clicks: 96, clickThroughRate: 0.08 };
       const promotion = { id: an[1], type: 'featured', status: 'active', entityType: 'gym', entityId: 'gym-1', entityName: o.nullEntity ? null : ENTITY_NAME('Zanzibar Iron', o), startsAt: '2026-10-01T00:00:00Z', endsAt: '2036-10-01T00:00:00Z', campaignId: null, isCommercial: false };
-      if (o.sparse) return route.fulfill({ json: { promotion, range: { from, to }, totals: m } });
+      if (o.sparse) return route.fulfill({ json: { promotion, range: { from, to }, totals: m, unverifiedEvents: o.unverified } });
       return route.fulfill({ json: { promotion, range: { from, to }, totals: m, daily,
         byPlacement: [{ placement: 'gym_discovery', ...m }, { placement: 'home', ...ZERO, impressions: 300 }, { placement: 'campaign_page', ...ZERO }],
-        funnel: [{ step: 'impressions', count: m.impressions }, { step: 'clicks', count: m.clicks }, { step: 'detailViews', count: 60 }, { step: 'actionClicks', count: 25 }, { step: 'conversions', count: 0 }], notTracked: ['booking_conversions'] } });
+        funnel: [{ step: 'impressions', count: m.impressions }, { step: 'clicks', count: m.clicks }, { step: 'detailViews', count: 60 }, { step: 'actionClicks', count: 25 }, { step: 'conversions', count: 0 }], notTracked: ['booking_conversions'], unverifiedEvents: o.unverified } });
     }
 
     // Promotions

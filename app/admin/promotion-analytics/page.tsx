@@ -8,7 +8,7 @@ import { PLACEMENTS, PLACEMENT_KEY, PROMOTION_TYPES, STATUS_KEY, STATUS_TONE, TY
 import { money } from '@/lib/admin-utils';
 import type { MessageKey } from '@/lib/i18n';
 import { Alert, Badge, Button, Card, CardContent, Field, PageHeader, Spinner } from '@/components/shared';
-import { MetricTiles, NotTrackedNotice, PromotionPerformanceView } from '@/components/promotion-analytics';
+import { MetricTiles, NotTrackedNotice, PromotionPerformanceView, UnverifiedNotice } from '@/components/promotion-analytics';
 
 const ENTITY_TYPES: ModerationEntityType[] = ['gym', 'trainer', 'vendor', 'product'];
 const PRESETS: Array<{ days: number; key: MessageKey }> = [{ days: 7, key: 'pan.last7' }, { days: 30, key: 'pan.last30' }, { days: 90, key: 'pan.last90' }];
@@ -128,6 +128,7 @@ export default function PromotionAnalyticsPage() {
         <>
           <MetricTiles totals={data.totals ?? {}} />
           <NotTrackedNotice items={data.notTracked ?? []} />
+          <UnverifiedNotice count={data.unverifiedEvents} />
           <Card>
             <CardContent className="p-0">
               <div className="border-b border-[var(--color-border-secondary)] px-4 py-3">
