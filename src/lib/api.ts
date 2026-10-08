@@ -1985,7 +1985,7 @@ export interface HrUser {
 
 // ── Communications ──────────────────────────────────────────────────────
 export type CommsScope = 'owner' | 'admin';
-export type CommsChannel = 'in_app' | 'push' | 'whatsapp';
+export type CommsChannel = 'in_app' | 'push' | 'whatsapp' | 'sms';
 export type CommsPurpose = 'promotion' | 'renewal' | 'payment' | 'announcement' | 'engagement' | 'general';
 export type CommsStatus = 'draft' | 'scheduled' | 'sending' | 'sent' | 'partially_failed' | 'failed' | 'cancelled';
 export type CommsDeepLink = 'message' | 'membership' | 'renewal' | 'payment' | 'gym';
@@ -2074,7 +2074,7 @@ export interface CommsMessage {
   title: string; body: string; locale: string | null; deepLink: string | null;
   status: CommsMessageStatus; skipReason: string | null; failureReason: string | null; failurePermanent: boolean; attempts: number;
   /** Who delivered it and their reference — never credentials. */
-  provider: { name: 'inbox' | 'fcm' | 'whatsapp'; messageId: string | null; templateName?: string | null; language?: string | null; devices?: number | null; failedDevices?: number; errors?: string[]; parameters?: string[] };
+  provider: { name: 'inbox' | 'fcm' | 'whatsapp' | 'sms'; messageId: string | null; templateName?: string | null; language?: string | null; devices?: number | null; failedDevices?: number; errors?: string[]; parameters?: string[] };
   createdAt: string | null; sentAt: string | null; deliveredAt: string | null; openedAt: string | null;
   clickedAt: string | null; failedAt: string | null; nextAttemptAt: string | null;
   /** Only on a single message. */

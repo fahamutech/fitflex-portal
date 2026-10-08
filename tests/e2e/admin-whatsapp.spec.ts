@@ -36,7 +36,7 @@ test('admins see why WhatsApp is off and can pause and resume it', async ({ page
     if (p === '/admin/communications/whatsapp') return route.fulfill({ json: status() });
     if (p === '/admin/communications/whatsapp/templates') return route.fulfill({ json: { provider: 'not_configured', templates: [], expected: [] } });
     if (p === '/admin/communications/overview') {
-      return route.fulfill({ json: { senderType: 'platform', members: 900, trainers: 4, campaigns: {}, recent: [], channels: { in_app: true, push: false, whatsapp: false }, limits: { largeSendThreshold: 500, marketingWeeklyCap: 2 } } });
+      return route.fulfill({ json: { senderType: 'platform', members: 900, trainers: 4, campaigns: {}, recent: [], channels: { in_app: true, push: false, whatsapp: false, sms: false }, limits: { largeSendThreshold: 500, marketingWeeklyCap: 2 } } });
     }
     if (p === '/admin/communications/campaigns') return route.fulfill({ json: { campaigns: [], nextCursor: null } });
     if (p === '/admin/communications/analytics') {

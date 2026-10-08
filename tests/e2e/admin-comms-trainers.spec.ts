@@ -21,7 +21,7 @@ test('FitFlex can address a message to trainers instead of members', async ({ pa
       return route.fulfill({
         json: {
           senderType: 'platform', members: 120, trainers: 3, campaigns: {}, recent: [],
-          channels: { in_app: true, push: true, whatsapp: false },
+          channels: { in_app: true, push: true, whatsapp: false, sms: false },
           limits: { largeSendThreshold: 500, marketingWeeklyCap: 2 },
         },
       });
