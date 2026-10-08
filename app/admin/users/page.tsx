@@ -36,6 +36,12 @@ const ACL_SCOPES = [
   { key: 'settings',  label: 'Settings' },
   { key: 'users',     label: 'Portal Users' },
   { key: 'communications', label: 'Messages' },
+  { key: 'moderation', label: 'Moderation: view' },
+  { key: 'moderation_decide', label: 'Moderation: approve, reject, suspend, hide' },
+  { key: 'promotions', label: 'Promotions: create and run' },
+  { key: 'promotions_approve', label: 'Promotions: approve and activate' },
+  { key: 'campaigns', label: 'Campaigns and placement limits' },
+  { key: 'promotion_analytics', label: 'Promotion analytics' },
 ] as const;
 
 type AclScope = typeof ACL_SCOPES[number]['key'];

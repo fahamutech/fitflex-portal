@@ -126,6 +126,31 @@ export const isPin = (pin: string) => /^[0-9]{4}$/.test(pin);
 /** The sign-in password the app derives from a PIN; the portal must send the same. */
 export const passwordForPin = (pin: string) => `fitflex-pin:${pin}`;
 
+
+// ─── Moderation (admin, 'moderation' / 'moderation_decide' scopes) ───
+export type ModerationEntityType = 'gym' | 'trainer' | 'vendor' | 'product';
+export type ModerationStatus = 'pending' | 'approved' | 'rejected' | 'suspended' | 'hidden';
+export type ModerationAction = 'approve' | 'reject' | 'suspend' | 'hide' | 'restore' | 'reopen' | 'require_review';
+export type ModerationCounts = Record<ModerationStatus, number>;
+export type ModerationRow = {
+  entityType: ModerationEntityType; id: string; name: string; subtitle: string | null; status: string; tier?: string | null;
+  moderationStatus: ModerationStatus; reason: string | null; decidedBy: string | null; decidedAt: string | null;
+};
+export type ModerationList = { items: ModerationRow[]; total: number; nextCursor: number | null; counts: ModerationCounts };
+export type ModerationEvent = {
+  id: string; entityType: ModerationEntityType; entityId: string; action: ModerationAction;
+  fromStatus: ModerationStatus | null; toStatus: ModerationStatus; reason: string | null; actor: string; at: string;
+};
+export type ModerationDetail = {
+  entityType: ModerationEntityType;
+  summary: { id: string; name: string; subtitle: string | null; status: string; tier?: string | null };
+  moderationStatus: ModerationStatus; reason: string | null; decidedBy: string | null; decidedAt: string | null;
+  eligibility: { ok: boolean; reasons: string[] };
+  history: ModerationEvent[];
+  allowedActions: Array<{ action: ModerationAction; reasonRequired: boolean }>;
+};
+export type ModerationDecision = { entityType: ModerationEntityType; entityId: string; from: ModerationStatus; to: ModerationStatus; heldPromotions: number };
+
 export const api = {
   firebaseSession: (idToken: string, requestedRole: 'member' | 'trainer' | 'gym_owner' | 'gym_operator' | 'admin' = 'gym_operator') =>
     request<{ token: string; user: { id: string; userType: string; gymId?: string; email?: string; portalUser?: boolean; aclPermissions?: string[] } }>(
@@ -361,6 +386,24 @@ export const api = {
     request<{ added: boolean }>(`/admin/account-recoveries/${encodeURIComponent(id)}/note`, { method: 'POST', body: JSON.stringify({ note }) }, token),
   recoveryDecide: (token: string, id: string, body: { decision: 'approve' | 'refuse'; reason?: RecoveryRefusalReason; note?: string }) =>
     request<{ status: 'completed' | 'refused' }>(`/admin/account-recoveries/${encodeURIComponent(id)}/decision`, { method: 'POST', body: JSON.stringify(body) }, token),
+
+
+  // ─── Moderation ───
+  moderationQueue: (token: string, f: { entityType: ModerationEntityType; status?: ModerationStatus; q?: string; cursor?: number; limit?: number }) => {
+    const q = new URLSearchParams({ entityType: f.entityType });
+    if (f.status) q.set('status', f.status);
+    if (f.q) q.set('q', f.q);
+    if (f.cursor) q.set('cursor', String(f.cursor));
+    if (f.limit) q.set('limit', String(f.limit));
+    return request<ModerationList>(`/admin/moderation?${q.toString()}`, {}, token);
+  },
+  moderationCounts: (token: string, entityType?: ModerationEntityType) =>
+    request<{ counts: ModerationCounts }>(`/admin/moderation/counts${entityType ? `?entityType=${entityType}` : ''}`, {}, token),
+  moderationDetail: (token: string, entityType: ModerationEntityType, id: string) =>
+    request<ModerationDetail>(`/admin/moderation/${entityType}/${encodeURIComponent(id)}`, {}, token),
+  moderationDecide: (token: string, entityType: ModerationEntityType, id: string, action: ModerationAction, reason?: string) =>
+    request<ModerationDecision>(`/admin/moderation/${entityType}/${encodeURIComponent(id)}/${action === 'require_review' ? 'require-review' : action}`,
+      { method: 'POST', body: JSON.stringify({ reason: reason?.trim() || undefined }) }, token),
 
   // ─── Partner KYC / KYB review (admin, 'kyc' scope) ───
   kycCases: (token: string, filters: { status?: KycCaseStatus; partnerType?: KycPartnerType } = {}) => {
