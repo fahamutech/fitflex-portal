@@ -1,5 +1,5 @@
 'use client';
-import { ButtonHTMLAttributes, Children, HTMLAttributes, InputHTMLAttributes, ReactElement, ReactNode, cloneElement, forwardRef, isValidElement, useId } from 'react';
+import { ButtonHTMLAttributes, Children, HTMLAttributes, InputHTMLAttributes, ReactElement, ReactNode, SelectHTMLAttributes, TdHTMLAttributes, TextareaHTMLAttributes, ThHTMLAttributes, cloneElement, forwardRef, isValidElement, useId } from 'react';
 import { cn } from '@/lib/cn';
 
 /* ─────────────────────────────────────────────
@@ -24,11 +24,13 @@ const btnSizes: Record<BtnSize, string> = {
 
 export const Button = forwardRef<
   HTMLButtonElement,
-  ButtonHTMLAttributes<HTMLButtonElement> & { variant?: BtnVariant; size?: BtnSize }
->(({ variant = 'primary', size = 'md', className, ...rest }, ref) => (
+  ButtonHTMLAttributes<HTMLButtonElement> & { variant?: BtnVariant; size?: BtnSize; /** Shows a spinner, sets aria-busy and disables the button. */ loading?: boolean }
+>(({ variant = 'primary', size = 'md', className, loading = false, disabled, children, ...rest }, ref) => (
   <button
     ref={ref}
     {...rest}
+    disabled={disabled || loading}
+    aria-busy={loading || rest['aria-busy'] || undefined}
     className={cn(
       'inline-flex items-center justify-center font-semibold rounded-[var(--radius-lg)] transition-colors duration-100',
       'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand-500)] focus-visible:ring-offset-2',
@@ -37,7 +39,10 @@ export const Button = forwardRef<
       btnSizes[size],
       className,
     )}
-  />
+  >
+    {loading && <Spinner className="h-4 w-4 mr-2 text-current" />}
+    {children}
+  </button>
 ));
 Button.displayName = 'Button';
 
@@ -175,37 +180,115 @@ export function Badge({
 /* ─────────────────────────────────────────────
    Field + Input  —  form controls
    ───────────────────────────────────────────── */
+type ControlAria = { id?: string; 'aria-describedby'?: string; 'aria-invalid'?: boolean | 'true' | 'false'; 'aria-required'?: boolean | 'true' | 'false' };
+
 export function Field({
   label,
   children,
   hint,
   error,
+  required,
 }: {
   label: ReactNode;
   children: ReactNode;
   hint?: ReactNode;
   error?: ReactNode;
+  /** Marks the control aria-required and shows a required asterisk after the label. */
+  required?: boolean;
 }) {
   // Tie the label to a single native control (or a component that takes an id), so it has an accessible name.
   const id = useId();
-  const child = Children.count(children) === 1 && isValidElement(children) ? (children as ReactElement<{ id?: string }>) : null;
-  const takesId = !!child && !child.props.id && ((typeof child.type === 'string' && ['input', 'select', 'textarea'].includes(child.type)) || (child.type as { acceptsId?: boolean }).acceptsId === true);
+  const child = Children.count(children) === 1 && isValidElement(children) ? (children as ReactElement<ControlAria>) : null;
+  // Native controls and the shared Input/Select/Textarea (acceptsId) are real form controls we can wire up.
+  const isControl = !!child && ((typeof child.type === 'string' && ['input', 'select', 'textarea'].includes(child.type)) || (child.type as { acceptsId?: boolean }).acceptsId === true);
+  const takesId = isControl && !child!.props.id;
+  const controlId = takesId ? id : child?.props.id;
+  const hintId = !error && hint ? `${id}-hint` : undefined;
+  const errorId = error ? `${id}-error` : undefined;
+  let control: ReactNode = children;
+  if (child && isControl) {
+    const describedBy = [child.props['aria-describedby'], errorId, hintId].filter(Boolean).join(' ') || undefined;
+    const extra: ControlAria = {};
+    if (takesId) extra.id = id;
+    if (describedBy) extra['aria-describedby'] = describedBy;
+    if (error && child.props['aria-invalid'] === undefined) extra['aria-invalid'] = true;
+    if (required && child.props['aria-required'] === undefined) extra['aria-required'] = true;
+    control = cloneElement(child, extra);
+  }
   return (
     <div className="flex flex-col gap-1.5">
-      <label htmlFor={takesId ? id : child?.props.id} className="text-sm font-medium text-[var(--color-fg-secondary)]">{label}</label>
-      {takesId ? cloneElement(child!, { id }) : children}
-      {error && <span className="text-xs text-[var(--color-error-600)]">{error}</span>}
-      {!error && hint && <span className="text-xs text-[var(--color-fg-quaternary)]">{hint}</span>}
+      <label htmlFor={controlId} className="text-sm font-medium text-[var(--color-fg-secondary)]">
+        {label}
+        {required && <span aria-hidden="true" className="text-[var(--color-error-600)]"> *</span>}
+      </label>
+      {control}
+      {error && <span id={errorId} className="text-xs text-[var(--color-error-600)]">{error}</span>}
+      {!error && hint && <span id={hintId} className="text-xs text-[var(--color-fg-quaternary)]">{hint}</span>}
     </div>
   );
 }
 
-export const Input = forwardRef<HTMLInputElement, InputHTMLAttributes<HTMLInputElement>>(
-  ({ className, ...rest }, ref) => (
-    <input ref={ref} {...rest} className={cn('ui-input', className)} />
+type ControlSize = 'sm' | 'md';
+const controlSizeClass = (size: ControlSize) => (size === 'sm' ? 'ui-input-sm' : undefined);
+
+export const Input = Object.assign(
+  forwardRef<HTMLInputElement, Omit<InputHTMLAttributes<HTMLInputElement>, 'size'> & { /** sm = compact (about 32px, 12px text). Default md. */ size?: ControlSize }>(
+    ({ className, size = 'md', ...rest }, ref) => (
+      <input ref={ref} {...rest} className={cn('ui-input', controlSizeClass(size), className)} />
+    ),
   ),
+  { acceptsId: true },
 );
 Input.displayName = 'Input';
+
+/** Styled native <select> with the Input look and a chevron. */
+export const Select = Object.assign(
+  forwardRef<HTMLSelectElement, Omit<SelectHTMLAttributes<HTMLSelectElement>, 'size'> & { size?: ControlSize }>(
+    ({ className, size = 'md', children, ...rest }, ref) => (
+      <select ref={ref} {...rest} className={cn('ui-input ui-select', controlSizeClass(size), className)}>
+        {children}
+      </select>
+    ),
+  ),
+  { acceptsId: true },
+);
+Select.displayName = 'Select';
+
+/** Multi-line text input with the Input look. */
+export const Textarea = Object.assign(
+  forwardRef<HTMLTextAreaElement, TextareaHTMLAttributes<HTMLTextAreaElement> & { size?: ControlSize }>(
+    ({ className, size = 'md', ...rest }, ref) => (
+      <textarea ref={ref} {...rest} className={cn('ui-input ui-textarea', controlSizeClass(size), className)} />
+    ),
+  ),
+  { acceptsId: true },
+);
+Textarea.displayName = 'Textarea';
+
+/* ─────────────────────────────────────────────
+   Table family  —  wraps .ui-table
+   ───────────────────────────────────────────── */
+/**
+ * Scrollable table. Pass `aria-label` (what the table lists) so the horizontally
+ * scrollable region is a named landmark that keyboard users can focus and scroll.
+ */
+export function Table({ className, wrapperClassName, children, 'aria-label': ariaLabel, ...rest }: HTMLAttributes<HTMLTableElement> & { wrapperClassName?: string; 'aria-label'?: string }) {
+  return (
+    <div
+      role={ariaLabel ? 'region' : undefined}
+      aria-label={ariaLabel}
+      tabIndex={0}
+      className={cn('overflow-x-auto rounded-[var(--radius-xl)] border border-[var(--color-border-secondary)]', wrapperClassName)}
+    >
+      <table {...rest} className={cn('ui-table min-w-full', className)}>{children}</table>
+    </div>
+  );
+}
+export function THead({ children, ...rest }: HTMLAttributes<HTMLTableSectionElement>) { return <thead {...rest}>{children}</thead>; }
+export function TBody({ children, ...rest }: HTMLAttributes<HTMLTableSectionElement>) { return <tbody {...rest}>{children}</tbody>; }
+export function Tr({ children, ...rest }: HTMLAttributes<HTMLTableRowElement>) { return <tr {...rest}>{children}</tr>; }
+export function Th({ scope = 'col', children, ...rest }: ThHTMLAttributes<HTMLTableCellElement>) { return <th scope={scope} {...rest}>{children}</th>; }
+export function Td({ children, ...rest }: TdHTMLAttributes<HTMLTableCellElement>) { return <td {...rest}>{children}</td>; }
 
 /* ─────────────────────────────────────────────
    Divider

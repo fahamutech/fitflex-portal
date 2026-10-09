@@ -179,6 +179,40 @@ body {
   opacity: 0.5;
 }
 
+/* Compact control: about 32px tall, 12px text (the portal text floor) */
+.ui-input-sm {
+  padding: 0.25rem 0.625rem;
+  font-size: 0.75rem;
+  line-height: 1.25rem;
+  min-height: 2rem;
+}
+
+/* Native select: custom chevron, room for long (Swahili) labels */
+.ui-select {
+  appearance: none;
+  -webkit-appearance: none;
+  padding-right: 2.25rem;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20' viewBox='0 0 20 20' fill='none'%3E%3Cpath d='M5 7.5l5 5 5-5' stroke='%23667085' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.625rem center;
+  background-size: 1.25rem 1.25rem;
+  text-overflow: ellipsis;
+}
+.ui-select.ui-input-sm { padding-right: 2rem; }
+
+.ui-textarea {
+  min-height: 5rem;
+  resize: vertical;
+}
+.ui-textarea.ui-input-sm { min-height: 3.5rem; }
+
+.ui-input[aria-invalid="true"] {
+  border-color: var(--color-error-600);
+}
+.ui-input[aria-invalid="true"]:focus {
+  box-shadow: 0 0 0 4px rgba(217,45,32,0.2), var(--shadow-xs);
+}
+
 /* ── Data table ── */
 .ui-table {
   width: 100%;
