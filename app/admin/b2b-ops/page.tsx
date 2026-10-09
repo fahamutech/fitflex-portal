@@ -99,6 +99,7 @@ export default function B2BOperationsPage() {
     ['Passes waiting for the member to pay', data.pending.usage.passesAwaitingMemberPayment, 'Sponsor paid; member’s share outstanding'],
     ['Passes waiting for an account', data.pending.usage.passesAwaitingAccountLink, 'Person not linked to a FitFlex account'],
     ['People not yet active or linked', data.pending.people.beneficiariesPending + data.pending.people.employeesNotLinked, `${data.pending.people.beneficiariesPending} pending · ${data.pending.people.employeesNotLinked} employees not linked`],
+    ['Invited, not joined yet', data.pending.people.invitesWaiting ?? 0, `${data.pending.people.invitesNotDelivered ?? 0} with an undelivered message · ${data.pending.people.importsWithRejectedRowsLast7Days ?? 0} import${(data.pending.people.importsWithRejectedRowsLast7Days ?? 0) === 1 ? '' : 's'} with rejected rows this week`],
   ] : [];
 
   return (
