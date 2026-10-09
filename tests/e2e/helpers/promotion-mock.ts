@@ -18,9 +18,10 @@ export type Opts = {
   failing: RegExp | null;   // GET/POST paths matching this answer 500 until `failing` is cleared
   slow: number;             // ms to hold every write, so a double click can be tried
   manyCampaigns: boolean;
+  conversions: 'off' | 'full' | 'novalues'; // bookings/subscriptions/purchases on the busy promotion ('novalues' = the value fields are missing, as from an older server)
   unverified: number | undefined; // `unverifiedEvents` on every analytics response (undefined = field missing, as from an older server)
 };
-export const defaults = (): Opts => ({ longNames: false, nullEntity: false, sparse: false, big: false, failing: null, slow: 0, manyCampaigns: false, unverified: undefined });
+export const defaults = (): Opts => ({ longNames: false, nullEntity: false, sparse: false, big: false, failing: null, slow: 0, manyCampaigns: false, conversions: 'off', unverified: undefined });
 
 export type State = {
   opts: Opts; calls: Array<{ method: string; path: string; body: Json | null }>; promos: Json[]; campaigns: Json[]; limits: Json[]; me: string;
@@ -47,6 +48,14 @@ const PLACEMENTS = {
 export const ALL_ACTIONS = ['edit', 'submit', 'approve', 'reject', 'reopen', 'schedule', 'activate', 'pause', 'resume', 'cancel', 'complete', 'edit_live'];
 const NEXT: Record<string, string> = { submit: 'pending_approval', approve: 'approved', reject: 'rejected', reopen: 'draft', schedule: 'scheduled', activate: 'active', pause: 'paused', resume: 'active', cancel: 'cancelled', complete: 'completed' };
 const ZERO = { impressions: 0, searchAppearances: 0, clicks: 0, detailViews: 0, saves: 0, bookingClicks: 0, subscriptionClicks: 0, bookings: 0, subscriptions: 0, purchases: 0, purchaseValueTzs: 0, uniqueViewers: 0, clickThroughRate: null, viewRate: null, conversions: 0, conversionRate: null };
+
+export const CONV = { bookings: 4, subscriptions: 2, purchases: 1, purchaseValueTzs: 30000, conversions: 7, conversionRate: 7 / 96, bookingValueTzs: 200000, subscriptionValueTzs: 90000 };
+const conv = (o: Opts): Json => {
+  if (o.conversions === 'off') return {};
+  if (o.conversions === 'full') return CONV;
+  const { bookingValueTzs: _b, subscriptionValueTzs: _s, ...rest } = CONV; // eslint-disable-line @typescript-eslint/no-unused-vars
+  return rest;
+};
 
 export function fresh(opts: Partial<Opts> = {}): State {
   const o = { ...defaults(), ...opts };
@@ -161,13 +170,13 @@ export async function setup(page: Page, state: State, user: Json = SUPER, locale
     if (path === '/admin/promotion-analytics') {
       const m = o.big ? { ...ZERO, impressions: 12345678, clicks: 1234567, detailViews: 999999, saves: 1000000, bookingClicks: 1000000, subscriptionClicks: 1000000, purchases: 1000000, purchaseValueTzs: 9876543210, uniqueViewers: 5000000, clickThroughRate: 0.1, viewRate: 0.8 } : ZERO;
       const ref = (id: string, name: string) => ({ id, type: 'featured', status: 'active', entityType: 'gym', entityId: `e-${id}`, entityName: o.nullEntity ? null : ENTITY_NAME(name, o), startsAt: '2026-10-01T00:00:00Z', endsAt: '2036-10-01T00:00:00Z', campaignId: null, isCommercial: false });
-      return route.fulfill({ json: { range: { from: sp.get('from'), to: sp.get('to') }, totals: m, items: [{ promotion: ref('p1', 'Zanzibar Iron'), ...m }, { promotion: ref('p2', 'Masaki Fitness'), ...ZERO }], notTracked: o.sparse ? undefined : ['booking_conversions', 'subscription_conversions'], unverifiedEvents: o.unverified } });
+      return route.fulfill({ json: { range: { from: sp.get('from'), to: sp.get('to') }, totals: { ...m, ...conv(o) }, items: [{ promotion: ref('p1', 'Zanzibar Iron'), ...m, ...conv(o) }, { promotion: ref('p2', 'Masaki Fitness'), ...ZERO }], notTracked: o.sparse ? undefined : ['booking_conversions', 'subscription_conversions'], unverifiedEvents: o.unverified } });
     }
     const an = path.match(/^\/admin\/promotions\/([\w-]+)\/analytics$/);
     if (an) {
       const from = sp.get('from')!; const to = sp.get('to')!;
       const daily: Json[] = []; for (let d = new Date(`${from}T00:00:00Z`), i = 0; d <= new Date(`${to}T00:00:00Z`) && i < 400; d.setUTCDate(d.getUTCDate() + 1), i += 1) daily.push({ day: d.toISOString().slice(0, 10), ...ZERO, impressions: o.big ? 400000 + i : 40, clicks: i % 3 ? 3 : 0 });
-      const m = o.big ? { ...ZERO, impressions: 12345678, clicks: 1234567, purchaseValueTzs: 9876543210, purchases: 1000000, uniqueViewers: 5000000 } : { ...ZERO, impressions: 1200, clicks: 96, clickThroughRate: 0.08 };
+      const m = o.big ? { ...ZERO, impressions: 12345678, clicks: 1234567, purchaseValueTzs: 9876543210, purchases: 1000000, uniqueViewers: 5000000 } : { ...ZERO, impressions: 1200, clicks: 96, clickThroughRate: 0.08, ...conv(o) };
       const promotion = { id: an[1], type: 'featured', status: 'active', entityType: 'gym', entityId: 'gym-1', entityName: o.nullEntity ? null : ENTITY_NAME('Zanzibar Iron', o), startsAt: '2026-10-01T00:00:00Z', endsAt: '2036-10-01T00:00:00Z', campaignId: null, isCommercial: false };
       if (o.sparse) return route.fulfill({ json: { promotion, range: { from, to }, totals: m, unverifiedEvents: o.unverified } });
       return route.fulfill({ json: { promotion, range: { from, to }, totals: m, daily,

@@ -32,6 +32,9 @@ export function MetricTiles({ totals: raw, testId = 'pan-tiles' }: { totals: Par
     { key: 'bookingClicks', label: 'pan.tile.bookingClicks', value: num(totals.bookingClicks) },
     { key: 'subscriptionClicks', label: 'pan.tile.subscriptionClicks', value: num(totals.subscriptionClicks) },
     { key: 'purchases', label: 'pan.tile.purchases', value: num(totals.purchases), sub: money(totals.purchaseValueTzs) },
+    { key: 'bookings', label: 'pan.tile.bookings', value: num(totals.bookings), sub: Number(totals.bookingValueTzs) > 0 ? money(totals.bookingValueTzs) : undefined },
+    { key: 'subscriptions', label: 'pan.tile.subscriptions', value: num(totals.subscriptions), sub: Number(totals.subscriptionValueTzs) > 0 ? money(totals.subscriptionValueTzs) : undefined },
+    { key: 'conversionRate', label: 'pan.tile.conversionRate', value: pct(totals.conversionRate), sub: t('pan.tile.conversionRateHint') },
     { key: 'uniqueViewers', label: 'pan.tile.uniqueViewers', value: num(totals.uniqueViewers) },
   ];
   return (
@@ -186,6 +189,16 @@ export function PromotionPerformanceView({ id, from, to, onBack }: { id: string;
                     );
                   })}
                 </ol>
+                <dl className="mt-5 space-y-2 border-t border-[var(--color-border-secondary)] pt-4 text-sm" data-testid="pan-conversions">
+                  <dt className="text-xs text-[var(--color-fg-quaternary)]">{t('pan.detail.conversionsBreakdown')}</dt>
+                  {([['bookings', data.totals?.bookings, data.totals?.bookingValueTzs, 'pan.tile.bookings'], ['subscriptions', data.totals?.subscriptions, data.totals?.subscriptionValueTzs, 'pan.tile.subscriptions'], ['purchases', data.totals?.purchases, data.totals?.purchaseValueTzs, 'pan.tile.purchases']] as const).map(([k, count, value, label]) => (
+                    <dd key={k} className="flex items-baseline justify-between gap-3" data-testid={`pan-conv-${k}`}>
+                      <span className="min-w-0">{t(label)}</span>
+                      <span className="shrink-0 text-right tabular-nums"><span className="font-semibold" data-testid={`pan-conv-count-${k}`}>{num(count)}</span>
+                        {Number(value) > 0 && <span className="ml-2 text-xs text-[var(--color-fg-quaternary)]" data-testid={`pan-conv-value-${k}`}>{money(value)}</span>}</span>
+                    </dd>
+                  ))}
+                </dl>
               </CardContent>
             </Card>
 
@@ -194,10 +207,11 @@ export function PromotionPerformanceView({ id, from, to, onBack }: { id: string;
               <CardContent className="p-0">
                 {(data.byPlacement ?? []).length === 0 ? <p className="p-6 text-sm text-[var(--color-fg-quaternary)]" data-testid="pan-placements-empty">{t('pan.detail.noPlacements')}</p> : (
                   <div className="overflow-x-auto">
-                    <table className="w-full min-w-[420px] text-sm" data-testid="pan-placements">
+                    <table className="w-full min-w-[640px] text-sm" data-testid="pan-placements">
                       <thead className="text-left text-xs text-[var(--color-fg-tertiary)]"><tr className="border-b border-[var(--color-border-secondary)]">
                         <th className="px-4 py-2.5 font-medium">{t('pan.col.placement')}</th><th className="px-4 py-2.5 text-right font-medium">{t('pan.col.impressions')}</th>
-                        <th className="px-4 py-2.5 text-right font-medium">{t('pan.col.clicks')}</th><th className="px-4 py-2.5 text-right font-medium">{t('pan.col.ctr')}</th></tr></thead>
+                        <th className="px-4 py-2.5 text-right font-medium">{t('pan.col.clicks')}</th><th className="px-4 py-2.5 text-right font-medium">{t('pan.col.ctr')}</th>
+                        <th className="px-4 py-2.5 text-right font-medium">{t('pan.col.bookings')}</th><th className="px-4 py-2.5 text-right font-medium">{t('pan.col.subscriptions')}</th></tr></thead>
                       <tbody className="divide-y divide-[var(--color-border-secondary)]">
                         {(data.byPlacement ?? []).map(r => (
                           <tr key={r.placement} data-testid={`pan-placement-${r.placement}`}>
@@ -205,6 +219,8 @@ export function PromotionPerformanceView({ id, from, to, onBack }: { id: string;
                             <td className="px-4 py-3 text-right tabular-nums">{num(r.impressions)}</td>
                             <td className="px-4 py-3 text-right tabular-nums">{num(r.clicks)}</td>
                             <td className="px-4 py-3 text-right tabular-nums">{pct(r.clickThroughRate)}</td>
+                            <td className="px-4 py-3 text-right tabular-nums" data-testid="pan-placement-bookings">{num(r.bookings)}{Number(r.bookingValueTzs) > 0 && <span className="block text-xs text-[var(--color-fg-quaternary)]">{money(r.bookingValueTzs)}</span>}</td>
+                            <td className="px-4 py-3 text-right tabular-nums" data-testid="pan-placement-subscriptions">{num(r.subscriptions)}{Number(r.subscriptionValueTzs) > 0 && <span className="block text-xs text-[var(--color-fg-quaternary)]">{money(r.subscriptionValueTzs)}</span>}</td>
                           </tr>
                         ))}
                       </tbody>

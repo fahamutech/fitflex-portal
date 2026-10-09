@@ -202,7 +202,7 @@ export type PromotionCampaign = {
 };
 export type PromotionMetrics = {
   impressions: number; searchAppearances: number; clicks: number; detailViews: number; saves: number; bookingClicks: number; subscriptionClicks: number;
-  bookings: number; subscriptions: number; purchases: number; purchaseValueTzs: number; uniqueViewers: number;
+  bookings: number; subscriptions: number; purchases: number; purchaseValueTzs: number; bookingValueTzs?: number; subscriptionValueTzs?: number; uniqueViewers: number;
   clickThroughRate: number | null; viewRate: number | null; conversions: number; conversionRate: number | null;
 };
 export type PromotionAnalyticsRef = {
