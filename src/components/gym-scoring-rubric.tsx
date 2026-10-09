@@ -114,13 +114,13 @@ function getFlags(s: number, g: boolean, m: string[]) {
 
 // ── Sub-components ──────────────────────────────────────────
 
-const scoreColors = ['', 'text-[var(--color-error-600)]', 'text-[var(--color-warning-600)]', 'text-yellow-600', 'text-[var(--color-success-600)]', 'text-[var(--color-brand-600)]'];
-const scoreBgs = ['', 'bg-[var(--color-error-50)]', 'bg-[var(--color-warning-50)]', 'bg-yellow-50', 'bg-[var(--color-success-50)]', 'bg-[var(--color-brand-50)]'];
+const scoreColors = ['', 'text-[var(--color-error-600)]', 'text-[var(--color-warning-600)]', 'text-[var(--color-accent-700)]', 'text-[var(--color-success-600)]', 'text-[var(--color-brand-600)]'];
+const scoreBgs = ['', 'bg-[var(--color-error-50)]', 'bg-[var(--color-warning-50)]', 'bg-[var(--color-accent-50)]', 'bg-[var(--color-success-50)]', 'bg-[var(--color-brand-50)]'];
 
 function Section({ title, weight, complete, dimScore, open, onToggle, children }: {
   title: string; weight: number; complete: boolean; dimScore: number; open: boolean; onToggle: () => void; children: ReactNode;
 }) {
-  const color = dimScore >= 4 ? 'text-[var(--color-brand-600)]' : dimScore >= 3 ? 'text-[var(--color-success-600)]' : dimScore >= 2 ? 'text-yellow-600' : dimScore > 0 ? 'text-[var(--color-error-600)]' : 'text-[var(--color-fg-quaternary)]';
+  const color = dimScore >= 4 ? 'text-[var(--color-brand-600)]' : dimScore >= 3 ? 'text-[var(--color-success-600)]' : dimScore >= 2 ? 'text-[var(--color-accent-700)]' : dimScore > 0 ? 'text-[var(--color-error-600)]' : 'text-[var(--color-fg-quaternary)]';
   return (
     <div className="mb-2 rounded-[var(--radius-xl)] border border-[var(--color-border-secondary)] overflow-hidden">
       <button onClick={onToggle} className={cn('w-full px-4 py-3 flex items-center justify-between', open ? 'bg-[var(--color-bg-secondary)]' : 'bg-[var(--color-bg-primary)]')}>
@@ -171,7 +171,7 @@ function ConditionPicker({ value, onChange }: { value: string; onChange: (v: str
     <div className="flex gap-1">
       {items.map(cl => (
         <button key={cl.key} onClick={() => onChange(value === cl.key ? '' : cl.key)} className={cn(
-          'flex-1 px-1 py-1.5 rounded-[var(--radius-md)] text-[10px] font-semibold border transition-colors',
+          'flex-1 px-1 py-1.5 rounded-[var(--radius-md)] text-xs font-semibold border transition-colors',
           value === cl.key
             ? cl.score >= 4 ? 'text-[var(--color-brand-600)] border-[var(--color-brand-300)] bg-[var(--color-brand-50)]'
               : cl.score >= 3 ? 'text-[var(--color-success-600)] border-[var(--color-success-300)] bg-[var(--color-success-50)]'
@@ -356,7 +356,7 @@ export function GymScoringRubric({ data, onChange, onResult }: {
                 ? 'bg-[var(--color-brand-50)] text-[var(--color-brand-700)] border-[var(--color-brand-300)]'
                 : 'text-[var(--color-fg-quaternary)] border-[var(--color-border-secondary)] hover:bg-[var(--color-bg-tertiary)]'
             )}>
-              {z.label} <span className="font-mono text-[10px]">{z.multiplier}x</span>
+              {z.label} <span className="font-mono text-xs">{z.multiplier}x</span>
             </button>
           ))}
         </div>
@@ -368,7 +368,7 @@ export function GymScoringRubric({ data, onChange, onResult }: {
         {[{ l: 'Equipment', w: 40 }, { l: 'Amenities', w: 27 }, { l: 'Facility', w: 23 }, { l: 'Staffing', w: 10 }].map(d => (
           <div key={d.l} className="flex-1 rounded-[var(--radius-md)] bg-[var(--color-bg-tertiary)] py-1.5 text-center" style={{ flex: d.w }}>
             <div className="font-mono text-xs font-bold text-[var(--color-brand-600)]">{d.w}%</div>
-            <div className="text-[10px] text-[var(--color-fg-quaternary)]">{d.l}</div>
+            <div className="text-xs text-[var(--color-fg-quaternary)]">{d.l}</div>
           </div>
         ))}
       </div>
@@ -388,10 +388,10 @@ export function GymScoringRubric({ data, onChange, onResult }: {
                       {d.present ? '✓' : ''}
                     </button>
                     <span className={cn('flex-1 text-xs', d.present ? 'font-medium text-[var(--color-fg-primary)]' : 'text-[var(--color-fg-quaternary)]')}>{item.name}</span>
-                    {isStn && <span className="text-[9px] font-semibold text-[var(--color-brand-600)]">STATION</span>}
+                    {isStn && <span className="text-xs font-semibold text-[var(--color-brand-600)]">STATION</span>}
                     {d.present && (
                       <div className="flex items-center gap-1">
-                        <span className="text-[10px] text-[var(--color-fg-quaternary)]">{isStn ? 'Stns:' : 'Qty:'}</span>
+                        <span className="text-xs text-[var(--color-fg-quaternary)]">{isStn ? 'Stns:' : 'Qty:'}</span>
                         <input type="number" min="0" max="99" value={d.qty === 0 ? '' : d.qty} placeholder="0"
                           onChange={e => setEq(item.name, 'qty', e.target.value === '' ? 0 : parseInt(e.target.value) || 0)}
                           onClick={e => e.stopPropagation()}
@@ -399,7 +399,7 @@ export function GymScoringRubric({ data, onChange, onResult }: {
                       </div>
                     )}
                   </div>
-                  {d.present && item.hint && <p className="text-[10px] text-[var(--color-brand-600)] italic mt-1 pl-7">{item.hint}</p>}
+                  {d.present && item.hint && <p className="text-xs text-[var(--color-brand-600)] italic mt-1 pl-7">{item.hint}</p>}
                   {d.present && (
                     <div className="mt-2 space-y-1.5">
                       <ConditionPicker value={d.condition} onChange={v => setEq(item.name, 'condition', v)} />
@@ -471,7 +471,7 @@ export function GymScoringRubric({ data, onChange, onResult }: {
                       <span className={cn('flex-1 text-xs', d.present ? 'font-medium' : 'text-[var(--color-fg-quaternary)]')}>{tn}</span>
                       {d.present && (
                         <div className="flex items-center gap-1">
-                          <span className="text-[10px] text-[var(--color-fg-quaternary)]">Qty:</span>
+                          <span className="text-xs text-[var(--color-fg-quaternary)]">Qty:</span>
                           <input type="number" min="0" max="20" value={d.qty === 0 ? '' : d.qty} placeholder="0"
                             onChange={e => setWet(tn, 'qty', e.target.value === '' ? 0 : parseInt(e.target.value) || 0)}
                             onClick={e => e.stopPropagation()}
@@ -516,7 +516,7 @@ export function GymScoringRubric({ data, onChange, onResult }: {
       {any && tc && (
         <div className="rounded-[var(--radius-xl)] border-2 border-[var(--color-brand-200)] bg-[var(--color-bg-secondary)] p-5">
           <div className="text-center mb-4">
-            <p className="text-[10px] font-bold uppercase tracking-widest text-[var(--color-fg-quaternary)]">
+            <p className="text-xs font-bold uppercase tracking-widest text-[var(--color-fg-quaternary)]">
               {results.eqDone && results.amDone && results.fDone && results.sDone ? 'Classification Result' : 'Projected Result'}
             </p>
             <p className="text-2xl font-bold text-[var(--color-brand-700)] mt-1">{tc.label}</p>
@@ -542,12 +542,12 @@ export function GymScoringRubric({ data, onChange, onResult }: {
           )}
 
           <div className="bg-[var(--color-bg-primary)] rounded-[var(--radius-lg)] p-3">
-            <p className="text-[10px] font-bold uppercase tracking-wide text-[var(--color-fg-quaternary)] mb-2">Tier Thresholds</p>
+            <p className="text-xs font-bold uppercase tracking-wide text-[var(--color-fg-quaternary)] mb-2">Tier Thresholds</p>
             {Object.entries(TIER_CONFIG).map(([k, c]) => (
               <div key={k} className="flex items-center gap-2 mb-0.5">
                 <div className={cn('w-2 h-2 rounded-sm', results.tier === k ? 'bg-[var(--color-brand-600)]' : 'bg-[var(--color-fg-quaternary)]')} />
                 <span className={cn('flex-1 text-xs', results.tier === k ? 'font-bold text-[var(--color-fg-primary)]' : 'text-[var(--color-fg-quaternary)]')}>{c.label}</span>
-                <span className="font-mono text-[10px] text-[var(--color-fg-quaternary)]">{c.range}</span>
+                <span className="font-mono text-xs text-[var(--color-fg-quaternary)]">{c.range}</span>
               </div>
             ))}
           </div>
