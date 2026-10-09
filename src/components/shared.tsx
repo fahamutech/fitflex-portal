@@ -273,7 +273,7 @@ export function PageHeader({
 type AlertTone = 'info' | 'success' | 'warning' | 'error';
 
 const alertStyles: Record<AlertTone, string> = {
-  info:    'bg-[var(--color-brand-50)]   border-[var(--color-brand-200)]   text-[var(--color-brand-800)]',
+  info:    'bg-[var(--color-info-50)]    border-[var(--color-info-200)]    text-[var(--color-info-800)]',
   success: 'bg-[var(--color-success-50)] border-[var(--color-success-200)] text-[var(--color-success-800)]',
   warning: 'bg-[var(--color-warning-50)] border-[var(--color-warning-200)] text-[var(--color-warning-800)]',
   error:   'bg-[var(--color-error-50)]   border-[var(--color-error-200)]   text-[var(--color-error-800)]',

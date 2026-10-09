@@ -1,4 +1,7 @@
+import { Inter } from 'next/font/google';
 import './globals.css';
+
+const inter = Inter({ subsets: ['latin'], display: 'swap', variable: '--font-inter' });
 import { Providers } from './providers';
 import { Shell } from '../src/components/Shell';
 
@@ -22,12 +25,12 @@ export const metadata = {
 };
 
 export const viewport = {
-  themeColor: '#0f172a',
+  themeColor: '#101828',
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" suppressHydrationWarning>
+    <html lang="en" className={inter.variable} suppressHydrationWarning>
       <body suppressHydrationWarning>
         <Providers>
           <Shell>{children}</Shell>

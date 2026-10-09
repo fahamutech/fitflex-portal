@@ -1,9 +1,19 @@
 @import "tailwindcss";
 
 /*
- * FitFlex Af — design tokens aligned with Untitled UI React design system.
- * Colour palette from Untitled UI brand green scale.
- * Keep in sync with fitflexmobile/lib/shared/design_tokens.dart.
+ * FitFlex Af — design tokens (Untitled UI based).
+ *
+ * Brand ramp: 400–500 are the bright "energy" greens (charts, highlights,
+ * dark-surface accents). 600 and up are AA-safe with white text/fills:
+ *   white on brand-600 = 5.7:1, brand-600 on white = 5.7:1.
+ * Use brand-600 for primary fills and brand text/links; do not use 500 for text.
+ *
+ * Success is teal-leaning and info is blue so neither reads as "brand".
+ * Accent (gold) is for highlights/streaks/promotions — fills and graphics only,
+ * with dark text on top; never as text on white.
+ *
+ * Type scale (rem/px): caption 0.75/12 (floor), small 0.875/14, body 1/16,
+ * h3 1.125/18, h2 1.25/20, h1 1.5/24, display 1.875/30.
  */
 @theme {
   /* ── Brand (green) ── */
@@ -14,11 +24,11 @@
   --color-brand-300:  #75e7b3;
   --color-brand-400:  #3dd98e;
   --color-brand-500:  #17b26a;
-  --color-brand-600:  #079455;
-  --color-brand-700:  #067647;
-  --color-brand-800:  #085d3a;
-  --color-brand-900:  #074d31;
-  --color-brand-950:  #053321;
+  --color-brand-600:  #067647;
+  --color-brand-700:  #085d3a;
+  --color-brand-800:  #074d31;
+  --color-brand-900:  #053321;
+  --color-brand-950:  #032417;
 
   /* ── Neutrals (gray-900 based — Untitled UI style) ── */
   --color-gray-25:   #fcfcfd;
@@ -51,19 +61,37 @@
   --color-warning-200: #fedf89;
   --color-warning-300: #fec84b;
   --color-warning-500: #f79009;
-  --color-warning-600: #dc6803;
-  --color-warning-700: #b54708;
-  --color-warning-800: #93370d;
+  --color-warning-600: #b54708;
+  --color-warning-700: #93370d;
+  --color-warning-800: #7a2e0e;
 
-  --color-success-25:  #f6fef9;
-  --color-success-50:  #ecfdf3;
-  --color-success-100: #dcfae6;
-  --color-success-200: #abefc6;
-  --color-success-300: #6ce9a6;
-  --color-success-500: #17b26a;
-  --color-success-600: #079455;
-  --color-success-700: #067647;
-  --color-success-800: #085d3a;
+  --color-success-25:  #f6fefc;
+  --color-success-50:  #f0fdf9;
+  --color-success-100: #ccfbef;
+  --color-success-200: #99f6e0;
+  --color-success-300: #5fe9d0;
+  --color-success-500: #15b79e;
+  --color-success-600: #107569;
+  --color-success-700: #125d56;
+  --color-success-800: #134e48;
+
+  --color-info-25:  #f5faff;
+  --color-info-50:  #eff8ff;
+  --color-info-100: #d1e9ff;
+  --color-info-200: #b2ddff;
+  --color-info-300: #84caff;
+  --color-info-500: #2e90fa;
+  --color-info-600: #1570ef;
+  --color-info-700: #175cd3;
+  --color-info-800: #1849a9;
+
+  /* Accent (gold): fills/graphics only */
+  --color-accent-50:  #fefdf0;
+  --color-accent-100: #fef7c3;
+  --color-accent-300: #fde272;
+  --color-accent-500: #eaaa08;
+  --color-accent-600: #ca8504;
+  --color-accent-700: #854a0e;
 
   /* ── Aliases (used in components) ── */
   --color-fg-primary:    var(--color-gray-900);
@@ -79,6 +107,8 @@
 
   --color-border-primary:   var(--color-gray-300);
   --color-border-secondary: var(--color-gray-200);
+  /* Form-control boundary: >= 3:1 on white (WCAG 1.4.11) */
+  --color-border-input:     #858d9d;
 
   /* ── Sidebar ── */
   --color-sidebar-bg:     var(--color-gray-900);
@@ -97,7 +127,7 @@
   --radius-full: 9999px;
 
   /* ── Typography ── */
-  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
+  --font-sans: var(--font-inter), "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
 
   /* ── Shadows (Untitled UI shadow-xs / shadow-sm) ── */
   --shadow-xs: 0px 1px 2px rgba(16,24,40,0.05);
@@ -122,7 +152,7 @@ body {
 /* ── Untitled UI input base ── */
 .ui-input {
   width: 100%;
-  border: 1px solid var(--color-border-primary);
+  border: 1px solid var(--color-border-input);
   border-radius: var(--radius-md);
   background: var(--color-bg-primary);
   padding: 0.625rem 0.875rem;
@@ -139,8 +169,8 @@ body {
 }
 
 .ui-input:focus {
-  border-color: var(--color-brand-300);
-  box-shadow: 0 0 0 4px rgba(23,178,106,0.12), var(--shadow-xs);
+  border-color: var(--color-brand-600);
+  box-shadow: 0 0 0 4px rgba(6,118,71,0.2), var(--shadow-xs);
 }
 
 .ui-input:disabled {

@@ -470,7 +470,7 @@ export default function PortalUsersPage() {
                             {u.aclPermissions.map(p => (
                               <span
                                 key={p}
-                                className="rounded-full bg-[var(--color-brand-50)] border border-[var(--color-brand-200)] px-2 py-0.5 text-[10px] font-medium text-[var(--color-brand-700)] capitalize"
+                                className="rounded-full bg-[var(--color-brand-50)] border border-[var(--color-brand-200)] px-2 py-0.5 text-xs font-medium text-[var(--color-brand-700)] capitalize"
                               >
                                 {p}
                               </span>
