@@ -137,10 +137,10 @@ export default function PromotionAnalyticsPage() {
               </div>
               {(data.items ?? []).length === 0 ? <p className="p-10 text-center text-sm text-[var(--color-fg-quaternary)]" data-testid="pan-empty">{t('pan.empty')}</p> : (
                 <div className="overflow-x-auto">
-                  <table className="w-full min-w-[900px] text-sm" data-testid="pan-table">
+                  <table className="w-full min-w-[1200px] text-sm" data-testid="pan-table">
                     <thead className="text-left text-xs text-[var(--color-fg-tertiary)]"><tr className="border-b border-[var(--color-border-secondary)]">
                       <th className="px-4 py-2.5 font-medium">{t('pan.col.listing')}</th><th className="px-4 py-2.5 font-medium">{t('pan.col.type')}</th><th className="px-4 py-2.5 font-medium">{t('pan.col.status')}</th>
-                      {(['impressions', 'clicks', 'ctr', 'views', 'saves', 'actionClicks', 'purchases'] as const).map(c => <th key={c} className="px-4 py-2.5 text-right font-medium">{t(`pan.col.${c}` as MessageKey)}</th>)}
+                      {(['impressions', 'clicks', 'ctr', 'views', 'saves', 'actionClicks', 'bookings', 'subscriptions', 'purchases', 'conversionRate'] as const).map(c => <th key={c} className="px-4 py-2.5 text-right font-medium">{t(`pan.col.${c}` as MessageKey)}</th>)}
                     </tr></thead>
                     <tbody className="divide-y divide-[var(--color-border-secondary)]">
                       {(data.items ?? []).map(r => (
@@ -157,7 +157,10 @@ export default function PromotionAnalyticsPage() {
                           <td className="px-4 py-3 text-right tabular-nums">{num(r.detailViews)}</td>
                           <td className="px-4 py-3 text-right tabular-nums">{num(r.saves)}</td>
                           <td className="px-4 py-3 text-right tabular-nums">{num(r.bookingClicks + r.subscriptionClicks)}</td>
-                          <td className="px-4 py-3 text-right tabular-nums">{num(r.purchases)}{r.purchases > 0 && <span className="block text-xs text-[var(--color-fg-quaternary)]">{money(r.purchaseValueTzs)}</span>}</td>
+                          <td className="px-4 py-3 text-right tabular-nums" data-testid="pan-cell-bookings">{num(r.bookings)}{Number(r.bookingValueTzs) > 0 && <span className="block text-xs text-[var(--color-fg-quaternary)]">{money(r.bookingValueTzs)}</span>}</td>
+                          <td className="px-4 py-3 text-right tabular-nums" data-testid="pan-cell-subscriptions">{num(r.subscriptions)}{Number(r.subscriptionValueTzs) > 0 && <span className="block text-xs text-[var(--color-fg-quaternary)]">{money(r.subscriptionValueTzs)}</span>}</td>
+                          <td className="px-4 py-3 text-right tabular-nums" data-testid="pan-cell-purchases">{num(r.purchases)}{Number(r.purchaseValueTzs) > 0 && <span className="block text-xs text-[var(--color-fg-quaternary)]">{money(r.purchaseValueTzs)}</span>}</td>
+                          <td className="px-4 py-3 text-right tabular-nums" data-testid="pan-cell-conversionRate">{pct(r.conversionRate)}</td>
                         </tr>
                       ))}
                     </tbody>
