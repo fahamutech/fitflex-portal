@@ -1,7 +1,7 @@
 'use client';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { useEffect, ReactNode, useState } from 'react';
+import { useEffect, useRef, ReactNode, useState } from 'react';
 import {
   LayoutDashboard,
   QrCode,
@@ -155,6 +155,7 @@ function SidebarLink({
     <Link
       href={href}
       onClick={onClick}
+      aria-current={active ? 'page' : undefined}
       className={cn(
         'group flex items-center gap-3 rounded-[var(--radius-md)] px-3 py-2.5 text-sm font-medium transition-colors',
         active
@@ -162,9 +163,9 @@ function SidebarLink({
           : 'text-[var(--color-sidebar-text)] hover:bg-[var(--color-sidebar-hover)] hover:text-white',
       )}
     >
-      <Icon className="h-5 w-5 shrink-0" strokeWidth={active ? 2.5 : 1.75} />
+      <Icon aria-hidden="true" className="h-5 w-5 shrink-0" strokeWidth={active ? 2.5 : 1.75} />
       <span className="flex-1 truncate">{label}</span>
-      {active && <ChevronRight className="h-4 w-4 shrink-0 opacity-60" />}
+      {active && <ChevronRight aria-hidden="true" className="h-4 w-4 shrink-0 opacity-60" />}
     </Link>
   );
 }
@@ -217,7 +218,7 @@ function SidebarContent({
       </div>
 
       {/* Nav items */}
-      <nav className="flex-1 overflow-y-auto px-3 py-4">
+      <nav aria-label={t('common.mainNavigation')} className="flex-1 overflow-y-auto px-3 py-4">
         {(() => {
           const groups: string[] = [];
           nav.forEach(item => { if (item.groupKey && !groups.includes(item.groupKey)) groups.push(item.groupKey); });
@@ -258,9 +259,10 @@ function SidebarContent({
       <div className="shrink-0 px-3 py-4 border-t border-[var(--color-gray-800)] space-y-1">
         {/* Locale toggle */}
         <div className="flex items-center gap-2 px-3 py-2">
-          <Globe className="h-4 w-4 text-[var(--color-gray-400)]" />
+          <Globe aria-hidden="true" className="h-4 w-4 text-[var(--color-gray-400)]" />
           <select
             data-testid="locale-select"
+            aria-label={t('common.language')}
             value={locale}
             onChange={e => setLocale(e.target.value as 'en' | 'sw')}
             className="flex-1 bg-transparent text-xs text-[var(--color-gray-400)] border-none outline-none cursor-pointer"
@@ -307,8 +309,9 @@ function SidebarContent({
             onClick={() => { signOut(); router.replace('/login'); }}
             className="shrink-0 text-[var(--color-gray-400)] hover:text-white transition-colors"
             title={t('nav.signout')}
+            aria-label={t('nav.signout')}
           >
-            <LogOut className="h-4 w-4" />
+            <LogOut aria-hidden="true" className="h-4 w-4" />
           </button>
         </div>
       </div>
@@ -318,10 +321,12 @@ function SidebarContent({
 
 /* ── Shell ───────────────────────────────────────────────── */
 export function Shell({ children }: { children: ReactNode }) {
-  const { ready, token, user, hasPermission, locale, setLocale } = useApp();
+  const { ready, token, user, hasPermission, locale, setLocale, t } = useApp();
   const pathname = usePathname();
   const router = useRouter();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const menuButtonRef = useRef<HTMLButtonElement>(null);
+  const drawerRef = useRef<HTMLElement>(null);
 
   const isAdminUser   = token && user?.userType === 'admin';
   const isHr          = token && user?.userType === 'corporate_hr';
@@ -374,6 +379,17 @@ export function Shell({ children }: { children: ReactNode }) {
   /* Close mobile drawer on route change */
   useEffect(() => { setMobileOpen(false); }, [pathname]);
 
+  /* Mobile drawer: focus moves into it when it opens; Escape closes it and gives focus back to the menu button. */
+  useEffect(() => {
+    if (!mobileOpen) return;
+    drawerRef.current?.querySelector<HTMLElement>('a[href], button, select')?.focus({ preventScroll: true });
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') { setMobileOpen(false); menuButtonRef.current?.focus(); }
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [mobileOpen]);
+
   // Authentication is restored from localStorage after mount. Keep the server
   // and the first client render identical so React never hydrates the public
   // header as the authenticated shell (or vice versa).
@@ -409,7 +425,7 @@ export function Shell({ children }: { children: ReactNode }) {
           </div>
           <select
             data-testid="locale-select"
-            aria-label="Language"
+            aria-label={t('common.language')}
             value={locale}
             onChange={e => setLocale(e.target.value as 'en' | 'sw')}
             className="ui-input w-24 text-xs"
@@ -433,11 +449,11 @@ export function Shell({ children }: { children: ReactNode }) {
 
       {/* ── Mobile sidebar overlay ── */}
       {mobileOpen && (
-        <div className="fixed inset-0 z-40 lg:hidden" onClick={() => setMobileOpen(false)}>
+        <div className="fixed inset-0 z-40 lg:hidden" onClick={() => { setMobileOpen(false); menuButtonRef.current?.focus(); }}>
           <div className="absolute inset-0 bg-black/60" />
         </div>
       )}
-      <aside className={cn(
+      <aside id="mobile-drawer" ref={drawerRef} inert={!mobileOpen} className={cn(
         'fixed inset-y-0 left-0 z-50 w-72 bg-[var(--color-sidebar-bg)] transition-transform duration-200 lg:hidden',
         mobileOpen ? 'translate-x-0' : '-translate-x-full',
       )}>
@@ -450,10 +466,15 @@ export function Shell({ children }: { children: ReactNode }) {
         {/* Mobile top bar */}
         <header className="flex h-14 shrink-0 items-center justify-between gap-3 border-b border-[var(--color-border-secondary)] bg-[var(--color-bg-primary)] px-4 lg:hidden print:hidden">
           <button
+            ref={menuButtonRef}
+            type="button"
             onClick={() => setMobileOpen(v => !v)}
-            className="text-[var(--color-fg-tertiary)] hover:text-[var(--color-fg-primary)] transition-colors"
+            aria-label={mobileOpen ? t('common.closeMenu') : t('common.openMenu')}
+            aria-expanded={mobileOpen}
+            aria-controls="mobile-drawer"
+            className="p-2 -m-2 text-[var(--color-fg-tertiary)] hover:text-[var(--color-fg-primary)] transition-colors"
           >
-            {mobileOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
+            {mobileOpen ? <X aria-hidden="true" className="h-5 w-5" /> : <Menu aria-hidden="true" className="h-5 w-5" />}
           </button>
           <div className="flex items-center gap-2">
             <div className="flex h-6 w-6 items-center justify-center rounded-[var(--radius-sm)] bg-[var(--color-brand-600)]">

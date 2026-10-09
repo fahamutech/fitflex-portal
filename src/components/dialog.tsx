@@ -5,6 +5,56 @@ import { cn } from '@/lib/cn';
 import { Button } from './shared';
 import { useApp } from '../../app/providers';
 
+/* ── Scroll lock ─────────────────────────────────────────── */
+// Locks the page behind a modal: body plus any scrolling ancestor of the dialog (the portal scrolls inside
+// <main>, not the body). Reference counted so stacked dialogs unlock only when the last one closes.
+const locks = new Map<HTMLElement, { count: number; prev: string }>();
+function lockScroll(from: HTMLElement | null): () => void {
+  const targets: HTMLElement[] = [document.body];
+  for (let el = from?.parentElement ?? null; el && el !== document.body; el = el.parentElement) {
+    const o = getComputedStyle(el).overflowY;
+    if (o === 'auto' || o === 'scroll') targets.push(el);
+  }
+  for (const el of targets) {
+    const hit = locks.get(el);
+    if (hit) hit.count += 1;
+    else { locks.set(el, { count: 1, prev: el.style.overflow }); el.style.overflow = 'hidden'; }
+  }
+  return () => {
+    for (const el of targets) {
+      const hit = locks.get(el);
+      if (!hit) continue;
+      hit.count -= 1;
+      if (hit.count <= 0) { el.style.overflow = hit.prev; locks.delete(el); }
+    }
+  };
+}
+
+/* Esc closes; Tab stays inside the panel; focus moves in on open and returns to what opened it; page scroll is locked. */
+function useModalBehavior(open: boolean, panelRef: React.RefObject<HTMLDivElement | null>, onClose: () => void) {
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+  useEffect(() => {
+    if (!open) return;
+    const opener = document.activeElement as HTMLElement | null;
+    const panel = panelRef.current;
+    const unlock = lockScroll(panel);
+    const focusables = () => Array.from(panel?.querySelectorAll<HTMLElement>('a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])') ?? []);
+    (panel?.querySelector<HTMLElement>('[data-autofocus], input:not([disabled]), textarea:not([disabled]), select:not([disabled])') ?? panel)?.focus();
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') { onCloseRef.current(); return; }
+      if (e.key !== 'Tab') return;
+      const f = focusables();
+      if (!f.length) return;
+      const first = f[0]; const last = f[f.length - 1];
+      if (e.shiftKey && (document.activeElement === first || document.activeElement === panel)) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+    };
+    document.addEventListener('keydown', handler);
+    return () => { document.removeEventListener('keydown', handler); unlock(); if (opener && document.contains(opener)) opener.focus(); };
+  }, [open, panelRef]);
+}
+
 /* ── Overlay Dialog ──────────────────────────────────────── */
 export function Dialog({
   open,
@@ -24,28 +74,8 @@ export function Dialog({
   const panelRef = useRef<HTMLDivElement>(null);
   const titleId = useId();
   const { t } = useApp();
-  const onCloseRef = useRef(onClose);
-  onCloseRef.current = onClose;
 
-  // Esc closes; Tab stays inside the dialog; focus moves in on open and goes back to what opened it.
-  useEffect(() => {
-    if (!open) return;
-    const opener = document.activeElement as HTMLElement | null;
-    const panel = panelRef.current;
-    const focusables = () => Array.from(panel?.querySelectorAll<HTMLElement>('a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])') ?? []);
-    (panel?.querySelector<HTMLElement>('input:not([disabled]), textarea:not([disabled]), select:not([disabled])') ?? panel)?.focus();
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') { onCloseRef.current(); return; }
-      if (e.key !== 'Tab') return;
-      const f = focusables();
-      if (!f.length) return;
-      const first = f[0]; const last = f[f.length - 1];
-      if (e.shiftKey && (document.activeElement === first || document.activeElement === panel)) { e.preventDefault(); last.focus(); }
-      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
-    };
-    document.addEventListener('keydown', handler);
-    return () => { document.removeEventListener('keydown', handler); if (opener && document.contains(opener)) opener.focus(); };
-  }, [open]);
+  useModalBehavior(open, panelRef, onClose);
 
   if (!open) return null;
 
@@ -125,8 +155,8 @@ export function ConfirmDialog({
   onConfirm,
   title,
   description,
-  confirmLabel = 'Confirm',
-  cancelLabel = 'Cancel',
+  confirmLabel,
+  cancelLabel,
   tone = 'danger',
   busy = false,
 }: {
@@ -140,14 +170,23 @@ export function ConfirmDialog({
   tone?: 'danger' | 'primary';
   busy?: boolean;
 }) {
+  const { t } = useApp();
+  const panelRef = useRef<HTMLDivElement>(null);
+  const titleId = useId();
+  const descId = useId();
+  useModalBehavior(open, panelRef, onClose);
   if (!open) return null;
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose} aria-hidden="true" />
       <div
+        ref={panelRef}
         role="alertdialog"
         aria-modal="true"
-        className="relative z-10 w-full max-w-sm rounded-[var(--radius-2xl)] bg-[var(--color-bg-primary)] shadow-[var(--shadow-xl)] overflow-hidden"
+        aria-labelledby={titleId}
+        aria-describedby={description ? descId : undefined}
+        tabIndex={-1}
+        className="relative z-10 w-full max-w-sm outline-none rounded-[var(--radius-2xl)] bg-[var(--color-bg-primary)] shadow-[var(--shadow-xl)] overflow-hidden"
       >
         {/* Icon accent */}
         <div className={cn(
@@ -166,15 +205,15 @@ export function ConfirmDialog({
         </div>
 
         <div className="px-6 py-5 text-center">
-          <h3 className="text-base font-semibold text-[var(--color-fg-primary)]">{title}</h3>
+          <h3 id={titleId} className="text-base font-semibold text-[var(--color-fg-primary)]">{title}</h3>
           {description && (
-            <p className="mt-2 text-sm text-[var(--color-fg-quaternary)]">{description}</p>
+            <p id={descId} className="mt-2 text-sm text-[var(--color-fg-quaternary)]">{description}</p>
           )}
         </div>
 
         <div className="flex gap-3 px-6 pb-6">
-          <Button variant="secondary" size="md" className="flex-1" onClick={onClose} disabled={busy}>
-            {cancelLabel}
+          <Button variant="secondary" size="md" className="flex-1" onClick={onClose} disabled={busy} data-autofocus>
+            {cancelLabel ?? t('common.cancel')}
           </Button>
           <Button
             variant={tone === 'danger' ? 'destructive' : 'primary'}
@@ -183,7 +222,7 @@ export function ConfirmDialog({
             onClick={onConfirm}
             disabled={busy}
           >
-            {busy ? 'Please wait…' : confirmLabel}
+            {busy ? t('common.pleaseWait') : (confirmLabel ?? t('common.confirm'))}
           </Button>
         </div>
       </div>
