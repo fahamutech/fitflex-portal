@@ -1,5 +1,5 @@
 'use client';
-import { ButtonHTMLAttributes, HTMLAttributes, InputHTMLAttributes, ReactNode, forwardRef } from 'react';
+import { ButtonHTMLAttributes, Children, HTMLAttributes, InputHTMLAttributes, ReactElement, ReactNode, cloneElement, forwardRef, isValidElement, useId } from 'react';
 import { cn } from '@/lib/cn';
 
 /* ─────────────────────────────────────────────
@@ -17,7 +17,7 @@ const btnVariants: Record<BtnVariant, string> = {
 };
 
 const btnSizes: Record<BtnSize, string> = {
-  sm: 'h-9  px-3.5 text-sm  gap-1.5',
+  sm: 'h-9 max-sm:h-10 px-3.5 text-sm  gap-1.5',
   md: 'h-10 px-4   text-sm  gap-2',
   lg: 'h-11 px-5   text-base gap-2',
 };
@@ -186,10 +186,14 @@ export function Field({
   hint?: ReactNode;
   error?: ReactNode;
 }) {
+  // Tie the label to a single native control (or a component that takes an id), so it has an accessible name.
+  const id = useId();
+  const child = Children.count(children) === 1 && isValidElement(children) ? (children as ReactElement<{ id?: string }>) : null;
+  const takesId = !!child && !child.props.id && ((typeof child.type === 'string' && ['input', 'select', 'textarea'].includes(child.type)) || (child.type as { acceptsId?: boolean }).acceptsId === true);
   return (
     <div className="flex flex-col gap-1.5">
-      <label className="text-sm font-medium text-[var(--color-fg-secondary)]">{label}</label>
-      {children}
+      <label htmlFor={takesId ? id : child?.props.id} className="text-sm font-medium text-[var(--color-fg-secondary)]">{label}</label>
+      {takesId ? cloneElement(child!, { id }) : children}
       {error && <span className="text-xs text-[var(--color-error-600)]">{error}</span>}
       {!error && hint && <span className="text-xs text-[var(--color-fg-quaternary)]">{hint}</span>}
     </div>

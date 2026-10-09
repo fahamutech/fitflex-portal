@@ -39,7 +39,7 @@ async function mockApi(page: Page, calls: string[]) {
     if (p === '/owner/communications/overview') {
       return route.fulfill({ json: {
         senderType: 'gym', gymIds: [url.searchParams.get('gymId') || 'gym_a'], members: 120, campaigns: { sent: 1 }, recent: [sent],
-        channels: { in_app: true, push: true, whatsapp: false }, limits: { largeSendThreshold: 500, marketingWeeklyCap: 2 },
+        channels: { in_app: true, push: true, whatsapp: false, sms: true }, limits: { largeSendThreshold: 500, marketingWeeklyCap: 2 },
       } });
     }
     if (p === '/owner/communications/campaigns' && req.method() === 'GET') return route.fulfill({ json: { campaigns: [sent], nextCursor: null } });
@@ -74,6 +74,10 @@ test('an owner with two gyms opens a sent campaign, sees how it did, and uses it
 
   await page.goto('/owner/communications');
   await expect(page.getByTestId('comms-home')).toBeVisible();
+  // SMS is one of the channels, and is on.
+  await expect(page.getByTestId('channel-sms')).toContainText('SMS');
+  await expect(page.getByTestId('channel-sms')).toContainText('On');
+  await expect(page.getByTestId('channel-whatsapp')).toContainText('Coming soon');
 
   // Choosing a gym scopes what is loaded to it.
   await page.getByTestId('comms-gym').selectOption('gym_b');

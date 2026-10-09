@@ -1,8 +1,9 @@
 'use client';
-import React, { ReactNode, useEffect, useRef } from 'react';
+import React, { ReactNode, useEffect, useId, useRef } from 'react';
 import { X } from 'lucide-react';
 import { cn } from '@/lib/cn';
 import { Button } from './shared';
+import { useApp } from '../../app/providers';
 
 /* ── Overlay Dialog ──────────────────────────────────────── */
 export function Dialog({
@@ -21,13 +22,30 @@ export function Dialog({
   size?: 'sm' | 'md' | 'lg' | 'xl';
 }) {
   const panelRef = useRef<HTMLDivElement>(null);
+  const titleId = useId();
+  const { t } = useApp();
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
 
+  // Esc closes; Tab stays inside the dialog; focus moves in on open and goes back to what opened it.
   useEffect(() => {
     if (!open) return;
-    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    const opener = document.activeElement as HTMLElement | null;
+    const panel = panelRef.current;
+    const focusables = () => Array.from(panel?.querySelectorAll<HTMLElement>('a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])') ?? []);
+    (panel?.querySelector<HTMLElement>('input:not([disabled]), textarea:not([disabled]), select:not([disabled])') ?? panel)?.focus();
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') { onCloseRef.current(); return; }
+      if (e.key !== 'Tab') return;
+      const f = focusables();
+      if (!f.length) return;
+      const first = f[0]; const last = f[f.length - 1];
+      if (e.shiftKey && (document.activeElement === first || document.activeElement === panel)) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+    };
     document.addEventListener('keydown', handler);
-    return () => document.removeEventListener('keydown', handler);
-  }, [open, onClose]);
+    return () => { document.removeEventListener('keydown', handler); if (opener && document.contains(opener)) opener.focus(); };
+  }, [open]);
 
   if (!open) return null;
 
@@ -46,23 +64,27 @@ export function Dialog({
         ref={panelRef}
         role="dialog"
         aria-modal="true"
+        aria-labelledby={titleId}
+        tabIndex={-1}
         className={cn(
-          'relative z-10 w-full rounded-[var(--radius-2xl)] bg-[var(--color-bg-primary)]',
-          'shadow-[var(--shadow-xl)] flex flex-col max-h-[90vh]',
+          'relative z-10 w-full outline-none rounded-[var(--radius-2xl)] bg-[var(--color-bg-primary)]',
+          'shadow-[var(--shadow-xl)] flex flex-col max-h-[90vh] max-h-[90dvh]',
           widths[size],
         )}
       >
         {/* Header */}
         <div className="flex items-start justify-between gap-4 px-6 pt-6 pb-0">
           <div className="flex-1 min-w-0">
-            <h2 className="text-lg font-semibold text-[var(--color-fg-primary)]">{title}</h2>
+            <h2 id={titleId} className="text-lg font-semibold text-[var(--color-fg-primary)] [overflow-wrap:anywhere]">{title}</h2>
             {description && (
               <p className="mt-1 text-sm text-[var(--color-fg-quaternary)]">{description}</p>
             )}
           </div>
           <button
+            type="button"
             onClick={onClose}
-            className="shrink-0 p-1 rounded-[var(--radius-md)] text-[var(--color-fg-tertiary)] hover:bg-[var(--color-bg-tertiary)] hover:text-[var(--color-fg-primary)] transition-colors"
+            aria-label={t('pro.close')}
+            className="shrink-0 p-2.5 -m-1.5 rounded-[var(--radius-md)] text-[var(--color-fg-tertiary)] hover:bg-[var(--color-bg-tertiary)] hover:text-[var(--color-fg-primary)] transition-colors"
           >
             <X className="h-5 w-5" />
           </button>
