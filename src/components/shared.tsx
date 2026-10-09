@@ -2,6 +2,9 @@
 import { ButtonHTMLAttributes, Children, HTMLAttributes, InputHTMLAttributes, ReactElement, ReactNode, SelectHTMLAttributes, TdHTMLAttributes, TextareaHTMLAttributes, ThHTMLAttributes, cloneElement, forwardRef, isValidElement, useId } from 'react';
 import { cn } from '@/lib/cn';
 
+export { ToastProvider, useToast } from './ui/toast';
+export type { ToastApi, ToastOptions, ToastTone } from './ui/toast';
+
 /* ─────────────────────────────────────────────
    Button  —  Untitled UI style
    ───────────────────────────────────────────── */
@@ -300,12 +303,94 @@ export function Divider({ className }: { className?: string }) {
 /* ─────────────────────────────────────────────
    EmptyState
    ───────────────────────────────────────────── */
-export function EmptyState({ title, body, action }: { title: ReactNode; body?: ReactNode; action?: ReactNode }) {
+export function EmptyState({ title, body, action, icon }: { title: ReactNode; body?: ReactNode; action?: ReactNode; /** Optional lucide icon node shown above the title. */ icon?: ReactNode }) {
   return (
     <div className="flex flex-col items-center justify-center gap-3 rounded-[var(--radius-xl)] border border-dashed border-[var(--color-border-primary)] bg-[var(--color-bg-secondary)] px-6 py-12 text-center">
+      {icon && (
+        <div aria-hidden="true" className="flex h-11 w-11 items-center justify-center rounded-full bg-[var(--color-bg-tertiary)] text-[var(--color-fg-quaternary)] [&>svg]:h-5 [&>svg]:w-5">
+          {icon}
+        </div>
+      )}
       <div className="text-sm font-semibold text-[var(--color-fg-secondary)]">{title}</div>
       {body && <div className="max-w-xs text-sm text-[var(--color-fg-quaternary)]">{body}</div>}
       {action}
+    </div>
+  );
+}
+
+/* ─────────────────────────────────────────────
+   ErrorState  —  something failed to load
+   Strings are passed in (translate at the call site).
+   ───────────────────────────────────────────── */
+export function ErrorState({
+  title,
+  message,
+  onRetry,
+  retryLabel,
+  className,
+}: {
+  title: ReactNode;
+  message?: ReactNode;
+  onRetry?: () => void;
+  /** Label for the retry button; the button shows only when onRetry is given. */
+  retryLabel?: string;
+  className?: string;
+}) {
+  return (
+    <div
+      role="alert"
+      className={cn('flex flex-col items-center justify-center gap-3 rounded-[var(--radius-xl)] border border-[var(--color-error-200)] bg-[var(--color-error-50)] px-6 py-12 text-center', className)}
+    >
+      <div aria-hidden="true" className="flex h-11 w-11 items-center justify-center rounded-full bg-[var(--color-error-100)] text-[var(--color-error-700)]">
+        <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v4m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+        </svg>
+      </div>
+      <div className="text-sm font-semibold text-[var(--color-error-800)]">{title}</div>
+      {message && <div className="max-w-sm text-sm text-[var(--color-error-800)] [overflow-wrap:anywhere]">{message}</div>}
+      {onRetry && retryLabel && <Button variant="secondary" size="sm" onClick={onRetry}>{retryLabel}</Button>}
+    </div>
+  );
+}
+
+/* ─────────────────────────────────────────────
+   Skeleton  —  loading placeholders (decorative: aria-hidden)
+   Put aria-busy="true" on the region that is loading.
+   ───────────────────────────────────────────── */
+export function Skeleton({ className }: { className?: string }) {
+  return <div aria-hidden="true" className={cn('animate-pulse rounded-[var(--radius-md)] bg-[var(--color-gray-200)]', className)} />;
+}
+
+export function SkeletonText({ lines = 3, className }: { lines?: number; className?: string }) {
+  return (
+    <div aria-hidden="true" className={cn('flex flex-col gap-2', className)}>
+      {Array.from({ length: lines }, (_, i) => (
+        <Skeleton key={i} className={cn('h-3.5', i === lines - 1 && lines > 1 ? 'w-2/3' : 'w-full')} />
+      ))}
+    </div>
+  );
+}
+
+export function SkeletonCard({ className, lines = 3 }: { className?: string; lines?: number }) {
+  return (
+    <Card aria-hidden="true" className={cn('p-5 sm:p-6', className)}>
+      <Skeleton className="h-4 w-1/3" />
+      <SkeletonText lines={lines} className="mt-4" />
+    </Card>
+  );
+}
+
+export function SkeletonTable({ rows = 5, columns = 4, className }: { rows?: number; columns?: number; className?: string }) {
+  return (
+    <div aria-hidden="true" className={cn('overflow-hidden rounded-[var(--radius-xl)] border border-[var(--color-border-secondary)]', className)}>
+      <div className="flex gap-4 border-b border-[var(--color-border-secondary)] bg-[var(--color-gray-50)] px-4 py-3">
+        {Array.from({ length: columns }, (_, c) => <Skeleton key={c} className="h-3 flex-1" />)}
+      </div>
+      {Array.from({ length: rows }, (_, r) => (
+        <div key={r} className="flex gap-4 border-b border-[var(--color-border-secondary)] px-4 py-4 last:border-b-0">
+          {Array.from({ length: columns }, (_, c) => <Skeleton key={c} className="h-3.5 flex-1" />)}
+        </div>
+      ))}
     </div>
   );
 }
