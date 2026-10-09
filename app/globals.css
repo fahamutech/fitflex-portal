@@ -247,3 +247,41 @@ body {
 .ui-table tbody tr:hover td {
   background: var(--color-gray-25);
 }
+
+/* ── Keyboard focus: always visible ──
+   In the base layer so a component's own focus style (Tailwind `focus-visible:*`
+   utilities, `.ui-input` which sets outline:none) wins; everything else gets this. */
+@layer base {
+  a:focus-visible,
+  button:focus-visible,
+  summary:focus-visible,
+  [tabindex]:focus-visible,
+  select:focus-visible,
+  textarea:focus-visible,
+  input:focus-visible {
+    outline: 2px solid var(--color-brand-600);
+    outline-offset: 2px;
+  }
+  /* The sidebar is dark: brand-600 would not contrast there */
+  aside a:focus-visible,
+  aside button:focus-visible,
+  aside select:focus-visible {
+    outline-color: var(--color-brand-400);
+  }
+}
+
+/* ── Reduced motion ──
+   Transitions and animations are removed; the spinner is slowed rather than
+   removed so "busy" is still visible. Skeleton pulses become static. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+  .animate-spin {
+    animation-duration: 2s !important;
+    animation-iteration-count: infinite !important;
+  }
+}

@@ -1,8 +1,9 @@
 'use client';
-import { ReactNode, useState, useMemo } from 'react';
+import { ReactNode, useState, useMemo, useId } from 'react';
 import { ChevronUp, ChevronDown, ChevronsUpDown, ChevronLeft, ChevronRight, Search } from 'lucide-react';
 import { cn } from '@/lib/cn';
-import { Button, Input } from './shared';
+import { Button, Input, Select } from './shared';
+import { useApp } from '../../app/providers';
 
 export type ColumnDef<T> = {
   key: string;
@@ -24,11 +25,12 @@ export function DataTable<T extends Record<string, any>>({
   data,
   keyFn,
   actions,
-  filterPlaceholder = 'Search…',
+  filterPlaceholder,
   emptyState,
   pageSize: defaultPageSize = 10,
   extraFilters,
   onRowClick,
+  label,
 }: {
   columns: ColumnDef<T>[];
   data: T[];
@@ -39,7 +41,11 @@ export function DataTable<T extends Record<string, any>>({
   pageSize?: number;
   extraFilters?: ReactNode;
   onRowClick?: (row: T) => void;
+  /** Names the table's scroll region for assistive tech (what the table lists). */
+  label?: string;
 }) {
+  const { t } = useApp();
+  const tableId = useId();
   const [query, setQuery]         = useState('');
   const [sortKey, setSortKey]     = useState<string | null>(null);
   const [sortDir, setSortDir]     = useState<SortDir>(null);
@@ -91,9 +97,9 @@ export function DataTable<T extends Record<string, any>>({
 
   function SortIcon({ col }: { col: ColumnDef<T> }) {
     if (!col.sortable) return null;
-    if (sortKey !== col.key) return <ChevronsUpDown className="h-3.5 w-3.5 text-[var(--color-fg-disabled)]" />;
-    if (sortDir === 'asc')   return <ChevronUp   className="h-3.5 w-3.5 text-[var(--color-brand-600)]" />;
-    return <ChevronDown className="h-3.5 w-3.5 text-[var(--color-brand-600)]" />;
+    if (sortKey !== col.key) return <ChevronsUpDown aria-hidden="true" className="h-3.5 w-3.5 text-[var(--color-fg-disabled)]" />;
+    if (sortDir === 'asc')   return <ChevronUp   aria-hidden="true" className="h-3.5 w-3.5 text-[var(--color-brand-600)]" />;
+    return <ChevronDown aria-hidden="true" className="h-3.5 w-3.5 text-[var(--color-brand-600)]" />;
   }
 
   const hasActions = Boolean(actions);
@@ -104,11 +110,12 @@ export function DataTable<T extends Record<string, any>>({
       {/* Toolbar */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="relative flex-1 max-w-xs">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[var(--color-fg-disabled)] pointer-events-none" />
+          <Search aria-hidden="true" className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[var(--color-fg-disabled)] pointer-events-none" />
           <Input
             value={query}
             onChange={e => { setQuery(e.target.value); setPage(1); }}
-            placeholder={filterPlaceholder}
+            placeholder={filterPlaceholder ?? t('common.search')}
+            aria-label={t('common.searchTable')}
             className="!pl-9"
           />
         </div>
@@ -116,13 +123,20 @@ export function DataTable<T extends Record<string, any>>({
       </div>
 
       {/* Table */}
-      <div className="overflow-x-auto rounded-[var(--radius-xl)] border border-[var(--color-border-secondary)]">
+      <div
+        role={label ? 'region' : undefined}
+        aria-label={label}
+        tabIndex={0}
+        className="overflow-x-auto rounded-[var(--radius-xl)] border border-[var(--color-border-secondary)]"
+      >
         <table className="ui-table min-w-full">
           <thead>
             <tr>
               {columns.map(col => (
                 <th
                   key={col.key}
+                  scope="col"
+                  aria-sort={col.sortable ? (sortKey === col.key && sortDir ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none') : undefined}
                   style={col.width ? { width: col.width } : undefined}
                   className={cn(
                     col.sortable && 'cursor-pointer select-none hover:bg-[var(--color-gray-100)]',
@@ -131,14 +145,24 @@ export function DataTable<T extends Record<string, any>>({
                   )}
                   onClick={() => col.sortable && toggleSort(col.key)}
                 >
-                  <span className="inline-flex items-center gap-1.5">
-                    {col.header}
-                    <SortIcon col={col} />
-                  </span>
+                  {col.sortable ? (
+                    // The th click toggles the sort for mouse users; this real button makes it keyboard reachable
+                    // (its click bubbles to the th).
+                    <button
+                      type="button"
+                      aria-label={t('common.sortBy').replace('{column}', col.header)}
+                      className="inline-flex items-center gap-1.5 font-[inherit] text-[inherit]"
+                    >
+                      {col.header}
+                      <SortIcon col={col} />
+                    </button>
+                  ) : (
+                    <span className="inline-flex items-center gap-1.5">{col.header}</span>
+                  )}
                 </th>
               ))}
               {hasActions && (
-                <th className="text-right w-px whitespace-nowrap">Actions</th>
+                <th scope="col" className="text-right w-px whitespace-nowrap">{t('common.actions')}</th>
               )}
             </tr>
           </thead>
@@ -149,7 +173,7 @@ export function DataTable<T extends Record<string, any>>({
                   colSpan={visibleColumns.length + (hasActions ? 1 : 0)}
                   className="py-16 text-center text-sm text-[var(--color-fg-quaternary)]"
                 >
-                  {emptyState ?? 'No records found.'}
+                  {emptyState ?? t('common.noRecords')}
                 </td>
               </tr>
             ) : (
@@ -187,27 +211,32 @@ export function DataTable<T extends Record<string, any>>({
       {/* Pagination */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between text-sm text-[var(--color-fg-tertiary)]">
         <div className="flex items-center gap-2">
-          <span>Rows per page:</span>
-          <select
+          <span id={`${tableId}-rpp`}>{t('common.rowsPerPage')}:</span>
+          <Select
+            aria-labelledby={`${tableId}-rpp`}
             value={pageSize}
             onChange={e => { setPageSize(Number(e.target.value)); setPage(1); }}
-            className="ui-input !w-auto !py-1 !px-2"
+            className="!w-auto !px-2 !pr-8"
+            size="sm"
           >
             {PAGE_SIZES.map(s => <option key={s} value={s}>{s}</option>)}
-          </select>
+          </Select>
           <span className="hidden sm:inline">
-            {sorted.length === 0 ? '0' : `${(safePage - 1) * pageSize + 1}–${Math.min(safePage * pageSize, sorted.length)}`} of {sorted.length}
+            {sorted.length === 0 ? '0' : `${(safePage - 1) * pageSize + 1}–${Math.min(safePage * pageSize, sorted.length)}`} {t('common.of')} {sorted.length}
           </span>
+          {/* Announces the filtered count to screen readers as the search changes. */}
+          <span className="sr-only" role="status" aria-live="polite">{t('common.resultsCount').replace('{count}', String(sorted.length))}</span>
         </div>
-        <div className="flex items-center gap-1">
+        <nav aria-label={t('common.pagination')} className="flex items-center gap-1">
           <Button
             variant="ghost"
             size="sm"
             className="h-8 w-8 p-0"
+            aria-label={t('common.previousPage')}
             disabled={safePage <= 1}
             onClick={() => setPage(p => Math.max(1, p - 1))}
           >
-            <ChevronLeft className="h-4 w-4" />
+            <ChevronLeft aria-hidden="true" className="h-4 w-4" />
           </Button>
           {Array.from({ length: Math.min(totalPages, 5) }, (_, i) => {
             let p: number;
@@ -218,6 +247,9 @@ export function DataTable<T extends Record<string, any>>({
             return (
               <button
                 key={p}
+                type="button"
+                aria-label={t('common.goToPage').replace('{n}', String(p))}
+                aria-current={p === safePage ? 'page' : undefined}
                 onClick={() => setPage(p)}
                 className={cn(
                   'h-8 w-8 rounded-[var(--radius-md)] text-sm font-medium transition-colors',
@@ -234,12 +266,13 @@ export function DataTable<T extends Record<string, any>>({
             variant="ghost"
             size="sm"
             className="h-8 w-8 p-0"
+            aria-label={t('common.nextPage')}
             disabled={safePage >= totalPages}
             onClick={() => setPage(p => Math.min(totalPages, p + 1))}
           >
-            <ChevronRight className="h-4 w-4" />
+            <ChevronRight aria-hidden="true" className="h-4 w-4" />
           </Button>
-        </div>
+        </nav>
       </div>
     </div>
   );
