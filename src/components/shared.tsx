@@ -1,6 +1,9 @@
 'use client';
-import { ButtonHTMLAttributes, Children, HTMLAttributes, InputHTMLAttributes, ReactElement, ReactNode, cloneElement, forwardRef, isValidElement, useId } from 'react';
+import { ButtonHTMLAttributes, Children, HTMLAttributes, InputHTMLAttributes, ReactElement, ReactNode, SelectHTMLAttributes, TdHTMLAttributes, TextareaHTMLAttributes, ThHTMLAttributes, cloneElement, forwardRef, isValidElement, useId } from 'react';
 import { cn } from '@/lib/cn';
+
+export { ToastProvider, useToast } from './ui/toast';
+export type { ToastApi, ToastOptions, ToastTone } from './ui/toast';
 
 /* ─────────────────────────────────────────────
    Button  —  Untitled UI style
@@ -24,11 +27,13 @@ const btnSizes: Record<BtnSize, string> = {
 
 export const Button = forwardRef<
   HTMLButtonElement,
-  ButtonHTMLAttributes<HTMLButtonElement> & { variant?: BtnVariant; size?: BtnSize }
->(({ variant = 'primary', size = 'md', className, ...rest }, ref) => (
+  ButtonHTMLAttributes<HTMLButtonElement> & { variant?: BtnVariant; size?: BtnSize; /** Shows a spinner, sets aria-busy and disables the button. */ loading?: boolean }
+>(({ variant = 'primary', size = 'md', className, loading = false, disabled, children, ...rest }, ref) => (
   <button
     ref={ref}
     {...rest}
+    disabled={disabled || loading}
+    aria-busy={loading || rest['aria-busy'] || undefined}
     className={cn(
       'inline-flex items-center justify-center font-semibold rounded-[var(--radius-lg)] transition-colors duration-100',
       'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand-500)] focus-visible:ring-offset-2',
@@ -37,7 +42,10 @@ export const Button = forwardRef<
       btnSizes[size],
       className,
     )}
-  />
+  >
+    {loading && <Spinner className="h-4 w-4 mr-2 text-current" />}
+    {children}
+  </button>
 ));
 Button.displayName = 'Button';
 
@@ -175,37 +183,115 @@ export function Badge({
 /* ─────────────────────────────────────────────
    Field + Input  —  form controls
    ───────────────────────────────────────────── */
+type ControlAria = { id?: string; 'aria-describedby'?: string; 'aria-invalid'?: boolean | 'true' | 'false'; 'aria-required'?: boolean | 'true' | 'false' };
+
 export function Field({
   label,
   children,
   hint,
   error,
+  required,
 }: {
   label: ReactNode;
   children: ReactNode;
   hint?: ReactNode;
   error?: ReactNode;
+  /** Marks the control aria-required and shows a required asterisk after the label. */
+  required?: boolean;
 }) {
   // Tie the label to a single native control (or a component that takes an id), so it has an accessible name.
   const id = useId();
-  const child = Children.count(children) === 1 && isValidElement(children) ? (children as ReactElement<{ id?: string }>) : null;
-  const takesId = !!child && !child.props.id && ((typeof child.type === 'string' && ['input', 'select', 'textarea'].includes(child.type)) || (child.type as { acceptsId?: boolean }).acceptsId === true);
+  const child = Children.count(children) === 1 && isValidElement(children) ? (children as ReactElement<ControlAria>) : null;
+  // Native controls and the shared Input/Select/Textarea (acceptsId) are real form controls we can wire up.
+  const isControl = !!child && ((typeof child.type === 'string' && ['input', 'select', 'textarea'].includes(child.type)) || (child.type as { acceptsId?: boolean }).acceptsId === true);
+  const takesId = isControl && !child!.props.id;
+  const controlId = takesId ? id : child?.props.id;
+  const hintId = !error && hint ? `${id}-hint` : undefined;
+  const errorId = error ? `${id}-error` : undefined;
+  let control: ReactNode = children;
+  if (child && isControl) {
+    const describedBy = [child.props['aria-describedby'], errorId, hintId].filter(Boolean).join(' ') || undefined;
+    const extra: ControlAria = {};
+    if (takesId) extra.id = id;
+    if (describedBy) extra['aria-describedby'] = describedBy;
+    if (error && child.props['aria-invalid'] === undefined) extra['aria-invalid'] = true;
+    if (required && child.props['aria-required'] === undefined) extra['aria-required'] = true;
+    control = cloneElement(child, extra);
+  }
   return (
     <div className="flex flex-col gap-1.5">
-      <label htmlFor={takesId ? id : child?.props.id} className="text-sm font-medium text-[var(--color-fg-secondary)]">{label}</label>
-      {takesId ? cloneElement(child!, { id }) : children}
-      {error && <span className="text-xs text-[var(--color-error-600)]">{error}</span>}
-      {!error && hint && <span className="text-xs text-[var(--color-fg-quaternary)]">{hint}</span>}
+      <label htmlFor={controlId} className="text-sm font-medium text-[var(--color-fg-secondary)]">
+        {label}
+        {required && <span aria-hidden="true" className="text-[var(--color-error-600)]"> *</span>}
+      </label>
+      {control}
+      {error && <span id={errorId} className="text-xs text-[var(--color-error-600)]">{error}</span>}
+      {!error && hint && <span id={hintId} className="text-xs text-[var(--color-fg-quaternary)]">{hint}</span>}
     </div>
   );
 }
 
-export const Input = forwardRef<HTMLInputElement, InputHTMLAttributes<HTMLInputElement>>(
-  ({ className, ...rest }, ref) => (
-    <input ref={ref} {...rest} className={cn('ui-input', className)} />
+type ControlSize = 'sm' | 'md';
+const controlSizeClass = (size: ControlSize) => (size === 'sm' ? 'ui-input-sm' : undefined);
+
+export const Input = Object.assign(
+  forwardRef<HTMLInputElement, Omit<InputHTMLAttributes<HTMLInputElement>, 'size'> & { /** sm = compact (about 32px, 12px text). Default md. */ size?: ControlSize }>(
+    ({ className, size = 'md', ...rest }, ref) => (
+      <input ref={ref} {...rest} className={cn('ui-input', controlSizeClass(size), className)} />
+    ),
   ),
+  { acceptsId: true },
 );
 Input.displayName = 'Input';
+
+/** Styled native <select> with the Input look and a chevron. */
+export const Select = Object.assign(
+  forwardRef<HTMLSelectElement, Omit<SelectHTMLAttributes<HTMLSelectElement>, 'size'> & { size?: ControlSize }>(
+    ({ className, size = 'md', children, ...rest }, ref) => (
+      <select ref={ref} {...rest} className={cn('ui-input ui-select', controlSizeClass(size), className)}>
+        {children}
+      </select>
+    ),
+  ),
+  { acceptsId: true },
+);
+Select.displayName = 'Select';
+
+/** Multi-line text input with the Input look. */
+export const Textarea = Object.assign(
+  forwardRef<HTMLTextAreaElement, TextareaHTMLAttributes<HTMLTextAreaElement> & { size?: ControlSize }>(
+    ({ className, size = 'md', ...rest }, ref) => (
+      <textarea ref={ref} {...rest} className={cn('ui-input ui-textarea', controlSizeClass(size), className)} />
+    ),
+  ),
+  { acceptsId: true },
+);
+Textarea.displayName = 'Textarea';
+
+/* ─────────────────────────────────────────────
+   Table family  —  wraps .ui-table
+   ───────────────────────────────────────────── */
+/**
+ * Scrollable table. Pass `aria-label` (what the table lists) so the horizontally
+ * scrollable region is a named landmark that keyboard users can focus and scroll.
+ */
+export function Table({ className, wrapperClassName, children, 'aria-label': ariaLabel, ...rest }: HTMLAttributes<HTMLTableElement> & { wrapperClassName?: string; 'aria-label'?: string }) {
+  return (
+    <div
+      role={ariaLabel ? 'region' : undefined}
+      aria-label={ariaLabel}
+      tabIndex={0}
+      className={cn('overflow-x-auto rounded-[var(--radius-xl)] border border-[var(--color-border-secondary)]', wrapperClassName)}
+    >
+      <table {...rest} className={cn('ui-table min-w-full', className)}>{children}</table>
+    </div>
+  );
+}
+export function THead({ children, ...rest }: HTMLAttributes<HTMLTableSectionElement>) { return <thead {...rest}>{children}</thead>; }
+export function TBody({ children, ...rest }: HTMLAttributes<HTMLTableSectionElement>) { return <tbody {...rest}>{children}</tbody>; }
+export function Tr({ children, ...rest }: HTMLAttributes<HTMLTableRowElement>) { return <tr {...rest}>{children}</tr>; }
+export function Th({ scope = 'col', children, ...rest }: ThHTMLAttributes<HTMLTableCellElement>) { return <th scope={scope} {...rest}>{children}</th>; }
+export function Td({ children, ...rest }: TdHTMLAttributes<HTMLTableCellElement>) { return <td {...rest}>{children}</td>; }
 
 /* ─────────────────────────────────────────────
    Divider
@@ -217,12 +303,94 @@ export function Divider({ className }: { className?: string }) {
 /* ─────────────────────────────────────────────
    EmptyState
    ───────────────────────────────────────────── */
-export function EmptyState({ title, body, action }: { title: ReactNode; body?: ReactNode; action?: ReactNode }) {
+export function EmptyState({ title, body, action, icon }: { title: ReactNode; body?: ReactNode; action?: ReactNode; /** Optional lucide icon node shown above the title. */ icon?: ReactNode }) {
   return (
     <div className="flex flex-col items-center justify-center gap-3 rounded-[var(--radius-xl)] border border-dashed border-[var(--color-border-primary)] bg-[var(--color-bg-secondary)] px-6 py-12 text-center">
+      {icon && (
+        <div aria-hidden="true" className="flex h-11 w-11 items-center justify-center rounded-full bg-[var(--color-bg-tertiary)] text-[var(--color-fg-quaternary)] [&>svg]:h-5 [&>svg]:w-5">
+          {icon}
+        </div>
+      )}
       <div className="text-sm font-semibold text-[var(--color-fg-secondary)]">{title}</div>
       {body && <div className="max-w-xs text-sm text-[var(--color-fg-quaternary)]">{body}</div>}
       {action}
+    </div>
+  );
+}
+
+/* ─────────────────────────────────────────────
+   ErrorState  —  something failed to load
+   Strings are passed in (translate at the call site).
+   ───────────────────────────────────────────── */
+export function ErrorState({
+  title,
+  message,
+  onRetry,
+  retryLabel,
+  className,
+}: {
+  title: ReactNode;
+  message?: ReactNode;
+  onRetry?: () => void;
+  /** Label for the retry button; the button shows only when onRetry is given. */
+  retryLabel?: string;
+  className?: string;
+}) {
+  return (
+    <div
+      role="alert"
+      className={cn('flex flex-col items-center justify-center gap-3 rounded-[var(--radius-xl)] border border-[var(--color-error-200)] bg-[var(--color-error-50)] px-6 py-12 text-center', className)}
+    >
+      <div aria-hidden="true" className="flex h-11 w-11 items-center justify-center rounded-full bg-[var(--color-error-100)] text-[var(--color-error-700)]">
+        <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v4m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+        </svg>
+      </div>
+      <div className="text-sm font-semibold text-[var(--color-error-800)]">{title}</div>
+      {message && <div className="max-w-sm text-sm text-[var(--color-error-800)] [overflow-wrap:anywhere]">{message}</div>}
+      {onRetry && retryLabel && <Button variant="secondary" size="sm" onClick={onRetry}>{retryLabel}</Button>}
+    </div>
+  );
+}
+
+/* ─────────────────────────────────────────────
+   Skeleton  —  loading placeholders (decorative: aria-hidden)
+   Put aria-busy="true" on the region that is loading.
+   ───────────────────────────────────────────── */
+export function Skeleton({ className }: { className?: string }) {
+  return <div aria-hidden="true" className={cn('animate-pulse rounded-[var(--radius-md)] bg-[var(--color-gray-200)]', className)} />;
+}
+
+export function SkeletonText({ lines = 3, className }: { lines?: number; className?: string }) {
+  return (
+    <div aria-hidden="true" className={cn('flex flex-col gap-2', className)}>
+      {Array.from({ length: lines }, (_, i) => (
+        <Skeleton key={i} className={cn('h-3.5', i === lines - 1 && lines > 1 ? 'w-2/3' : 'w-full')} />
+      ))}
+    </div>
+  );
+}
+
+export function SkeletonCard({ className, lines = 3 }: { className?: string; lines?: number }) {
+  return (
+    <Card aria-hidden="true" className={cn('p-5 sm:p-6', className)}>
+      <Skeleton className="h-4 w-1/3" />
+      <SkeletonText lines={lines} className="mt-4" />
+    </Card>
+  );
+}
+
+export function SkeletonTable({ rows = 5, columns = 4, className }: { rows?: number; columns?: number; className?: string }) {
+  return (
+    <div aria-hidden="true" className={cn('overflow-hidden rounded-[var(--radius-xl)] border border-[var(--color-border-secondary)]', className)}>
+      <div className="flex gap-4 border-b border-[var(--color-border-secondary)] bg-[var(--color-gray-50)] px-4 py-3">
+        {Array.from({ length: columns }, (_, c) => <Skeleton key={c} className="h-3 flex-1" />)}
+      </div>
+      {Array.from({ length: rows }, (_, r) => (
+        <div key={r} className="flex gap-4 border-b border-[var(--color-border-secondary)] px-4 py-4 last:border-b-0">
+          {Array.from({ length: columns }, (_, c) => <Skeleton key={c} className="h-3.5 flex-1" />)}
+        </div>
+      ))}
     </div>
   );
 }
