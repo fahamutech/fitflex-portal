@@ -1,8 +1,9 @@
 'use client';
 import { useEffect, useState } from 'react';
+import Link from 'next/link';
 import { RefreshCw, CheckCircle2, XCircle } from 'lucide-react';
 import { useApp } from '../../providers';
-import { api, RoleApproval } from '@/lib/api';
+import { api, ApiError, RoleApproval } from '@/lib/api';
 import { Badge, Button, PageHeader, Alert, Spinner, Card } from '@/components/shared';
 import { DataTable, ColumnDef } from '@/components/data-table';
 import { ConfirmDialog } from '@/components/dialog';
@@ -15,6 +16,8 @@ export default function ApprovalsPage() {
   const [approvals, setApprovals] = useState<RoleApproval[]>([]);
   const [loading, setLoading]     = useState(true);
   const [error, setError]         = useState<string | null>(null);
+  // The server refuses to approve a new partner here: they are approved through Partner Verification.
+  const [useKyc, setUseKyc]       = useState<string | null>(null);
   const [busy, setBusy]           = useState(false);
   const [filter, setFilter]       = useState<ApprovalFilter>('pending_approval');
   const [actionTarget, setActionTarget] = useState<{ approval: RoleApproval; action: 'approve' | 'reject' } | null>(null);
@@ -41,11 +44,17 @@ export default function ApprovalsPage() {
     if (!token || !actionTarget) return;
     setBusy(true);
     try {
+      setUseKyc(null);
       await api.decideRoleApproval(token, actionTarget.approval.id, actionTarget.action);
       setActionTarget(null);
       await load();
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Action failed');
+      if (e instanceof ApiError && (e.body as { error?: string } | null)?.error === 'use_kyc_review') {
+        setActionTarget(null);
+        setUseKyc(actionTarget.approval.displayName || actionTarget.approval.email || 'This partner');
+      } else {
+        setError(e instanceof Error ? e.message : 'Action failed');
+      }
     } finally {
       setBusy(false);
     }
@@ -88,6 +97,15 @@ export default function ApprovalsPage() {
       />
 
       {error && <Alert tone="error">{error}</Alert>}
+      {useKyc && (
+        <Alert tone="warning">
+          <span data-testid="approvals-use-kyc">
+            {useKyc} is a new partner, so they are approved through <strong>Partner Verification</strong>, where their
+            details and documents are reviewed.{' '}
+            <Link href="/admin/kyc" className="underline font-semibold">Open Partner Verification</Link>
+          </span>
+        </Alert>
+      )}
 
       {loading && !approvals.length ? (
         <div className="flex h-64 items-center justify-center"><Spinner className="h-8 w-8" /></div>
