@@ -1735,8 +1735,9 @@ export const messages = {
     'common.closeMenu': 'Funga menyu',
     'common.mainNavigation': 'Menyu kuu',
     'common.language': 'Lugha',
-    'common.switchToSwahili': 'Badili kwenda Kiswahili',
-    'common.switchToEnglish': 'Badili kwenda Kiingereza',
+    // Kept in English until native Swahili review.
+    'common.switchToSwahili': 'Switch to Swahili',
+    'common.switchToEnglish': 'Switch to English',
     'pro.retry': 'Jaribu tena',
     'pro.cancel': 'Ghairi',
     'pro.confirm': 'Thibitisha',
