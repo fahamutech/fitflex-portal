@@ -42,6 +42,7 @@ import { useApp } from '../../app/providers';
 import { cn } from '@/lib/cn';
 import { Avatar, Badge } from './shared';
 import { BrandLogo } from './brand-logo';
+import { LanguageToggle } from './language-toggle';
 
 /* ── Nav definitions ─────────────────────────────────────── */
 type NavItem = {
@@ -423,16 +424,7 @@ export function Shell({ children }: { children: ReactNode }) {
             <BrandLogo className="h-7 w-7 rounded-[var(--radius-md)]" />
             <span className="text-sm font-semibold text-[var(--color-fg-primary)]">FitFlex Af</span>
           </div>
-          <select
-            data-testid="locale-select"
-            aria-label={t('common.language')}
-            value={locale}
-            onChange={e => setLocale(e.target.value as 'en' | 'sw')}
-            className="ui-input w-24 text-xs"
-          >
-            <option value="en">English</option>
-            <option value="sw">Kiswahili</option>
-          </select>
+          <LanguageToggle className="justify-self-end" />
         </header>
         <main className="flex-1">{children}</main>
       </div>
@@ -482,7 +474,10 @@ export function Shell({ children }: { children: ReactNode }) {
             </div>
             <span className="text-sm font-semibold text-[var(--color-fg-primary)]">FitFlex Af</span>
           </div>
-          <Badge tone="brand">{user?.userType === 'corporate_hr' ? 'Company HR' : user?.userType}</Badge>
+          <div className="flex items-center gap-1">
+            <LanguageToggle />
+            <Badge tone="brand">{user?.userType === 'corporate_hr' ? 'Company HR' : user?.userType}</Badge>
+          </div>
         </header>
 
         {/* Page content */}

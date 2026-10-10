@@ -227,6 +227,8 @@ export const messages = {
     'common.closeMenu': 'Close menu',
     'common.mainNavigation': 'Main navigation',
     'common.language': 'Language',
+    'common.switchToSwahili': 'Switch to Swahili',
+    'common.switchToEnglish': 'Switch to English',
     'pro.retry': 'Try again',
     'pro.cancel': 'Cancel',
     'pro.confirm': 'Confirm',
@@ -1733,6 +1735,9 @@ export const messages = {
     'common.closeMenu': 'Funga menyu',
     'common.mainNavigation': 'Menyu kuu',
     'common.language': 'Lugha',
+    // Kept in English until native Swahili review.
+    'common.switchToSwahili': 'Switch to Swahili',
+    'common.switchToEnglish': 'Switch to English',
     'pro.retry': 'Jaribu tena',
     'pro.cancel': 'Ghairi',
     'pro.confirm': 'Thibitisha',
