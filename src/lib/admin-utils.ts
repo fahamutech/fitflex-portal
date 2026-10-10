@@ -27,3 +27,13 @@ export function statusLabel(status: string | undefined): string {
   };
   return MAP[status ?? ''] ?? status ?? '—';
 }
+
+/**
+ * A trainer's two names, for staff: the name clients see (the nickname when
+ * the trainer chose one) and the trainer's own name when it is different.
+ */
+export function trainerNames(t?: { displayName?: string | null; fullName?: string | null; nickname?: string | null } | null) {
+  const shown = t?.displayName || '';
+  const own = t?.nickname && t?.fullName && t.fullName !== shown ? t.fullName : '';
+  return { shown, own, label: own ? `${shown} (${own})` : shown };
+}

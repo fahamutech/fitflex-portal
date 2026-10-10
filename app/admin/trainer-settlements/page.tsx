@@ -3,7 +3,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { ArrowLeft, Dumbbell, Play, RefreshCw } from 'lucide-react';
 import { useApp } from '../../providers';
 import { api, GymSettlementStatus, TrainerSettlement, TrainerSettlementAction, TrainerSettlementDetail } from '@/lib/api';
-import { money } from '@/lib/admin-utils';
+import { money, trainerNames } from '@/lib/admin-utils';
 import { STATEMENT_STATUS, STATEMENT_TABS, shortDay } from '@/lib/settlements';
 import { Alert, Badge, Button, Card, CardContent, CardHeader, Field, PageHeader, Spinner } from '@/components/shared';
 import { Dialog, DialogFooter } from '@/components/dialog';
@@ -153,8 +153,11 @@ export default function TrainerSettlementsPage() {
                     <tr key={r.id} className="cursor-pointer hover:bg-[var(--color-bg-secondary)]" onClick={() => open(r.id)} data-testid={`trainer-settlement-row-${r.id}`}>
                       <td className="px-4 py-3">
                         <button className="text-left font-medium text-[var(--color-fg-primary)] hover:underline" onClick={e => { e.stopPropagation(); open(r.id); }}>
-                          {r.trainer?.displayName || 'Unnamed trainer'}
+                          {trainerNames(r.trainer).shown || 'Unnamed trainer'}
                         </button>
+                        {trainerNames(r.trainer).own && (
+                          <div className="text-xs text-[var(--color-fg-quaternary)]" data-testid={`trainer-settlement-own-name-${r.id}`}>{trainerNames(r.trainer).own}</div>
+                        )}
                       </td>
                       <td className="whitespace-nowrap px-4 py-3">{week(r)}</td>
                       <td className="px-4 py-3 text-right tabular-nums">{r.sessionCount}</td>
@@ -248,7 +251,7 @@ function StatementView({ id, onBack }: { id: string; onBack: () => void }) {
     <div className="space-y-6">
       <Button variant="secondary" size="sm" onClick={onBack}><ArrowLeft className="h-4 w-4" />All trainer payouts</Button>
       <PageHeader
-        title={s.trainer?.displayName || 'Unnamed trainer'}
+        title={trainerNames(s.trainer).label || 'Unnamed trainer'}
         description={`${week(s)} · ${s.sessionCount} ${s.sessionCount === 1 ? 'session' : 'sessions'}`}
         actions={<Badge tone={STATEMENT_STATUS[s.status].tone}>{STATEMENT_STATUS[s.status].label}</Badge>}
       />
@@ -318,7 +321,7 @@ function StatementView({ id, onBack }: { id: string; onBack: () => void }) {
         </CardContent>
       </Card>
 
-      <Dialog open={!!pending} onClose={() => setPending(null)} title={pending?.title ?? ''} description={`${s.trainer?.displayName || 'Trainer'} · ${week(s)} · ${money(s.finalNetTzs)}`} size="sm">
+      <Dialog open={!!pending} onClose={() => setPending(null)} title={pending?.title ?? ''} description={`${trainerNames(s.trainer).label || 'Trainer'} · ${week(s)} · ${money(s.finalNetTzs)}`} size="sm">
         <div className="space-y-4">
           {actionError && <Alert tone="error">{actionError}</Alert>}
           {pending?.hint && <p className="text-sm text-[var(--color-fg-tertiary)]">{pending.hint}</p>}
