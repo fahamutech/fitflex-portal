@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 import { ChevronDown, ChevronRight, RefreshCw } from 'lucide-react';
 import { useApp } from '../../app/providers';
 import {
-  api, ApiError, userContact, B2BBeneficiary, B2BBenefit, B2BOrganization, B2BProgram, CorporateEmployee,
+  api, ApiError, userContact, B2BBeneficiary, B2BProgramLifecycle, B2BBenefit, B2BOrganization, B2BProgram, CorporateEmployee,
 } from '@/lib/api';
 import { Alert, Badge, Button, Card, CardContent, Field, PageHeader, Spinner } from '@/components/shared';
 import { money } from '@/lib/admin-utils';
@@ -374,11 +374,34 @@ function Programmes({ token, mine }: { token: string; mine: Mine }) {
   const [benefits, setBenefits] = useState<Record<string, B2BBenefit[]>>({});
   const [types, setTypes] = useState<Record<string, { label: string }>>({});
   const [error, setError] = useState<string | null>(null);
+  const [life, setLife] = useState<Record<string, B2BProgramLifecycle>>({});
+  const [notice, setNotice] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const canManage = mine.permissions.includes('programs.manage');
 
-  useEffect(() => {
+  const load = () => {
     api.b2bPrograms(token, orgId).then(r => setProgrammes(r.items)).catch(() => { setError('Could not load your programmes.'); setProgrammes([]); });
+    api.b2bProgramLifecycle(token, orgId).then(r => setLife(Object.fromEntries(r.items.map(i => [i.programId, i])))).catch(() => undefined);
+  };
+  useEffect(() => {
+    load();
     api.b2bProgramReference().then(r => setTypes(r.benefitTypes)).catch(() => undefined);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token, orgId]);
+
+  const renew = async (p: B2BProgram) => {
+    setBusy(true); setError(null); setNotice(null);
+    try {
+      const r = await api.prepareB2BProgramRenewal(token, orgId, p.id);
+      const skipped = r.skipped.length ? ` ${r.skipped.length} benefit${r.skipped.length === 1 ? '' : 's'} could not be copied (${r.skipped.map(x => x.name).join(', ')}); FitFlex will set ${r.skipped.length === 1 ? 'it' : 'them'} up again with you.` : '';
+      setNotice(`${r.existing ? 'A renewal is already prepared' : 'Renewal prepared'} for ${day(r.program.startDate)} to ${r.program.endDate ? day(r.program.endDate) : 'open'}. FitFlex will review it with you before it starts; nothing changes until then.${skipped}${r.discountNotCarriedOver ? ' The current price concession is not carried over automatically; FitFlex will confirm the price.' : ''}`);
+      load();
+    } catch (e) {
+      setError(said(e, 'Could not prepare the renewal.'));
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const toggle = async (id: string) => {
     if (open === id) return setOpen(null);
@@ -397,6 +420,7 @@ function Programmes({ token, mine }: { token: string; mine: Mine }) {
   return (
     <div className="space-y-3" data-testid="org-programmes">
       {error && <Alert tone="error">{error}</Alert>}
+      {notice && <Alert tone="success">{notice}</Alert>}
       {programmes.length === 0 && <Card><CardContent className="py-8 text-center text-sm text-[var(--color-fg-quaternary)]">No programme yet. FitFlex sets programmes up with you.</CardContent></Card>}
       {programmes.map(p => (
         <Card key={p.id}>
@@ -407,6 +431,8 @@ function Programmes({ token, mine }: { token: string; mine: Mine }) {
                 <span className="font-semibold">{p.name}</span>
               </span>
               <span className="flex items-center gap-3 text-xs text-[var(--color-fg-quaternary)]">
+                {life[p.id]?.renewalOf && <Badge tone="brand">Renewal</Badge>}
+                {life[p.id]?.endingSoon && <Badge tone="warning">{life[p.id].daysLeft === 0 ? 'Ends today' : `Ends in ${life[p.id].daysLeft} day${life[p.id].daysLeft === 1 ? '' : 's'}`}</Badge>}
                 <span>{day(p.startDate)} to {p.endDate ? day(p.endDate) : 'open'}</span>
                 {p.budgetTzs != null && <span>Budget {money(p.budgetTzs)}</span>}
                 <Badge tone={TONE[p.effectiveStatus] ?? 'gray'}>{p.effectiveStatus === 'pending' ? 'waiting for FitFlex' : p.effectiveStatus}</Badge>
@@ -415,6 +441,17 @@ function Programmes({ token, mine }: { token: string; mine: Mine }) {
             {open === p.id && (
               <div className="mt-3 space-y-2 border-t border-[var(--color-border-secondary)] pt-3 text-sm">
                 {p.description && <p className="text-[var(--color-fg-tertiary)]">{p.description}</p>}
+                {life[p.id]?.renewal && (
+                  <Alert tone="info">
+                    Its renewal for {day(life[p.id].renewal!.startDate)} to {life[p.id].renewal!.endDate ? day(life[p.id].renewal!.endDate!) : 'open'} is {life[p.id].renewal!.status === 'draft' ? 'prepared and with FitFlex to review' : life[p.id].renewal!.status === 'pending' ? 'waiting for FitFlex to activate' : life[p.id].renewal!.status}.
+                  </Alert>
+                )}
+                {canManage && life[p.id]?.canRenew && (life[p.id].endingSoon || life[p.id].status === 'expired') && (
+                  <div className="flex flex-wrap items-center gap-3 rounded-lg border border-[var(--color-border-secondary)] px-3 py-2" data-testid={`renew-${p.id}`}>
+                    <span className="text-[var(--color-fg-tertiary)]">{life[p.id].status === 'expired' ? 'This programme has ended.' : 'This programme is ending soon.'} Prepare the next period with the same benefits and people.</span>
+                    <Button size="sm" disabled={busy} onClick={() => renew(p)} data-testid={`renew-button-${p.id}`}>Prepare renewal</Button>
+                  </div>
+                )}
                 {p.effectiveStatus === 'paused' && <Alert tone="warning">This programme is paused{p.statusReason === 'budget_exhausted' ? ' because its budget has been used up' : ''}. Only FitFlex can resume it.</Alert>}
                 <div className="text-xs text-[var(--color-fg-quaternary)]">
                   Covers: {p.eligibility.scope === 'all' ? 'everyone on your list' : p.eligibility.scope === 'groups' ? `the groups ${p.eligibility.groups.join(', ')}` : `${p.eligibility.beneficiaryIds.length} chosen people`}
