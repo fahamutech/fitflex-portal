@@ -64,6 +64,10 @@ export function Providers({ children }: { children: ReactNode }) {
     setReady(true);
   }, []);
 
+  // Keep the document language in step with the chosen language (screen
+  // readers, hyphenation, browser translation prompts).
+  useEffect(() => { document.documentElement.lang = locale; }, [locale]);
+
   const setLocale = (l: Locale) => { localStorage.setItem('locale', l); setLocaleState(l); };
   const signIn = (tk: string, u: AppCtx['user']) => {
     localStorage.setItem('token', tk);

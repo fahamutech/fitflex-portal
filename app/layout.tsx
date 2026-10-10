@@ -31,6 +31,15 @@ export const viewport = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" className={inter.variable} suppressHydrationWarning>
+      <head>
+        {/* Set <html lang> before first paint for returning Swahili users; the
+            provider keeps it in step afterwards. Static string, no user input. */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html: "try{var l=localStorage.getItem('locale');if(l==='sw'||l==='en')document.documentElement.lang=l}catch(e){}",
+          }}
+        />
+      </head>
       <body suppressHydrationWarning>
         <Providers>
           <Shell>{children}</Shell>
