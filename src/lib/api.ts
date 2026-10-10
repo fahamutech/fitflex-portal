@@ -23,7 +23,7 @@ export function setOnUnauthorized(cb: (() => void) | null) {
 // The backend ignores the header unless its V2 flags are on.
 export const IDENTITY_V2_CLIENT = 'identity-v2';
 
-type SessionResult = { token: string; user: { id: string; userType: string; gymId?: string; email?: string; portalUser?: boolean; aclPermissions?: string[] } };
+type SessionResult = { token: string; user: { id: string; userType: string; gymId?: string; email?: string; portalUser?: boolean; aclPermissions?: string[]; organizationUser?: boolean; organizationRoles?: string[] } };
 
 // The portal never registers anyone. It asks for an admin profile first (as it
 // always has), then for an existing gym owner profile, then an existing gym
@@ -35,6 +35,19 @@ const PORTAL_SIGN_IN_ROLES = [
   { requestedRole: 'gym_staff', existingOnly: true },
 ];
 const NO_SUCH_PROFILE = new Set(['admin_self_registration_not_allowed', 'profile_not_found']);
+/** Roles in a B2B organisation that see its billing (invoices, payments, statement). */
+export const ORG_BILLING_ROLES = new Set(['owner', 'admin', 'finance']);
+/** Roles that see the organisation's people (beneficiaries). Everyone sees its programmes. */
+export const ORG_PEOPLE_ROLES = new Set(['owner', 'admin', 'manager', 'hr', 'analyst']);
+
+/** How a person is named when adding them: the email or mobile number of their FitFlex account, or their user id. */
+export type UserContact = { userId?: string; email?: string; phone?: string };
+export function userContact(text: string): UserContact {
+  const value = text.trim();
+  if (value.includes('@')) return { email: value };
+  if (/^usr_/i.test(value)) return { userId: value };
+  return { phone: value };
+}
 
 /** A persona (User row) of the signed-in Person, as the backend returns it. */
 export interface PersonaSummary {
@@ -104,11 +117,118 @@ function qs(params: object): string {
   return s ? `?${s}` : '';
 }
 
+/** Group routes of a company's HR, or of a B2B organisation's own users. */
+const groupsBase = (orgId?: string) => (orgId ? `/b2b/organizations/${encodeURIComponent(orgId)}/groups` : '/corporate/groups');
+
 /** A PIN is always exactly four digits. */
 export const isPin = (pin: string) => /^[0-9]{4}$/.test(pin);
 
 /** The sign-in password the app derives from a PIN; the portal must send the same. */
 export const passwordForPin = (pin: string) => `fitflex-pin:${pin}`;
+
+
+// ─── Moderation (admin, 'moderation' / 'moderation_decide' scopes) ───
+export type ModerationEntityType = 'gym' | 'trainer' | 'vendor' | 'product';
+export type ModerationStatus = 'pending' | 'approved' | 'rejected' | 'suspended' | 'hidden';
+export type ModerationAction = 'approve' | 'reject' | 'suspend' | 'hide' | 'restore' | 'reopen' | 'require_review';
+export type ModerationCounts = Record<ModerationStatus, number>;
+export type ModerationRow = {
+  entityType: ModerationEntityType; id: string; name: string; subtitle: string | null; status: string; tier?: string | null;
+  moderationStatus: ModerationStatus; reason: string | null; decidedBy: string | null; decidedAt: string | null;
+};
+export type ModerationList = { items: ModerationRow[]; total: number; nextCursor: number | null; counts: ModerationCounts };
+export type ModerationEvent = {
+  id: string; entityType: ModerationEntityType; entityId: string; action: ModerationAction;
+  fromStatus: ModerationStatus | null; toStatus: ModerationStatus; reason: string | null; actor: string; at: string;
+};
+export type ModerationDetail = {
+  entityType: ModerationEntityType;
+  summary: { id: string; name: string; subtitle: string | null; status: string; tier?: string | null };
+  moderationStatus: ModerationStatus; reason: string | null; decidedBy: string | null; decidedAt: string | null;
+  eligibility: { ok: boolean; reasons: string[] };
+  history: ModerationEvent[];
+  allowedActions: Array<{ action: ModerationAction; reasonRequired: boolean }>;
+};
+export type ModerationDecision = { entityType: ModerationEntityType; entityId: string; from: ModerationStatus; to: ModerationStatus; heldPromotions: number };
+
+
+// ─── Promotions (admin: 'promotions', 'promotions_approve', 'campaigns' scopes) ───
+export type PromotionType = 'featured' | 'promoted' | 'sponsored' | 'recommended' | 'campaign';
+export type PromotionStatus = 'draft' | 'pending_approval' | 'approved' | 'scheduled' | 'active' | 'paused' | 'expired' | 'completed' | 'rejected' | 'cancelled';
+export type PromotionPlacement = 'gym_discovery' | 'trainer_discovery' | 'vendor_discovery' | 'marketplace' | 'search_results' | 'home' | 'campaign_page';
+export type GeoScope = { areaIds: string[]; radius?: { lat: number; lng: number; km: number } };
+export type PromotionEntity = { id: string; name: string; subtitle: string | null; status: string };
+export type Promotion = {
+  id: string; entityType: ModerationEntityType; entityId: string; type: PromotionType; status: PromotionStatus; effectiveStatus: PromotionStatus;
+  statusReason: string | null; campaignId: string | null; partnerRef: string | null; startsAt: string; endsAt: string; priority: number; boostWeight: number;
+  geoScope: GeoScope; audience: Record<string, unknown>; categories: string[]; isCommercial: boolean; relationshipType: string | null;
+  commercialRef: string | null; disclosureLabel: string | null; notes: string | null; createdBy: string; submittedBy: string | null; approvedBy: string | null;
+  placements: PromotionPlacement[]; label: string | null; entity: PromotionEntity | null; createdAt: string; updatedAt: string;
+};
+export type PromotionList = { items: Promotion[]; total: number; nextCursor: number | null };
+export type CapacityRow = { placement: PromotionPlacement; type: PromotionType; max: number; used: number; available: number; full: boolean };
+export type AuditEntry = { id: string; at: string; actor: string; action: string; target: string; before: Record<string, unknown> | null; after: Record<string, unknown> | null };
+export type PromotionDetail = {
+  promotion: Promotion; eligibility: { ok: boolean; reasons: string[] }; capacity: CapacityRow[]; history: AuditEntry[]; allowedActions: string[];
+};
+export type PromotionPreview = {
+  entity: PromotionEntity; eligibility: { ok: boolean; reasons: string[] }; capacity: CapacityRow[]; canApprove: boolean;
+  warnings: Array<{ code: string; reasons?: string[]; capacity?: CapacityRow[] }>;
+};
+export type PromotionInput = {
+  entityType: ModerationEntityType; entityId: string; type: PromotionType; placements: PromotionPlacement[]; startsAt: string; endsAt: string;
+  priority: number; boostWeight: number; geoScope: GeoScope; categories: string[]; campaignId?: string | null; partnerRef?: string | null;
+  isCommercial: boolean; relationshipType?: string | null; commercialRef?: string | null; disclosureLabel?: string | null; notes?: string | null;
+};
+export type PromotionReference = {
+  entityTypes: ModerationEntityType[];
+  promotionTypes: Record<PromotionType, { label: string; disclosure: string; commercial: 'required' | 'forbidden' | 'either' }>;
+  relationshipTypes: Record<string, string>;
+  placements: Record<PromotionPlacement, { label: string; entityTypes: ModerationEntityType[] }>;
+  defaultLimits: Record<PromotionType, number>; defaultMaxBoostFraction: number; maxPriority: number;
+};
+export type PromotionOverview = {
+  active: number; scheduled: number; paused: number; drafts: number; pendingPromotionRequests: number; pendingModeration: number;
+  moderation: ModerationCounts; expiringSoon: Array<{ id: string; entityType: ModerationEntityType; entityId: string; type: PromotionType; endsAt: string }>;
+  recent: AuditEntry[];
+};
+export type PlacementLimit = {
+  placement: PromotionPlacement; label: string; promotionType: PromotionType; entityTypes: ModerationEntityType[]; maxSlots: number;
+  source: 'config' | 'default'; maxBoostFraction: number; rotationMode: 'none' | 'time_slice'; rotationWindowMinutes: number; used: number;
+};
+export type PromotionCampaign = {
+  id: string; name: string; description: string | null; status: 'draft' | 'active' | 'ended' | 'cancelled'; statusReason: string | null;
+  startsAt: string; endsAt: string; geoScope: GeoScope; createdBy: string; createdAt: string; updatedAt: string; promotionCount?: number;
+};
+export type PromotionMetrics = {
+  impressions: number; searchAppearances: number; clicks: number; detailViews: number; saves: number; bookingClicks: number; subscriptionClicks: number;
+  bookings: number; subscriptions: number; purchases: number; purchaseValueTzs: number; bookingValueTzs?: number; subscriptionValueTzs?: number; uniqueViewers: number;
+  clickThroughRate: number | null; viewRate: number | null; conversions: number; conversionRate: number | null;
+};
+export type PromotionAnalyticsRef = {
+  id: string; type: PromotionType; status: PromotionStatus; entityType: ModerationEntityType; entityId: string; entityName: string | null;
+  startsAt: string; endsAt: string; campaignId: string | null; isCommercial: boolean;
+};
+export type PromotionAnalyticsItem = PromotionMetrics & { promotion: PromotionAnalyticsRef };
+export type PromotionAnalyticsRange = { from: string; to: string };
+export type PromotionAnalytics = { range: PromotionAnalyticsRange; totals: PromotionMetrics; items: PromotionAnalyticsItem[]; notTracked: string[]; unverifiedEvents?: number };
+export type PromotionAnalyticsFilters = { from?: string; to?: string; type?: PromotionType; entityType?: ModerationEntityType; campaignId?: string; placement?: PromotionPlacement };
+export type PromotionFunnelStep = { step: 'impressions' | 'clicks' | 'detailViews' | 'actionClicks' | 'conversions'; count: number };
+export type PromotionAnalyticsDetail = {
+  promotion: PromotionAnalyticsRef; range: PromotionAnalyticsRange; totals: PromotionMetrics;
+  daily: Array<{ day: string } & Partial<PromotionMetrics>>; byPlacement: Array<{ placement: PromotionPlacement } & PromotionMetrics>;
+  funnel: PromotionFunnelStep[]; notTracked: string[]; unverifiedEvents?: number;
+};
+export type CampaignAnalytics = {
+  campaign: { id: string; name: string; status: string; startsAt: string; endsAt: string }; range: PromotionAnalyticsRange;
+  totals: PromotionMetrics; items: PromotionAnalyticsItem[]; notTracked: string[]; unverifiedEvents?: number;
+};
+export type GeoArea = { id: string; level: 'country' | 'region' | 'city' | 'district'; name: string; parentId: string | null };
+export type EntityMatch = {
+  entityType: ModerationEntityType; id: string; name: string; subtitle: string | null; status: string; moderationStatus: ModerationStatus;
+  promotable: boolean; reasons: string[]; placements: PromotionPlacement[];
+};
+export type PartnerMatch = { id: string; name: string; legalName: string; type: string; status: string };
 
 export const api = {
   firebaseSession: (idToken: string, requestedRole: 'member' | 'trainer' | 'gym_owner' | 'gym_operator' | 'admin' = 'gym_operator') =>
@@ -125,6 +245,18 @@ export const api = {
         if (!code || !NO_SUCH_PROFILE.has(code)) throw err;
         refused = err;
       }
+    }
+    // Not FitFlex staff and not a gym: someone who looks after billing for a B2B
+    // organisation signs in with the account they already have. Nothing is
+    // created, and an account with no such organisation is refused as before.
+    try {
+      const session = await request<SessionResult>('/auth/firebase/session', { method: 'POST', body: JSON.stringify({ idToken, requestedRole: 'member', existingOnly: true }) });
+      const { organizations } = await request<{ organizations: Array<{ id: string; role: string }> }>('/b2b/me/organizations', {}, session.token);
+      // Any role in an organisation opens its area; what each role sees is decided there and on the server.
+      if (organizations.length) return { token: session.token, user: { ...session.user, organizationUser: true, organizationRoles: [...new Set(organizations.map(o => o.role))] } };
+    } catch (err) {
+      const code = err instanceof ApiError ? (err.body as { error?: string } | null)?.error : undefined;
+      if (code && !NO_SUCH_PROFILE.has(code)) throw err;
     }
     throw refused;
   },
@@ -271,17 +403,17 @@ export const api = {
     request<{ ok: boolean }>(`/owner/communications/templates/${encodeURIComponent(id)}/archive`, { method: 'POST' }, token),
 
   // ── Challenges: FitFlex admin (scope 'admin') and company HR ('corporate') ──
-  creatorChallenges: (token: string, scope: ChallengeScope) =>
+  creatorChallenges: (token: string, scope: ChallengeApiScope) =>
     request<{ challenges: ManagedChallenge[] }>(`/${scope}/challenges`, {}, token),
-  createChallenge: (token: string, scope: ChallengeScope, body: ChallengeInput) =>
+  createChallenge: (token: string, scope: ChallengeApiScope, body: ChallengeInput) =>
     request<{ challenge: ManagedChallenge }>(`/${scope}/challenges`, { method: 'POST', body: JSON.stringify(body) }, token),
-  updateChallenge: (token: string, scope: ChallengeScope, id: string, body: Partial<ChallengeInput>) =>
+  updateChallenge: (token: string, scope: ChallengeApiScope, id: string, body: Partial<ChallengeInput>) =>
     request<{ challenge: ManagedChallenge }>(`/${scope}/challenges/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(body) }, token),
-  challengeAction: (token: string, scope: ChallengeScope, id: string, action: 'cancel' | 'close' | 'archive') =>
+  challengeAction: (token: string, scope: ChallengeApiScope, id: string, action: 'cancel' | 'close' | 'archive' | 'publish' | 'pause' | 'resume') =>
     request<{ challenge: ManagedChallenge }>(`/${scope}/challenges/${encodeURIComponent(id)}/${action}`, { method: 'POST' }, token),
-  challengeParticipation: (token: string, scope: ChallengeScope, id: string) =>
+  challengeParticipation: (token: string, scope: ChallengeApiScope, id: string) =>
     request<ChallengeParticipation>(`/${scope}/challenges/${encodeURIComponent(id)}/participants`, {}, token),
-  challengeStandings: (token: string, scope: ChallengeScope, id: string) =>
+  challengeStandings: (token: string, scope: ChallengeApiScope, id: string) =>
     request<ChallengeStandings>(`/${scope}/challenges/${encodeURIComponent(id)}/leaderboard`, {}, token),
   // ─── Gym settlements (admin; reads need 'payments', each step its own scope) ───
   settlementRuns: (token: string, mode?: SettlementMode) =>
@@ -324,6 +456,88 @@ export const api = {
   ownerSettlement: (token: string, id: string) =>
     request<OwnerStatementDetail>(`/owner/settlements/${encodeURIComponent(id)}`, {}, token),
 
+  // ─── Account recovery (admin, 'account_recovery' scope; 404 not_found while the backend flag is off) ───
+  recoveries: (token: string, status: RecoveryFilter = 'open') =>
+    request<{ recoveries: RecoveryRow[] }>(`/admin/account-recoveries${qs({ status })}`, {}, token),
+  recovery: (token: string, id: string) =>
+    request<RecoveryDetail>(`/admin/account-recoveries/${encodeURIComponent(id)}`, {}, token),
+  recoveryNote: (token: string, id: string, note: string) =>
+    request<{ added: boolean }>(`/admin/account-recoveries/${encodeURIComponent(id)}/note`, { method: 'POST', body: JSON.stringify({ note }) }, token),
+  recoveryDecide: (token: string, id: string, body: { decision: 'approve' | 'refuse'; reason?: RecoveryRefusalReason; note?: string }) =>
+    request<{ status: 'completed' | 'refused' }>(`/admin/account-recoveries/${encodeURIComponent(id)}/decision`, { method: 'POST', body: JSON.stringify(body) }, token),
+
+
+  // ─── Moderation ───
+  moderationQueue: (token: string, f: { entityType: ModerationEntityType; status?: ModerationStatus; q?: string; cursor?: number; limit?: number }) => {
+    const q = new URLSearchParams({ entityType: f.entityType });
+    if (f.status) q.set('status', f.status);
+    if (f.q) q.set('q', f.q);
+    if (f.cursor) q.set('cursor', String(f.cursor));
+    if (f.limit) q.set('limit', String(f.limit));
+    return request<ModerationList>(`/admin/moderation?${q.toString()}`, {}, token);
+  },
+  moderationCounts: (token: string, entityType?: ModerationEntityType) =>
+    request<{ counts: ModerationCounts }>(`/admin/moderation/counts${entityType ? `?entityType=${entityType}` : ''}`, {}, token),
+  moderationDetail: (token: string, entityType: ModerationEntityType, id: string) =>
+    request<ModerationDetail>(`/admin/moderation/${entityType}/${encodeURIComponent(id)}`, {}, token),
+  moderationDecide: (token: string, entityType: ModerationEntityType, id: string, action: ModerationAction, reason?: string) =>
+    request<ModerationDecision>(`/admin/moderation/${entityType}/${encodeURIComponent(id)}/${action === 'require_review' ? 'require-review' : action}`,
+      { method: 'POST', body: JSON.stringify({ reason: reason?.trim() || undefined }) }, token),
+
+
+  // ─── Promotions ───
+  promotionReference: (token: string) => request<PromotionReference>('/admin/promotion-reference', {}, token),
+  promotionOverview: (token: string) => request<PromotionOverview>('/admin/promotion-overview', {}, token),
+  promotions: (token: string, f: { cursor?: number; limit?: number; campaignId?: string } = {}) => {
+    const q = new URLSearchParams();
+    if (f.cursor) q.set('cursor', String(f.cursor));
+    q.set('limit', String(f.limit ?? 100));
+    if (f.campaignId) q.set('campaignId', f.campaignId);
+    return request<PromotionList>(`/admin/promotions?${q.toString()}`, {}, token);
+  },
+  promotionDetail: (token: string, id: string) => request<PromotionDetail>(`/admin/promotions/${encodeURIComponent(id)}`, {}, token),
+  createPromotion: (token: string, body: PromotionInput) => request<{ promotion: Promotion }>('/admin/promotions', { method: 'POST', body: JSON.stringify(body) }, token),
+  updatePromotion: (token: string, id: string, body: Partial<PromotionInput> & { notes?: string | null }) =>
+    request<{ promotion: Promotion }>(`/admin/promotions/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(body) }, token),
+  promotionAction: (token: string, id: string, action: 'submit' | 'approve' | 'reject' | 'reopen' | 'schedule' | 'activate' | 'pause' | 'resume' | 'cancel' | 'complete', reason?: string) =>
+    request<{ promotion: Promotion; warnings?: Array<{ code: string }> }>(`/admin/promotions/${encodeURIComponent(id)}/${action}`,
+      { method: 'POST', body: JSON.stringify({ reason: reason?.trim() || undefined }) }, token),
+  previewPromotion: (token: string, body: { id: string } | PromotionInput) => request<PromotionPreview>('/admin/promotion-preview', { method: 'POST', body: JSON.stringify(body) }, token),
+  searchPromotionEntities: (token: string, entityType: ModerationEntityType, q: string) =>
+    request<{ items: EntityMatch[]; total: number }>(`/admin/promotion-entities?entityType=${entityType}&q=${encodeURIComponent(q)}`, {}, token),
+  searchPromotionPartners: (token: string, q: string) =>
+    request<{ items: PartnerMatch[]; total: number }>(`/admin/promotion-partners?q=${encodeURIComponent(q)}`, {}, token),
+  geoAreas: (token: string) => request<{ areas: GeoArea[] }>('/admin/geo-areas', {}, token),
+  placementLimits: (token: string) => request<{ limits: PlacementLimit[] }>('/admin/promotion-limits', {}, token),
+  setPlacementLimit: (token: string, placement: PromotionPlacement, type: PromotionType, body: { maxSlots: number; maxBoostFraction?: number | null; rotationMode?: 'none' | 'time_slice'; rotationWindowMinutes?: number }) =>
+    request<{ limit: PlacementLimit }>(`/admin/promotion-limits/${placement}/${type}`, { method: 'PUT', body: JSON.stringify(body) }, token),
+  promotionCampaigns: (token: string) => request<{ items: PromotionCampaign[]; total: number }>('/admin/promotion-campaigns?limit=100', {}, token),
+  promotionCampaign: (token: string, id: string) => request<{ campaign: PromotionCampaign; promotions: Promotion[] }>(`/admin/promotion-campaigns/${encodeURIComponent(id)}`, {}, token),
+  createPromotionCampaign: (token: string, body: { name: string; description?: string; startsAt: string; endsAt: string; geoScope: GeoScope }) =>
+    request<{ campaign: PromotionCampaign }>('/admin/promotion-campaigns', { method: 'POST', body: JSON.stringify(body) }, token),
+  updatePromotionCampaign: (token: string, id: string, body: Partial<{ name: string; description: string; startsAt: string; endsAt: string; geoScope: GeoScope }>) =>
+    request<{ campaign: PromotionCampaign }>(`/admin/promotion-campaigns/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(body) }, token),
+  promotionCampaignAction: (token: string, id: string, action: 'start' | 'end' | 'cancel', reason?: string) =>
+    request<{ campaign: PromotionCampaign; openPromotions: string[] }>(`/admin/promotion-campaigns/${encodeURIComponent(id)}/${action}`,
+      { method: 'POST', body: JSON.stringify({ reason: reason?.trim() || undefined }) }, token),
+  promotionAnalytics: (token: string, f: PromotionAnalyticsFilters = {}) => {
+    const q = new URLSearchParams();
+    for (const [k, v] of Object.entries(f)) if (v) q.set(k, String(v));
+    return request<PromotionAnalytics>(`/admin/promotion-analytics?${q.toString()}`, {}, token);
+  },
+  promotionAnalyticsDetail: (token: string, id: string, f: { from?: string; to?: string } = {}) => {
+    const q = new URLSearchParams();
+    if (f.from) q.set('from', f.from);
+    if (f.to) q.set('to', f.to);
+    return request<PromotionAnalyticsDetail>(`/admin/promotions/${encodeURIComponent(id)}/analytics?${q.toString()}`, {}, token);
+  },
+  campaignAnalytics: (token: string, id: string, f: { from?: string; to?: string } = {}) => {
+    const q = new URLSearchParams();
+    if (f.from) q.set('from', f.from);
+    if (f.to) q.set('to', f.to);
+    return request<CampaignAnalytics>(`/admin/promotion-campaigns/${encodeURIComponent(id)}/analytics?${q.toString()}`, {}, token);
+  },
+
   // ─── Partner KYC / KYB review (admin, 'kyc' scope) ───
   kycCases: (token: string, filters: { status?: KycCaseStatus; partnerType?: KycPartnerType } = {}) => {
     const q = new URLSearchParams();
@@ -356,27 +570,27 @@ export const api = {
     return res.blob();
   },
   /** Earned rewards to hand out: FitFlex admin ('admin') or company HR ('corporate'). */
-  rewardQueue: (token: string, scope: ChallengeScope, filters: { status?: RewardStatus; challengeId?: string } = {}) => {
+  rewardQueue: (token: string, scope: ChallengeApiScope, filters: { status?: RewardStatus; challengeId?: string } = {}) => {
     const q = new URLSearchParams();
     if (filters.status) q.set('status', filters.status);
     if (filters.challengeId) q.set('challengeId', filters.challengeId);
     const s = q.toString();
     return request<RewardQueue>(`/${scope}/rewards${s ? '?' + s : ''}`, {}, token);
   },
-  setRewardStatus: (token: string, scope: ChallengeScope, id: string, body: { status: RewardStatus; reference?: string; note?: string }) =>
+  setRewardStatus: (token: string, scope: ChallengeApiScope, id: string, body: { status: RewardStatus; reference?: string; note?: string }) =>
     request<{ reward: RewardAward }>(`/${scope}/rewards/${encodeURIComponent(id)}/status`, { method: 'POST', body: JSON.stringify(body) }, token),
-  // ── Groups (company HR) and moderation (admin) ──
-  corporateGroups: (token: string) => request<{ groups: SocialGroup[] }>('/corporate/groups', {}, token),
-  createCorporateGroup: (token: string, body: GroupInput) =>
-    request<{ group: SocialGroup }>('/corporate/groups', { method: 'POST', body: JSON.stringify(body) }, token),
-  corporateGroup: (token: string, id: string) =>
-    request<{ group: SocialGroup; members: GroupMember[] }>(`/corporate/groups/${encodeURIComponent(id)}`, {}, token),
-  updateCorporateGroup: (token: string, id: string, body: Partial<GroupInput>) =>
-    request<{ group: SocialGroup; members: GroupMember[] }>(`/corporate/groups/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(body) }, token),
-  archiveCorporateGroup: (token: string, id: string) =>
-    request<{ archived: boolean }>(`/corporate/groups/${encodeURIComponent(id)}/archive`, { method: 'POST' }, token),
-  corporateGroupMember: (token: string, id: string, userId: string, action: GroupMemberAction) =>
-    request<{ group: SocialGroup; members: GroupMember[] }>(`/corporate/groups/${encodeURIComponent(id)}/members/${encodeURIComponent(userId)}/${action}`, { method: 'POST' }, token),
+  // ── Groups (company HR, or a B2B organisation's own users with `orgId`) and moderation (admin) ──
+  corporateGroups: (token: string, orgId?: string) => request<{ groups: SocialGroup[] }>(groupsBase(orgId), {}, token),
+  createCorporateGroup: (token: string, body: GroupInput, orgId?: string) =>
+    request<{ group: SocialGroup }>(groupsBase(orgId), { method: 'POST', body: JSON.stringify(body) }, token),
+  corporateGroup: (token: string, id: string, orgId?: string) =>
+    request<{ group: SocialGroup; members: GroupMember[] }>(`${groupsBase(orgId)}/${encodeURIComponent(id)}`, {}, token),
+  updateCorporateGroup: (token: string, id: string, body: Partial<GroupInput>, orgId?: string) =>
+    request<{ group: SocialGroup; members: GroupMember[] }>(`${groupsBase(orgId)}/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(body) }, token),
+  archiveCorporateGroup: (token: string, id: string, orgId?: string) =>
+    request<{ archived: boolean }>(`${groupsBase(orgId)}/${encodeURIComponent(id)}/archive`, { method: 'POST' }, token),
+  corporateGroupMember: (token: string, id: string, userId: string, action: GroupMemberAction, orgId?: string) =>
+    request<{ group: SocialGroup; members: GroupMember[] }>(`${groupsBase(orgId)}/${encodeURIComponent(id)}/members/${encodeURIComponent(userId)}/${action}`, { method: 'POST' }, token),
   socialReports: (token: string, status: SocialReportStatus) =>
     request<{ reports: SocialReport[] }>(`/admin/social/reports?${new URLSearchParams({ status })}`, {}, token),
   resolveSocialReport: (token: string, id: string, action: 'remove' | 'dismiss') =>
@@ -394,6 +608,13 @@ export const api = {
   /** HR: the company's staff (for eligibility by department or person). */
   corporateStaff: (token: string) =>
     request<{ employees: CorporateEmployee[] }>('/corporate/staff', {}, token),
+  provisionCorporateStaff: (token: string, body: { displayName: string; phone?: string; email?: string; department?: string }) =>
+    request<{ employee: CorporateEmployee }>('/corporate/staff', { method: 'POST', body: JSON.stringify(body) }, token),
+  setCorporateStaffStatus: (token: string, employeeId: string, status: string) =>
+    request<{ employee: CorporateEmployee }>(`/corporate/staff/${encodeURIComponent(employeeId)}/status`, { method: 'POST', body: JSON.stringify({ status }) }, token),
+  /** Link an employee to their FitFlex member account (by email, mobile number or user id); `null` unlinks. */
+  linkCorporateStaff: (token: string, employeeId: string, contact: UserContact | null) =>
+    request<{ employee: CorporateEmployee }>(`/corporate/staff/${encodeURIComponent(employeeId)}/link`, { method: 'POST', body: JSON.stringify(contact ?? { userId: null }) }, token),
   /** HR sign-in: email + password (not Firebase). */
   hrLogin: (email: string, password: string) =>
     request<{ token: string; user: { id: string; userType: string; email?: string; displayName?: string; corporateId?: string } }>(
@@ -424,13 +645,22 @@ export const api = {
     request<{ created: number; existing: number }>('/admin/b2b/corporate-sync', { method: 'POST' }, token),
   b2bOrganizationUsers: (token: string, id: string, params: { status?: string; limit?: number } = {}) =>
     request<Paged<B2BOrganizationUser>>(`/b2b/organizations/${encodeURIComponent(id)}/users${qs(params)}`, {}, token),
-  addB2BOrganizationUser: (token: string, id: string, body: { userId: string; role: string; permissions?: string[] }) =>
+  addB2BOrganizationUser: (token: string, id: string, body: UserContact & { role: string; permissions?: string[] }) =>
     request<{ organizationUser: B2BOrganizationUser }>(`/b2b/organizations/${encodeURIComponent(id)}/users`, { method: 'POST', body: JSON.stringify(body) }, token),
   updateB2BOrganizationUser: (token: string, id: string, orgUserId: string, body: { role?: string; status?: string; permissions?: string[] }) =>
     request<{ organizationUser: B2BOrganizationUser }>(`/b2b/organizations/${encodeURIComponent(id)}/users/${encodeURIComponent(orgUserId)}`, { method: 'PUT', body: JSON.stringify(body) }, token),
   b2bBeneficiaries: (token: string, id: string, params: { status?: string; search?: string; limit?: number } = {}) =>
     request<Paged<B2BBeneficiary>>(`/b2b/organizations/${encodeURIComponent(id)}/beneficiaries${qs(params)}`, {}, token),
-  enrollB2BBeneficiary: (token: string, id: string, body: { userId: string; beneficiaryType?: string; externalReference?: string; groupName?: string; status?: string }) =>
+  // Many people at once; those who have not joined FitFlex yet are invited.
+  importB2BBeneficiaries: (token: string, id: string, body: { rawText: string; dryRun?: boolean }) =>
+    request<B2BImportResult>(`/b2b/organizations/${encodeURIComponent(id)}/beneficiaries/import`, { method: 'POST', body: JSON.stringify(body) }, token),
+  b2bBeneficiaryInvites: (token: string, id: string) =>
+    request<{ items: B2BBeneficiaryInvite[]; invited: number; emailConfigured: boolean; smsConfigured: boolean }>(`/b2b/organizations/${encodeURIComponent(id)}/beneficiary-invites`, {}, token),
+  cancelB2BBeneficiaryInvite: (token: string, id: string, inviteId: string) =>
+    request<{ invite: B2BBeneficiaryInvite }>(`/b2b/organizations/${encodeURIComponent(id)}/beneficiary-invites/${encodeURIComponent(inviteId)}/cancel`, { method: 'POST', body: '{}' }, token),
+  resendB2BBeneficiaryInvite: (token: string, id: string, inviteId: string) =>
+    request<{ invite: B2BBeneficiaryInvite; sent: { email: boolean; sms: boolean }; emailConfigured: boolean; smsConfigured: boolean }>(`/b2b/organizations/${encodeURIComponent(id)}/beneficiary-invites/${encodeURIComponent(inviteId)}/resend`, { method: 'POST', body: '{}' }, token),
+  enrollB2BBeneficiary: (token: string, id: string, body: UserContact & { beneficiaryType?: string; externalReference?: string; groupName?: string; status?: string }) =>
     request<{ beneficiary: B2BBeneficiary }>(`/b2b/organizations/${encodeURIComponent(id)}/beneficiaries`, { method: 'POST', body: JSON.stringify(body) }, token),
   setB2BBeneficiaryStatus: (token: string, id: string, beneficiaryId: string, status: string) =>
     request<{ beneficiary: B2BBeneficiary }>(`/b2b/organizations/${encodeURIComponent(id)}/beneficiaries/${encodeURIComponent(beneficiaryId)}/status`, { method: 'POST', body: JSON.stringify({ status }) }, token),
@@ -465,6 +695,107 @@ export const api = {
     request<{ consumption: B2BConsumption; sourceEvent: Record<string, unknown> | null; settlementCandidate: Record<string, unknown> }>(`/admin/b2b/consumptions/${encodeURIComponent(id)}`, {}, token),
   reverseB2BConsumption: (token: string, id: string, reason: string) =>
     request<{ consumption: B2BConsumption }>(`/admin/b2b/consumptions/${encodeURIComponent(id)}/reverse`, { method: 'POST', body: JSON.stringify({ reason }) }, token),
+  // ── B2B billing and financial management (Phase 5) ──
+  adminB2BBilling: (token: string, period?: string) => request<B2BBillingDashboard>(`/admin/b2b/billing${qs({ period })}`, {}, token),
+  adminB2BAgreements: (token: string, orgId: string) =>
+    request<{ agreements: B2BAgreement[]; inForce: B2BAgreement | null }>(`/admin/b2b/organizations/${encodeURIComponent(orgId)}/agreements`, {}, token),
+  createB2BAgreement: (token: string, orgId: string, body: B2BAgreementInput) =>
+    request<{ agreement: B2BAgreement }>(`/admin/b2b/organizations/${encodeURIComponent(orgId)}/agreements`, { method: 'POST', body: JSON.stringify(body) }, token),
+  activateB2BAgreement: (token: string, id: string) =>
+    request<{ agreement: B2BAgreement }>(`/admin/b2b/agreements/${encodeURIComponent(id)}/activate`, { method: 'POST', body: '{}' }, token),
+  endB2BAgreement: (token: string, id: string, effectiveTo?: string) =>
+    request<{ agreement: B2BAgreement }>(`/admin/b2b/agreements/${encodeURIComponent(id)}/end`, { method: 'POST', body: JSON.stringify({ effectiveTo }) }, token),
+  adminB2BBillingAccount: (token: string, orgId: string) =>
+    request<{ account: B2BBillingAccount }>(`/admin/b2b/organizations/${encodeURIComponent(orgId)}/billing-account`, {}, token),
+  setB2BBillingAccount: (token: string, orgId: string, body: Partial<Pick<B2BBillingAccount, 'contactName' | 'email' | 'phone'>>) =>
+    request<{ account: B2BBillingAccount }>(`/admin/b2b/organizations/${encodeURIComponent(orgId)}/billing-account`, { method: 'PUT', body: JSON.stringify(body) }, token),
+  prepareB2BFee: (token: string, orgId: string, period: string) =>
+    request<{ invoice: B2BSponsorInvoice | null; added: number; reason?: string }>(`/admin/b2b/organizations/${encodeURIComponent(orgId)}/invoices/prepare-fee`, { method: 'POST', body: JSON.stringify({ period }) }, token),
+  adminB2BStatement: (token: string, orgId: string, range: { from?: string; to?: string } = {}) =>
+    request<B2BStatement>(`/admin/b2b/organizations/${encodeURIComponent(orgId)}/statement${qs(range)}`, {}, token),
+  adminB2BPayments: (token: string, organizationId?: string) =>
+    request<{ items: B2BPayment[]; total: number }>(`/admin/b2b/payments${qs({ organizationId, limit: 200 })}`, {}, token),
+  recordB2BPayment: (token: string, orgId: string, body: B2BPaymentInput) =>
+    request<{ payment: B2BPayment; invoices?: B2BSponsorInvoice[]; existing?: boolean; skipped?: Array<{ invoiceId: string; reason: string }> }>(
+      `/admin/b2b/organizations/${encodeURIComponent(orgId)}/payments`, { method: 'POST', body: JSON.stringify(body) }, token),
+  allocateB2BPayment: (token: string, paymentId: string, allocations: Array<{ invoiceId: string; amountTzs: number }>) =>
+    request<{ payment: B2BPayment }>(`/admin/b2b/payments/${encodeURIComponent(paymentId)}/allocate`, { method: 'POST', body: JSON.stringify({ allocations }) }, token),
+  reverseB2BPayment: (token: string, paymentId: string, reason: string) =>
+    request<{ payment: B2BPayment }>(`/admin/b2b/payments/${encodeURIComponent(paymentId)}/reverse`, { method: 'POST', body: JSON.stringify({ reason }) }, token),
+  createB2BNote: (token: string, invoiceId: string, body: { type: 'credit' | 'debit'; amountTzs: number; reason: string }) =>
+    request<{ note: B2BSponsorInvoice }>(`/admin/b2b/invoices/${encodeURIComponent(invoiceId)}/notes`, { method: 'POST', body: JSON.stringify(body) }, token),
+  issueB2BNote: (token: string, noteId: string) =>
+    request<{ note: B2BSponsorInvoice }>(`/admin/b2b/notes/${encodeURIComponent(noteId)}/issue`, { method: 'POST', body: '{}' }, token),
+  applyB2BCredit: (token: string, noteId: string, allocations: Array<{ invoiceId: string; amountTzs: number }>) =>
+    request<{ invoices: B2BSponsorInvoice[] }>(`/admin/b2b/notes/${encodeURIComponent(noteId)}/apply`, { method: 'POST', body: JSON.stringify({ allocations }) }, token),
+  adminB2BInvoiceDetail: (token: string, invoiceId: string) =>
+    request<B2BInvoiceDetail>(`/admin/b2b/invoices/${encodeURIComponent(invoiceId)}`, {}, token),
+  adminB2BReconciliation: (token: string, invoiceId: string) =>
+    request<B2BReconciliation>(`/admin/b2b/invoices/${encodeURIComponent(invoiceId)}/reconciliation`, {}, token),
+  // The organisation's own billing (billing.read: owner, admin, finance).
+  myB2BOrganizations: (token: string) =>
+    request<{ organizations: Array<{ id: string; legalName: string; tradingName?: string | null; role: string; status: string }> }>('/b2b/me/organizations', {}, token),
+  orgBilling: (token: string, orgId: string) => request<B2BOrgBilling>(`/b2b/organizations/${encodeURIComponent(orgId)}/billing`, {}, token),
+  orgInvoices: (token: string, orgId: string) =>
+    request<{ items: B2BSponsorInvoice[]; total: number }>(`/b2b/organizations/${encodeURIComponent(orgId)}/invoices${qs({ limit: 100 })}`, {}, token),
+  orgInvoice: (token: string, orgId: string, invoiceId: string) =>
+    request<B2BInvoiceDetail>(`/b2b/organizations/${encodeURIComponent(orgId)}/invoices/${encodeURIComponent(invoiceId)}`, {}, token),
+  orgPayments: (token: string, orgId: string) =>
+    request<{ items: B2BPayment[]; total: number }>(`/b2b/organizations/${encodeURIComponent(orgId)}/payments${qs({ limit: 200 })}`, {}, token),
+  orgStatement: (token: string, orgId: string, range: { from?: string; to?: string } = {}) =>
+    request<B2BStatement>(`/b2b/organizations/${encodeURIComponent(orgId)}/statement${qs(range)}`, {}, token),
+  // Paying (Phase 6): where to pay, "we have paid" notices, the hold.
+  orgPaying: (token: string, orgId: string) => request<B2BOrgPaying>(`/b2b/organizations/${encodeURIComponent(orgId)}/paying`, {}, token),
+  submitPaymentNotice: (token: string, orgId: string, body: B2BPaymentNoticeInput) =>
+    request<{ notice: B2BPaymentNotice; existing?: boolean }>(`/b2b/organizations/${encodeURIComponent(orgId)}/payment-notices`, { method: 'POST', body: JSON.stringify(body) }, token),
+  withdrawPaymentNotice: (token: string, orgId: string, noticeId: string) =>
+    request<{ notice: B2BPaymentNotice }>(`/b2b/organizations/${encodeURIComponent(orgId)}/payment-notices/${encodeURIComponent(noticeId)}/withdraw`, { method: 'POST', body: '{}' }, token),
+  // Analytics and reporting. `query` carries the period (period= or from=&to=) and filters.
+  orgDashboard: (token: string, orgId: string, query: B2BAnalyticsQuery = {}) =>
+    request<B2BDashboard>(`/b2b/organizations/${encodeURIComponent(orgId)}/analytics/dashboard${qs(query)}`, {}, token),
+  orgPeopleAnalytics: (token: string, orgId: string, query: B2BAnalyticsQuery & { search?: string; activity?: string; sort?: string; limit?: number; cursor?: number } = {}) =>
+    request<{ period: B2BPeriod; items: B2BPersonRow[]; total: number; nextCursor: number | null }>(`/b2b/organizations/${encodeURIComponent(orgId)}/analytics/people${qs(query)}`, {}, token),
+  orgPersonAnalytics: (token: string, orgId: string, beneficiaryId: string, query: B2BAnalyticsQuery = {}) =>
+    request<B2BPersonDetail>(`/b2b/organizations/${encodeURIComponent(orgId)}/analytics/people/${encodeURIComponent(beneficiaryId)}${qs(query)}`, {}, token),
+  orgProgramAnalytics: (token: string, orgId: string, query: B2BAnalyticsQuery = {}) =>
+    request<{ period: B2BPeriod; items: B2BProgramAnalytics[] }>(`/b2b/organizations/${encodeURIComponent(orgId)}/analytics/programs${qs(query)}`, {}, token),
+  orgBenefitAnalytics: (token: string, orgId: string, query: B2BAnalyticsQuery = {}) =>
+    request<{ period: B2BPeriod; items: B2BBenefitAnalytics[] }>(`/b2b/organizations/${encodeURIComponent(orgId)}/analytics/benefits${qs(query)}`, {}, token),
+  orgProviderAnalytics: (token: string, orgId: string, query: B2BAnalyticsQuery = {}) =>
+    request<{ period: B2BPeriod; items: B2BProviderAnalytics[]; totals: { providers: number; visits: number; serviceValueTzs: number } }>(`/b2b/organizations/${encodeURIComponent(orgId)}/analytics/providers${qs(query)}`, {}, token),
+  orgFinanceAnalytics: (token: string, orgId: string, query: B2BAnalyticsQuery = {}) =>
+    request<B2BFinanceAnalytics>(`/b2b/organizations/${encodeURIComponent(orgId)}/analytics/finance${qs(query)}`, {}, token),
+  orgExport: (token: string, orgId: string, report: string, query: B2BAnalyticsQuery = {}) =>
+    request<{ filename: string; title: string; rows: number; csv: string }>(`/b2b/organizations/${encodeURIComponent(orgId)}/analytics/export/${encodeURIComponent(report)}${qs(query)}`, {}, token),
+  adminB2BAnalytics: (token: string, query: B2BAnalyticsQuery = {}) => request<B2BAnalyticsOverview>(`/admin/b2b/analytics${qs(query)}`, {}, token),
+  adminB2BDataQuality: (token: string) => request<B2BDataQuality>('/admin/b2b/analytics/data-quality', {}, token),
+  // Operations: recurring jobs, exceptions and work waiting on a person.
+  adminB2BOps: (token: string) => request<B2BOpsOverview>('/admin/b2b/ops', {}, token),
+  adminB2BJobRuns: (token: string, job: string) => request<{ job: string; items: B2BJobRun[] }>(`/admin/b2b/ops/jobs/${encodeURIComponent(job)}/runs${qs({ limit: 20 })}`, {}, token),
+  runB2BJob: (token: string, job: string) =>
+    request<{ job: string; outcome?: 'ok' | 'failed'; failure?: string | null; skipped?: string; processed?: number; succeeded?: number; failed?: number }>(`/admin/b2b/ops/jobs/${encodeURIComponent(job)}/run`, { method: 'POST', body: '{}' }, token),
+  pauseB2BJob: (token: string, job: string, body: { paused: boolean; reason?: string }) =>
+    request<{ job: string; paused: boolean }>(`/admin/b2b/ops/jobs/${encodeURIComponent(job)}/pause`, { method: 'POST', body: JSON.stringify(body) }, token),
+  adminB2BExceptions: (token: string, query: { status?: string; severity?: string; type?: string; limit?: number } = {}) =>
+    request<{ items: B2BOpsException[]; total: number }>(`/admin/b2b/ops/exceptions${qs(query)}`, {}, token),
+  setB2BExceptionStatus: (token: string, id: string, body: { status: 'open' | 'investigating' | 'resolved' | 'ignored'; resolution?: string }) =>
+    request<{ exception: B2BOpsException }>(`/admin/b2b/ops/exceptions/${encodeURIComponent(id)}/status`, { method: 'POST', body: JSON.stringify(body) }, token),
+  retryB2BException: (token: string, id: string) =>
+    request<{ exception: B2BOpsException; run: { outcome?: 'ok' | 'failed'; failure?: string | null; skipped?: string } }>(`/admin/b2b/ops/exceptions/${encodeURIComponent(id)}/retry`, { method: 'POST', body: '{}' }, token),
+  // Collections (FitFlex staff).
+  adminB2BCollections: (token: string) => request<B2BCollectionsQueue>('/admin/b2b/collections', {}, token),
+  adminB2BPaymentInstructions: (token: string) => request<{ instructions: B2BPaymentInstructions; configured: boolean }>('/admin/b2b/payment-instructions', {}, token),
+  setB2BPaymentInstructions: (token: string, body: Partial<B2BPaymentInstructions>) =>
+    request<{ instructions: B2BPaymentInstructions; configured: boolean }>('/admin/b2b/payment-instructions', { method: 'PUT', body: JSON.stringify(body) }, token),
+  confirmB2BPaymentNotice: (token: string, noticeId: string, body: { amountTzs?: number; note?: string } = {}) =>
+    request<{ notice: B2BPaymentNotice; payment?: B2BPayment; skipped?: Array<{ invoiceId: string; reason: string }> }>(
+      `/admin/b2b/payment-notices/${encodeURIComponent(noticeId)}/confirm`, { method: 'POST', body: JSON.stringify(body) }, token),
+  rejectB2BPaymentNotice: (token: string, noticeId: string, reason: string) =>
+    request<{ notice: B2BPaymentNotice }>(`/admin/b2b/payment-notices/${encodeURIComponent(noticeId)}/reject`, { method: 'POST', body: JSON.stringify({ reason }) }, token),
+  remindB2BInvoice: (token: string, invoiceId: string) =>
+    request<{ sent: boolean; recipients?: number; emailedTo?: string | null }>(`/admin/b2b/invoices/${encodeURIComponent(invoiceId)}/remind`, { method: 'POST', body: '{}' }, token),
+  setB2BBillingHold: (token: string, orgId: string, body: { onHold: boolean; reason?: string }) =>
+    request<{ organizationId: string; onHold: boolean; holdReason: string | null }>(`/admin/b2b/organizations/${encodeURIComponent(orgId)}/billing-hold`, { method: 'POST', body: JSON.stringify(body) }, token),
   // ── B2B sponsor billing (FitFlex admin) ──
   prepareB2BInvoice: (token: string, programId: string, kind: 'prepaid' | 'usage', period: string) =>
     request<{ invoice: B2BSponsorInvoice | null; added: number; credited?: number }>(`/admin/b2b/programs/${encodeURIComponent(programId)}/invoices/prepare`, { method: 'POST', body: JSON.stringify({ kind, period }) }, token),
@@ -1261,6 +1592,8 @@ export interface AnalyticsOverview {
 
 // ── Challenge management (admin + HR) ───────────────────────────────────
 export type ChallengeScope = 'admin' | 'corporate';
+/** Where the challenge and reward routes live: FitFlex admin, a company's HR, or a B2B organisation's own users. */
+export type ChallengeApiScope = ChallengeScope | `b2b/organizations/${string}`;
 export type ChallengeType = 'steps' | 'distance_km' | 'workouts' | 'active_minutes' | 'consistency' | 'gym_attendance';
 export type ChallengeMode = 'individual' | 'teams' | 'gym_vs_gym' | 'department';
 export type RewardFunding = 'fitflex' | 'company' | 'partner';
@@ -1369,6 +1702,8 @@ export interface ChallengeInput {
   eligibility?: Eligibility;
   mode?: ChallengeMode;
   teams?: string[];
+  /** Save without publishing: nobody sees it until it is published. */
+  draft?: boolean;
 }
 export interface ManagedChallenge {
   id: string;
@@ -1383,8 +1718,9 @@ export interface ManagedChallenge {
   rewardFunding?: RewardFunding | null;
   eligibility: Eligibility | null;
   mode?: ChallengeMode;
-  status: 'active' | 'closed' | 'cancelled' | 'archived';
-  phase: 'upcoming' | 'active' | 'ended' | 'cancelled';
+  /** `paused` takes no new people; those already in carry on. */
+  status: 'draft' | 'active' | 'paused' | 'closed' | 'cancelled' | 'archived';
+  phase: 'draft' | 'upcoming' | 'active' | 'ended' | 'cancelled';
   participantCount: number;
   teams?: { id: string; name: string }[];
 }
@@ -1392,9 +1728,12 @@ export interface ChallengeSummary {
   eligible: number | null;
   joined: number;
   participationRate: Rate;
-  completed: number;
+  /** null (with `resultsHidden`) while too few people take part for results to be shown. */
+  completed: number | null;
   completionRate: Rate;
-  averageProgress: number;
+  averageProgress: number | null;
+  /** Company challenges: completion and progress are withheld until `minGroupSize` people take part. */
+  resultsHidden?: boolean;
 }
 export interface DepartmentParticipation {
   department: string | null;
@@ -1421,6 +1760,9 @@ export interface CorporateEmployee {
   displayName: string;
   department?: string | null;
   email?: string | null;
+  phone?: string | null;
+  /** Their FitFlex member account, once linked; benefits only work for a linked employee. */
+  userId?: string | null;
   status: string;
 }
 export interface CorporateAccount {
@@ -1611,10 +1953,19 @@ export interface B2BSponsorInvoice {
   id: string;
   number: string;
   organizationId: string;
-  programId: string;
+  programId: string | null;
   period: string;
-  kind: 'prepaid' | 'usage';
-  status: 'draft' | 'issued' | 'paid' | 'void';
+  kind: 'prepaid' | 'usage' | 'fee' | 'credit_note' | 'debit_note';
+  status: 'draft' | 'issued' | 'partially_paid' | 'paid' | 'void';
+  /** EAT day the invoice falls due; null for a credit. */
+  dueDate?: string | null;
+  amountPaidTzs?: number;
+  /** What is still owed (negative: credit still to apply). */
+  outstandingTzs?: number;
+  overdue?: boolean;
+  relatedInvoiceId?: string | null;
+  reason?: string | null;
+  createdBy?: string | null;
   /** VAT-inclusive. */
   totalTzs: number;
   vatRateBps: number | null;
@@ -1656,7 +2007,7 @@ export interface HrUser {
 
 // ── Communications ──────────────────────────────────────────────────────
 export type CommsScope = 'owner' | 'admin';
-export type CommsChannel = 'in_app' | 'push' | 'whatsapp';
+export type CommsChannel = 'in_app' | 'push' | 'whatsapp' | 'sms';
 export type CommsPurpose = 'promotion' | 'renewal' | 'payment' | 'announcement' | 'engagement' | 'general';
 export type CommsStatus = 'draft' | 'scheduled' | 'sending' | 'sent' | 'partially_failed' | 'failed' | 'cancelled';
 export type CommsDeepLink = 'message' | 'membership' | 'renewal' | 'payment' | 'gym';
@@ -1745,7 +2096,7 @@ export interface CommsMessage {
   title: string; body: string; locale: string | null; deepLink: string | null;
   status: CommsMessageStatus; skipReason: string | null; failureReason: string | null; failurePermanent: boolean; attempts: number;
   /** Who delivered it and their reference — never credentials. */
-  provider: { name: 'inbox' | 'fcm' | 'whatsapp'; messageId: string | null; templateName?: string | null; language?: string | null; devices?: number | null; failedDevices?: number; errors?: string[]; parameters?: string[] };
+  provider: { name: 'inbox' | 'fcm' | 'whatsapp' | 'sms'; messageId: string | null; templateName?: string | null; language?: string | null; devices?: number | null; failedDevices?: number; errors?: string[]; parameters?: string[] };
   createdAt: string | null; sentAt: string | null; deliveredAt: string | null; openedAt: string | null;
   clickedAt: string | null; failedAt: string | null; nextAttemptAt: string | null;
   /** Only on a single message. */
@@ -2189,3 +2540,239 @@ export interface SettlementClawbacks {
   pending: SettlementClawbackItem[];
   skipped: Array<{ memberCycleSettlementId: string; memberId: string; reason: string }>;
 }
+
+// ── B2B billing and financial management (Phase 5) ──
+export type B2BAging = Record<'current' | 'days1to30' | 'days31to60' | 'days61to90' | 'over90', number>;
+export interface B2BBalances {
+  outstandingTzs: number; overdueTzs: number; seatBillsTzs: number; creditTzs: number; balanceTzs: number;
+  unallocatedPaymentsTzs: number; unappliedCreditNotesTzs: number; aging: B2BAging; asOf: string;
+}
+export interface B2BAgreement {
+  id: string; organizationId: string; reference: string; contractReference: string | null;
+  status: 'draft' | 'active' | 'ended'; effectiveFrom: string; effectiveTo: string | null;
+  billingCycle: string; currency: string; prepaidTermsDays: number; usageTermsDays: number;
+  platformFeeTzs: number | null; vatRateBps: number | null; notes: string | null;
+}
+export interface B2BAgreementInput {
+  effectiveFrom: string; effectiveTo?: string | null; prepaidTermsDays?: number; usageTermsDays?: number;
+  platformFeeTzs?: number | null; vatRateBps?: number | null; contractReference?: string | null;
+}
+export interface B2BBillingAccount {
+  organizationId: string; contactName: string | null; email: string | null; phone: string | null;
+  taxIdentificationNumber: string | null; registrationNumber: string | null; currency: string;
+  source: 'billing_account' | 'corporate_account' | 'organization';
+  onHold?: boolean; holdReason?: string | null;
+}
+export interface B2BAnalyticsQuery { period?: string; from?: string; to?: string; programId?: string; benefitId?: string; providerId?: string; group?: string }
+export interface B2BPeriod { preset: string; from: string; to: string; days: number; previous: { from: string; to: string }; bucket: 'day' | 'week' | 'month'; timezone: string }
+export interface B2BUsageMoney { uses: number; grossTzs: number; sponsorTzs: number; beneficiaryTzs: number }
+export interface B2BDashboard {
+  organization: { id: string; name: string }; period: B2BPeriod; freshness: string; generatedAt: string;
+  beneficiaries: { total: number; enrolled: number; pending: number; suspended: number; inactive: number; linkedToAccount: number; enrolledInPeriod: number; groups: string[] };
+  participation: { activeBeneficiaries: number; previousActiveBeneficiaries: number; changePct: number | null; utilisationRatePct: number | null; inactiveBeneficiaries: number };
+  usage: B2BUsageMoney & { passCheckins: number; sponsoredVisits: number; usesChangePct: number | null; averagePerActiveBeneficiary: number | null };
+  spend: {
+    sponsorPerUseTzs: number; sponsorPassFeesTzs: number; sponsorTotalTzs: number; memberPerUseTzs: number; memberPassSharesTzs: number; serviceValueTzs: number;
+    passes: number; passesStarted: number; costPerActiveBeneficiaryTzs: number | null; costPerSponsoredVisitTzs: number | null;
+  };
+  benefits: { active: number; usedInPeriod: number; endingWithin30Days: number; total: number };
+  providers: { used: number; top: Array<{ providerType: string; providerId: string; name: string | null; visits: number; uses: number; passCheckins: number; sponsorTzs: number }> };
+  engagement: { peopleWithActivity: number; activities: number; workouts: number; steps: number; distanceKm: number; activeMinutes: number; gymCheckins: number; peopleInChallenges: number };
+  trend: Array<{ bucket: string; uses: number; sponsorTzs: number; passCheckins: number; activities: number; activeBeneficiaries: number }>;
+  billing?: { invoicedTzs: number; invoices: number; paidTzs: number; payments: number; outstandingTzs: number; overdueTzs: number; creditTzs: number; aging: B2BAging; asOf: string };
+}
+export interface B2BPersonRow {
+  beneficiaryId: string; name: string | null; externalReference: string | null; group: string | null; beneficiaryType: string; status: string; enrolledAt: string | null;
+  linkedToAccount: boolean; active: boolean; sponsoredUses: number; passCheckins: number; sponsorTzs: number; memberTzs: number; serviceValueTzs: number;
+  gymCheckins: number; activities: number; workouts: number; steps: number; activeMinutes: number; lastActiveDay: string | null;
+}
+export interface B2BPersonDetail {
+  period: B2BPeriod;
+  beneficiary: { id: string; name: string | null; externalReference: string | null; group: string | null; beneficiaryType: string; status: string; enrolledAt: string | null; linkedToAccount: boolean };
+  totals: B2BUsageMoney & { passCheckins: number; activities: number; otherGymVisits: number; capped: boolean };
+  byBenefit: Array<B2BUsageMoney & { benefitId: string; benefitName: string | null }>;
+  passes: Array<{ period: string; passTier: string; status: string; sponsorTzs: number; memberTzs: number; benefitName: string | null; startedAt: string | null }>;
+  sponsoredUsage: Array<{ id: string; day: string; benefitName: string | null; serviceType: string; providerType: string; provider: string | null; quantity: number; serviceValueTzs: number; sponsorTzs: number; memberTzs: number }>;
+  passCheckins: Array<{ id: string; day: string; gym: string | null; passTier: string | null; benefitName: string | null }>;
+  otherGymVisits: Array<{ id: string; day: string; gym: string | null }>;
+  activities: Array<{ id: string; day: string; type: string; source: string; durationMinutes: number | null; distanceKm: number | null; steps: number | null; activeMinutes: number | null; intensity: string | null; gym: string | null }>;
+  challenges: Array<{ id: string; name: string; type: string; target: number; endDate: string; phase: string; progress: number; completed: boolean }>;
+  notShown: string[];
+}
+export interface B2BBenefitAnalytics {
+  benefitId: string; name: string; benefitType: string; status: string; programId: string; programName: string | null; fundingType: string;
+  usageLimit: number | null; usagePeriod: string | null; eligible: number; users: number; uses: number; reachPct: number | null; averageUsesPerUser: number | null;
+  serviceValueTzs: number; sponsorTzs: number; memberTzs: number; passes: number | null; passesStarted: number | null;
+  allowance: { windowStart: string; windowEnd: string | null; consumedUnits: number; availableUnits: number; usedPct: number | null; peopleAtLimit: number; peopleNearLimit: number } | null;
+}
+export interface B2BProgramAnalytics {
+  programId: string; name: string; programType: string; status: string; startDate: string; endDate: string | null; benefits: number; activeBenefits: number;
+  eligible: number; activeBeneficiaries: number; participationPct: number | null; uses: number; passCheckins: number; serviceValueTzs: number;
+  sponsorPerUseTzs: number; sponsorPassFeesTzs: number; sponsorTotalTzs: number; memberTzs: number;
+  budget: { budgetTzs: number | null; committedTzs: number; remainingTzs: number | null; usedPct: number | null };
+}
+export interface B2BProviderAnalytics {
+  providerType: string; providerId: string; name: string | null; location: string | null; visits: number; uses: number; passCheckins: number; people: number; repeatPeople: number;
+  serviceValueTzs: number; sponsorTzs: number; memberTzs: number; settlement?: { perUseVisits: number; inLiveSettlement: number; notYetSettled: number };
+}
+export interface B2BFinanceAnalytics {
+  period: B2BPeriod; billing: NonNullable<B2BDashboard['billing']>; note: string;
+  months: Array<{ month: string; invoicedTzs: number; creditNotesTzs: number; collectedTzs: number; sponsorPerUseTzs: number; sponsorPassFeesTzs: number; memberTzs: number; serviceValueTzs: number }>;
+}
+export interface B2BAnalyticsOverview {
+  period: B2BPeriod; generatedAt: string;
+  organizations: { total: number; active: number; createdInPeriod: number; withUsage: number; byStatus: Array<{ status: string; count: number }>; byType: Array<{ organizationType: string; count: number }> };
+  beneficiaries: { total: number; enrolled: number; linkedToAccount: number; active: number; utilisationRatePct: number | null };
+  usage: B2BUsageMoney & { passCheckins: number; usesChangePct: number | null };
+  billing: { invoicedTzs: number; collectedTzs: number };
+  topOrganizations: Array<B2BUsageMoney & { organizationId: string; name: string | null; passCheckins: number; activeBeneficiaries: number }>;
+  topProviders: Array<B2BUsageMoney & { providerType: string; providerId: string; name: string | null; people: number; organizations: number }>;
+  trend: Array<{ bucket: string; uses: number; sponsorTzs: number }>;
+}
+export interface B2BImportResult {
+  dryRun?: boolean; importId?: string; total: number; enrolled: number; invited: number; unchanged: number; rejected: number; withoutEmail: number; withoutPhone: number; emailConfigured: boolean; smsConfigured: boolean;
+  problems: Array<{ line: number; name: string | null; contact: string | null; problem: string }>;
+}
+export interface B2BBeneficiaryInvite {
+  id: string; organizationId: string; email: string | null; phone: string | null; displayName: string | null; externalReference: string | null; groupName: string | null;
+  beneficiaryType: string; status: 'invited' | 'enrolled' | 'cancelled'; invitedAt: string; emailsSent: number; lastEmailAt: string | null; nextEmailAt: string | null;
+  emailFailures: number; lastEmailError: string | null; smsSent: number; lastSmsAt: string | null; nextSmsAt: string | null; smsFailures: number; canResend: boolean;
+}
+export interface B2BJobRun {
+  id: string; job: string; status: 'running' | 'ok' | 'failed'; slot: string | null; trigger: 'schedule' | 'catch_up' | 'retry' | 'manual' | null; triggeredBy: string | null;
+  attempt: number; startedAt: string; finishedAt: string | null; processed: number | null; succeeded: number | null; failed: number | null; error: string | null;
+}
+export interface B2BJobStatus {
+  name: string; title: string; description: string | null; domain: 'finance' | 'operations'; schedule: { type: 'daily'; utc: string } | { type: 'every'; minutes: number };
+  state: 'ok' | 'running' | 'delayed' | 'retrying' | 'failed' | 'paused'; paused: boolean; pauseReason: string | null; currentSlotDone: boolean | null; attemptsThisSlot: number;
+  nextDue: string; lastSuccessAt: string | null;
+  lastRun: { id: string; status: string; trigger: string | null; startedAt: string; finishedAt: string | null; processed: number | null; succeeded: number | null; failed: number | null; error: string | null } | null;
+}
+export interface B2BOpsException {
+  id: string; type: string; severity: 'low' | 'medium' | 'high'; status: 'open' | 'investigating' | 'retrying' | 'resolved' | 'ignored' | 'permanently_failed'; title: string;
+  job: string | null; entityType: string | null; entityId: string | null; organizationId: string | null; detail: Record<string, unknown> | null;
+  occurrences: number; retryCount: number; detectedAt: string; lastSeenAt: string; resolvedAt: string | null; resolution: string | null; resolvedBy: string | null;
+}
+export interface B2BOpsOverview {
+  generatedAt: string;
+  jobs: { total: number; ok: number; running: number; delayed: number; retrying: number; failed: number; paused: number; items: B2BJobStatus[] };
+  exceptions: { live: number; bySeverity: Record<string, number>; byStatus: Record<string, number>; oldestDetectedAt: string | null; mostUrgent: B2BOpsException[] };
+  pending: {
+    billing: { draftInvoices: number; draftsOlderThan7Days: number; paymentNoticesToCheck: number; overdueInvoices: number; organizationsOnHold: number; paymentsNotFullyApplied: number };
+    usage: { holdsOlderThan1Hour: number; passesAwaitingMemberPayment: number; passesAwaitingAccountLink: number };
+    people: { beneficiariesPending: number; employeesNotLinked: number; invitesWaiting?: number; invitesNotDelivered?: number; importsWithRejectedRowsLast7Days?: number };
+  };
+}
+export interface B2BDataQuality { checkedAt: string; issues: number; checks: Array<{ key: string; severity: 'low' | 'medium' | 'high'; title: string; count: number; examples: string[] }> }
+export interface B2BPaymentInstructions {
+  bankName: string | null; accountName: string | null; accountNumber: string | null; branch: string | null; swiftCode: string | null;
+  lipaNamba: string | null; lipaNambaName: string | null; notes: string | null; updatedAt?: string | null;
+}
+export interface B2BPaymentNotice {
+  id: string; organizationId: string; organizationName?: string | null; amountTzs: number; method: string; reference: string; paidOn: string;
+  invoiceIds: string[]; invoices?: Array<{ id: string; number: string; totalTzs: number; outstandingTzs: number; status: string; dueDate: string | null }>;
+  note: string | null; proofUrl: string | null; status: 'submitted' | 'confirmed' | 'rejected' | 'withdrawn';
+  submittedAt: string; decidedAt: string | null; decisionNote: string | null; paymentId: string | null;
+}
+export interface B2BPaymentNoticeInput {
+  amountTzs: number; method: string; reference: string; paidOn?: string; invoiceIds?: string[]; note?: string; proofUrl?: string;
+}
+export interface B2BOrgPaying {
+  instructions: B2BPaymentInstructions; configured: boolean; canPay: boolean; onHold: boolean; holdReason: string | null; notices: B2BPaymentNotice[];
+}
+export interface B2BCollectionsQueue {
+  today: string;
+  notices: B2BPaymentNotice[];
+  overdue: Array<{
+    id: string; number: string; kind: string; organizationId: string; organizationName: string | null; dueDate: string; daysOverdue: number;
+    totalTzs: number; outstandingTzs: number; lastReminder: { stage: string; sentAt: string; count: number } | null; onHold: boolean;
+  }>;
+  onHold: Array<{ organizationId: string; organizationName: string | null; holdReason: string | null; holdAt: string | null }>;
+  totals: { noticesToCheck: number; overdueInvoices: number; overdueTzs: number; organizationsOnHold: number };
+}
+export interface B2BPayment {
+  id: string; number: string; organizationId: string; amountTzs: number; method: string; reference: string;
+  receivedAt: string; status: 'received' | 'reversed'; allocatedTzs: number; unallocatedTzs: number;
+  reversalReason?: string | null; note?: string | null; recordedBy?: string | null;
+}
+export interface B2BPaymentInput {
+  amountTzs: number; method: string; reference: string; receivedAt?: string; note?: string;
+  autoAllocate?: boolean; allocations?: Array<{ invoiceId: string; amountTzs: number }>;
+}
+export interface B2BStatementEntry {
+  at: string; day: string; type: 'invoice' | 'credit_note' | 'debit_note' | 'payment' | 'payment_reversal' | 'seat_bill' | 'seat_bill_payment';
+  reference: string; description: string; status: string; dueDate?: string | null; invoiceId?: string;
+  chargeTzs: number; creditTzs: number; balanceTzs: number;
+}
+export interface B2BStatement extends B2BBalances {
+  organization: { id: string; name: string }; from: string | null; to: string | null;
+  openingBalanceTzs: number; closingBalanceTzs: number; entries: B2BStatementEntry[];
+  totals: { chargesTzs: number; creditsTzs: number };
+}
+export interface B2BInvoiceSettlement {
+  id: string; amountTzs: number; createdAt: string; paymentNumber: string | null; method: string | null;
+  reference: string | null; receivedAt: string | null; creditNoteNumber: string | null;
+}
+export interface B2BInvoiceDetail {
+  invoice: B2BSponsorInvoice;
+  lines: Array<{ kind: string; description?: string | null; beneficiaryName?: string | null; quantity: number; amountTzs: number; benefitId?: string | null }>;
+  settlements: B2BInvoiceSettlement[];
+  relatedInvoice: { id: string; number: string } | null;
+  notes: Array<{ id: string; number: string; kind: string; status: string; totalTzs: number; reason: string | null }>;
+}
+export interface B2BOrgBilling extends B2BBalances {
+  organization: { id: string; name: string };
+  account: B2BBillingAccount;
+  terms: { reference: string | null; contractReference?: string | null; billingCycle: string; prepaidTermsDays: number; usageTermsDays: number; platformFeeTzs: number | null; effectiveFrom?: string; effectiveTo?: string | null };
+  recentInvoices: B2BSponsorInvoice[];
+}
+export interface B2BBillingDashboard {
+  asOf: string;
+  totals: { invoicedTzs: number; creditNotesTzs: number; collectedTzs: number; outstandingTzs: number; overdueTzs: number; creditTzs: number };
+  aging: B2BAging;
+  organizations: Array<{ organizationId: string; name: string; status: string; invoicedTzs: number; creditNotesTzs: number; collectedTzs: number; outstandingTzs: number; overdueTzs: number; creditTzs: number; aging: B2BAging }>;
+  currentPeriod: { period: string; draftInvoices: number; draftTotalTzs: number };
+  billedAgainstProviders: {
+    period: string; billedTzs: number; differenceTzs: number; note: string;
+    providerObligations: { gymVisitsTzs: number; sponsoredPassesTzs: number; trainerSessionsTzs: number; totalTzs: number };
+  };
+}
+export interface B2BReconciliation {
+  invoice: B2BSponsorInvoice;
+  lines: Array<{
+    lineId: string; kind: string; description: string; amountTzs: number; active: boolean;
+    consumption: { id: string; status: string; businessDate: string; sourceType: string; sourceId: string; providerType: string; providerId: string; grossTzs: number; sponsorTzs: number; beneficiaryTzs: number } | null;
+    entitlement: { id: string; status: string; passTier: string; listPriceTzs: number; discountBps: number; feeTzs: number; sponsorTzs: number; memberTzs: number; subscriptionId: string | null } | null;
+    provider: { outcome?: string; statementId?: string | null; statementStatus?: string | null; gymsOwedTzs?: number; collectedForPassTzs?: number } | null;
+  }>;
+  settlements: B2BInvoiceSettlement[];
+  checks: { linesAddUp: boolean; linesTotalTzs: number; invoiceTotalTzs: number; usageMatchesLedger: boolean; reversedSinceInvoiced: string[]; amountPaidTzs: number; outstandingTzs: number };
+}
+
+export type RecoveryStatus = 'open' | 'cancelled' | 'refused' | 'completed';
+export type RecoveryFilter = RecoveryStatus | 'all';
+export type RecoveryRefusalReason = 'evidence_insufficient' | 'details_do_not_match' | 'other';
+export type RecoveryRow = {
+  id: string; status: RecoveryStatus; tier: string | null; claimedName: string; accountName: string | null;
+  newIdentifierType: 'phone' | 'email'; createdAt: string; waitUntil: string; ready: boolean; answered: boolean;
+};
+export type RecoveryDetail = {
+  recovery: {
+    id: string; status: RecoveryStatus; tier: string | null; claimedName: string;
+    oldIdentifier: { type: string; masked: string };
+    newIdentifier: { type: 'phone' | 'email'; value: string };
+    evidence: { homeGym?: string; plan?: string; lastCheckin?: string; paymentRef?: string; other?: string };
+    createdAt: string; waitUntil: string; ready: boolean;
+    cancelledBy: string | null; decisionReason: string | null; decisionNote: string | null;
+    decidedBy: string | null; decidedAt: string | null; requestIp: string | null;
+  };
+  account: {
+    registeredAt: string | null;
+    personas: Array<{ id: string; userType: string; displayName: string | null; approvalStatus: string | null }>;
+    subscription: { type: string | null; tier: string | null; status: string | null; startedAt: string | null; expiresAt: string | null; homeGym: string | null; paymentRef: string | null } | null;
+    lastCheckins: Array<{ at: string; gym: string | null }>;
+    payments: Array<{ reference: string; amountTzs: number; status: string; at: string }>;
+    identifiers: Array<{ type: string; masked: string; status: string; verified: boolean }>;
+  };
+  events: Array<{ kind: string; actor: string | null; detail: Record<string, unknown> | null; createdAt: string }>;
+};

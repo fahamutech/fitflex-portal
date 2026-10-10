@@ -4,7 +4,7 @@ import { Gift, Plus, RefreshCw, Trophy, Lock, Users, X } from 'lucide-react';
 import Link from 'next/link';
 import { useApp } from '../../app/providers';
 import {
-  api, ApiError, ChallengeInput, ChallengeMode, ChallengeParticipation, ChallengeScope,
+  api, ApiError, ChallengeApiScope, ChallengeInput, ChallengeMode, ChallengeParticipation, ChallengeScope,
   ChallengeStandings, ChallengeType, CorporateEmployee, Eligibility, ManagedChallenge,
   Rate, RewardFunding, RewardItem, RewardItemInput, RewardQueue, RewardRule, RewardType,
 } from '@/lib/api';
@@ -64,7 +64,11 @@ const ERRORS: Record<string, string> = {
   mode_not_allowed: 'That challenge format is not available here.',
   measure_locked: 'What it measures can’t change once it has started or someone has joined.',
   start_locked: 'The start date can’t change once the challenge has started.',
-  not_editable: 'Only running or upcoming challenges can be edited.',
+  not_editable: 'Only draft, running or upcoming challenges can be edited.',
+  not_draft: 'This challenge is already published.',
+  not_running: 'Only a running or upcoming challenge can be paused or closed.',
+  not_paused: 'This challenge isn’t paused.',
+  already_paused: 'This challenge is already paused.',
   still_running: 'Close or cancel the challenge before archiving it.',
   not_started_cancel_instead: 'It hasn’t started yet — cancel it instead.',
 };
@@ -76,29 +80,50 @@ const num = (n: number | null | undefined) => (n == null ? '—' : n.toLocaleStr
 const day = (d: string) => new Date(`${d}T00:00:00Z`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' });
 const range = (c: { startDate: string; endDate: string }) => `${day(c.startDate)} – ${day(c.endDate)}`;
 const unitFor = (t: ChallengeType) => TYPES.find(x => x.value === t)?.unit ?? '';
+/** Published and not over yet: running or upcoming, paused or not. */
+const isLive = (c: ManagedChallenge) => (c.status === 'active' || c.status === 'paused') && (c.phase === 'active' || c.phase === 'upcoming');
+const isPaused = (c: ManagedChallenge) => c.status === 'paused' && isLive(c);
 const phaseTone = (c: ManagedChallenge): 'default' | 'success' | 'brand' | 'danger' | 'gray' =>
-  c.status === 'archived' ? 'gray' : c.phase === 'active' ? 'success' : c.phase === 'upcoming' ? 'brand' : c.phase === 'cancelled' ? 'danger' : 'default';
+  c.status === 'archived' || c.status === 'draft' ? 'gray' : isPaused(c) ? 'default' : c.phase === 'active' ? 'success' : c.phase === 'upcoming' ? 'brand' : c.phase === 'cancelled' ? 'danger' : 'default';
 const phaseLabel = (c: ManagedChallenge) =>
-  c.status === 'archived' ? 'Archived' : c.status === 'closed' ? 'Closed early' : { active: 'Running', upcoming: 'Upcoming', ended: 'Ended', cancelled: 'Cancelled' }[c.phase];
+  c.status === 'archived' ? 'Archived' : c.status === 'closed' ? 'Closed early' : isPaused(c) ? 'Paused'
+    : { draft: 'Draft', active: 'Running', upcoming: 'Upcoming', ended: 'Ended', cancelled: 'Cancelled' }[c.phase];
 
-function eligibilityText(e: Eligibility | null, scope: ChallengeScope, staff: CorporateEmployee[]) {
-  if (!e || e.kind === 'all') return scope === 'admin' ? 'All FitFlex members' : 'All employees';
+/**
+ * A company has employees in departments; a B2B organisation (an insurer, a
+ * club, a school) has people in groups. Same screens, its own words.
+ */
+const wordsFor = (org: boolean) => (org
+  ? { person: 'person', people: 'people', unit: 'group', units: 'groups', Unit: 'Group', owner: 'Your organisation', list: 'people list' }
+  : { person: 'employee', people: 'employees', unit: 'department', units: 'departments', Unit: 'Department', owner: 'Your company', list: 'staff list' });
+const isOrg = (apiScope: ChallengeApiScope) => apiScope.startsWith('b2b/');
+
+function eligibilityText(e: Eligibility | null, scope: ChallengeScope, staff: CorporateEmployee[], org = false) {
+  const w = wordsFor(org);
+  if (!e || e.kind === 'all') return scope === 'admin' ? 'All FitFlex members' : org ? 'Everyone' : 'All employees';
   if (e.kind === 'tiers') return `Members on ${e.tiers.map(t => TIERS.find(x => x.value === t)?.label ?? t).join(', ')} passes`;
   if (e.kind === 'departments') return e.departments.join(', ');
-  return `${e.employeeIds.length} chosen ${e.employeeIds.length === 1 ? 'employee' : 'employees'}`;
+  return `${e.employeeIds.length} chosen ${e.employeeIds.length === 1 ? w.person : w.people}`;
 }
 
 /**
  * Challenge management for FitFlex admins (`scope="admin"`) and company HR
  * (`scope="corporate"`). Both only ever see totals: participation,
- * completion and average progress, never a person's activity.
+ * completion and average progress. An organisation sees each person's
+ * progress elsewhere, under Insights.
  */
-export function ChallengeManager({ scope, title, description }: { scope: ChallengeScope; title: string; description: string }) {
+export function ChallengeManager({ scope, title, description, organizationId, rewardsHref }: {
+  scope: ChallengeScope; title: string; description: string;
+  /** A B2B organisation's own users: its routes and its people list are used instead of the company HR ones. */
+  organizationId?: string; rewardsHref?: string;
+}) {
   const { token } = useApp();
+  const apiScope: ChallengeApiScope = organizationId ? `b2b/organizations/${organizationId}` : scope;
+  const rewardsBase = rewardsHref ?? `${scope === 'admin' ? '/admin' : '/hr'}/rewards`;
   const [rows, setRows] = useState<ManagedChallenge[] | null>(null);
   const [staff, setStaff] = useState<CorporateEmployee[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [tab, setTab] = useState<'live' | 'ended' | 'closed'>('live');
+  const [tab, setTab] = useState<'live' | 'draft' | 'ended' | 'closed'>('live');
   const [editing, setEditing] = useState<ManagedChallenge | 'new' | null>(null);
   const [open, setOpen] = useState<ManagedChallenge | null>(null);
 
@@ -106,8 +131,13 @@ export function ChallengeManager({ scope, title, description }: { scope: Challen
     if (!token) return;
     try {
       const [c, s] = await Promise.all([
-        api.creatorChallenges(token, scope),
-        scope === 'corporate' ? api.corporateStaff(token).catch(() => ({ employees: [] })) : Promise.resolve({ employees: [] }),
+        api.creatorChallenges(token, apiScope),
+        organizationId
+          // The organisation's people; their group stands in for a department.
+          ? api.b2bBeneficiaries(token, organizationId, { status: 'active', limit: 100 })
+            .then(r => ({ employees: r.items.map(b => ({ id: b.id, displayName: b.displayName ?? 'Unnamed', department: b.groupName, status: b.status })) }))
+            .catch(() => ({ employees: [] }))
+          : scope === 'corporate' ? api.corporateStaff(token).catch(() => ({ employees: [] })) : Promise.resolve({ employees: [] }),
       ]);
       setRows(c.challenges);
       setStaff(s.employees);
@@ -118,11 +148,12 @@ export function ChallengeManager({ scope, title, description }: { scope: Challen
     }
   };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { load(); }, [token, scope]);
+  useEffect(() => { load(); }, [token, apiScope]);
 
   const shown = useMemo(() => (rows ?? []).filter(c =>
-    tab === 'live' ? c.status === 'active' && (c.phase === 'active' || c.phase === 'upcoming')
-      : tab === 'ended' ? (c.status === 'active' || c.status === 'closed') && c.phase === 'ended'
+    tab === 'live' ? isLive(c)
+      : tab === 'draft' ? c.status === 'draft'
+      : tab === 'ended' ? ['active', 'paused', 'closed'].includes(c.status) && c.phase === 'ended'
         : c.status === 'cancelled' || c.status === 'archived'), [rows, tab]);
 
   return (
@@ -140,8 +171,8 @@ export function ChallengeManager({ scope, title, description }: { scope: Challen
       {error && <Alert tone="error">{error}</Alert>}
 
       <div role="tablist" className="inline-flex rounded-[var(--radius-lg)] border border-[var(--color-border-primary)] p-0.5">
-        {([['live', 'Running & upcoming'], ['ended', 'Ended'], ['closed', 'Cancelled & archived']] as const).map(([k, label]) => (
-          <button key={k} role="tab" aria-selected={tab === k} onClick={() => setTab(k)}
+        {([['live', 'Running & upcoming'], ['draft', 'Drafts'], ['ended', 'Ended'], ['closed', 'Cancelled & archived']] as const).map(([k, label]) => (
+          <button key={k} role="tab" aria-selected={tab === k} onClick={() => setTab(k)} data-testid={`challenge-tab-${k}`}
             className={`rounded-[var(--radius-md)] px-3 py-1 text-sm font-medium ${tab === k ? 'bg-[var(--color-brand-600)] text-white' : 'text-[var(--color-fg-tertiary)]'}`}>
             {label}
           </button>
@@ -153,7 +184,8 @@ export function ChallengeManager({ scope, title, description }: { scope: Challen
       ) : shown.length === 0 ? (
         <Card><CardContent className="py-12 text-center text-sm text-[var(--color-fg-quaternary)]">
           <Trophy className="mx-auto mb-2 h-6 w-6" />
-          {tab === 'live' ? 'No running or upcoming challenges. Create one to get started.' : 'Nothing here yet.'}
+          {tab === 'live' ? 'No running or upcoming challenges. Create one to get started.'
+            : tab === 'draft' ? 'No drafts. Use “Save as draft” to prepare a challenge before anyone sees it.' : 'Nothing here yet.'}
         </CardContent></Card>
       ) : (
         <div className="grid gap-3">
@@ -165,7 +197,7 @@ export function ChallengeManager({ scope, title, description }: { scope: Challen
                   <div className="min-w-0">
                     <p className="font-semibold text-[var(--color-fg-primary)]">{c.name}</p>
                     <p className="text-sm text-[var(--color-fg-tertiary)]">
-                      {num(c.target)} {unitFor(c.type)} · {range(c)} · {eligibilityText(c.eligibility, scope, staff)}
+                      {num(c.target)} {unitFor(c.type)} · {range(c)} · {eligibilityText(c.eligibility, scope, staff, isOrg(apiScope))}
                     </p>
                   </div>
                   <div className="flex items-center gap-3">
@@ -182,20 +214,24 @@ export function ChallengeManager({ scope, title, description }: { scope: Challen
       {editing && (
         <ChallengeForm
           scope={scope}
+          apiScope={apiScope}
+          rewardsBase={rewardsBase}
           staff={staff}
           existing={editing === 'new' ? null : editing}
           onClose={() => setEditing(null)}
-          onSaved={async saved => { setEditing(null); await load(); setOpen(saved); }}
+          onSaved={async saved => { setEditing(null); await load(); if (saved.status === 'draft') setTab('draft'); setOpen(saved); }}
         />
       )}
       {open && !editing && (
         <ChallengeDetail
           scope={scope}
+          apiScope={apiScope}
+          rewardsBase={rewardsBase}
           staff={staff}
           challenge={open}
           onClose={() => setOpen(null)}
           onEdit={() => setEditing(open)}
-          onChanged={async c => { await load(); setOpen(c); }}
+          onChanged={async c => { await load(); if (isLive(c)) setTab('live'); setOpen(c); }}
         />
       )}
     </div>
@@ -263,8 +299,8 @@ function RewardEditor({ items, teamsOk, onChange }: {
 
 // ── Detail ────────────────────────────────────────────────────────────────
 
-function ChallengeDetail({ scope, staff, challenge: c, onClose, onEdit, onChanged }: {
-  scope: ChallengeScope; staff: CorporateEmployee[]; challenge: ManagedChallenge;
+function ChallengeDetail({ scope, apiScope, rewardsBase, staff, challenge: c, onClose, onEdit, onChanged }: {
+  scope: ChallengeScope; apiScope: ChallengeApiScope; rewardsBase: string; staff: CorporateEmployee[]; challenge: ManagedChallenge;
   onClose: () => void; onEdit: () => void; onChanged: (c: ManagedChallenge) => Promise<void>;
 }) {
   const { token } = useApp();
@@ -278,16 +314,16 @@ function ChallengeDetail({ scope, staff, challenge: c, onClose, onEdit, onChange
 
   useEffect(() => {
     if (!token) return;
-    api.challengeParticipation(token, scope, c.id).then(setP).catch(e => setError(message(e)));
-    if (teamed) api.challengeStandings(token, scope, c.id).then(setStandings).catch(() => setStandings(null));
-    if (ownRewards) api.rewardQueue(token, scope, { challengeId: c.id }).then(q => setRewardCounts(q.counts)).catch(() => setRewardCounts(null));
-  }, [token, scope, c.id, teamed, ownRewards]);
+    api.challengeParticipation(token, apiScope, c.id).then(setP).catch(e => setError(message(e)));
+    if (teamed) api.challengeStandings(token, apiScope, c.id).then(setStandings).catch(() => setStandings(null));
+    if (ownRewards) api.rewardQueue(token, apiScope, { challengeId: c.id }).then(q => setRewardCounts(q.counts)).catch(() => setRewardCounts(null));
+  }, [token, apiScope, c.id, teamed, ownRewards]);
 
-  const act = async (action: 'cancel' | 'close' | 'archive', confirmText: string) => {
-    if (!token || !window.confirm(confirmText)) return;
+  const act = async (action: 'cancel' | 'close' | 'archive' | 'publish' | 'pause' | 'resume', confirmText: string | null) => {
+    if (!token || (confirmText && !window.confirm(confirmText))) return;
     setBusy(true);
     try {
-      const r = await api.challengeAction(token, scope, c.id, action);
+      const r = await api.challengeAction(token, apiScope, c.id, action);
       await onChanged({ ...c, ...r.challenge });
     } catch (e) {
       setError(message(e));
@@ -296,8 +332,10 @@ function ChallengeDetail({ scope, staff, challenge: c, onClose, onEdit, onChange
     }
   };
 
-  const running = c.status === 'active' && c.phase === 'active';
-  const upcoming = c.status === 'active' && c.phase === 'upcoming';
+  const draft = c.status === 'draft';
+  const paused = isPaused(c);
+  const running = isLive(c) && c.phase === 'active';
+  const upcoming = isLive(c) && c.phase === 'upcoming';
   const over = c.phase === 'ended' && c.status !== 'archived' || c.status === 'cancelled';
   const s = p?.summary;
 
@@ -307,28 +345,40 @@ function ChallengeDetail({ scope, staff, challenge: c, onClose, onEdit, onChange
         {error && <Alert tone="error">{error}</Alert>}
         <div className="flex flex-wrap items-center gap-2">
           <Badge tone={phaseTone(c)}>{phaseLabel(c)}</Badge>
-          <span className="text-sm text-[var(--color-fg-tertiary)]">Open to: {eligibilityText(c.eligibility, scope, staff)}</span>
+          <span className="text-sm text-[var(--color-fg-tertiary)]">Open to: {eligibilityText(c.eligibility, scope, staff, isOrg(apiScope))}</span>
         </div>
+        {draft && <Alert tone="info">This is a draft. Nobody can see or join it until you publish it.</Alert>}
+        {paused && <Alert tone="info">Paused: nobody new can join or find it. People already taking part carry on and their activity still counts. The dates and rewards are unchanged.</Alert>}
 
         {!s ? (
           <div className="flex h-24 items-center justify-center"><Spinner className="h-6 w-6" /></div>
         ) : (
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <MetricCard label="Taking part" value={num(s.joined)} sub={s.eligible == null ? undefined : `${pct(s.participationRate)} of ${num(s.eligible)} eligible`} />
-            <MetricCard label="Completed" value={num(s.completed)} sub={`${pct(s.completionRate)} of those taking part`} />
-            <MetricCard label="Average progress" value={pct(s.averageProgress)} sub="Toward the target" />
-            <MetricCard label="Eligible" value={num(s.eligible)} sub={eligibilityText(c.eligibility, scope, staff)} />
+            {s.resultsHidden || s.completed == null || s.averageProgress == null ? (
+              // Too few people for results to be shown without pointing at someone.
+              <>
+                <MetricCard label="Completed" value="—" sub={`Shown once ${p?.minGroupSize ?? 3} or more take part`} />
+                <MetricCard label="Average progress" value="—" sub={`Shown once ${p?.minGroupSize ?? 3} or more take part`} />
+              </>
+            ) : (
+              <>
+                <MetricCard label="Completed" value={num(s.completed)} sub={`${pct(s.completionRate)} of those taking part`} />
+                <MetricCard label="Average progress" value={pct(s.averageProgress)} sub="Toward the target" />
+              </>
+            )}
+            <MetricCard label="Eligible" value={num(s.eligible)} sub={eligibilityText(c.eligibility, scope, staff, isOrg(apiScope))} />
           </div>
         )}
 
         {p?.byDepartment && p.byDepartment.length > 0 && (
           <Card>
-            <CardHeader><span className="text-sm font-semibold">By department</span></CardHeader>
+            <CardHeader><span className="text-sm font-semibold">By {wordsFor(isOrg(apiScope)).unit}</span></CardHeader>
             <CardContent>
               <div className="overflow-x-auto">
                 <table className="w-full text-sm" data-testid="department-table">
                   <thead><tr className="text-left text-xs text-[var(--color-fg-quaternary)]">
-                    <th className="py-2 font-medium">Department</th>
+                    <th className="py-2 font-medium">{wordsFor(isOrg(apiScope)).Unit}</th>
                     <th className="py-2 text-right font-medium">Taking part</th>
                     <th className="py-2 text-right font-medium">Completed</th>
                     <th className="py-2 text-right font-medium">Avg progress</th>
@@ -346,7 +396,7 @@ function ChallengeDetail({ scope, staff, challenge: c, onClose, onEdit, onChange
                 </table>
               </div>
               <p className="mt-2 text-xs text-[var(--color-fg-quaternary)]">
-                Progress and completion show only for groups of {p.minGroupSize ?? 3} or more taking part, so no one person’s results can be worked out.
+                Progress and completion show only for groups of {p.minGroupSize ?? 3} or more taking part, so the table stays readable. Each person’s progress is under Insights.
               </p>
             </CardContent>
           </Card>
@@ -389,7 +439,7 @@ function ChallengeDetail({ scope, staff, challenge: c, onClose, onEdit, onChange
               </ul>
             )}
             {c.rewards.length > 0 && c.rewardFunding && (
-              <p className="text-xs text-[var(--color-fg-quaternary)]">Funded by {FUNDERS[scope].find(f => f.value === c.rewardFunding)?.label ?? c.rewardFunding}</p>
+              <p className="text-xs text-[var(--color-fg-quaternary)]">Funded by {c.rewardFunding === 'company' ? wordsFor(isOrg(apiScope)).owner : FUNDERS[scope].find(f => f.value === c.rewardFunding)?.label ?? c.rewardFunding}</p>
             )}
             {rewardCounts && rewardItemsOf(c).length > 0 && (
               <p className="mt-1 flex flex-wrap items-center gap-1.5 text-xs" data-testid="challenge-reward-counts">
@@ -398,7 +448,7 @@ function ChallengeDetail({ scope, staff, challenge: c, onClose, onEdit, onChange
                 ))}
                 {Object.values(rewardCounts).every(n => n === 0) && <span className="text-[var(--color-fg-quaternary)]">Nobody has earned one yet.</span>}
                 {Object.values(rewardCounts).some(n => n > 0) && (
-                  <Link className="font-medium text-[var(--color-fg-brand)] underline-offset-2 hover:underline" href={`${scope === 'admin' ? '/admin' : '/hr'}/rewards?challengeId=${encodeURIComponent(c.id)}`}>Hand out rewards</Link>
+                  <Link className="font-medium text-[var(--color-fg-brand)] underline-offset-2 hover:underline" href={`${rewardsBase}?challengeId=${encodeURIComponent(c.id)}`}>Hand out rewards</Link>
                 )}
               </p>
             )}
@@ -416,13 +466,19 @@ function ChallengeDetail({ scope, staff, challenge: c, onClose, onEdit, onChange
 
         <p className="flex items-start gap-2 text-xs text-[var(--color-fg-quaternary)]">
           <Lock className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-          You see totals only: who is taking part, completion and average progress. Individual activity, workouts and health information are never shown here.
+          {scope === 'admin'
+            ? 'You see totals only: who is taking part, completion and average progress. Individual activity, workouts and health information are never shown here.'
+            : 'This page shows totals: who is taking part, completion and average progress. Each person’s progress is under Insights.'}
         </p>
 
         <div className="flex flex-wrap justify-end gap-2 border-t border-[var(--color-border-secondary)] pt-4">
-          {(running || upcoming) && <Button variant="secondary" onClick={onEdit} data-testid="challenge-edit">Edit</Button>}
+          {(running || upcoming || draft) && <Button variant="secondary" onClick={onEdit} data-testid="challenge-edit">Edit</Button>}
+          {(running || upcoming) && !paused && <Button variant="secondary" disabled={busy} onClick={() => act('pause', 'Pause this challenge? Nobody new can join until you resume it. People already taking part carry on.')} data-testid="challenge-pause">Pause</Button>}
+          {paused && <Button disabled={busy} onClick={() => act('resume', null)} data-testid="challenge-resume">Resume</Button>}
           {running && <Button variant="secondary" disabled={busy} onClick={() => act('close', 'End this challenge today? Results so far are kept.')} data-testid="challenge-close">Close now</Button>}
           {(running || upcoming) && <Button variant="secondary" disabled={busy} onClick={() => act('cancel', 'Cancel this challenge? It disappears for members.')} data-testid="challenge-cancel">Cancel</Button>}
+          {draft && <Button variant="secondary" disabled={busy} onClick={() => act('cancel', 'Delete this draft?')} data-testid="challenge-discard">Delete draft</Button>}
+          {draft && <Button disabled={busy} onClick={() => act('publish', 'Publish this challenge? The people it is open to can see and join it straight away.')} data-testid="challenge-publish">Publish</Button>}
           {over && <Button variant="secondary" disabled={busy} onClick={() => act('archive', 'Archive this challenge? It stays in the history of those who took part.')} data-testid="challenge-archive">Archive</Button>}
         </div>
       </div>
@@ -434,12 +490,15 @@ function ChallengeDetail({ scope, staff, challenge: c, onClose, onEdit, onChange
 
 const today = () => new Date(Date.now() + 3 * 3600_000).toISOString().slice(0, 10);
 
-function ChallengeForm({ scope, staff, existing, onClose, onSaved }: {
-  scope: ChallengeScope; staff: CorporateEmployee[]; existing: ManagedChallenge | null;
+function ChallengeForm({ scope, apiScope, staff, existing, onClose, onSaved }: {
+  scope: ChallengeScope; apiScope: ChallengeApiScope; rewardsBase: string; staff: CorporateEmployee[]; existing: ManagedChallenge | null;
   onClose: () => void; onSaved: (c: ManagedChallenge) => Promise<void>;
 }) {
+  const org = isOrg(apiScope);
+  const w = wordsFor(org);
   const { token } = useApp();
-  const started = !!existing && existing.phase !== 'upcoming';
+  // A draft hasn't gone out to anyone, so nothing about it is locked yet.
+  const started = !!existing && existing.phase !== 'upcoming' && existing.phase !== 'draft';
   const locked = !!existing && (started || existing.participantCount > 0);
   const [f, setF] = useState(() => ({
     name: existing?.name ?? '',
@@ -478,6 +537,7 @@ function ChallengeForm({ scope, staff, existing, onClose, onSaved }: {
   const save = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!token) return;
+    const asDraft = !existing && ((e.nativeEvent as SubmitEvent).submitter as HTMLButtonElement | null)?.value === 'draft';
     const rewardItems = f.rewards
       .map(r => ({ ...r, label: r.label.trim(), value: r.value?.trim() || null, topN: r.rule === 'top' ? Number(r.topN) || null : null }))
       .filter(r => r.label);
@@ -486,13 +546,14 @@ function ChallengeForm({ scope, staff, existing, onClose, onSaved }: {
       target: Number(f.target), startDate: f.startDate, endDate: f.endDate, rewardItems,
       rewardFunding: f.rewardFunding, eligibility: eligibility(), mode: f.mode,
       ...(!existing && f.mode === 'teams' ? { teams: f.teams.split(',').map(t => t.trim()).filter(Boolean) } : {}),
+      ...(asDraft ? { draft: true } : {}),
     };
     setBusy(true);
     setError(null);
     try {
       const r = existing
-        ? await api.updateChallenge(token, scope, existing.id, locked ? { ...body, type: undefined, mode: undefined, ...(started ? { startDate: undefined } : {}) } : body)
-        : await api.createChallenge(token, scope, body);
+        ? await api.updateChallenge(token, apiScope, existing.id, locked ? { ...body, type: undefined, mode: undefined, ...(started ? { startDate: undefined } : {}) } : body)
+        : await api.createChallenge(token, apiScope, body);
       await onSaved(r.challenge);
     } catch (err) {
       setError(message(err));
@@ -506,7 +567,7 @@ function ChallengeForm({ scope, staff, existing, onClose, onSaved }: {
         {error && <Alert tone="error">{error}</Alert>}
         <Field label="Name">
           <input className="ui-input" value={f.name} onChange={e => set('name', e.target.value)} maxLength={80} required
-            placeholder={scope === 'admin' ? 'FitFlex 50K Steps Challenge' : 'Company Wellness Challenge'} data-testid="challenge-name" />
+            placeholder={scope === 'admin' ? 'FitFlex 50K Steps Challenge' : org ? 'Wellness Challenge' : 'Company Wellness Challenge'} data-testid="challenge-name" />
         </Field>
         <Field label="Description (optional)">
           <textarea className="ui-input" rows={2} value={f.description} onChange={e => set('description', e.target.value)} maxLength={500} />
@@ -531,7 +592,7 @@ function ChallengeForm({ scope, staff, existing, onClose, onSaved }: {
 
         <Field label="Format">
           <div className="grid gap-2 sm:grid-cols-3">
-            {MODES[scope].map(m => (
+            {MODES[scope].map(m => (org ? { ...m, label: m.value === 'department' ? 'Groups' : m.label, hint: m.hint.replace('employees pick', 'people pick').replace('Each employee represents their department', 'Each person represents their group') } : m)).map(m => (
               <label key={m.value} className={`cursor-pointer rounded-[var(--radius-lg)] border p-3 text-sm ${f.mode === m.value ? 'border-[var(--color-brand-600)] bg-[var(--color-brand-50)]' : 'border-[var(--color-border-primary)]'} ${locked ? 'opacity-60' : ''}`}>
                 <input type="radio" className="sr-only" name="mode" aria-label={m.label} disabled={locked} checked={f.mode === m.value} onChange={() => set('mode', m.value)} />
                 <span className="font-medium">{m.label}</span>
@@ -550,7 +611,7 @@ function ChallengeForm({ scope, staff, existing, onClose, onSaved }: {
           <div className="space-y-2" data-testid="challenge-eligibility">
             {(scope === 'admin'
               ? [['all', 'All FitFlex members'], ['tiers', 'Members on chosen passes']]
-              : [['all', 'All employees'], ['departments', 'Chosen departments'], ['employees', 'Chosen employees']]
+              : [['all', org ? 'Everyone' : 'All employees'], ['departments', `Chosen ${w.units}`], ['employees', `Chosen ${w.people}`]]
             ).map(([k, label]) => (
               <label key={k} className="flex items-center gap-2 text-sm">
                 <input type="radio" name="elig" aria-label={label} checked={f.eligKind === k} onChange={() => set('eligKind', k as Eligibility['kind'])} data-testid={`elig-${k}`} />
@@ -568,7 +629,7 @@ function ChallengeForm({ scope, staff, existing, onClose, onSaved }: {
             )}
             {f.eligKind === 'departments' && (
               <div className="flex flex-wrap gap-3 pl-6">
-                {departments.length === 0 && <p className="text-xs text-[var(--color-fg-quaternary)]">No departments on your staff list yet.</p>}
+                {departments.length === 0 && <p className="text-xs text-[var(--color-fg-quaternary)]">No {w.units} on your {w.list} yet.</p>}
                 {departments.map(d => (
                   <label key={d} className="flex items-center gap-1.5 text-sm">
                     <input type="checkbox" aria-label={d} checked={f.departments.includes(d)} onChange={() => toggle('departments', d)} data-testid={`dept-${d}`} />{d}
@@ -578,7 +639,7 @@ function ChallengeForm({ scope, staff, existing, onClose, onSaved }: {
             )}
             {f.eligKind === 'employees' && (
               <div className="space-y-2 pl-6">
-                <input className="ui-input" aria-label="Search staff" placeholder="Search staff" value={search} onChange={e => setSearch(e.target.value)} />
+                <input className="ui-input" aria-label={`Search ${w.people}`} placeholder={`Search ${w.people}`} value={search} onChange={e => setSearch(e.target.value)} />
                 <div className="max-h-48 space-y-1 overflow-y-auto rounded-[var(--radius-md)] border border-[var(--color-border-secondary)] p-2">
                   {people.map(p => (
                     <label key={p.id} className="flex items-center gap-2 text-sm">
@@ -586,7 +647,7 @@ function ChallengeForm({ scope, staff, existing, onClose, onSaved }: {
                       {p.displayName}{p.department ? <span className="text-xs text-[var(--color-fg-quaternary)]">· {p.department}</span> : null}
                     </label>
                   ))}
-                  {people.length === 0 && <p className="text-xs text-[var(--color-fg-quaternary)]">No matching staff.</p>}
+                  {people.length === 0 && <p className="text-xs text-[var(--color-fg-quaternary)]">No matching {w.people}.</p>}
                 </div>
                 <p className="text-xs text-[var(--color-fg-quaternary)]">{f.employeeIds.length} chosen</p>
               </div>
@@ -598,13 +659,14 @@ function ChallengeForm({ scope, staff, existing, onClose, onSaved }: {
         <div className="grid gap-4 sm:grid-cols-2">
           <Field label="Rewards funded by">
             <select className="ui-input" value={f.rewardFunding} onChange={e => set('rewardFunding', e.target.value as RewardFunding)} data-testid="challenge-funding">
-              {FUNDERS[scope].map(x => <option key={x.value} value={x.value}>{x.label}</option>)}
+              {FUNDERS[scope].map(x => <option key={x.value} value={x.value}>{x.value === 'company' ? w.owner : x.label}</option>)}
             </select>
           </Field>
         </div>
 
         <div className="flex justify-end gap-2 border-t border-[var(--color-border-secondary)] pt-4">
           <Button type="button" variant="secondary" onClick={onClose}>Cancel</Button>
+          {!existing && <Button type="submit" value="draft" variant="secondary" disabled={busy} data-testid="challenge-save-draft">Save as draft</Button>}
           <Button type="submit" disabled={busy} data-testid="challenge-save">{existing ? 'Save changes' : 'Create challenge'}</Button>
         </div>
       </form>

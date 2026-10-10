@@ -6,7 +6,7 @@ export default function HrChallengesPage() {
     <ChallengeManager
       scope="corporate"
       title="Wellness challenges"
-      description="Challenges for your employees. You see participation, completion and team or department progress, never anyone's personal activity."
+      description="Challenges for your employees. This page shows participation, completion and team or department progress; each person's progress is under Insights."
     />
   );
 }

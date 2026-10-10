@@ -2,7 +2,7 @@
 import { useEffect, useState } from 'react';
 import { Check, Gift, History, Lock, PackageCheck, RefreshCw, RotateCcw, X } from 'lucide-react';
 import { useApp } from '../../app/providers';
-import { api, ApiError, ChallengeScope, RewardAward, RewardQueue as Queue, RewardStatus } from '@/lib/api';
+import { api, ApiError, ChallengeApiScope, ChallengeScope, RewardAward, RewardQueue as Queue, RewardStatus } from '@/lib/api';
 import { reasonLabel, STATUS, typeLabel } from '@/lib/rewards';
 import { Alert, Badge, Button, Card, CardContent, Field, PageHeader, Spinner } from '@/components/shared';
 import { Dialog } from '@/components/dialog';
@@ -23,7 +23,9 @@ type Step = { award: RewardAward; to: RewardStatus };
  * Earned rewards and handing them out: pending → approved → issued, or
  * rejected with a reason. Shows who earned what and why, never activity.
  */
-export function RewardQueue({ scope, title, description }: { scope: ChallengeScope; title: string; description: string }) {
+export function RewardQueue({ scope: role, title, description, organizationId }: { scope: ChallengeScope; title: string; description: string; organizationId?: string }) {
+  // A B2B organisation's own users go through its routes; what is shown is the same as for a company's HR.
+  const scope: ChallengeApiScope = organizationId ? `b2b/organizations/${organizationId}` : role;
   const { token } = useApp();
   const [tab, setTab] = useState<RewardStatus>('pending');
   const [data, setData] = useState<Queue | null>(null);
@@ -139,7 +141,7 @@ export function RewardQueue({ scope, title, description }: { scope: ChallengeSco
 
       <p className="flex items-start gap-2 text-xs text-[var(--color-fg-quaternary)]">
         <Lock className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-        To hand a reward over you see who earned it and why (finished, top place or winning team), never their activity or health information.
+        To hand a reward over you see who earned it and why (finished, top place or winning team).
         Marking a reward issued records what was handed over; it doesn’t create passes, bookings or payments.
       </p>
 
@@ -159,7 +161,7 @@ const STEP_COPY: Record<RewardStatus, { title: string; action: string }> = {
   pending: { title: 'Reopen reward', action: 'Reopen' },
 };
 
-function StepDialog({ scope, step, onClose, onDone }: { scope: ChallengeScope; step: Step; onClose: () => void; onDone: () => Promise<void> }) {
+function StepDialog({ scope, step, onClose, onDone }: { scope: ChallengeApiScope; step: Step; onClose: () => void; onDone: () => Promise<void> }) {
   const { token } = useApp();
   const { award: a, to } = step;
   const [reference, setReference] = useState('');

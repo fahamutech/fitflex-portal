@@ -28,7 +28,7 @@ import { AutomationsTab, automationTitle } from './communication-automations';
 import { ResultsPanel, SourcesTable, periodTitle } from './communication-results';
 
 const TRANSACTIONAL: CommsPurpose[] = ['renewal', 'payment', 'announcement'];
-const CHANNELS: CommsChannel[] = ['in_app', 'push', 'whatsapp'];
+const CHANNELS: CommsChannel[] = ['in_app', 'push', 'whatsapp', 'sms'];
 const STEPS = ['purpose', 'audience', 'message', 'channels', 'schedule', 'preview', 'confirm'] as const;
 type Step = typeof STEPS[number];
 const STATUS_TONE: Record<CommsStatus, 'gray' | 'warning' | 'brand' | 'success' | 'danger'> = {
@@ -325,7 +325,7 @@ function Composer({ scope, token, t, locale, gymId, campaign, templateId, onClos
   const [later, setLater] = useState(Boolean(campaign?.scheduledAt));
   const [scheduledAt, setScheduledAt] = useState<string>(campaign?.scheduledAt ? campaign.scheduledAt.slice(0, 16) : '');
   const [presets, setPresets] = useState<string[]>([]);
-  const [available, setAvailable] = useState<Record<CommsChannel, boolean>>({ in_app: true, push: false, whatsapp: false });
+  const [available, setAvailable] = useState<Record<CommsChannel, boolean>>({ in_app: true, push: false, whatsapp: false, sms: false });
   const [count, setCount] = useState<{ n: number; names: string[] } | null>(null);
   const [preview, setPreview] = useState<CommsPreview | null>(null);
   const [reach, setReach] = useState<CommsPreview | null>(null);
@@ -689,7 +689,7 @@ function Composer({ scope, token, t, locale, gymId, campaign, templateId, onClos
                   <span>
                     <span className="block text-sm font-medium">{t(`comms.channel.${ch}`)}</span>
                     <span className="block text-xs text-[var(--color-fg-quaternary)]">
-                      {!on ? t(ch !== 'whatsapp' ? 'comms.channel.pushOff' : available.whatsapp ? 'comms.channel.whatsappNeedsTemplate' : 'comms.channel.whatsappSoon')
+                      {!on ? t(ch === 'sms' ? 'comms.channel.smsOff' : ch !== 'whatsapp' ? 'comms.channel.pushOff' : available.whatsapp ? 'comms.channel.whatsappNeedsTemplate' : 'comms.channel.whatsappSoon')
                         : reached != null && reach ? fill(t('comms.channel.reaches'), { n: reached, total: reach.counts.targeted })
                         : t(`comms.channel.${ch}.body`)}
                     </span>

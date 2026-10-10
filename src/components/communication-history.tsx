@@ -15,11 +15,12 @@ import { Alert, Badge, Button, Card, EmptyState, Field, Input, PageHeader, Spinn
 import { Dialog } from './dialog';
 import { PURPOSES, T, errorText, fill, skipLabel, when } from './communication-shared';
 
-const CHANNELS: CommsChannel[] = ['in_app', 'push', 'whatsapp'];
+const CHANNELS: CommsChannel[] = ['in_app', 'push', 'whatsapp', 'sms'];
 const STATUS_FILTERS = ['reached', 'pending', 'opened', 'failed', 'skipped'];
 const FAILURES = new Set([
   'invalid_recipient', 'recipient_opted_out', 'template_not_approved', 'provider_unavailable', 'provider_failed',
   'rate_limited', 'push_failed', 'push_disabled', 'push_unavailable', 'no_device', 'whatsapp_template_missing', 'channel_not_supported',
+  'provider_rejected', 'provider_unreachable',
 ]);
 const STATUS_TONE: Record<string, 'gray' | 'warning' | 'brand' | 'success' | 'danger'> = {
   queued: 'warning', sending: 'warning', sent: 'brand', delivered: 'success', read: 'success', clicked: 'success', failed: 'danger', skipped: 'gray',

@@ -21,6 +21,9 @@ const ACL_SCOPES = [
   { key: 'social', label: 'Community moderation' },
   { key: 'corporate', label: 'Companies' },
   { key: 'b2b',       label: 'B2B organisations' },
+  { key: 'b2b_billing', label: 'B2B billing: invoices and agreements' },
+  { key: 'b2b_billing_approve', label: 'B2B billing: approve notes and reversals' },
+  { key: 'b2b_payments', label: 'B2B billing: record payments' },
   { key: 'vendors',   label: 'Vendor outreach' },
   { key: 'shop',      label: 'Products' },
   { key: 'payments',  label: 'Payments' },
@@ -29,9 +32,16 @@ const ACL_SCOPES = [
   { key: 'settlements_pay',     label: 'Settlements: pay' },
   { key: 'approvals', label: 'Approvals' },
   { key: 'kyc',       label: 'Partner verification' },
+  { key: 'account_recovery', label: 'Account recovery' },
   { key: 'settings',  label: 'Settings' },
   { key: 'users',     label: 'Portal Users' },
   { key: 'communications', label: 'Messages' },
+  { key: 'moderation', label: 'Moderation: view' },
+  { key: 'moderation_decide', label: 'Moderation: approve, reject, suspend, hide' },
+  { key: 'promotions', label: 'Promotions: create and run' },
+  { key: 'promotions_approve', label: 'Promotions: approve and activate' },
+  { key: 'campaigns', label: 'Campaigns and placement limits' },
+  { key: 'promotion_analytics', label: 'Promotion analytics' },
 ] as const;
 
 type AclScope = typeof ACL_SCOPES[number]['key'];
@@ -39,7 +49,7 @@ type AclScope = typeof ACL_SCOPES[number]['key'];
 const ROLE_PRESETS = [
   { key: 'custom',      label: 'Custom',      scopes: [] as AclScope[] },
   { key: 'sales',       label: 'Sales Person', scopes: ['gyms', 'owners', 'trainers', 'members'] as AclScope[] },
-  { key: 'finance',     label: 'Finance',      scopes: ['payments', 'approvals'] as AclScope[] },
+  { key: 'finance',     label: 'Finance',      scopes: ['payments', 'approvals', 'b2b_payments'] as AclScope[] },
   { key: 'operations',  label: 'Operations',   scopes: ['gyms', 'trainers', 'members', 'approvals', 'kyc'] as AclScope[] },
 ] as const;
 
