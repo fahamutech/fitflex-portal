@@ -1256,7 +1256,7 @@ export interface PartnerSettlement {
   paidAt: string | null;
   destinationSnapshot: { method?: string | null; provider?: string | null; accountName?: string | null; accountLast4?: string | null } | null;
   // Trainer statements.
-  trainer?: { id: string; displayName: string | null; userId: string | null } | null;
+  trainer?: { id: string; displayName: string | null; fullName?: string | null; nickname?: string | null; userId: string | null } | null;
   sessionCount?: number;
   listTzs?: number;
   // Vendor statements.
@@ -1408,7 +1408,12 @@ export interface TrainerProfile {
   id: string;
   userId?: string | null;
   email?: string | null;
+  /** The name clients see: the nickname when the trainer chose one, otherwise their own name. */
   displayName: string;
+  /** The trainer's own name. */
+  fullName?: string | null;
+  /** The optional name the trainer chose for clients to see. */
+  nickname?: string | null;
   photoUrl?: string | null;
   images?: string[];
   imageThumbnails?: string[];
@@ -1499,6 +1504,8 @@ export interface GymOwnerRef {
 export interface TrainerRef {
   id: string;
   displayName?: string | null;
+  fullName?: string | null;
+  nickname?: string | null;
   email?: string | null;
   gymIds?: string[];
 }

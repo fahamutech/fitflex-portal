@@ -8,7 +8,7 @@ import { DataTable, ColumnDef } from '@/components/data-table';
 import { Dialog, DialogFooter, ConfirmDialog } from '@/components/dialog';
 import { ImageUpload } from '@/components/image-upload';
 import { SearchableSelect, SelectOption } from '@/components/searchable-select';
-import { statusTone, statusLabel, money } from '@/lib/admin-utils';
+import { statusTone, statusLabel, money, trainerNames } from '@/lib/admin-utils';
 import { GymCreateForm, GymDraft, BLANK_GYM_DRAFT, validateGymDraft } from '@/components/gym-create-form';
 import { OwnerInlineForm, OwnerFormDraft, BLANK_OWNER_DRAFT, validateOwnerDraft } from '@/components/owner-inline-form';
 import { SOCIAL_PLATFORMS, cleanSocialLinks } from '@/lib/social-handles';
@@ -87,6 +87,10 @@ export default function TrainersPage() {
     setEditing(trainer);
     setDraft({
       ...trainer,
+      // The form edits the trainer's own name; the nickname is the trainer's to choose.
+      displayName: trainer.fullName || trainer.displayName,
+      fullName: undefined,
+      nickname: undefined,
       images: trainer.images?.length ? trainer.images : (trainer.photoUrl ? [trainer.photoUrl] : []),
       imageThumbnails: trainer.imageThumbnails || [],
     });
@@ -107,7 +111,7 @@ export default function TrainersPage() {
 
   function validateTrainerForm(): Record<string, string> {
     const errs: Record<string, string> = {};
-    if (!draft.displayName?.trim()) errs.displayName = 'Display name is required';
+    if (!draft.displayName?.trim()) errs.displayName = 'Name is required';
     if (!draft.email?.trim()) errs.email = 'Email is required';
     const specs = specialtiesInput.split(',').map(s => s.trim()).filter(Boolean);
     if (specs.length === 0) errs.specialties = 'At least one specialty is required';
@@ -276,6 +280,9 @@ export default function TrainersPage() {
       cell: (t) => (
         <div>
           <div className="font-medium text-[var(--color-fg-primary)]">{t.displayName || t.email || t.id}</div>
+          {trainerNames(t).own && (
+            <div className="text-xs text-[var(--color-fg-tertiary)]" data-testid={`trainer-own-name-${t.id}`}>Name: {trainerNames(t).own}</div>
+          )}
           <div className="text-xs text-[var(--color-fg-quaternary)]">{t.email || t.id}</div>
         </div>
       ),
@@ -377,9 +384,9 @@ export default function TrainersPage() {
         </Card>
       )}
 
-      <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} title={editing ? 'Edit trainer' : 'Add trainer'} description={editing ? `Editing ${editing.displayName || editing.email}` : 'Register a new trainer.'} size="md">
+      <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} title={editing ? 'Edit trainer' : 'Add trainer'} description={editing ? `Editing ${trainerNames(editing).label || editing.email}` : 'Register a new trainer.'} size="md">
         <div className="space-y-4">
-          <Field label="Display name" error={formErrors.displayName}>
+          <Field label="Name" error={formErrors.displayName} hint={editing?.nickname ? `Clients see the nickname this trainer chose: ${editing.nickname}` : undefined}>
             <input className="ui-input" value={draft.displayName || ''} onChange={e => { setDraft({ ...draft, displayName: e.target.value }); setFormErrors(prev => { const { displayName, ...rest } = prev; return rest; }); }} />
           </Field>
           <Field label="Email" error={formErrors.email}>

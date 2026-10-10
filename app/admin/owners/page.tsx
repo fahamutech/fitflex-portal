@@ -7,7 +7,7 @@ import { Badge, Button, PageHeader, Alert, Spinner, Card, Field } from '@/compon
 import { DataTable, ColumnDef } from '@/components/data-table';
 import { Dialog, DialogFooter, ConfirmDialog } from '@/components/dialog';
 import { SearchableSelect, SelectOption } from '@/components/searchable-select';
-import { statusTone, statusLabel } from '@/lib/admin-utils';
+import { statusTone, statusLabel, trainerNames } from '@/lib/admin-utils';
 import { GymCreateForm, GymDraft, BLANK_GYM_DRAFT, validateGymDraft } from '@/components/gym-create-form';
 import { TrainerInlineForm, TrainerFormDraft, BLANK_TRAINER_DRAFT, validateTrainerDraft } from '@/components/trainer-inline-form';
 
@@ -57,7 +57,7 @@ export default function OwnersPage() {
   );
 
   const trainerOptions: SelectOption[] = useMemo(() =>
-    trainers.map(t => ({ value: t.id, label: t.displayName || t.email || t.id, sub: t.email || undefined })),
+    trainers.map(t => ({ value: t.id, label: trainerNames(t).label || t.email || t.id, sub: t.email || undefined })),
     [trainers]
   );
 

@@ -3,7 +3,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { ArrowLeft, Play, RefreshCw, Wallet } from 'lucide-react';
 import { useApp } from '../../app/providers';
 import { api, GymSettlementStatus, PartnerSettlement, PartnerSettlementAction, PartnerSettlementDetail, PartnerSettlementLine, PayoutKind } from '@/lib/api';
-import { money } from '@/lib/admin-utils';
+import { money, trainerNames } from '@/lib/admin-utils';
 import { STATEMENT_STATUS, STATEMENT_TABS, shortDay } from '@/lib/settlements';
 import { Alert, Badge, Button, Card, CardContent, CardHeader, Field, PageHeader, Spinner } from '@/components/shared';
 import { Dialog, DialogFooter } from '@/components/dialog';
@@ -14,7 +14,9 @@ const KIND = {
     title: 'Trainer payouts',
     description: 'What each trainer is owed for a week of sessions. A statement is prepared, approved by someone else, then paid to the trainer’s verified payout account.',
     who: 'trainer', column: 'Trainer', unnamed: 'Unnamed trainer',
-    nameOf: (s: PartnerSettlement) => s.trainer?.displayName,
+    nameOf: (s: PartnerSettlement) => trainerNames(s.trainer).shown,
+    ownNameOf: (s: PartnerSettlement) => trainerNames(s.trainer).own,
+    labelOf: (s: PartnerSettlement) => trainerNames(s.trainer).label,
     countOf: (s: PartnerSettlement) => s.sessionCount ?? 0, countLabel: 'Sessions', unit: ['session', 'sessions'],
     grossOf: (s: PartnerSettlement) => s.listTzs ?? 0, grossLabel: 'At their price', grossCard: 'Sessions at the trainer’s price',
     netCard: 'To pay the trainer', linesTitle: 'Sessions',
@@ -28,6 +30,8 @@ const KIND = {
     description: 'What each vendor is owed for a week of delivered orders, after FitFlex’s commission. A statement is prepared, approved by someone else, then paid to the vendor’s verified payout account.',
     who: 'vendor', column: 'Vendor', unnamed: 'Unnamed vendor',
     nameOf: (s: PartnerSettlement) => s.vendor?.businessName,
+    ownNameOf: (_s: PartnerSettlement) => '',
+    labelOf: (s: PartnerSettlement) => s.vendor?.businessName,
     countOf: (s: PartnerSettlement) => s.orderCount ?? 0, countLabel: 'Orders', unit: ['order', 'orders'],
     grossOf: (s: PartnerSettlement) => s.salesTzs ?? 0, grossLabel: 'Sales', grossCard: 'Sales of the vendor’s items',
     netCard: 'To pay the vendor', linesTitle: 'Delivered orders',
@@ -190,6 +194,9 @@ export function PartnerPayouts({ kind }: { kind: PayoutKind }) {
                         <button className="text-left font-medium text-[var(--color-fg-primary)] hover:underline" onClick={e => { e.stopPropagation(); open(r.id); }}>
                           {k.nameOf(r) || k.unnamed}
                         </button>
+                        {k.ownNameOf(r) && (
+                          <div className="text-xs text-[var(--color-fg-quaternary)]" data-testid={`${kind}-settlement-own-name-${r.id}`}>{k.ownNameOf(r)}</div>
+                        )}
                       </td>
                       <td className="whitespace-nowrap px-4 py-3">{week(r)}</td>
                       <td className="px-4 py-3 text-right tabular-nums">{k.countOf(r)}</td>
@@ -333,7 +340,7 @@ function StatementView({ kind, id, onBack }: { kind: PayoutKind; id: string; onB
     <div className="space-y-6">
       <Button variant="secondary" size="sm" onClick={onBack}><ArrowLeft className="h-4 w-4" />All {k.title.toLowerCase()}</Button>
       <PageHeader
-        title={k.nameOf(s) || k.unnamed}
+        title={k.labelOf(s) || k.unnamed}
         description={`${week(s)} · ${n} ${n === 1 ? k.unit[0] : k.unit[1]}`}
         actions={<Badge tone={STATEMENT_STATUS[s.status].tone}>{STATEMENT_STATUS[s.status].label}</Badge>}
       />
@@ -374,7 +381,7 @@ function StatementView({ kind, id, onBack }: { kind: PayoutKind; id: string; onB
         <CardContent className="p-0"><Lines kind={kind} lines={data.lines} /></CardContent>
       </Card>
 
-      <Dialog open={!!pending} onClose={() => setPending(null)} title={pending?.title ?? ''} description={`${k.nameOf(s) || k.unnamed} · ${week(s)} · ${money(s.finalNetTzs)}`} size="sm">
+      <Dialog open={!!pending} onClose={() => setPending(null)} title={pending?.title ?? ''} description={`${k.labelOf(s) || k.unnamed} · ${week(s)} · ${money(s.finalNetTzs)}`} size="sm">
         <div className="space-y-4">
           {actionError && <Alert tone="error">{actionError}</Alert>}
           {pending?.hint && <p className="text-sm text-[var(--color-fg-tertiary)]">{pending.hint}</p>}

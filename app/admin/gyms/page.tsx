@@ -12,7 +12,7 @@ import { ImageUpload } from '@/components/image-upload';
 import dynamic from 'next/dynamic';
 const LocationPicker = dynamic(() => import('@/components/location-picker').then(m => ({ default: m.LocationPicker })), { ssr: false, loading: () => <div className="h-[260px] rounded-xl bg-[var(--color-bg-tertiary)] flex items-center justify-center text-xs text-[var(--color-fg-quaternary)]">Loading map...</div> });
 import { GymScoringRubric, RubricData, RubricResult, EMPTY_RUBRIC } from '@/components/gym-scoring-rubric';
-import { statusTone, statusLabel, money } from '@/lib/admin-utils';
+import { statusTone, statusLabel, money, trainerNames } from '@/lib/admin-utils';
 import { OwnerInlineForm, OwnerFormDraft, BLANK_OWNER_DRAFT, validateOwnerDraft } from '@/components/owner-inline-form';
 import { TrainerInlineForm, TrainerFormDraft, BLANK_TRAINER_DRAFT, validateTrainerDraft } from '@/components/trainer-inline-form';
 import { TrainerPassFields, trainerPassError, trainerPassOptions } from '@/components/trainer-pass-fields';
@@ -101,7 +101,7 @@ export default function GymsPage() {
   );
 
   const trainerOptions: SelectOption[] = useMemo(() =>
-    trainers.map(t => ({ value: t.id, label: t.displayName || t.email || t.id, sub: t.email || undefined })),
+    trainers.map(t => ({ value: t.id, label: trainerNames(t).label || t.email || t.id, sub: t.email || undefined })),
     [trainers]
   );
 
