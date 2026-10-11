@@ -1,6 +1,6 @@
 'use client';
 import { useState } from 'react';
-import { Field } from '@/components/shared';
+import { Field, Input, Select } from '@/components/shared';
 import { ImageUpload } from '@/components/image-upload';
 import dynamic from 'next/dynamic';
 
@@ -75,15 +75,13 @@ export function GymCreateForm({ token, draft, onChange, errors, onClearError, ex
     <div className="space-y-4">
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <Field label="Name" error={errors.name}>
-          <input
-            className="ui-input"
+          <Input
             value={draft.name}
             onChange={e => set('name', e.target.value)}
           />
         </Field>
         <Field label="Location" error={errors.location}>
-          <input
-            className="ui-input"
+          <Input
             value={draft.location}
             onChange={e => set('location', e.target.value)}
           />
@@ -92,8 +90,7 @@ export function GymCreateForm({ token, draft, onChange, errors, onClearError, ex
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <Field label="Tier">
-          <select
-            className="ui-input"
+          <Select
             value={draft.tier}
             onChange={e => set('tier', e.target.value)}
           >
@@ -102,25 +99,23 @@ export function GymCreateForm({ token, draft, onChange, errors, onClearError, ex
                 {t.charAt(0).toUpperCase() + t.slice(1).replace(/_/g, ' ')}
               </option>
             ))}
-          </select>
+          </Select>
         </Field>
         <Field label="Status">
-          <select
-            className="ui-input"
+          <Select
             value={draft.status}
             onChange={e => set('status', e.target.value)}
           >
             <option value="active">Active</option>
             <option value="inactive">Inactive</option>
             <option value="suspended">Suspended</option>
-          </select>
+          </Select>
         </Field>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <Field label="Rate per day (TZS)" error={errors.ratePerDay}>
-          <input
-            className="ui-input"
+          <Input
             type="number"
             value={draft.ratePerDay || ''}
             placeholder="0"
@@ -128,8 +123,7 @@ export function GymCreateForm({ token, draft, onChange, errors, onClearError, ex
           />
         </Field>
         <Field label="Rate per week (TZS)" error={errors.ratePerWeek}>
-          <input
-            className="ui-input"
+          <Input
             type="number"
             value={draft.ratePerWeek || ''}
             placeholder="0"
@@ -137,8 +131,7 @@ export function GymCreateForm({ token, draft, onChange, errors, onClearError, ex
           />
         </Field>
         <Field label="Rate per month (TZS)" error={errors.ratePerMonth}>
-          <input
-            className="ui-input"
+          <Input
             type="number"
             value={draft.ratePerMonth || ''}
             placeholder="0"
@@ -148,8 +141,7 @@ export function GymCreateForm({ token, draft, onChange, errors, onClearError, ex
       </div>
 
       <Field label="Commission %" error={errors.commissionRate}>
-        <input
-          className="ui-input"
+        <Input
           type="number"
           value={draft.commissionRate || ''}
           placeholder="0"
@@ -185,16 +177,14 @@ export function GymCreateForm({ token, draft, onChange, errors, onClearError, ex
       <h3 className="text-sm font-semibold text-[var(--color-fg-secondary)] pt-4">Payment & KYC details</h3>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <Field label="Bank / FSP">
-          <input
-            className="ui-input"
+          <Input
             value={draft.paymentBank}
             onChange={e => set('paymentBank', e.target.value)}
             placeholder="e.g. CRDB, NMB, M-Pesa"
           />
         </Field>
         <Field label="Payment number">
-          <input
-            className="ui-input"
+          <Input
             value={draft.paymentNumber}
             onChange={e => set('paymentNumber', e.target.value)}
             placeholder="Account or mobile number"
@@ -203,16 +193,14 @@ export function GymCreateForm({ token, draft, onChange, errors, onClearError, ex
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <Field label="Payment notes">
-          <input
-            className="ui-input"
+          <Input
             value={draft.paymentNotes}
             onChange={e => set('paymentNotes', e.target.value)}
             placeholder="Any notes for payment"
           />
         </Field>
         <Field label="TIN number">
-          <input
-            className="ui-input"
+          <Input
             value={draft.tinNumber}
             onChange={e => set('tinNumber', e.target.value)}
             placeholder="Tax ID (if registered)"
