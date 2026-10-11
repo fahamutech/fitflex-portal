@@ -6,7 +6,7 @@ import { useApp } from '../../providers';
 import {
   api, ApiError, B2BBeneficiary, B2BOrganization, B2BOrganizationUser, B2BProgram, B2BReference, userContact,
 } from '@/lib/api';
-import { Alert, Badge, Button, Card, CardContent, CardHeader, Field, PageHeader, Spinner } from '@/components/shared';
+import { Alert, Badge, Button, Card, CardContent, CardHeader, Field, Input, PageHeader, Select, Spinner } from '@/components/shared';
 import { B2BPrograms } from '@/components/b2b-programs';
 
 const ERRORS: Record<string, string> = {
@@ -215,14 +215,14 @@ export default function AdminB2BPage() {
         <Card className="lg:col-span-2">
           <CardHeader>
             <div className="flex flex-wrap items-center gap-2">
-              <select className="ui-input w-auto" value={filter.type} onChange={e => setFilter({ ...filter, type: e.target.value })} aria-label="Type">
+              <Select className="w-auto" value={filter.type} onChange={e => setFilter({ ...filter, type: e.target.value })} aria-label="Type">
                 <option value="">All types</option>
                 {ref && Object.entries(ref.organizationTypes).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-              </select>
-              <select className="ui-input w-auto" value={filter.status} onChange={e => setFilter({ ...filter, status: e.target.value })} aria-label="Status">
+              </Select>
+              <Select className="w-auto" value={filter.status} onChange={e => setFilter({ ...filter, status: e.target.value })} aria-label="Status">
                 <option value="">All statuses</option>
                 {['pending', 'active', 'suspended', 'inactive'].map(s => <option key={s} value={s}>{s}</option>)}
-              </select>
+              </Select>
             </div>
           </CardHeader>
           <CardContent>
@@ -257,22 +257,22 @@ export default function AdminB2BPage() {
               <CardContent>
                 <form onSubmit={create} className="grid gap-3 sm:grid-cols-2" data-testid="b2b-create-form">
                   <Field label="Type">
-                    <select className="ui-input" value={newOrg.organizationType} onChange={e => setNewOrg({ ...newOrg, organizationType: e.target.value })} data-testid="b2b-type">
+                    <Select value={newOrg.organizationType} onChange={e => setNewOrg({ ...newOrg, organizationType: e.target.value })} data-testid="b2b-type">
                       {ref && Object.entries(ref.organizationTypes).filter(([k]) => k !== 'employer').map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-                    </select>
+                    </Select>
                   </Field>
-                  <Field label="Legal name"><input className="ui-input" required value={newOrg.legalName} onChange={e => setNewOrg({ ...newOrg, legalName: e.target.value })} data-testid="b2b-legal-name" /></Field>
-                  <Field label="Trading name"><input className="ui-input" value={newOrg.tradingName} onChange={e => setNewOrg({ ...newOrg, tradingName: e.target.value })} /></Field>
+                  <Field label="Legal name"><Input required value={newOrg.legalName} onChange={e => setNewOrg({ ...newOrg, legalName: e.target.value })} data-testid="b2b-legal-name" /></Field>
+                  <Field label="Trading name"><Input value={newOrg.tradingName} onChange={e => setNewOrg({ ...newOrg, tradingName: e.target.value })} /></Field>
                   <Field label="Sector">
-                    <select className="ui-input" value={newOrg.industrySector} onChange={e => setNewOrg({ ...newOrg, industrySector: e.target.value })}>
+                    <Select value={newOrg.industrySector} onChange={e => setNewOrg({ ...newOrg, industrySector: e.target.value })}>
                       <option value="">—</option>
                       {ref && Object.entries(ref.industrySectors).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-                    </select>
+                    </Select>
                   </Field>
-                  <Field label="Registration number"><input className="ui-input" value={newOrg.registrationNumber} onChange={e => setNewOrg({ ...newOrg, registrationNumber: e.target.value })} /></Field>
-                  <Field label="TIN"><input className="ui-input" value={newOrg.taxIdentificationNumber} onChange={e => setNewOrg({ ...newOrg, taxIdentificationNumber: e.target.value })} /></Field>
-                  <Field label="Email"><input className="ui-input" type="email" value={newOrg.email} onChange={e => setNewOrg({ ...newOrg, email: e.target.value })} /></Field>
-                  <Field label="Phone"><input className="ui-input" value={newOrg.phone} onChange={e => setNewOrg({ ...newOrg, phone: e.target.value })} /></Field>
+                  <Field label="Registration number"><Input value={newOrg.registrationNumber} onChange={e => setNewOrg({ ...newOrg, registrationNumber: e.target.value })} /></Field>
+                  <Field label="TIN"><Input value={newOrg.taxIdentificationNumber} onChange={e => setNewOrg({ ...newOrg, taxIdentificationNumber: e.target.value })} /></Field>
+                  <Field label="Email"><Input type="email" value={newOrg.email} onChange={e => setNewOrg({ ...newOrg, email: e.target.value })} /></Field>
+                  <Field label="Phone"><Input value={newOrg.phone} onChange={e => setNewOrg({ ...newOrg, phone: e.target.value })} /></Field>
                   <div className="sm:col-span-2 flex justify-end gap-2">
                     <Button type="button" variant="secondary" onClick={() => setCreating(false)}>Cancel</Button>
                     <Button type="submit" disabled={busy} data-testid="b2b-create">Create</Button>
@@ -340,9 +340,9 @@ export default function AdminB2BPage() {
                           </span>
                           <span className="flex items-center gap-2">
                             {u.readOnly ? <Badge tone="gray">{u.role} · Companies</Badge> : (
-                              <select className="ui-input w-auto py-1" value={u.role} disabled={busy} onChange={e => changeUser(u, { role: e.target.value })} aria-label="Role">
+                              <Select className="w-auto py-1" value={u.role} disabled={busy} onChange={e => changeUser(u, { role: e.target.value })} aria-label="Role">
                                 {ref?.organizationUserRoles.map(r => <option key={r} value={r}>{r}</option>)}
-                              </select>
+                              </Select>
                             )}
                             <Badge tone={TONE[u.status] ?? 'gray'}>{u.status}</Badge>
                             {!u.readOnly && (
@@ -359,10 +359,10 @@ export default function AdminB2BPage() {
                     </ul>
                   )}
                   <form onSubmit={addUser} className="grid gap-2 sm:grid-cols-3" data-testid="b2b-user-form">
-                    <input className="ui-input sm:col-span-1" placeholder="Their email, mobile number or user ID" required value={userForm.userId} onChange={e => setUserForm({ ...userForm, userId: e.target.value })} data-testid="b2b-user-id" />
-                    <select className="ui-input" value={userForm.role} onChange={e => setUserForm({ ...userForm, role: e.target.value })} aria-label="Role" data-testid="b2b-user-role">
+                    <Input className="sm:col-span-1" placeholder="Their email, mobile number or user ID" aria-label="Their email, mobile number or user ID" required value={userForm.userId} onChange={e => setUserForm({ ...userForm, userId: e.target.value })} data-testid="b2b-user-id" />
+                    <Select value={userForm.role} onChange={e => setUserForm({ ...userForm, role: e.target.value })} aria-label="Role" data-testid="b2b-user-role">
                       {ref?.organizationUserRoles.map(r => <option key={r} value={r}>{r}</option>)}
-                    </select>
+                    </Select>
                     <Button type="submit" disabled={busy} data-testid="b2b-user-add">Add user</Button>
                     <p className="text-xs text-[var(--color-fg-quaternary)] sm:col-span-3">They sign in to this portal with the FitFlex account they already have. Owner, admin and finance see billing; HR and managers see people and programmes.</p>
                   </form>
@@ -398,12 +398,12 @@ export default function AdminB2BPage() {
                   )}
                   {!mapped && (
                     <form onSubmit={enroll} className="grid gap-2 sm:grid-cols-2" data-testid="b2b-beneficiary-form">
-                      <input className="ui-input" placeholder="Member’s email, mobile number or user ID" required value={benForm.userId} onChange={e => setBenForm({ ...benForm, userId: e.target.value })} data-testid="b2b-ben-user-id" />
-                      <select className="ui-input" value={benForm.beneficiaryType} onChange={e => setBenForm({ ...benForm, beneficiaryType: e.target.value })} aria-label="Beneficiary type">
+                      <Input placeholder="Member’s email, mobile number or user ID" aria-label="Member’s email, mobile number or user ID" required value={benForm.userId} onChange={e => setBenForm({ ...benForm, userId: e.target.value })} data-testid="b2b-ben-user-id" />
+                      <Select value={benForm.beneficiaryType} onChange={e => setBenForm({ ...benForm, beneficiaryType: e.target.value })} aria-label="Beneficiary type">
                         {ref && Object.entries(ref.beneficiaryTypes).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-                      </select>
-                      <input className="ui-input" placeholder="Reference (policy / staff no.)" value={benForm.externalReference} onChange={e => setBenForm({ ...benForm, externalReference: e.target.value })} />
-                      <input className="ui-input" placeholder="Group / department" value={benForm.groupName} onChange={e => setBenForm({ ...benForm, groupName: e.target.value })} />
+                      </Select>
+                      <Input placeholder="Reference (policy / staff no.)" aria-label="Reference (policy / staff no.)" value={benForm.externalReference} onChange={e => setBenForm({ ...benForm, externalReference: e.target.value })} />
+                      <Input placeholder="Group / department" aria-label="Group / department" value={benForm.groupName} onChange={e => setBenForm({ ...benForm, groupName: e.target.value })} />
                       <div className="sm:col-span-2 flex justify-end">
                         <Button type="submit" disabled={busy} data-testid="b2b-ben-enroll">Enrol member</Button>
                       </div>
