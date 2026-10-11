@@ -6,7 +6,7 @@ import {
   api, ApiError, B2BAgreement, B2BBillingAccount, B2BBillingDashboard, B2BInvoiceDetail, B2BPayment, B2BReconciliation,
   B2BSponsorInvoice, B2BStatement,
 } from '@/lib/api';
-import { Alert, Badge, Button, Card, CardContent, Field, PageHeader, Segmented, Spinner } from '@/components/shared';
+import { Alert, Badge, Button, Card, CardContent, Field, Input, PageHeader, Segmented, Select, Spinner, Table, TBody, Td, Th, THead, Tr } from '@/components/shared';
 import { Aging, Balances, InvoiceDocument, InvoiceStatus, PrintButton, StatementTable, INVOICE_KIND, PAYMENT_METHOD, day } from '@/components/b2b-finance';
 import { CollectionsPanel } from '@/components/b2b-collections';
 import { money } from '@/lib/admin-utils';
@@ -108,7 +108,7 @@ export default function B2BBillingPage() {
             <CardContent className="space-y-2 py-4 text-sm">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="font-semibold">Month</div>
-                <input className="ui-input !w-auto" type="month" value={period} onChange={e => e.target.value && setPeriod(e.target.value)} data-testid="billing-period" />
+                <Input className="!w-auto" type="month" aria-label="Month" value={period} onChange={e => e.target.value && setPeriod(e.target.value)} data-testid="billing-period" />
               </div>
               <div>Drafts waiting to be issued for {dash.currentPeriod.period}: <span className="font-medium">{dash.currentPeriod.draftInvoices}</span> ({money(dash.currentPeriod.draftTotalTzs)})</div>
               <div className="grid gap-2 sm:grid-cols-3" data-testid="billed-vs-providers">
@@ -138,32 +138,32 @@ export default function B2BBillingPage() {
             <CardContent className="py-4">
               <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
                 <div className="text-sm font-semibold">Organisations</div>
-                <select className="ui-input !w-auto" value="" onChange={(e) => { const o = orgs.find(x => x.id === e.target.value); if (o) setOrg(o); }} data-testid="billing-open-org">
+                <Select className="!w-auto" aria-label="Organisations" value="" onChange={(e) => { const o = orgs.find(x => x.id === e.target.value); if (o) setOrg(o); }} data-testid="billing-open-org">
                   <option value="">Open an organisation…</option>
                   {orgs.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
-                </select>
+                </Select>
               </div>
               {dash.organizations.length === 0 ? <p className="text-sm text-[var(--color-fg-quaternary)]">Nothing has been invoiced yet.</p> : (
-                <table className="w-full text-sm" data-testid="billing-organizations">
-                  <thead>
-                    <tr className="border-b border-[var(--color-border-secondary)] text-left text-xs text-[var(--color-fg-quaternary)]">
-                      <th className="py-2 pr-3">Organisation</th><th className="py-2 pr-3 text-right">Invoiced</th><th className="py-2 pr-3 text-right">Collected</th>
-                      <th className="py-2 pr-3 text-right">Outstanding</th><th className="py-2 pr-3 text-right">Overdue</th><th className="py-2 text-right">Credit</th>
-                    </tr>
-                  </thead>
-                  <tbody>
+                <Table data-testid="billing-organizations">
+                  <THead>
+                    <Tr>
+                      <Th>Organisation</Th><Th className="!text-right">Invoiced</Th><Th className="!text-right">Collected</Th>
+                      <Th className="!text-right">Outstanding</Th><Th className="!text-right">Overdue</Th><Th className="!text-right">Credit</Th>
+                    </Tr>
+                  </THead>
+                  <TBody>
                     {dash.organizations.map(o => (
-                      <tr key={o.organizationId} className="border-b border-[var(--color-border-secondary)]">
-                        <td className="py-2 pr-3"><button className="font-medium text-[var(--color-fg-brand)]" onClick={() => setOrg({ id: o.organizationId, name: o.name })}>{o.name}</button></td>
-                        <td className="py-2 pr-3 text-right">{money(o.invoicedTzs)}</td>
-                        <td className="py-2 pr-3 text-right">{money(o.collectedTzs)}</td>
-                        <td className="py-2 pr-3 text-right">{money(o.outstandingTzs)}</td>
-                        <td className={`py-2 pr-3 text-right ${o.overdueTzs > 0 ? 'text-[var(--color-error-600)]' : ''}`}>{o.overdueTzs ? money(o.overdueTzs) : ''}</td>
-                        <td className="py-2 text-right">{o.creditTzs ? money(o.creditTzs) : ''}</td>
-                      </tr>
+                      <Tr key={o.organizationId}>
+                        <Td><Button variant="link" className="h-auto px-0 font-medium" onClick={() => setOrg({ id: o.organizationId, name: o.name })}>{o.name}</Button></Td>
+                        <Td className="text-right">{money(o.invoicedTzs)}</Td>
+                        <Td className="text-right">{money(o.collectedTzs)}</Td>
+                        <Td className="text-right">{money(o.outstandingTzs)}</Td>
+                        <Td className={`text-right ${o.overdueTzs > 0 ? 'text-[var(--color-error-600)]' : ''}`}>{o.overdueTzs ? money(o.overdueTzs) : ''}</Td>
+                        <Td className="text-right">{o.creditTzs ? money(o.creditTzs) : ''}</Td>
+                      </Tr>
                     ))}
-                  </tbody>
-                </table>
+                  </TBody>
+                </Table>
               )}
             </CardContent>
           </Card>
@@ -271,7 +271,7 @@ function OrganizationBilling({ token, org, can, userId, onBack }: { token: strin
               <div className="space-y-3 border-t border-[var(--color-border-secondary)] pt-3" data-testid="invoice-actions">
                 {inv.status === 'draft' && (
                   <div className="flex flex-wrap items-end gap-2">
-                    {!isNote && <Field label="VAT rate %"><input className="ui-input !w-28" inputMode="decimal" value={amount} onChange={e => setAmount(e.target.value)} placeholder="18" data-testid="invoice-vat" /></Field>}
+                    {!isNote && <Field label="VAT rate %"><Input className="!w-28" inputMode="decimal" value={amount} onChange={e => setAmount(e.target.value)} placeholder="18" data-testid="invoice-vat" /></Field>}
                     {isNote ? (
                       <Button size="sm" disabled={busy || !can.approve || inv.createdBy === userId} data-testid="note-issue"
                         onClick={() => run(async () => { await api.issueB2BNote(token, inv.id); await refreshOpen(inv.id); }, 'Could not issue the note.')}>Issue note</Button>
@@ -284,15 +284,15 @@ function OrganizationBilling({ token, org, can, userId, onBack }: { token: strin
                 )}
                 {(inv.status === 'draft' || inv.status === 'issued') && (
                   <div className="flex flex-wrap items-end gap-2">
-                    <Field label="Reason (to void)"><input className="ui-input !w-72" value={text} onChange={e => setText(e.target.value)} data-testid="invoice-reason" /></Field>
+                    <Field label="Reason (to void)"><Input className="!w-72" value={text} onChange={e => setText(e.target.value)} data-testid="invoice-reason" /></Field>
                     <Button size="sm" variant="secondary" disabled={busy || !can.bill || !text.trim()} data-testid="invoice-void"
                       onClick={() => run(async () => { await api.voidB2BInvoice(token, inv.id, text.trim()); await refreshOpen(inv.id); }, 'Could not void the invoice.')}>Void</Button>
                   </div>
                 )}
                 {!isNote && ['issued', 'partially_paid', 'paid'].includes(inv.status) && inv.totalTzs > 0 && (
                   <div className="flex flex-wrap items-end gap-2">
-                    <Field label="Correction amount (TZS)"><input className="ui-input !w-40" inputMode="numeric" value={amount} onChange={e => setAmount(e.target.value)} data-testid="note-amount" /></Field>
-                    <Field label="Why"><input className="ui-input !w-72" value={text} onChange={e => setText(e.target.value)} data-testid="note-reason" /></Field>
+                    <Field label="Correction amount (TZS)"><Input className="!w-40" inputMode="numeric" value={amount} onChange={e => setAmount(e.target.value)} data-testid="note-amount" /></Field>
+                    <Field label="Why"><Input className="!w-72" value={text} onChange={e => setText(e.target.value)} data-testid="note-reason" /></Field>
                     {(['credit', 'debit'] as const).map(type => (
                       <Button key={type} size="sm" variant="secondary" disabled={busy || !can.bill || !(whole(amount) > 0) || !text.trim()} data-testid={`note-${type}`}
                         onClick={() => run(async () => {
@@ -314,32 +314,32 @@ function OrganizationBilling({ token, org, can, userId, onBack }: { token: strin
                   <Badge tone={trace.checks.usageMatchesLedger ? 'success' : 'danger'}>{trace.checks.usageMatchesLedger ? 'Usage matches the ledger' : 'Usage differs from the ledger'}</Badge>
                   {trace.checks.reversedSinceInvoiced.length > 0 && <Badge tone="warning">{trace.checks.reversedSinceInvoiced.length} reversed since; credited on the next usage invoice</Badge>}
                 </div>
-                <table className="w-full">
-                  <thead>
-                    <tr className="border-b border-[var(--color-border-secondary)] text-left text-[var(--color-fg-quaternary)]">
-                      <th className="py-1 pr-2">Line</th><th className="py-1 pr-2 text-right">Charged</th><th className="py-1 pr-2">What it charges for</th><th className="py-1">Provider side (separate)</th>
-                    </tr>
-                  </thead>
-                  <tbody>
+                <Table>
+                  <THead>
+                    <Tr>
+                      <Th>Line</Th><Th className="!text-right">Charged</Th><Th>What it charges for</Th><Th>Provider side (separate)</Th>
+                    </Tr>
+                  </THead>
+                  <TBody>
                     {trace.lines.map(l => (
-                      <tr key={l.lineId} className="border-b border-[var(--color-border-secondary)] align-top">
-                        <td className="py-1 pr-2">{l.description}</td>
-                        <td className="py-1 pr-2 text-right">{money(l.amountTzs)}</td>
-                        <td className="py-1 pr-2">
+                      <Tr key={l.lineId} className="align-top">
+                        <Td>{l.description}</Td>
+                        <Td className="text-right">{money(l.amountTzs)}</Td>
+                        <Td>
                           {l.consumption && `${l.consumption.sourceType === 'gym_checkin' ? 'Gym visit' : 'Trainer session'} on ${l.consumption.businessDate} · value ${money(l.consumption.grossTzs)} · sponsor ${money(l.consumption.sponsorTzs)} · ${l.consumption.status}`}
                           {l.entitlement && `${l.entitlement.passTier} pass · list ${money(l.entitlement.listPriceTzs)} · fee ${money(l.entitlement.feeTzs)}${BASIS[l.entitlement.priceBasis ?? ''] ? ` (${BASIS[l.entitlement.priceBasis ?? '']})` : ''} · sponsor ${money(l.entitlement.sponsorTzs)} · member ${money(l.entitlement.memberTzs)} · ${l.entitlement.status}`}
                           {!l.consumption && !l.entitlement && (l.kind === 'fee' ? 'The agreement’s platform fee' : 'A correction')}
-                        </td>
-                        <td className="py-1">
+                        </Td>
+                        <Td>
                           {!l.provider ? '—'
                             : l.provider.outcome === 'not_settled_yet' ? 'Not settled yet'
                               : l.provider.gymsOwedTzs != null ? `Gyms owed ${money(l.provider.gymsOwedTzs)} for this pass`
                                 : `${l.provider.outcome}${l.provider.statementStatus ? ` · statement ${l.provider.statementStatus}` : ''}`}
-                        </td>
-                      </tr>
+                        </Td>
+                      </Tr>
                     ))}
-                  </tbody>
-                </table>
+                  </TBody>
+                </Table>
               </div>
             )}
           </CardContent>
@@ -355,7 +355,7 @@ function OrganizationBilling({ token, org, can, userId, onBack }: { token: strin
             <Card>
               <CardContent className="space-y-3 py-4">
                 <div className="flex flex-wrap items-end gap-2">
-                  <Field label="Platform fee for"><input className="ui-input !w-auto" type="month" value={feePeriod} onChange={e => setFeePeriod(e.target.value)} /></Field>
+                  <Field label="Platform fee for"><Input className="!w-auto" type="month" value={feePeriod} onChange={e => setFeePeriod(e.target.value)} /></Field>
                   <Button size="sm" variant="secondary" disabled={busy || !can.bill} data-testid="fee-prepare"
                     onClick={() => run(async () => {
                       const r = await api.prepareB2BFee(token, org.id, feePeriod);
@@ -365,26 +365,26 @@ function OrganizationBilling({ token, org, can, userId, onBack }: { token: strin
                   <span className="text-xs text-[var(--color-fg-quaternary)]">Pass and per-use invoices are prepared on each programme, under B2B organisations.</span>
                 </div>
                 {!invoices ? <Spinner className="h-5 w-5" /> : invoices.length === 0 ? <p className="text-sm text-[var(--color-fg-quaternary)]">No invoices yet.</p> : (
-                  <table className="w-full text-sm" data-testid="admin-invoices">
-                    <thead>
-                      <tr className="border-b border-[var(--color-border-secondary)] text-left text-xs text-[var(--color-fg-quaternary)]">
-                        <th className="py-2 pr-3">Number</th><th className="py-2 pr-3">For</th><th className="py-2 pr-3">Due</th>
-                        <th className="py-2 pr-3 text-right">Total</th><th className="py-2 pr-3 text-right">Still owed</th><th className="py-2">Status</th>
-                      </tr>
-                    </thead>
-                    <tbody>
+                  <Table data-testid="admin-invoices">
+                    <THead>
+                      <Tr>
+                        <Th>Number</Th><Th>For</Th><Th>Due</Th>
+                        <Th className="!text-right">Total</Th><Th className="!text-right">Still owed</Th><Th>Status</Th>
+                      </Tr>
+                    </THead>
+                    <TBody>
                       {invoices.map(i => (
-                        <tr key={i.id} className="border-b border-[var(--color-border-secondary)]">
-                          <td className="py-2 pr-3"><button className="font-medium text-[var(--color-fg-brand)]" onClick={() => view(i.id)} data-testid={`admin-invoice-${i.id}`}>{i.number}</button></td>
-                          <td className="py-2 pr-3">{INVOICE_KIND[i.kind] ?? i.kind} · {i.period}</td>
-                          <td className="py-2 pr-3 whitespace-nowrap">{i.totalTzs > 0 ? day(i.dueDate) : '—'}</td>
-                          <td className="py-2 pr-3 text-right">{money(i.totalTzs)}</td>
-                          <td className="py-2 pr-3 text-right">{i.outstandingTzs ? money(i.outstandingTzs) : ''}</td>
-                          <td className="py-2"><InvoiceStatus invoice={i} /></td>
-                        </tr>
+                        <Tr key={i.id}>
+                          <Td><Button variant="link" className="h-auto px-0 font-medium" onClick={() => view(i.id)} data-testid={`admin-invoice-${i.id}`}>{i.number}</Button></Td>
+                          <Td>{INVOICE_KIND[i.kind] ?? i.kind} · {i.period}</Td>
+                          <Td className="whitespace-nowrap">{i.totalTzs > 0 ? day(i.dueDate) : '—'}</Td>
+                          <Td className="text-right">{money(i.totalTzs)}</Td>
+                          <Td className="text-right">{i.outstandingTzs ? money(i.outstandingTzs) : ''}</Td>
+                          <Td><InvoiceStatus invoice={i} /></Td>
+                        </Tr>
                       ))}
-                    </tbody>
-                  </table>
+                    </TBody>
+                  </Table>
                 )}
               </CardContent>
             </Card>
@@ -396,14 +396,14 @@ function OrganizationBilling({ token, org, can, userId, onBack }: { token: strin
                 <CardContent className="space-y-3 py-4" data-testid="payment-form">
                   <div className="text-sm font-semibold">Record a payment</div>
                   <div className="grid gap-3 sm:grid-cols-4">
-                    <Field label="Amount (TZS)"><input className="ui-input" inputMode="numeric" value={payment.amount} onChange={e => setPayment({ ...payment, amount: e.target.value })} data-testid="payment-amount" /></Field>
+                    <Field label="Amount (TZS)"><Input inputMode="numeric" value={payment.amount} onChange={e => setPayment({ ...payment, amount: e.target.value })} data-testid="payment-amount" /></Field>
                     <Field label="How it was paid">
-                      <select className="ui-input" value={payment.method} onChange={e => setPayment({ ...payment, method: e.target.value })} data-testid="payment-method">
+                      <Select value={payment.method} onChange={e => setPayment({ ...payment, method: e.target.value })} data-testid="payment-method">
                         {Object.entries(PAYMENT_METHOD).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-                      </select>
+                      </Select>
                     </Field>
-                    <Field label="Bank or mobile-money reference"><input className="ui-input" value={payment.reference} onChange={e => setPayment({ ...payment, reference: e.target.value })} data-testid="payment-reference" /></Field>
-                    <Field label="Received on (blank = today)"><input className="ui-input" type="date" value={payment.receivedAt} onChange={e => setPayment({ ...payment, receivedAt: e.target.value })} /></Field>
+                    <Field label="Bank or mobile-money reference"><Input value={payment.reference} onChange={e => setPayment({ ...payment, reference: e.target.value })} data-testid="payment-reference" /></Field>
+                    <Field label="Received on (blank = today)"><Input type="date" value={payment.receivedAt} onChange={e => setPayment({ ...payment, receivedAt: e.target.value })} /></Field>
                   </div>
                   <Segmented className="w-fit" value={payment.mode} onChange={v => setPayment({ ...payment, mode: v as typeof payment.mode })}
                     options={[['auto', 'Settle the oldest invoices first'], ['choose', 'Choose invoices'], ['hold', 'Keep on the account']]} />
@@ -412,7 +412,7 @@ function OrganizationBilling({ token, org, can, userId, onBack }: { token: strin
                       {openInvoices.map(i => (
                         <li key={i.id} className="flex flex-wrap items-center gap-2">
                           <span className="w-56">{i.number} · owed {money(i.outstandingTzs)}</span>
-                          <input className="ui-input !w-40" inputMode="numeric" placeholder="Amount to apply" value={picked[i.id] ?? ''} onChange={e => setPicked({ ...picked, [i.id]: e.target.value })} data-testid={`payment-apply-${i.id}`} />
+                          <Input className="!w-40" inputMode="numeric" placeholder="Amount to apply" aria-label="Amount to apply" value={picked[i.id] ?? ''} onChange={e => setPicked({ ...picked, [i.id]: e.target.value })} data-testid={`payment-apply-${i.id}`} />
                         </li>
                       ))}
                     </ul>
@@ -424,22 +424,22 @@ function OrganizationBilling({ token, org, can, userId, onBack }: { token: strin
               <Card>
                 <CardContent className="py-4">
                   {!payments ? <Spinner className="h-5 w-5" /> : payments.length === 0 ? <p className="text-sm text-[var(--color-fg-quaternary)]">No payments recorded.</p> : (
-                    <table className="w-full text-sm" data-testid="admin-payments">
-                      <thead>
-                        <tr className="border-b border-[var(--color-border-secondary)] text-left text-xs text-[var(--color-fg-quaternary)]">
-                          <th className="py-2 pr-3">Received</th><th className="py-2 pr-3">Receipt</th><th className="py-2 pr-3">How · reference</th>
-                          <th className="py-2 pr-3 text-right">Amount</th><th className="py-2 pr-3 text-right">Not applied</th><th className="py-2"></th>
-                        </tr>
-                      </thead>
-                      <tbody>
+                    <Table data-testid="admin-payments">
+                      <THead>
+                        <Tr>
+                          <Th>Received</Th><Th>Receipt</Th><Th>How · reference</Th>
+                          <Th className="!text-right">Amount</Th><Th className="!text-right">Not applied</Th><Th></Th>
+                        </Tr>
+                      </THead>
+                      <TBody>
                         {payments.map(p => (
-                          <tr key={p.id} className="border-b border-[var(--color-border-secondary)]">
-                            <td className="py-2 pr-3 whitespace-nowrap">{day(p.receivedAt)}</td>
-                            <td className="py-2 pr-3 font-medium">{p.number}</td>
-                            <td className="py-2 pr-3">{PAYMENT_METHOD[p.method] ?? p.method} · {p.reference}{p.status === 'reversed' ? ` · reversed: ${p.reversalReason}` : ''}</td>
-                            <td className="py-2 pr-3 text-right">{money(p.amountTzs)}</td>
-                            <td className="py-2 pr-3 text-right">{p.unallocatedTzs ? money(p.unallocatedTzs) : ''}</td>
-                            <td className="py-2 text-right">
+                          <Tr key={p.id}>
+                            <Td className="whitespace-nowrap">{day(p.receivedAt)}</Td>
+                            <Td className="font-medium">{p.number}</Td>
+                            <Td>{PAYMENT_METHOD[p.method] ?? p.method} · {p.reference}{p.status === 'reversed' ? ` · reversed: ${p.reversalReason}` : ''}</Td>
+                            <Td className="text-right">{money(p.amountTzs)}</Td>
+                            <Td className="text-right">{p.unallocatedTzs ? money(p.unallocatedTzs) : ''}</Td>
+                            <Td className="text-right">
                               {p.status === 'reversed' ? <Badge tone="danger">Reversed</Badge> : (
                                 <span className="flex justify-end gap-2">
                                   {p.unallocatedTzs > 0 && <Button size="sm" variant="secondary" disabled={busy || !can.pay} onClick={() => { setApplying(p); setPicked({}); }} data-testid={`payment-apply-open-${p.id}`}>Apply</Button>}
@@ -447,11 +447,11 @@ function OrganizationBilling({ token, org, can, userId, onBack }: { token: strin
                                     onClick={() => { const why = window.prompt('Why is this payment being reversed?'); if (why?.trim()) run(async () => { await api.reverseB2BPayment(token, p.id, why.trim()); }, 'Could not reverse the payment.'); }}>Reverse</Button>
                                 </span>
                               )}
-                            </td>
-                          </tr>
+                            </Td>
+                          </Tr>
                         ))}
-                      </tbody>
-                    </table>
+                      </TBody>
+                    </Table>
                   )}
                   {applying && (
                     <div className="mt-3 space-y-2 border-t border-[var(--color-border-secondary)] pt-3 text-sm" data-testid="payment-apply-panel">
@@ -459,7 +459,7 @@ function OrganizationBilling({ token, org, can, userId, onBack }: { token: strin
                       {openInvoices.length === 0 ? <p className="text-xs text-[var(--color-fg-quaternary)]">No invoice is waiting for payment.</p> : openInvoices.map(i => (
                         <div key={i.id} className="flex flex-wrap items-center gap-2">
                           <span className="w-56">{i.number} · owed {money(i.outstandingTzs)}</span>
-                          <input className="ui-input !w-40" inputMode="numeric" placeholder="Amount to apply" value={picked[i.id] ?? ''} onChange={e => setPicked({ ...picked, [i.id]: e.target.value })} />
+                          <Input className="!w-40" inputMode="numeric" placeholder="Amount to apply" aria-label="Amount to apply" value={picked[i.id] ?? ''} onChange={e => setPicked({ ...picked, [i.id]: e.target.value })} />
                         </div>
                       ))}
                       <div className="flex gap-2">
@@ -486,8 +486,8 @@ function OrganizationBilling({ token, org, can, userId, onBack }: { token: strin
                     <div className="text-xs text-[var(--color-fg-quaternary)]">{statement.from || statement.to ? `${day(statement.from)} to ${day(statement.to)}` : 'All dates'} · as of {day(statement.asOf)}</div>
                   </div>
                   <div className="flex flex-wrap items-end gap-2 print:hidden">
-                    <input className="ui-input !w-auto" type="date" value={range.from} onChange={e => setRange({ ...range, from: e.target.value })} aria-label="From" />
-                    <input className="ui-input !w-auto" type="date" value={range.to} onChange={e => setRange({ ...range, to: e.target.value })} aria-label="To" />
+                    <Input className="!w-auto" type="date" value={range.from} onChange={e => setRange({ ...range, from: e.target.value })} aria-label="From" />
+                    <Input className="!w-auto" type="date" value={range.to} onChange={e => setRange({ ...range, to: e.target.value })} aria-label="To" />
                     <Button variant="secondary" size="sm" onClick={() => run(async () => undefined, 'Could not load the statement.')}>Show</Button>
                     <PrintButton />
                   </div>
@@ -519,12 +519,12 @@ function OrganizationBilling({ token, org, can, userId, onBack }: { token: strin
                     ))}
                   </ul>
                   <div className="grid gap-3 border-t border-[var(--color-border-secondary)] pt-3 sm:grid-cols-2">
-                    <Field label="Starts on"><input className="ui-input" type="date" value={draft.effectiveFrom} onChange={e => setDraft({ ...draft, effectiveFrom: e.target.value })} data-testid="agreement-from" /></Field>
-                    <Field label="Contract reference (optional)"><input className="ui-input" value={draft.contractReference} onChange={e => setDraft({ ...draft, contractReference: e.target.value })} /></Field>
-                    <Field label="Days to pay advance invoices"><input className="ui-input" inputMode="numeric" value={draft.prepaidTermsDays} onChange={e => setDraft({ ...draft, prepaidTermsDays: e.target.value })} /></Field>
-                    <Field label="Days to pay usage invoices"><input className="ui-input" inputMode="numeric" value={draft.usageTermsDays} onChange={e => setDraft({ ...draft, usageTermsDays: e.target.value })} /></Field>
-                    <Field label="Platform fee a month, TZS incl. VAT (optional)"><input className="ui-input" inputMode="numeric" value={draft.platformFee} onChange={e => setDraft({ ...draft, platformFee: e.target.value })} data-testid="agreement-fee" /></Field>
-                    <Field label="Usual VAT rate % (optional)" hint="Offered when an invoice is issued."><input className="ui-input" inputMode="decimal" value={draft.vatPct} onChange={e => setDraft({ ...draft, vatPct: e.target.value })} /></Field>
+                    <Field label="Starts on"><Input type="date" value={draft.effectiveFrom} onChange={e => setDraft({ ...draft, effectiveFrom: e.target.value })} data-testid="agreement-from" /></Field>
+                    <Field label="Contract reference (optional)"><Input value={draft.contractReference} onChange={e => setDraft({ ...draft, contractReference: e.target.value })} /></Field>
+                    <Field label="Days to pay advance invoices"><Input inputMode="numeric" value={draft.prepaidTermsDays} onChange={e => setDraft({ ...draft, prepaidTermsDays: e.target.value })} /></Field>
+                    <Field label="Days to pay usage invoices"><Input inputMode="numeric" value={draft.usageTermsDays} onChange={e => setDraft({ ...draft, usageTermsDays: e.target.value })} /></Field>
+                    <Field label="Platform fee a month, TZS incl. VAT (optional)"><Input inputMode="numeric" value={draft.platformFee} onChange={e => setDraft({ ...draft, platformFee: e.target.value })} data-testid="agreement-fee" /></Field>
+                    <Field label="Usual VAT rate % (optional)" hint="Offered when an invoice is issued."><Input inputMode="decimal" value={draft.vatPct} onChange={e => setDraft({ ...draft, vatPct: e.target.value })} /></Field>
                   </div>
                   <div className="space-y-2">
                     <div className="text-xs text-[var(--color-fg-tertiary)]">Sponsored pass rate per person per month, TZS (optional). A tier left empty uses the pass price less the programme's discount; a fee set on a benefit comes first.</div>
@@ -553,9 +553,9 @@ function OrganizationBilling({ token, org, can, userId, onBack }: { token: strin
                   {account && account.source !== 'billing_account' && (
                     <p className="text-xs text-[var(--color-fg-quaternary)]">Using {account.source === 'corporate_account' ? 'the company’s billing contact from Corporate' : 'the organisation’s own contact'} until one is saved here.</p>
                   )}
-                  <Field label="Contact name"><input className="ui-input" value={contact.contactName} onChange={e => setContact({ ...contact, contactName: e.target.value })} /></Field>
-                  <Field label="Email"><input className="ui-input" type="email" value={contact.email} onChange={e => setContact({ ...contact, email: e.target.value })} data-testid="account-email" /></Field>
-                  <Field label="Phone"><input className="ui-input" value={contact.phone} onChange={e => setContact({ ...contact, phone: e.target.value })} /></Field>
+                  <Field label="Contact name"><Input value={contact.contactName} onChange={e => setContact({ ...contact, contactName: e.target.value })} /></Field>
+                  <Field label="Email"><Input type="email" value={contact.email} onChange={e => setContact({ ...contact, email: e.target.value })} data-testid="account-email" /></Field>
+                  <Field label="Phone"><Input value={contact.phone} onChange={e => setContact({ ...contact, phone: e.target.value })} /></Field>
                   {account?.taxIdentificationNumber && <div className="text-xs text-[var(--color-fg-quaternary)]">TIN {account.taxIdentificationNumber}</div>}
                   <Button size="sm" disabled={busy || !can.bill} data-testid="account-save"
                     onClick={() => run(async () => { await api.setB2BBillingAccount(token, org.id, contact); return 'Billing contact saved.'; }, 'Could not save the billing contact.')}>Save</Button>
