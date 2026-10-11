@@ -5,7 +5,7 @@ import { useApp } from '../../app/providers';
 import {
   api, ApiError, userContact, B2BBeneficiary, B2BProgramLifecycle, B2BBenefit, B2BOrganization, B2BProgram, CorporateEmployee,
 } from '@/lib/api';
-import { Alert, Badge, Button, Card, CardContent, Field, PageHeader, Spinner } from '@/components/shared';
+import { Alert, Badge, Button, Card, CardContent, Field, Input, PageHeader, Select, Spinner } from '@/components/shared';
 import { money } from '@/lib/admin-utils';
 import { ChallengeManager } from '@/components/challenge-manager';
 import { PeopleImport } from '@/components/b2b-people-import';
@@ -89,9 +89,9 @@ export function OrgFrame({ title, description, state, bare = false, children }: 
       {error && <Alert tone="error">{error}</Alert>}
       {orgs && orgs.length === 0 && !error && <Alert tone="info">You aren’t part of any organisation on FitFlex yet.</Alert>}
       {orgs && orgs.length > 1 && (
-        <select className="ui-input !w-auto" value={orgId} onChange={e => setOrgId(e.target.value)} data-testid="org-picker">
+        <Select className="!w-auto" value={orgId} onChange={e => setOrgId(e.target.value)} data-testid="org-picker">
           {orgs.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
-        </select>
+        </Select>
       )}
       {orgs === null || (orgId && !mine && !error) ? <Spinner className="h-6 w-6" /> : mine && children(mine, token)}
     </div>
@@ -176,16 +176,16 @@ function Beneficiaries({ token, mine, readOnlyNote }: { token: string; mine: Min
             <form onSubmit={add} className="grid gap-3 sm:grid-cols-5" data-testid="org-people-add">
               <div className="sm:col-span-2">
                 <Field label="Email or mobile number" hint="Of the FitFlex account they use in the app.">
-                  <input className="ui-input" required value={form.contact} onChange={e => setForm({ ...form, contact: e.target.value })} placeholder="asha@example.co.tz or 0712 345 678" data-testid="org-people-contact" />
+                  <Input required value={form.contact} onChange={e => setForm({ ...form, contact: e.target.value })} placeholder="asha@example.co.tz or 0712 345 678" data-testid="org-people-contact" />
                 </Field>
               </div>
               <Field label="Type">
-                <select className="ui-input" value={form.beneficiaryType} onChange={e => setForm({ ...form, beneficiaryType: e.target.value })}>
+                <Select value={form.beneficiaryType} onChange={e => setForm({ ...form, beneficiaryType: e.target.value })}>
                   {Object.entries(Object.keys(types).length ? types : { member: 'Member' }).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-                </select>
+                </Select>
               </Field>
-              <Field label="Group (optional)"><input className="ui-input" value={form.groupName} onChange={e => setForm({ ...form, groupName: e.target.value })} placeholder="e.g. Head office" /></Field>
-              <Field label="Your reference (optional)"><input className="ui-input" value={form.externalReference} onChange={e => setForm({ ...form, externalReference: e.target.value })} placeholder="Staff or policy no." /></Field>
+              <Field label="Group (optional)"><Input value={form.groupName} onChange={e => setForm({ ...form, groupName: e.target.value })} placeholder="e.g. Head office" /></Field>
+              <Field label="Your reference (optional)"><Input value={form.externalReference} onChange={e => setForm({ ...form, externalReference: e.target.value })} placeholder="Staff or policy no." /></Field>
               <div className="sm:col-span-5"><Button type="submit" size="sm" disabled={busy || !form.contact.trim()} data-testid="org-people-add-button">Add person</Button></div>
             </form>
           </CardContent>
@@ -197,7 +197,7 @@ function Beneficiaries({ token, mine, readOnlyNote }: { token: string; mine: Min
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="text-sm font-semibold">{total} {total === 1 ? 'person' : 'people'}</div>
             <form className="flex gap-2" onSubmit={(e) => { e.preventDefault(); run(async () => undefined, 'Could not search.'); }}>
-              <input className="ui-input !w-56" value={search} onChange={e => setSearch(e.target.value)} placeholder="Search by name or reference" />
+              <Input className="!w-56" value={search} onChange={e => setSearch(e.target.value)} placeholder="Search by name or reference" />
               <Button type="submit" size="sm" variant="secondary" disabled={busy}><RefreshCw className="h-4 w-4" />Search</Button>
             </form>
           </div>
@@ -291,13 +291,13 @@ function CompanyStaff({ token }: { token: string }) {
       <Card>
         <CardContent className="py-4">
           <form onSubmit={add} className="grid gap-3 sm:grid-cols-4" data-testid="company-staff-add">
-            <Field label="Employee’s name"><input className="ui-input" required value={form.displayName} onChange={e => setForm({ ...form, displayName: e.target.value })} data-testid="company-staff-name" /></Field>
+            <Field label="Employee’s name"><Input required value={form.displayName} onChange={e => setForm({ ...form, displayName: e.target.value })} data-testid="company-staff-name" /></Field>
             <div className="sm:col-span-2">
               <Field label="Email or mobile number (optional)" hint="Of the FitFlex account they use in the app. They are linked to it if it exists.">
-                <input className="ui-input" value={form.contact} onChange={e => setForm({ ...form, contact: e.target.value })} placeholder="asha@example.co.tz or 0712 345 678" data-testid="company-staff-contact" />
+                <Input value={form.contact} onChange={e => setForm({ ...form, contact: e.target.value })} placeholder="asha@example.co.tz or 0712 345 678" data-testid="company-staff-contact" />
               </Field>
             </div>
-            <Field label="Department (optional)"><input className="ui-input" value={form.department} onChange={e => setForm({ ...form, department: e.target.value })} /></Field>
+            <Field label="Department (optional)"><Input value={form.department} onChange={e => setForm({ ...form, department: e.target.value })} /></Field>
             <div className="sm:col-span-4"><Button type="submit" size="sm" disabled={busy || !form.displayName.trim()} data-testid="company-staff-add-button">Add employee</Button></div>
           </form>
         </CardContent>
@@ -324,7 +324,7 @@ function CompanyStaff({ token }: { token: string }) {
                         </span>
                       ) : (
                         <span className="flex flex-wrap items-center gap-2">
-                          <input className="ui-input !w-52" value={link[s.id] ?? ''} onChange={e => setLink({ ...link, [s.id]: e.target.value })} placeholder="Their email or number" data-testid={`company-staff-link-${s.id}`} />
+                          <Input className="!w-52" value={link[s.id] ?? ''} onChange={e => setLink({ ...link, [s.id]: e.target.value })} placeholder="Their email or number" data-testid={`company-staff-link-${s.id}`} />
                           <Button size="sm" variant="secondary" disabled={busy || !(link[s.id] ?? '').trim()}
                             onClick={() => run(async () => { await api.linkCorporateStaff(token, s.id, userContact(link[s.id])); setLink({ ...link, [s.id]: '' }); return `${s.displayName} is linked to their FitFlex account.`; }, 'Could not link them.')}>Link</Button>
                         </span>
