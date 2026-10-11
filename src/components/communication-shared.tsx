@@ -13,8 +13,11 @@ export const LOCALES: CommsLocale[] = ['en', 'sw'];
 export const TITLE_MAX = 65;
 export const BODY_MAX = 1000;
 
-export const fill = (s: string, vars: Record<string, string | number>) =>
-  Object.entries(vars).reduce((out, [k, v]) => out.replace(`{${k}}`, String(v)), s);
+// `s` is a translation, which is missing (undefined) for a key this build
+// doesn't know — say a code a newer server sends. That must never crash the
+// page, so a missing text fills to an empty string.
+export const fill = (s: string | undefined, vars: Record<string, string | number>) =>
+  Object.entries(vars).reduce((out, [k, v]) => out.replace(`{${k}}`, String(v)), s ?? '');
 export const when = (iso: string | null | undefined) =>
   iso ? new Date(iso).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '';
 export const variablesIn = (text: string) => [...text.matchAll(/\{\{\s*([a-z_]+)\s*\}\}/g)].map(m => m[1]);

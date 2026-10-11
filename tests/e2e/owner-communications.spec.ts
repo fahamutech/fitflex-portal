@@ -105,3 +105,37 @@ test('a permission taken away shows a plain message, not a raw error', async ({ 
   await page.goto('/owner/communications');
   await expect(page.getByText('Communications permission any more')).toBeVisible();
 });
+
+test('a warning this portal has no wording for is left out; it never breaks the preview', async ({ page }) => {
+  const runtimeErrors: Error[] = [];
+  page.on('pageerror', e => runtimeErrors.push(e));
+  const calls: string[] = [];
+  await mockApi(page, calls);
+  // Registered after mockApi, so it wins for the preview of an unsaved draft.
+  await page.route(`${API}/owner/communications/campaigns/preview`, route => route.fulfill({ json: {
+    category: 'transactional', largeSendThreshold: 500,
+    counts: { targeted: 7, queued: 7, skipped: {}, byChannel: { in_app: { queued: 7, skipped: 0 } } },
+    example: { memberName: 'Amina Said', title: 'Class moved', body: 'Now at 6pm. Last day' },
+    warnings: [
+      { code: 'a_code_from_a_newer_server', count: 3 },
+      { code: 'empty_value', variable: 'expiry_date', count: 7, of: 7 },
+    ],
+  } }));
+
+  await page.goto('/owner/communications');
+  await page.getByTestId('comms-new').click();
+  await page.getByTestId('purpose-announcement').click();
+  await page.getByTestId('comms-next').click();
+  await page.getByTestId('preset-all').click();
+  await page.getByTestId('comms-next').click();
+  await page.getByTestId('msg-title-en').fill('Class moved');
+  await page.getByTestId('msg-body-en').fill('Now at 6pm. Last day {{expiry_date}}');
+  await page.getByTestId('comms-next').click();
+  await page.getByTestId('channel-in_app').check();
+  await page.getByTestId('comms-next').click();
+  await page.getByTestId('comms-next').click();
+
+  await expect(page.getByTestId('warning-empty_value-expiry_date')).toContainText('blank for everyone');
+  await expect(page.getByTestId('warning-a_code_from_a_newer_server')).toHaveCount(0);
+  expect(runtimeErrors).toEqual([]);
+});

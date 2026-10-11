@@ -15,7 +15,8 @@ const CHANNELS: CommsChannel[] = ['in_app', 'push', 'whatsapp', 'sms'];
 
 export function automationTitle(t: T, a: Pick<CommsAutomation, 'trigger' | 'offsetDays'>) {
   if (a.trigger === 'membership_expiring' && a.offsetDays === 1) return t('comms.auto.title.membership_expiring_1');
-  return fill(t(`comms.auto.title.${a.trigger}`), { n: a.offsetDays });
+  // A trigger this build has no title for (a newer server's) shows by its code.
+  return fill(t(`comms.auto.title.${a.trigger}`), { n: a.offsetDays }) || a.trigger;
 }
 
 const templateLabel = (t: T, a: CommsAutomation) =>
