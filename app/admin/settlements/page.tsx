@@ -152,6 +152,7 @@ export default function SettlementsPage() {
                           <td className="px-4 py-3">
                             <Badge tone={STATEMENT_STATUS[r.status].tone}>{STATEMENT_STATUS[r.status].label}</Badge>
                             {r.holdReason && r.status !== 'voided' && <span className="ml-2"><Badge tone="danger">On hold</Badge></span>}
+                            {r.voidRequestedBy && r.status !== 'voided' && <span className="ml-2"><Badge tone="warning">Void requested</Badge></span>}
                           </td>
                         </tr>
                       ))}

@@ -13,7 +13,7 @@ import { ConfirmDialog, Dialog, DialogFooter } from '@/components/dialog';
 
 type Ask =
   | { kind: 'confirm'; step: SettlementStep; title: string; description: string; label: string }
-  | { kind: 'reason'; step: 'reject' | 'hold' | 'void'; title: string; description: string; label: string }
+  | { kind: 'reason'; step: 'reject' | 'hold' | 'void-request'; title: string; description: string; label: string }
   | { kind: 'pay' }
   | { kind: 'adjust' }
   | { kind: 'reject-adjustment'; adjustment: SettlementAdjustment };
@@ -71,6 +71,9 @@ export function SettlementStatementView({ statementId, onBack }: { statementId: 
   const canApprove = live && hasPermission('settlements_approve');
   const canPay = live && hasPermission('settlements_pay');
   const held = !!s.holdReason;
+  // A void has been asked for and waits for a second person.
+  const voidAsked = !!s.voidRequestedBy && s.status !== 'voided';
+  const ownVoidRequest = voidAsked && !!user?.id && s.voidRequestedBy === user.id;
   const proposed = adjustments.filter(a => a.status === 'proposed');
   const ownSubmission = s.status === 'submitted' && !!user?.id && s.submittedBy === user.id;
   const visitsOf = (lineId: string) => visits.filter(v => v.lineId === lineId);
@@ -94,28 +97,35 @@ export function SettlementStatementView({ statementId, onBack }: { statementId: 
           {held && canApprove && s.status !== 'voided' && (
             <Button size="sm" onClick={() => setAsk({ kind: 'confirm', step: 'release', title: 'Release the hold?', description: 'The statement carries on from where it was.', label: 'Release' })}>Release hold</Button>
           )}
-          {s.status === 'draft' && canPrepare && (
+          {s.status === 'draft' && canPrepare && !voidAsked && (
             <>
               <Button size="sm" variant="secondary" onClick={() => setAsk({ kind: 'adjust' })} data-testid="settlement-adjust">Add adjustment</Button>
               <Button size="sm" disabled={proposed.length > 0} title={proposed.length ? 'Apply or reject the proposed adjustments first' : undefined}
                 onClick={() => setAsk({ kind: 'confirm', step: 'submit', title: 'Submit for approval?', description: 'The amounts are fixed from here. Any shortfall carried forward from earlier months is taken off first.', label: 'Submit' })} data-testid="settlement-submit">Submit for approval</Button>
             </>
           )}
-          {s.status === 'submitted' && canApprove && (
+          {s.status === 'submitted' && canApprove && !voidAsked && (
             <>
               <Button size="sm" variant="secondary" onClick={() => setAsk({ kind: 'reason', step: 'reject', title: 'Send back to draft', description: 'Say what needs fixing. The person who prepared it sees this.', label: 'Send back' })} data-testid="settlement-reject">Send back</Button>
               <Button size="sm" disabled={ownSubmission} title={ownSubmission ? 'You submitted this statement, so someone else has to approve it' : undefined}
                 onClick={() => setAsk({ kind: 'confirm', step: 'approve', title: 'Approve this statement?', description: `${money(s.finalNetTzs)} to ${s.gymName || 'this gym'} for ${period(s)}.`, label: 'Approve' })} data-testid="settlement-approve">Approve</Button>
             </>
           )}
-          {s.status === 'approved' && canPay && !held && (
+          {s.status === 'approved' && canPay && !held && !voidAsked && (
             <Button size="sm" onClick={() => setAsk({ kind: 'confirm', step: 'payable', title: 'Clear for payment?', description: 'Checks that the gym’s owner is verified and has a verified payout account, then fixes the account to pay.', label: 'Clear for payment' })} data-testid="settlement-payable">Clear for payment</Button>
           )}
           {s.status === 'payable' && canPay && (
             <Button size="sm" onClick={() => setAsk({ kind: 'pay' })} data-testid="settlement-pay">Record payment</Button>
           )}
-          {canApprove && ['draft', 'submitted', 'approved'].includes(s.status) && (
-            <Button size="sm" variant="ghost" onClick={() => setAsk({ kind: 'reason', step: 'void', title: 'Void this statement', description: `${s.gymName || 'This gym'} will never be paid for ${period(s)} on this statement, and its visits are not settled again. This can’t be undone. To pay later instead, put it on hold.`, label: 'Void statement' })} data-testid="settlement-void">Void</Button>
+          {voidAsked && canApprove && (
+            <Button size="sm" variant="destructive" disabled={ownVoidRequest} title={ownVoidRequest ? 'You asked for this void, so someone else has to confirm it' : undefined}
+              onClick={() => setAsk({ kind: 'confirm', step: 'void', title: 'Void this statement?', description: `${s.gymName || 'This gym'} will never be paid for ${period(s)} on this statement, and its visits are not settled again. This can’t be undone.`, label: 'Void statement' })} data-testid="settlement-void-confirm">Confirm void</Button>
+          )}
+          {voidAsked && (canPrepare || canApprove) && (
+            <Button size="sm" variant="secondary" onClick={() => setAsk({ kind: 'confirm', step: 'void-request/cancel', title: 'Cancel the void request?', description: 'The statement carries on from where it was.', label: 'Cancel request' })} data-testid="settlement-void-cancel">Cancel void request</Button>
+          )}
+          {!voidAsked && (canPrepare || canApprove) && ['draft', 'submitted', 'approved'].includes(s.status) && (
+            <Button size="sm" variant="ghost" onClick={() => setAsk({ kind: 'reason', step: 'void-request', title: 'Request a void', description: `Ask for this statement to be cancelled so that ${s.gymName || 'this gym'} is never paid on it for ${period(s)}. A second person has to confirm before anything is voided. To pay later instead, put it on hold.`, label: 'Request void' })} data-testid="settlement-void">Request void</Button>
           )}
           {!held && canPrepare && ['draft', 'submitted', 'approved', 'payable'].includes(s.status) && (
             <Button size="sm" variant="ghost" onClick={() => setAsk({ kind: 'reason', step: 'hold', title: 'Put on hold', description: 'A statement on hold can’t be paid until it is released.', label: 'Put on hold' })} data-testid="settlement-hold">Put on hold</Button>
@@ -127,6 +137,11 @@ export function SettlementStatementView({ statementId, onBack }: { statementId: 
       {notice && <Alert tone="success">{notice}</Alert>}
       {!live && <Alert tone="info">This is a shadow statement: a trial calculation that can’t be submitted, approved or paid.</Alert>}
       {s.status === 'voided' && <Alert tone="error">Voided{s.voidedAt ? ` on ${shortDay(s.voidedAt)}` : ''}: {s.voidReason}. Nothing is paid on this statement.</Alert>}
+      {voidAsked && (
+        <Alert tone="warning">
+          <span data-testid="settlement-void-requested">Void requested{s.voidRequestedAt ? ` on ${shortDay(s.voidRequestedAt)}` : ''}: {s.voidRequestReason}. {ownVoidRequest ? 'Someone else has to confirm it.' : 'A second person has to confirm it.'} Until then it can’t be submitted, approved or paid.</span>
+        </Alert>
+      )}
       {held && s.status !== 'voided' && <Alert tone="warning">On hold: {s.holdReason}</Alert>}
       {s.status === 'draft' && s.rejectReason && <Alert tone="warning">Sent back: {s.rejectReason}</Alert>}
       {s.carryForwardTzs > 0 && <Alert tone="info">{money(s.carryForwardTzs)} could not be recovered from this statement and is carried forward to the gym’s next one.</Alert>}
@@ -285,6 +300,7 @@ export function SettlementStatementView({ statementId, onBack }: { statementId: 
 const DONE: Record<SettlementStep, string> = {
   submit: 'Submitted for approval.', reject: 'Sent back to draft.', approve: 'Approved.', hold: 'Put on hold.',
   release: 'Hold released.', payable: 'Cleared for payment.', pay: 'Payment recorded.', void: 'Statement voided.',
+  'void-request': 'Void requested. Someone else has to confirm it.', 'void-request/cancel': 'Void request cancelled.',
 };
 
 function ReasonDialog({ title, description, label, busy, onClose, onSubmit }: {

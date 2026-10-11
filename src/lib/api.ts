@@ -2368,7 +2368,7 @@ export interface KycCaseDetail {
 // ─── Gym settlements ───
 export type SettlementMode = 'live' | 'shadow';
 export type GymSettlementStatus = 'draft' | 'submitted' | 'approved' | 'payable' | 'paid' | 'voided';
-export type SettlementStep = 'submit' | 'reject' | 'approve' | 'hold' | 'release' | 'payable' | 'pay' | 'void';
+export type SettlementStep = 'submit' | 'reject' | 'approve' | 'hold' | 'release' | 'payable' | 'pay' | 'void-request' | 'void-request/cancel' | 'void';
 
 export interface SettlementRunException { subscriptionId: string; memberId: string; reason: string; missing?: string[] }
 
@@ -2409,6 +2409,10 @@ export interface GymSettlement {
   rejectReason?: string | null;
   voidReason?: string | null;
   voidedAt?: string | null;
+  /** Someone has asked for this statement to be voided; a different person has to confirm. */
+  voidRequestedBy?: string | null;
+  voidRequestedAt?: string | null;
+  voidRequestReason?: string | null;
   destinationSnapshot?: { accountLast4?: string; method?: string; provider?: string; accountName?: string } | null;
   submittedBy?: string | null;
   submittedAt?: string | null;

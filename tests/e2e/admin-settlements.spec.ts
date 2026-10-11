@@ -37,7 +37,9 @@ async function setup(page: Page, user: Json, state: { statement: Json; adjustmen
         if (state.statement.submittedBy === user.id) return route.fulfill({ status: 403, json: { error: 'cannot_approve_own_submission' } });
         state.statement = { ...state.statement, status: 'approved' };
       }
-      if (path.endsWith('/void')) state.statement = { ...state.statement, status: 'voided', voidReason: body?.reason, voidedAt: '2026-11-03T09:00:00.000Z' };
+      if (path.endsWith('/void-request')) state.statement = { ...state.statement, voidRequestedBy: user.id, voidRequestedAt: '2026-11-02T09:00:00.000Z', voidRequestReason: body?.reason };
+      if (path.endsWith('/void-request/cancel')) state.statement = { ...state.statement, voidRequestedBy: null, voidRequestedAt: null, voidRequestReason: null };
+      if (path.endsWith('/void')) state.statement = { ...state.statement, status: 'voided', voidReason: state.statement.voidRequestReason, voidedAt: '2026-11-03T09:00:00.000Z' };
       if (path.endsWith('/payable')) return  route.fulfill({ status: 409, json: { error: 'not_payable', reason: 'payout_account_not_verified' } });
       if (path.endsWith('/adjustments')) {
         state.adjustments.push({ id: 'adj-1', gymSettlementId: 'st-1', status: 'proposed', createdBy: user.id, ...body });
@@ -132,7 +134,7 @@ test('portal staff without settlement scopes can read but not act; runs list sho
   await expect(page.getByTestId('settlement-actions').getByRole('button')).toHaveCount(0);
 });
 
-test('an approver voids a statement with a reason; amounts waiting from voided check-ins are shown', async ({ page }) => {
+test('voiding takes two people: one requests with a reason, another confirms; amounts waiting from voided check-ins are shown', async ({ page }) => {
   const state = { statement: statement({ status: 'submitted', submittedBy: 'admin-1' }), adjustments: [] as Json[], calls: [] as Array<{ path: string; body: Json | null }> };
   await setup(page, { id: 'admin-2', userType: 'admin', email: 'second@example.com' }, state);
 
@@ -146,7 +148,34 @@ test('an approver voids a statement with a reason; amounts waiting from voided c
   await expect(page.getByTestId('settlement-reason-submit')).toBeDisabled();
   await page.getByTestId('settlement-reason').fill('Gym left the network');
   await page.getByTestId('settlement-reason-submit').click();
-  expect(state.calls.at(-1)).toEqual({ path: '/admin/settlements/statements/st-1/void', body: { reason: 'Gym left the network' } });
+  expect(state.calls.at(-1)).toEqual({ path: '/admin/settlements/statements/st-1/void-request', body: { reason: 'Gym left the network' } });
+
+  // Requested, not voided: the requester can't confirm, and approving is off the table.
+  await expect(page.getByTestId('settlement-void-requested')).toContainText('Void requested on 2 Nov: Gym left the network. Someone else has to confirm it.');
+  await expect(page.getByTestId('settlement-void-confirm')).toBeDisabled();
+  await expect(page.getByTestId('settlement-approve')).toHaveCount(0);
+  await page.getByTestId('settlement-back').click();
+  await expect(page.getByTestId('settlement-table')).toContainText('Void requested');
+});
+
+test('a second admin confirms a requested void, or cancels the request', async ({ page }) => {
+  const requested = { status: 'submitted', submittedBy: 'admin-1', voidRequestedBy: 'admin-2', voidRequestedAt: '2026-11-02T09:00:00.000Z', voidRequestReason: 'Gym left the network' };
+  const state = { statement: statement(requested), adjustments: [] as Json[], calls: [] as Array<{ path: string; body: Json | null }> };
+  await setup(page, { id: 'admin-3', userType: 'admin', email: 'third@example.com' }, state);
+
+  // Cancelling puts the statement back in play.
+  await page.goto('/admin/settlements?statement=st-1');
+  await page.getByTestId('settlement-void-cancel').click();
+  await page.getByRole('button', { name: 'Cancel request', exact: true }).click();
+  await expect(page.getByText('Void request cancelled.')).toBeVisible();
+  await expect(page.getByTestId('settlement-approve')).toBeEnabled();
+
+  // Confirming voids it for good.
+  state.statement = statement(requested);
+  await page.reload();
+  await page.getByTestId('settlement-void-confirm').click();
+  await page.getByRole('button', { name: 'Void statement', exact: true }).click();
+  expect(state.calls.at(-1)?.path).toBe('/admin/settlements/statements/st-1/void');
   await expect(page.getByText('Voided on 3 Nov: Gym left the network. Nothing is paid on this statement.')).toBeVisible();
   await expect(page.getByTestId('settlement-actions').getByRole('button')).toHaveCount(0);
 
