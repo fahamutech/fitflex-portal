@@ -3,7 +3,7 @@ import { useEffect, useState, useMemo } from 'react';
 import { Plus, Pencil, Trash2, RefreshCw, ChevronLeft, ChevronRight as ChevronRightIcon, Eye } from 'lucide-react';
 import { useApp } from '../../providers';
 import { api, Gym, GymOwnerRef, TrainerRef } from '@/lib/api';
-import { Badge, Button, PageHeader, Alert, Spinner, Card, Field } from '@/components/shared';
+import { Badge, Button, PageHeader, Alert, Spinner, Card, Field, Input, Select } from '@/components/shared';
 import { DataTable, ColumnDef } from '@/components/data-table';
 import { Dialog, DialogFooter } from '@/components/dialog';
 import { ConfirmDialog } from '@/components/dialog';
@@ -491,18 +491,18 @@ export default function GymsPage() {
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <Field label="Name" error={formErrors.name}>
-                  <input className="ui-input" value={draft.name || ''} onChange={e => { setDraft({ ...draft, name: e.target.value }); setFormErrors(prev => { const { name, ...rest } = prev; return rest; }); }} />
+                  <Input value={draft.name || ''} onChange={e => { setDraft({ ...draft, name: e.target.value }); setFormErrors(prev => { const { name, ...rest } = prev; return rest; }); }} />
                 </Field>
                 <Field label="Location" error={formErrors.location}>
-                  <input className="ui-input" value={draft.location || ''} onChange={e => { setDraft({ ...draft, location: e.target.value }); setFormErrors(prev => { const { location, ...rest } = prev; return rest; }); }} />
+                  <Input value={draft.location || ''} onChange={e => { setDraft({ ...draft, location: e.target.value }); setFormErrors(prev => { const { location, ...rest } = prev; return rest; }); }} />
                 </Field>
               </div>
               <Field label="Status">
-                <select className="ui-input" value={draft.status || 'active'} onChange={e => setDraft({ ...draft, status: e.target.value as Gym['status'] })}>
+                <Select value={draft.status || 'active'} onChange={e => setDraft({ ...draft, status: e.target.value as Gym['status'] })}>
                   <option value="active">Active</option>
                   <option value="inactive">Inactive</option>
                   <option value="suspended">Suspended</option>
-                </select>
+                </Select>
               </Field>
               <label className="flex items-center gap-3 rounded-[var(--radius-lg)] border border-[var(--color-border-secondary)] p-3 text-sm text-[var(--color-fg-primary)]">
                 <input
@@ -524,9 +524,8 @@ export default function GymsPage() {
                   {t('listing.visible')}
                 </label>
                 <Field label={t('listing.priority')} hint={t('listing.priorityHint')}>
-                  <input
+                  <Input
                     aria-label={t('listing.priority')}
-                    className="ui-input"
                     type="number"
                     min="0"
                     value={draft.homepagePriority ?? 0}
@@ -536,17 +535,17 @@ export default function GymsPage() {
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 <Field label="Rate per day (TZS)" error={formErrors.ratePerDay}>
-                  <input className="ui-input" type="number" value={draft.ratePerDay || ''} placeholder="0" onChange={e => { const v = e.target.value === '' ? 0 : Number(e.target.value); setDraft({ ...draft, ratePerDay: v, perVisitRate: v }); setFormErrors(prev => { const { ratePerDay, ...rest } = prev; return rest; }); }} />
+                  <Input type="number" value={draft.ratePerDay || ''} placeholder="0" onChange={e => { const v = e.target.value === '' ? 0 : Number(e.target.value); setDraft({ ...draft, ratePerDay: v, perVisitRate: v }); setFormErrors(prev => { const { ratePerDay, ...rest } = prev; return rest; }); }} />
                 </Field>
                 <Field label="Rate per week (TZS)" error={formErrors.ratePerWeek}>
-                  <input className="ui-input" type="number" value={draft.ratePerWeek || ''} placeholder="0" onChange={e => { setDraft({ ...draft, ratePerWeek: e.target.value === '' ? 0 : Number(e.target.value) }); setFormErrors(prev => { const { ratePerWeek, ...rest } = prev; return rest; }); }} />
+                  <Input type="number" value={draft.ratePerWeek || ''} placeholder="0" onChange={e => { setDraft({ ...draft, ratePerWeek: e.target.value === '' ? 0 : Number(e.target.value) }); setFormErrors(prev => { const { ratePerWeek, ...rest } = prev; return rest; }); }} />
                 </Field>
                 <Field label="Rate per month (TZS)" error={formErrors.ratePerMonth}>
-                  <input className="ui-input" type="number" value={draft.ratePerMonth || ''} placeholder="0" onChange={e => { setDraft({ ...draft, ratePerMonth: e.target.value === '' ? 0 : Number(e.target.value) }); setFormErrors(prev => { const { ratePerMonth, ...rest } = prev; return rest; }); }} />
+                  <Input type="number" value={draft.ratePerMonth || ''} placeholder="0" onChange={e => { setDraft({ ...draft, ratePerMonth: e.target.value === '' ? 0 : Number(e.target.value) }); setFormErrors(prev => { const { ratePerMonth, ...rest } = prev; return rest; }); }} />
                 </Field>
               </div>
               <Field label="Commission %" error={formErrors.commissionRate}>
-                <input className="ui-input" type="number" value={draft.commissionRate || ''} placeholder="0" onChange={e => { setDraft({ ...draft, commissionRate: e.target.value === '' ? 0 : Number(e.target.value) }); setFormErrors(prev => { const { commissionRate, ...rest } = prev; return rest; }); }} />
+                <Input type="number" value={draft.commissionRate || ''} placeholder="0" onChange={e => { setDraft({ ...draft, commissionRate: e.target.value === '' ? 0 : Number(e.target.value) }); setFormErrors(prev => { const { commissionRate, ...rest } = prev; return rest; }); }} />
               </Field>
               <Field label="Trainer passes (optional)">
                 <TrainerPassFields
