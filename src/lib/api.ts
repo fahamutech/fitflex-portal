@@ -1250,7 +1250,7 @@ export interface Invoice {
 }
 
 export type PayoutKind = 'trainer' | 'vendor';
-export type PartnerSettlementAction = 'submit' | 'reject' | 'approve' | 'hold' | 'release' | 'payable' | 'pay' | 'void';
+export type PartnerSettlementAction = 'submit' | 'reject' | 'approve' | 'hold' | 'release' | 'payable' | 'pay' | 'void-request' | 'void-request/cancel' | 'void';
 
 /** A trainer's or vendor's weekly payout statement. */
 export interface PartnerSettlement {
@@ -1264,6 +1264,10 @@ export interface PartnerSettlement {
   holdReason: string | null;
   rejectReason: string | null;
   voidReason: string | null;
+  /** Someone has asked for this statement to be voided; a different person has to confirm. */
+  voidRequestedBy?: string | null;
+  voidRequestedAt?: string | null;
+  voidRequestReason?: string | null;
   paymentReference: string | null;
   paidAt: string | null;
   destinationSnapshot: { method?: string | null; provider?: string | null; accountName?: string | null; accountLast4?: string | null } | null;
