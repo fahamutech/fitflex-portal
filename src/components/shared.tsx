@@ -268,6 +268,64 @@ export const Textarea = Object.assign(
 );
 Textarea.displayName = 'Textarea';
 
+type ChoiceProps = Omit<InputHTMLAttributes<HTMLInputElement>, 'type' | 'size'> & {
+  /** Visible text next to the control. Without it, name the control with `aria-label`. */
+  label?: ReactNode;
+  /** Secondary text under the label; wired to the control with aria-describedby. */
+  description?: ReactNode;
+  /** Shows the error colour and sets aria-invalid. */
+  invalid?: boolean;
+};
+
+/** Shared by Checkbox and Radio: a native input inside a label whose hit area is at least 44px tall. */
+function makeChoice(kind: 'checkbox' | 'radio') {
+  const Choice = Object.assign(
+    forwardRef<HTMLInputElement, ChoiceProps>(({ label, description, invalid, className, disabled, id, 'aria-describedby': describedByProp, ...rest }, ref) => {
+      const autoId = useId();
+      const descId = description ? `${id ?? autoId}-desc` : undefined;
+      const describedBy = [describedByProp, descId].filter(Boolean).join(' ') || undefined;
+      return (
+        <label
+          className={cn(
+            'inline-flex min-h-11 items-start gap-2.5 py-2.5 text-sm text-[var(--color-fg-secondary)]',
+            disabled ? 'cursor-not-allowed opacity-50' : 'cursor-pointer',
+            invalid && 'text-[var(--color-error-700)]',
+          )}
+        >
+          <input
+            ref={ref}
+            {...rest}
+            id={id}
+            type={kind}
+            disabled={disabled}
+            aria-describedby={describedBy}
+            aria-invalid={invalid ? true : rest['aria-invalid']}
+            className={cn(
+              'mt-0.5 h-4 w-4 shrink-0 cursor-[inherit] accent-[var(--color-brand-600)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-brand-600)]',
+              invalid && 'outline outline-2 outline-[var(--color-error-600)]',
+              className,
+            )}
+          />
+          {(label || description) && (
+            <span className="flex min-w-0 flex-col">
+              {label && <span className="font-medium text-[var(--color-fg-primary)]">{label}</span>}
+              {description && <span id={descId} className="text-xs font-normal text-[var(--color-fg-quaternary)]">{description}</span>}
+            </span>
+          )}
+        </label>
+      );
+    }),
+    { acceptsId: true },
+  );
+  Choice.displayName = kind === 'checkbox' ? 'Checkbox' : 'Radio';
+  return Choice;
+}
+
+/** Native checkbox with a 44px hit area, optional label and description. All native input props are forwarded. */
+export const Checkbox = makeChoice('checkbox');
+/** Native radio with a 44px hit area, optional label and description. Group radios in a fieldset with a legend. */
+export const Radio = makeChoice('radio');
+
 /* ─────────────────────────────────────────────
    Table family  —  wraps .ui-table
    ───────────────────────────────────────────── */

@@ -59,6 +59,21 @@ slowed instead, skeleton pulses become static.
   `input/select/textarea` and for any component with `acceptsId = true` (as `Input`, `Select`, `Textarea` do).
 - `SearchableSelect` is an ARIA combobox: pass `ariaLabel` to name it (defaults to the placeholder).
 
+### Checkbox and Radio
+
+```tsx
+<Checkbox label={t('terms')} description={t('termsHint')} checked={v} onChange={e => setV(e.target.checked)} />
+<fieldset>
+  <legend>{t('plan')}</legend>
+  <Radio name="plan" value="monthly" label={t('monthly')} checked={plan === 'monthly'} onChange={() => setPlan('monthly')} />
+</fieldset>
+```
+Both render a native input inside a `<label>` with a hit area of at least 44px, brand-600 accent colour, the global
+keyboard focus ring, and `disabled` / `invalid` states (`invalid` sets `aria-invalid`). `label` and `description`
+are optional; `description` is linked with `aria-describedby`. Without a visible `label`, pass `aria-label`.
+All native input props (`checked`, `onChange`, `name`, `value`, `required`, `id`, `data-testid`) are forwarded.
+Radios have no group component: use a `fieldset` with a `legend`, as the portal already does.
+
 ## Button
 
 ```tsx
