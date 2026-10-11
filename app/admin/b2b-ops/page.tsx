@@ -37,7 +37,7 @@ const STATE: Record<B2BJobStatus['state'], { tone: 'success' | 'brand' | 'warnin
 };
 const SEVERITY: Record<string, 'danger' | 'warning' | 'gray'> = { high: 'danger', medium: 'warning', low: 'gray' };
 const STATUS_LABEL: Record<string, string> = { open: 'Open', investigating: 'Being looked at', retrying: 'Retrying', resolved: 'Resolved', ignored: 'Ignored', permanently_failed: 'Gave up retrying' };
-const TYPE_LABEL: Record<string, string> = { job_failed: 'Job did not finish', job_item_failed: 'Item not processed', data_quality: 'Records do not add up' };
+const TYPE_LABEL: Record<string, string> = { job_failed: 'Job did not finish', job_item_failed: 'Item not processed', data_quality: 'Records do not add up', billing_watch: 'Waiting too long' };
 const TRIGGER: Record<string, string> = { schedule: 'On schedule', catch_up: 'Caught up', retry: 'Retry', manual: 'By hand' };
 const HEAD = 'border-b border-[var(--color-border-secondary)] text-left text-xs text-[var(--color-fg-quaternary)]';
 const ROW = 'border-b border-[var(--color-border-secondary)] align-top';
@@ -123,6 +123,10 @@ export default function B2BOperationsPage() {
               </CardContent></Card>
             ))}
           </div>
+
+          {data.alerts && (data.alerts.active
+            ? <p className="text-xs text-[var(--color-fg-tertiary)]" data-testid="ops-alerts-on">High-severity exceptions are emailed to {data.alerts.recipients} address{data.alerts.recipients === 1 ? '' : 'es'} as they appear, with a summary each morning while anything is waiting.</p>
+            : <Alert tone="warning"><span data-testid="ops-alerts-off">Nobody is emailed when something goes wrong: {data.alerts.recipients === 0 ? 'no alert addresses are set on the server (OPS_ALERT_EMAILS).' : 'the email sender is not set up on the server.'} Until then, exceptions are only visible on this page.</span></Alert>)}
 
           <Card>
             <CardHeader><span className="text-sm font-semibold">Jobs</span></CardHeader>
