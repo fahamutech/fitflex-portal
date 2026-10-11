@@ -6,7 +6,7 @@ import {
   api, ApiError, B2BAnalyticsQuery, B2BBenefitAnalytics, B2BDashboard, B2BFinanceAnalytics, B2BPersonDetail, B2BPersonRow, B2BProgramAnalytics,
   B2BProviderAnalytics,
 } from '@/lib/api';
-import { Alert, Badge, Button, Card, CardContent, CardHeader, PageHeader, Segmented, Spinner } from '@/components/shared';
+import { Alert, Badge, Button, Card, CardContent, CardHeader, Input, PageHeader, Segmented, Select, Spinner } from '@/components/shared';
 import { Dialog } from '@/components/dialog';
 import { Aging, day } from '@/components/b2b-finance';
 import { money } from '@/lib/admin-utils';
@@ -121,26 +121,26 @@ export function OrgInsights({ token, orgId, orgName, can }: { token: string; org
       <PageHeader title="Insights" description={`${orgName} · who is taking part, what is being used, and what it costs.`}
         actions={<Button variant="secondary" size="sm" onClick={() => setTick(t => t + 1)}><RefreshCw className="h-4 w-4" />Refresh</Button>} />
       <div className="flex flex-wrap items-end gap-2" data-testid="insights-filters">
-        <select className="ui-input !w-auto" aria-label="Period" value={preset} onChange={e => setPreset(e.target.value)} data-testid="insights-period">
+        <Select className="!w-auto" aria-label="Period" value={preset} onChange={e => setPreset(e.target.value)} data-testid="insights-period">
           {PERIODS.map(([k, label]) => <option key={k} value={k}>{label}</option>)}
-        </select>
+        </Select>
         {preset === 'custom' && (
           <>
-            <input className="ui-input !w-auto" type="date" aria-label="From" value={custom.from} onChange={e => setCustom({ ...custom, from: e.target.value })} />
-            <input className="ui-input !w-auto" type="date" aria-label="To" value={custom.to} onChange={e => setCustom({ ...custom, to: e.target.value })} />
+            <Input className="!w-auto" type="date" aria-label="From" value={custom.from} onChange={e => setCustom({ ...custom, from: e.target.value })} />
+            <Input className="!w-auto" type="date" aria-label="To" value={custom.to} onChange={e => setCustom({ ...custom, to: e.target.value })} />
           </>
         )}
         {programs.length > 1 && (
-          <select className="ui-input !w-auto" aria-label="Programme" value={programId} onChange={e => setProgramId(e.target.value)}>
+          <Select className="!w-auto" aria-label="Programme" value={programId} onChange={e => setProgramId(e.target.value)}>
             <option value="">All programmes</option>
             {programs.map(p => <option key={p.programId} value={p.programId}>{p.name}</option>)}
-          </select>
+          </Select>
         )}
         {dash && dash.beneficiaries.groups.length > 0 && (
-          <select className="ui-input !w-auto" aria-label="Group" value={group} onChange={e => setGroup(e.target.value)}>
+          <Select className="!w-auto" aria-label="Group" value={group} onChange={e => setGroup(e.target.value)}>
             <option value="">All groups</option>
             {(group && !dash.beneficiaries.groups.includes(group) ? [group, ...dash.beneficiaries.groups] : dash.beneficiaries.groups).map(g => <option key={g} value={g}>{g}</option>)}
-          </select>
+          </Select>
         )}
         {dash && <span className="pb-2 text-xs text-[var(--color-fg-quaternary)]">{day(dash.period.from)} to {day(dash.period.to)} · East Africa Time · live figures</span>}
       </div>
@@ -258,13 +258,13 @@ function People({ token, orgId, query, tick }: { token: string; orgId: string; q
     <Card>
       <CardContent className="space-y-3 py-4">
         <div className="flex flex-wrap items-center gap-2">
-          <input className="ui-input !w-64" placeholder="Search by name, reference or group" aria-label="Search people" value={search} onChange={e => setSearch(e.target.value)} />
-          <select className="ui-input !w-auto" aria-label="Show" value={activity} onChange={e => setActivity(e.target.value)}>
+          <Input className="!w-64" placeholder="Search by name, reference or group" aria-label="Search people" value={search} onChange={e => setSearch(e.target.value)} />
+          <Select className="!w-auto" aria-label="Show" value={activity} onChange={e => setActivity(e.target.value)}>
             <option value="">Everyone</option><option value="active">Used a benefit</option><option value="inactive">Enrolled, did not use a benefit</option>
-          </select>
-          <select className="ui-input !w-auto" aria-label="Sort" value={sort} onChange={e => setSort(e.target.value)}>
+          </Select>
+          <Select className="!w-auto" aria-label="Sort" value={sort} onChange={e => setSort(e.target.value)}>
             <option value="name">By name</option><option value="uses">Most visits first</option><option value="spend">Highest spend first</option><option value="last_active">Most recently active</option>
-          </select>
+          </Select>
           <span className="text-xs text-[var(--color-fg-quaternary)]">{rows ? `${rows.length} of ${total}` : ''}</span>
         </div>
         {error && <Alert tone="error">{error}</Alert>}
