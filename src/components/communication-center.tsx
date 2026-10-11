@@ -13,7 +13,7 @@ import {
   CommsPreview, CommsPurpose, CommsRecipients, CommsScope, CommsStatus, CommsTemplate, CommsText, Gym,
 } from '@/lib/api';
 import type { MessageKey } from '@/lib/i18n';
-import { Alert, Badge, Button, Card, EmptyState, Field, Input, MetricCard, PageHeader, Segmented, Spinner } from './shared';
+import { Alert, Badge, Button, Card, Checkbox, EmptyState, Field, Input, MetricCard, PageHeader, Radio, Segmented, Select, Spinner } from './shared';
 import { ConfirmDialog } from './dialog';
 import {
   DEEP_LINKS, LOCALES, MessageCard, PURPOSES, PushCard, SENDER_VARIABLES, T, VARIABLES, errorText, fill, skipLabel, textOk,
@@ -186,9 +186,9 @@ function Home({ scope, token, t, gyms, gymId, setGymId, initialTab, onNew, onOpe
         description={t(scope === 'admin' ? 'comms.admin.subtitle' : 'comms.subtitle')}
         actions={<>
           {gyms.length > 1 && (
-            <select className="ui-input" aria-label={t('comms.gym')} value={gymId} onChange={e => setGymId(e.target.value)} data-testid="comms-gym">
+            <Select aria-label={t('comms.gym')} value={gymId} onChange={e => setGymId(e.target.value)} data-testid="comms-gym">
               {gyms.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
-            </select>
+            </Select>
           )}
           <Button variant="secondary" onClick={load} aria-label={t('comms.retry')}><RefreshCw className="h-4 w-4" /></Button>
           <Button onClick={onNew} data-testid="comms-new"><Plus className="h-4 w-4" />{t('comms.new')}</Button>
@@ -246,14 +246,14 @@ function Home({ scope, token, t, gyms, gymId, setGymId, initialTab, onNew, onOpe
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5" data-testid="campaign-filters">
             <Input placeholder={t('comms.history.searchCampaign')} defaultValue={cf.search ?? ''} data-testid="cf-search"
               onKeyDown={e => { if (e.key === 'Enter') setCf(f => ({ ...f, search: (e.target as HTMLInputElement).value.trim() || undefined })); }} />
-            <select className="ui-input" value={cf.purpose ?? ''} onChange={e => setCf(f => ({ ...f, purpose: e.target.value || undefined }))} data-testid="cf-purpose" aria-label={t('comms.history.kind')}>
+            <Select value={cf.purpose ?? ''} onChange={e => setCf(f => ({ ...f, purpose: e.target.value || undefined }))} data-testid="cf-purpose" aria-label={t('comms.history.kind')}>
               <option value="">{t('comms.filter.allTypes')}</option>
               {PURPOSES.map(p => <option key={p} value={p}>{t(`comms.purpose.${p}`)}</option>)}
-            </select>
-            <select className="ui-input" value={cf.channel ?? ''} onChange={e => setCf(f => ({ ...f, channel: e.target.value || undefined }))} data-testid="cf-channel" aria-label={t('comms.history.channel')}>
+            </Select>
+            <Select value={cf.channel ?? ''} onChange={e => setCf(f => ({ ...f, channel: e.target.value || undefined }))} data-testid="cf-channel" aria-label={t('comms.history.channel')}>
               <option value="">{t('comms.filter.allChannels')}</option>
               {CHANNELS.map(c => <option key={c} value={c}>{t(`comms.channel.${c}`)}</option>)}
-            </select>
+            </Select>
             <Input type="date" value={cf.from ?? ''} aria-label={t('comms.history.from')} onChange={e => setCf(f => ({ ...f, from: e.target.value || undefined }))} data-testid="cf-from" />
             <Input type="date" value={cf.to ?? ''} aria-label={t('comms.history.to')} onChange={e => setCf(f => ({ ...f, to: e.target.value || undefined }))} data-testid="cf-to" />
           </div>
@@ -578,52 +578,48 @@ function Composer({ scope, token, t, locale, gymId, campaign, templateId, onClos
             ) : recipients === 'trainers' ? (
               <div className="grid gap-4 sm:grid-cols-2">
                 <Field label={t('comms.audience.trainerPass')}>
-                  <select className="ui-input" value={trainerRefine.pass ?? ''} data-testid="refine-trainer-pass"
+                  <Select value={trainerRefine.pass ?? ''} data-testid="refine-trainer-pass"
                     onChange={e => setTrainerRefine({ ...trainerRefine, pass: (e.target.value || undefined) as TrainerRefine['pass'] })}>
                     <option value="">—</option>
                     {(['active', 'pending', 'none'] as const).map(v => <option key={v} value={v}>{t(`comms.audience.trainerPass.${v}`)}</option>)}
-                  </select>
+                  </Select>
                 </Field>
-                <label className="flex items-center gap-2 self-end text-sm">
-                  <input type="checkbox" checked={Boolean(trainerRefine.verifiedOnly)} data-testid="refine-trainer-verified"
+                <div className="self-end">
+                  <Checkbox label={t('comms.audience.verifiedTrainersOnly')} checked={Boolean(trainerRefine.verifiedOnly)} data-testid="refine-trainer-verified"
                     onChange={e => setTrainerRefine({ ...trainerRefine, verifiedOnly: e.target.checked || undefined })} />
-                  {t('comms.audience.verifiedTrainersOnly')}
-                </label>
+                </div>
               </div>
             ) : (
               <div className="grid gap-4 sm:grid-cols-2">
                 <Field label={t('comms.audience.expiresWithin')}>
-                  <select className="ui-input" value={refine.expiresWithin ?? ''} onChange={e => setR({ expiresWithin: e.target.value ? Number(e.target.value) : undefined })} data-testid="refine-expires">
+                  <Select value={refine.expiresWithin ?? ''} onChange={e => setR({ expiresWithin: e.target.value ? Number(e.target.value) : undefined })} data-testid="refine-expires">
                     <option value="">—</option>{[3, 7, 14, 30].map(d => <option key={d} value={d}>{fill(t('comms.days'), { n: d })}</option>)}
-                  </select>
+                  </Select>
                 </Field>
                 <Field label={t('comms.audience.noVisitFor')}>
-                  <select className="ui-input" value={refine.noVisitFor ?? ''} onChange={e => setR({ noVisitFor: e.target.value ? Number(e.target.value) : undefined })} data-testid="refine-novisit">
+                  <Select value={refine.noVisitFor ?? ''} onChange={e => setR({ noVisitFor: e.target.value ? Number(e.target.value) : undefined })} data-testid="refine-novisit">
                     <option value="">—</option>{[7, 14, 30, 60].map(d => <option key={d} value={d}>{fill(t('comms.days'), { n: d })}</option>)}
-                  </select>
+                  </Select>
                 </Field>
                 <Field label={t('comms.audience.plan')}>
                   <div className="flex gap-3 text-sm">
                     {['daily', 'weekly', 'monthly'].map(p => (
-                      <label key={p} className="flex items-center gap-1.5">
-                        <input type="checkbox" checked={refine.plans.includes(p)}
-                          onChange={() => setR({ plans: refine.plans.includes(p) ? refine.plans.filter(x => x !== p) : [...refine.plans, p] })} />
-                        {t(`comms.plan.${p}`)}
-                      </label>
+                      <Checkbox key={p} label={t(`comms.plan.${p}`)} checked={refine.plans.includes(p)}
+                        onChange={() => setR({ plans: refine.plans.includes(p) ? refine.plans.filter(x => x !== p) : [...refine.plans, p] })} />
                     ))}
                   </div>
                 </Field>
                 <Field label={t('comms.audience.gender')} hint={t('comms.audience.demographicsNote')}>
-                  <select className="ui-input" value={refine.gender ?? ''} onChange={e => setR({ gender: e.target.value || undefined })}>
+                  <Select value={refine.gender ?? ''} onChange={e => setR({ gender: e.target.value || undefined })}>
                     <option value="">—</option><option value="female">{t('comms.gender.female')}</option><option value="male">{t('comms.gender.male')}</option>
-                  </select>
+                  </Select>
                 </Field>
                 <Field label={t('comms.audience.age')}>
-                  <select className="ui-input" value={refine.age ? refine.age.join('-') : ''}
+                  <Select value={refine.age ? refine.age.join('-') : ''}
                     onChange={e => { const [a, b] = e.target.value.split('-'); setR({ age: e.target.value ? [Number(a), b ? Number(b) : null] : undefined }); }}>
                     <option value="">—</option>
                     {[[18, 25], [26, 35], [36, 50], [51, null]].map(([a, b]) => <option key={a} value={b == null ? `${a}` : `${a}-${b}`}>{b == null ? `${a}+` : `${a}–${b}`}</option>)}
-                  </select>
+                  </Select>
                 </Field>
                 {scope === 'admin' && (
                   <Field label={t('comms.audience.area')} hint={t('comms.audience.areaHint')}>
@@ -668,9 +664,9 @@ function Composer({ scope, token, t, locale, gymId, campaign, templateId, onClos
             )}
             {missing.length > 0 && <Alert tone="warning">{fill(t('comms.msg.fillIn'), { names: missing.map(v => t(`comms.var.${v}`)).join(', ') })}</Alert>}
             <Field label={t('comms.msg.opens')}>
-              <select className="ui-input" value={content.deepLink ?? 'message'} onChange={e => setContent(c => ({ ...c, deepLink: e.target.value as CommsDeepLink }))} data-testid="msg-link">
+              <Select value={content.deepLink ?? 'message'} onChange={e => setContent(c => ({ ...c, deepLink: e.target.value as CommsDeepLink }))} data-testid="msg-link">
                 {DEEP_LINKS.map(d => <option key={d} value={d}>{t(`comms.link.${d}`)}</option>)}
-              </select>
+              </Select>
             </Field>
             <TemplatePicker open={picking} onClose={() => setPicking(false)} scope={scope} token={token} t={t}
               gymId={gymId} purpose={purpose} onPick={pickTemplate} />
@@ -707,8 +703,8 @@ function Composer({ scope, token, t, locale, gymId, campaign, templateId, onClos
 
         {step === 'schedule' && (
           <div className="space-y-3 text-sm">
-            <label className="flex items-center gap-2"><input type="radio" checked={!later} onChange={() => setLater(false)} data-testid="send-now" />{t('comms.schedule.now')}</label>
-            <label className="flex items-center gap-2"><input type="radio" checked={later} onChange={() => setLater(true)} data-testid="send-later" />{t('comms.schedule.later')}</label>
+            <Radio label={t('comms.schedule.now')} checked={!later} onChange={() => setLater(false)} data-testid="send-now" />
+            <Radio label={t('comms.schedule.later')} checked={later} onChange={() => setLater(true)} data-testid="send-later" />
             {later && (
               <Field label={t('comms.schedule.pick')} error={tooSoon ? t('comms.schedule.tooSoon') : undefined}>
                 <Input type="datetime-local" value={scheduledAt} onChange={e => setScheduledAt(e.target.value)} data-testid="schedule-at" />
@@ -751,10 +747,7 @@ function Composer({ scope, token, t, locale, gymId, campaign, templateId, onClos
             </dl>
             {preview && <Warnings t={t} warnings={preview.warnings.filter(w => w.code !== 'large_send')} />}
             {largeSend && (
-              <label className="flex items-center gap-2 font-medium">
-                <input type="checkbox" checked={confirmLarge} onChange={e => setConfirmLarge(e.target.checked)} data-testid="confirm-large" />
-                {fill(t('comms.confirm.large'), { n: targeted })}
-              </label>
+              <Checkbox label={fill(t('comms.confirm.large'), { n: targeted })} checked={confirmLarge} onChange={e => setConfirmLarge(e.target.checked)} data-testid="confirm-large" />
             )}
             <p className="text-xs text-[var(--color-fg-quaternary)]">{t('comms.confirm.note')}</p>
           </div>
