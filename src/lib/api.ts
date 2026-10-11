@@ -651,6 +651,12 @@ export const api = {
     request<{ organizationUser: B2BOrganizationUser }>(`/b2b/organizations/${encodeURIComponent(id)}/users/${encodeURIComponent(orgUserId)}`, { method: 'PUT', body: JSON.stringify(body) }, token),
   b2bBeneficiaries: (token: string, id: string, params: { status?: string; search?: string; limit?: number } = {}) =>
     request<Paged<B2BBeneficiary>>(`/b2b/organizations/${encodeURIComponent(id)}/beneficiaries${qs(params)}`, {}, token),
+  // Programme lifecycle: how long each has left, and its renewal.
+  b2bProgramLifecycle: (token: string, id: string) =>
+    request<{ today: string; items: B2BProgramLifecycle[] }>(`/b2b/organizations/${encodeURIComponent(id)}/program-lifecycle`, {}, token),
+  prepareB2BProgramRenewal: (token: string, id: string, programId: string) =>
+    request<{ program: B2BProgram; existing?: boolean; benefits: B2BBenefit[]; skipped: Array<{ name: string; reason: string }>; discountNotCarriedOver?: boolean }>(
+      `/b2b/organizations/${encodeURIComponent(id)}/programs/${encodeURIComponent(programId)}/renewal`, { method: 'POST', body: '{}' }, token),
   // Many people at once; those who have not joined FitFlex yet are invited.
   importB2BBeneficiaries: (token: string, id: string, body: { rawText: string; dryRun?: boolean }) =>
     request<B2BImportResult>(`/b2b/organizations/${encodeURIComponent(id)}/beneficiaries/import`, { method: 'POST', body: JSON.stringify(body) }, token),
@@ -2636,6 +2642,10 @@ export interface B2BAnalyticsOverview {
   topProviders: Array<B2BUsageMoney & { providerType: string; providerId: string; name: string | null; people: number; organizations: number }>;
   trend: Array<{ bucket: string; uses: number; sponsorTzs: number }>;
 }
+export interface B2BProgramLifecycle {
+  programId: string; status: string; endDate: string | null; daysLeft: number | null; endingSoon: boolean; canRenew: boolean;
+  renewal: { programId: string; status: string; startDate: string; endDate: string | null } | null; renewalOf: string | null;
+}
 export interface B2BImportResult {
   dryRun?: boolean; importId?: string; total: number; enrolled: number; invited: number; unchanged: number; rejected: number; withoutEmail: number; withoutPhone: number; emailConfigured: boolean; smsConfigured: boolean;
   problems: Array<{ line: number; name: string | null; contact: string | null; problem: string }>;
@@ -2668,6 +2678,7 @@ export interface B2BOpsOverview {
     billing: { draftInvoices: number; draftsOlderThan7Days: number; paymentNoticesToCheck: number; overdueInvoices: number; organizationsOnHold: number; paymentsNotFullyApplied: number };
     usage: { holdsOlderThan1Hour: number; passesAwaitingMemberPayment: number; passesAwaitingAccountLink: number };
     people: { beneficiariesPending: number; employeesNotLinked: number; invitesWaiting?: number; invitesNotDelivered?: number; importsWithRejectedRowsLast7Days?: number };
+    programmes?: { renewalDraftsToReview: number; endingWithin30Days: number };
   };
 }
 export interface B2BDataQuality { checkedAt: string; issues: number; checks: Array<{ key: string; severity: 'low' | 'medium' | 'high'; title: string; count: number; examples: string[] }> }
