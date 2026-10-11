@@ -48,6 +48,10 @@ const ERRORS: Record<string, string> = {
   cannot_approve_own_submission: 'You submitted this statement, so someone else has to approve it.',
   not_on_hold: 'This statement is not on hold.',
   on_hold: 'This statement is on hold. Release it first.',
+  void_requested: 'A void has been requested for this statement. Confirm or cancel that first.',
+  void_already_requested: 'A void has already been requested for this statement.',
+  void_not_requested: 'Nobody has requested a void for this statement.',
+  cannot_void_own_request: 'You asked for this void, so someone else has to confirm it.',
   nothing_to_pay: 'There is nothing to pay on this statement.',
   payment_reference_required: 'Enter the payment reference.',
   week_not_ended: 'That week has not ended yet.',
@@ -206,6 +210,7 @@ export function PartnerPayouts({ kind }: { kind: PayoutKind }) {
                       <td className="px-4 py-3">
                         <Badge tone={STATEMENT_STATUS[r.status].tone}>{STATEMENT_STATUS[r.status].label}</Badge>
                         {r.holdReason && r.status !== 'voided' && <span className="ml-2"><Badge tone="danger">On hold</Badge></span>}
+                        {r.voidRequestedBy && r.status !== 'voided' && <span className="ml-2"><Badge tone="warning">Void requested</Badge></span>}
                       </td>
                     </tr>
                   ))}
@@ -324,16 +329,23 @@ function StatementView({ kind, id, onBack }: { kind: PayoutKind; id: string; onB
   const canPay = hasPermission('settlements_pay');
   const mine = s.submittedBy === user?.id;
   const dest = s.destinationSnapshot ?? data.payout.destination ?? null;
+  // A void has been asked for and waits for a second person.
+  const voidAsked = !!s.voidRequestedBy && s.status !== 'voided';
+  const ownVoidRequest = voidAsked && s.voidRequestedBy === user?.id;
+  const voidable = ['draft', 'submitted', 'approved'].includes(s.status);
 
   const actions: Array<Pending & { show: boolean; primary?: boolean }> = [
-    { show: s.status === 'draft' && canPrepare, primary: true, action: 'submit', title: 'Send for approval', confirm: 'Send for approval', hint: 'The amounts are frozen. Someone else has to approve it.' },
-    { show: s.status === 'submitted' && canApprove && !mine, primary: true, action: 'approve', title: 'Approve statement', confirm: 'Approve' },
+    { show: s.status === 'draft' && canPrepare && !voidAsked, primary: true, action: 'submit', title: 'Send for approval', confirm: 'Send for approval', hint: 'The amounts are frozen. Someone else has to approve it.' },
+    { show: s.status === 'submitted' && canApprove && !mine && !voidAsked, primary: true, action: 'approve', title: 'Approve statement', confirm: 'Approve' },
     { show: s.status === 'submitted' && canApprove, action: 'reject', title: 'Send back to draft', confirm: 'Send back', needs: 'reason' },
-    { show: s.status === 'approved' && canPay && !s.holdReason, primary: true, action: 'payable', title: 'Clear for payment', confirm: 'Clear for payment', hint: `Checks the ${k.who}’s verification and payout account.` },
+    { show: s.status === 'approved' && canPay && !s.holdReason && !voidAsked, primary: true, action: 'payable', title: 'Clear for payment', confirm: 'Clear for payment', hint: `Checks the ${k.who}’s verification and payout account.` },
     { show: s.status === 'payable' && canPay, primary: true, action: 'pay', title: 'Record payment', confirm: 'Mark as paid', needs: 'reference', hint: 'Enter the mobile-money or bank reference of the payment you sent.' },
     { show: !!s.holdReason && canApprove && s.status !== 'voided', action: 'release', title: 'Release hold', confirm: 'Release' },
     { show: !s.holdReason && ['draft', 'submitted', 'approved', 'payable'].includes(s.status) && canPrepare, action: 'hold', title: 'Put on hold', confirm: 'Hold', needs: 'reason' },
-    { show: ['draft', 'submitted', 'approved'].includes(s.status) && canApprove, action: 'void', title: 'Void statement', confirm: 'Void', needs: 'reason', hint: k.voidHint },
+    // Voiding takes two people: one asks with a reason, a different one confirms.
+    { show: voidable && !voidAsked && (canPrepare || canApprove), action: 'void-request', title: 'Request void', confirm: 'Request void', needs: 'reason', hint: `${k.voidHint} A second person has to confirm before anything is voided.` },
+    { show: voidAsked && canApprove && !ownVoidRequest, action: 'void', title: 'Confirm void', confirm: 'Void statement', hint: k.voidHint },
+    { show: voidAsked && (canPrepare || canApprove), action: 'void-request/cancel', title: 'Cancel void request', confirm: 'Cancel request', hint: 'The statement carries on from where it was.' },
   ];
 
   return (
@@ -348,6 +360,11 @@ function StatementView({ kind, id, onBack }: { kind: PayoutKind; id: string; onB
       {s.holdReason && s.status !== 'voided' && <Alert tone="warning">On hold: {s.holdReason}</Alert>}
       {s.status === 'draft' && s.rejectReason && <Alert tone="warning">Sent back: {s.rejectReason}</Alert>}
       {s.status === 'voided' && <Alert tone="error">Voided: {s.voidReason}</Alert>}
+      {voidAsked && (
+        <Alert tone="warning">
+          <span data-testid={`${kind}-settlement-void-requested`}>Void requested{s.voidRequestedAt ? ` on ${shortDay(s.voidRequestedAt)}` : ''}: {s.voidRequestReason}. {ownVoidRequest ? 'You asked for it, so someone else has to confirm it.' : 'A second person has to confirm it.'} Until then it can’t be sent for approval, approved or paid.</span>
+        </Alert>
+      )}
       {s.status === 'submitted' && mine && <Alert tone="info">You submitted this statement, so someone else has to approve it.</Alert>}
       {!data.payout.ok && !['paid', 'voided'].includes(s.status) && (
         <Alert tone="warning"><span data-testid={`${kind}-settlement-not-payable`}>This {k.who} can’t be paid yet: {whyNot(kind, data.payout.reason)}.</span></Alert>
@@ -372,7 +389,7 @@ function StatementView({ kind, id, onBack }: { kind: PayoutKind; id: string; onB
 
       <div className="flex flex-wrap gap-2">
         {actions.filter(a => a.show).map(a => (
-          <Button key={a.action} size="sm" variant={a.primary ? 'primary' : 'secondary'} onClick={() => start(a)} data-testid={`${kind}-settlement-${a.action}`}>{a.title}</Button>
+          <Button key={a.action} size="sm" variant={a.primary ? 'primary' : 'secondary'} onClick={() => start(a)} data-testid={`${kind}-settlement-${a.action.replace('/', '-')}`}>{a.title}</Button>
         ))}
       </div>
 
