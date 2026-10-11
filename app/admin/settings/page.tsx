@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 import { RefreshCw, Save, Plus, Trash2, X } from 'lucide-react';
 import { useApp } from '../../providers';
 import { api, PlatformSettings, SubscriptionTierConfig, PayoutBandConfig } from '@/lib/api';
-import { Button, PageHeader, Alert, Spinner, Card, Field } from '@/components/shared';
+import { Button, PageHeader, Alert, Spinner, Card, Field, Input, Select } from '@/components/shared';
 import { money } from '@/lib/admin-utils';
 
 const EMPTY_TIER: SubscriptionTierConfig = { key: '', label: '', monthlyPrice: 0, visits: 0, gymAccess: 'standard' };
@@ -150,18 +150,18 @@ export default function SettingsPage() {
           <h3 className="text-sm font-semibold text-[var(--color-fg-primary)]">General</h3>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <Field label="Payment Period" hint="How often invoices are generated for gym payouts.">
-              <select className="ui-input" value={period} onChange={e => setPeriod(Number(e.target.value))}>
+              <Select value={period} onChange={e => setPeriod(Number(e.target.value))}>
                 {PERIOD_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-              </select>
+              </Select>
             </Field>
             <Field label="Payout Model" hint="How gym partners are compensated.">
-              <select className="ui-input" value={model} onChange={e => setModel(e.target.value as typeof model)}>
+              <Select value={model} onChange={e => setModel(e.target.value as typeof model)}>
                 <option value="commission">Commission (% deduction)</option>
                 <option value="discounted_rate">Discounted Rate (margin from spread)</option>
-              </select>
+              </Select>
             </Field>
             <Field label="Currency">
-              <input className="ui-input" value={currency} onChange={e => setCurrency(e.target.value)} />
+              <Input value={currency} onChange={e => setCurrency(e.target.value)} />
             </Field>
           </div>
         </div>
@@ -192,21 +192,21 @@ export default function SettingsPage() {
                 {tiers.map((t, i) => (
                   <tr key={t.key || i}>
                     <td>
-                      <input className="ui-input !py-1 !text-xs font-mono" value={t.key} onChange={e => updateTier(i, 'key', e.target.value)} />
+                      <Input size="sm" className="font-mono" aria-label="Tier Key" value={t.key} onChange={e => updateTier(i, 'key', e.target.value)} />
                     </td>
                     <td>
-                      <input className="ui-input !py-1 !text-xs" value={t.label} onChange={e => updateTier(i, 'label', e.target.value)} />
+                      <Input size="sm" aria-label="Label" value={t.label} onChange={e => updateTier(i, 'label', e.target.value)} />
                     </td>
                     <td>
-                      <input className="ui-input !py-1 !text-xs text-right font-mono tabular-nums" type="number" value={t.monthlyPrice} onChange={e => updateTier(i, 'monthlyPrice', Number(e.target.value))} />
+                      <Input size="sm" className="text-right font-mono tabular-nums" aria-label={`Monthly Price (${currency})`} type="number" value={t.monthlyPrice} onChange={e => updateTier(i, 'monthlyPrice', Number(e.target.value))} />
                     </td>
                     <td>
-                      <input className="ui-input !py-1 !text-xs text-right font-mono tabular-nums" type="number" value={t.visits} onChange={e => updateTier(i, 'visits', Number(e.target.value))} placeholder="-1 = unlimited" />
+                      <Input size="sm" className="text-right font-mono tabular-nums" aria-label="Visits / Month" type="number" value={t.visits} onChange={e => updateTier(i, 'visits', Number(e.target.value))} placeholder="-1 = unlimited" />
                     </td>
                     <td>
-                      <select className="ui-input !py-1 !text-xs" value={t.gymAccess} onChange={e => updateTier(i, 'gymAccess', e.target.value)}>
+                      <Select size="sm" aria-label="Gym Access Level" value={t.gymAccess} onChange={e => updateTier(i, 'gymAccess', e.target.value)}>
                         {GYM_ACCESS_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
-                      </select>
+                      </Select>
                     </td>
                     <td>
                       <Button variant="ghost" size="sm" onClick={() => setTiers(prev => prev.filter((_, idx) => idx !== i))}>
@@ -260,21 +260,21 @@ export default function SettingsPage() {
                 {bands.map((b, i) => (
                   <tr key={b.key || i}>
                     <td>
-                      <input className="ui-input !py-1 !text-xs" value={b.label} onChange={e => updateBand(i, 'label', e.target.value)} />
+                      <Input size="sm" aria-label="Band" value={b.label} onChange={e => updateBand(i, 'label', e.target.value)} />
                     </td>
                     <td>
-                      <input className="ui-input !py-1 !text-xs text-right font-mono tabular-nums" type="number" value={b.minVisits} onChange={e => updateBand(i, 'minVisits', Number(e.target.value))} />
+                      <Input size="sm" className="text-right font-mono tabular-nums" aria-label="Min Visits" type="number" value={b.minVisits} onChange={e => updateBand(i, 'minVisits', Number(e.target.value))} />
                     </td>
                     <td>
-                      <input className="ui-input !py-1 !text-xs text-right font-mono tabular-nums" type="number" value={b.maxVisits} onChange={e => updateBand(i, 'maxVisits', Number(e.target.value))} placeholder="-1 = no cap" />
+                      <Input size="sm" className="text-right font-mono tabular-nums" aria-label="Max Visits" type="number" value={b.maxVisits} onChange={e => updateBand(i, 'maxVisits', Number(e.target.value))} placeholder="-1 = no cap" />
                     </td>
                     <td>
-                      <select className="ui-input !py-1 !text-xs" value={b.payoutTiming} onChange={e => updateBand(i, 'payoutTiming', e.target.value)}>
+                      <Select size="sm" aria-label="Payout Timing" value={b.payoutTiming} onChange={e => updateBand(i, 'payoutTiming', e.target.value)}>
                         {TIMING_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
-                      </select>
+                      </Select>
                     </td>
                     <td>
-                      <input className="ui-input !py-1 !text-xs text-right font-mono tabular-nums" type="number" value={b.commissionPct} onChange={e => updateBand(i, 'commissionPct', Number(e.target.value))} />
+                      <Input size="sm" className="text-right font-mono tabular-nums" aria-label="Commission %" type="number" value={b.commissionPct} onChange={e => updateBand(i, 'commissionPct', Number(e.target.value))} />
                     </td>
                     <td>
                       <Button variant="ghost" size="sm" onClick={() => setBands(prev => prev.filter((_, idx) => idx !== i))}>
@@ -317,8 +317,7 @@ export default function SettingsPage() {
           </div>
           <div className="flex gap-2 items-end">
             <Field label="Add specialty">
-              <input
-                className="ui-input"
+              <Input
                 value={newSpecialty}
                 onChange={e => setNewSpecialty(e.target.value)}
                 onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleAddSpecialty(); }}}
