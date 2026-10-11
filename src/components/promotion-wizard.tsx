@@ -12,7 +12,7 @@ import {
   COMMERCIAL_RELATIONSHIPS, NON_COMMERCIAL_RELATIONSHIPS, PLACEMENT_KEY, PROMOTION_TYPES, REL_KEY, TYPE_HINT_KEY, TYPE_KEY,
   dateTime, errorKey, scopeSummary,
 } from '@/lib/promotions';
-import { Alert, Badge, Button, Card, CardContent, Field, Spinner } from '@/components/shared';
+import { Alert, Badge, Button, Card, CardContent, Field, Input, Select, Spinner, Textarea } from '@/components/shared';
 import { Stepper } from '@/components/stepper';
 import { DateTimeInput } from '@/components/datetime-input';
 import { AreaPicker } from '@/components/area-picker';
@@ -225,7 +225,7 @@ export function PromotionWizard({ editId, onClose, onSaved }: { editId?: string 
                 <AreaPicker label={t('pro.wiz.targeting.areas')} areas={areas} value={d.areaIds} onChange={areaIds => set({ areaIds })} />
               </Field>
               <Field label={t('pro.wiz.targeting.categories')} hint={t('pro.wiz.targeting.categoriesHint')}>
-                <input className="ui-input" value={d.categories} onChange={e => set({ categories: e.target.value })} maxLength={200} data-testid="wizard-categories" />
+                <Input value={d.categories} onChange={e => set({ categories: e.target.value })} maxLength={200} data-testid="wizard-categories" />
               </Field>
             </div>
           )}
@@ -245,10 +245,10 @@ export function PromotionWizard({ editId, onClose, onSaved }: { editId?: string 
               <h2 className="font-semibold">{t('pro.wiz.priority.title')}</h2>
               <div className="grid gap-4 sm:grid-cols-2">
                 <Field label={t('pro.wiz.priority.priority')} hint={t('pro.wiz.priority.priorityHint').replace('{max}', String(ref?.maxPriority ?? 100))}>
-                  <input className="ui-input" type="number" min={1} max={ref?.maxPriority ?? 100} value={d.priority} onChange={e => set({ priority: e.target.value })} data-testid="wizard-priority" />
+                  <Input type="number" min={1} max={ref?.maxPriority ?? 100} value={d.priority} onChange={e => set({ priority: e.target.value })} data-testid="wizard-priority" />
                 </Field>
                 <Field label={t('pro.wiz.priority.weight')} hint={t('pro.wiz.priority.weightHint')}>
-                  <input className="ui-input" type="number" min={0} max={1} step={0.05} value={d.boostWeight} onChange={e => set({ boostWeight: e.target.value })} data-testid="wizard-weight" />
+                  <Input type="number" min={0} max={1} step={0.05} value={d.boostWeight} onChange={e => set({ boostWeight: e.target.value })} data-testid="wizard-weight" />
                 </Field>
               </div>
               {!valid.priority && <Alert tone="error">{t('pro.err.invalid_priority')}</Alert>}
@@ -322,7 +322,7 @@ function EntityStep({ d, set, locked }: { d: Draft; set: (p: Partial<Draft>) => 
       </div>
       <div className="relative">
         <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--color-fg-quaternary)]" />
-        <input className="ui-input" style={{ paddingLeft: 36 }} type="search" placeholder={t('pro.wiz.entity.search')} value={q} onChange={e => setQ(e.target.value)} data-testid="wizard-entity-search" />
+        <Input style={{ paddingLeft: 36 }} type="search" placeholder={t('pro.wiz.entity.search')} aria-label={t('pro.wiz.entity.search')} value={q} onChange={e => setQ(e.target.value)} data-testid="wizard-entity-search" />
       </div>
       {error && <Alert tone="error"><span className="flex flex-wrap items-center justify-between gap-2">{error}<Button size="sm" variant="secondary" onClick={() => setAgain(n => n + 1)} data-testid="wizard-entity-retry">{t('pro.retry')}</Button></span></Alert>}
       {results == null ? <Spinner className="h-5 w-5" /> : results.length === 0 ? (error ? null :
@@ -385,9 +385,9 @@ function CommercialStep({ d, set, campaigns }: { d: Draft; set: (p: Partial<Draf
         </div>
       )}
       <Field label={t('pro.wiz.commercial.relationship')}>
-        <select className="ui-input" value={d.relationshipType} onChange={e => set({ relationshipType: e.target.value })} data-testid="wizard-relationship">
+        <Select value={d.relationshipType} onChange={e => set({ relationshipType: e.target.value })} data-testid="wizard-relationship">
           {rels.map(r => <option key={r} value={r}>{t(REL_KEY[r])}</option>)}
-        </select>
+        </Select>
       </Field>
       {commercial && (
         <>
@@ -399,7 +399,7 @@ function CommercialStep({ d, set, campaigns }: { d: Draft; set: (p: Partial<Draf
                   <button type="button" className="min-h-10 shrink-0 px-2 text-xs text-[var(--color-fg-tertiary)] hover:underline" onClick={() => set({ partner: null })}>{t('pro.wiz.commercial.clear')}</button>
                 </p>
               )}
-              <input className="ui-input" type="search" placeholder={t('pro.wiz.commercial.partnerSearch')} value={q} onChange={e => setQ(e.target.value)} data-testid="wizard-partner-search" />
+              <Input type="search" placeholder={t('pro.wiz.commercial.partnerSearch')} aria-label={t('pro.wiz.commercial.partnerSearch')} value={q} onChange={e => setQ(e.target.value)} data-testid="wizard-partner-search" />
               {partners.length > 0 && (
                 <ul className="max-h-40 divide-y divide-[var(--color-border-secondary)] overflow-y-auto rounded-[var(--radius-md)] border border-[var(--color-border-secondary)]">
                   {partners.map(p => (
@@ -410,21 +410,21 @@ function CommercialStep({ d, set, campaigns }: { d: Draft; set: (p: Partial<Draf
             </div>
           </Field>
           <Field label={t('pro.wiz.commercial.reference')} hint={t('pro.wiz.commercial.referenceHint')}>
-            <input className="ui-input" value={d.commercialRef} onChange={e => set({ commercialRef: e.target.value })} maxLength={200} data-testid="wizard-commercial-ref" />
+            <Input value={d.commercialRef} onChange={e => set({ commercialRef: e.target.value })} maxLength={200} data-testid="wizard-commercial-ref" />
           </Field>
         </>
       )}
       <Field label={d.type === 'campaign' ? t('pro.wiz.commercial.campaignRequired') : t('pro.wiz.commercial.campaign')}>
-        <select className="ui-input" value={d.campaignId} onChange={e => set({ campaignId: e.target.value })} data-testid="wizard-campaign">
+        <Select value={d.campaignId} onChange={e => set({ campaignId: e.target.value })} data-testid="wizard-campaign">
           <option value="">{t('pro.wiz.commercial.noCampaign')}</option>
           {campaigns.map(c => <option key={c.id} value={c.id}>{c.name.length > 60 ? `${c.name.slice(0, 57)}…` : c.name}</option>)}
-        </select>
+        </Select>
       </Field>
       <Field label={t('pro.wiz.commercial.label')} hint={t('pro.wiz.commercial.labelHint')}>
-        <input className="ui-input" value={d.disclosureLabel} onChange={e => set({ disclosureLabel: e.target.value })} maxLength={60} />
+        <Input value={d.disclosureLabel} onChange={e => set({ disclosureLabel: e.target.value })} maxLength={60} />
       </Field>
       <Field label={t('pro.wiz.commercial.notes')}>
-        <textarea className="ui-input" rows={2} value={d.notes} onChange={e => set({ notes: e.target.value })} maxLength={1000} />
+        <Textarea rows={2} value={d.notes} onChange={e => set({ notes: e.target.value })} maxLength={1000} />
       </Field>
     </div>
   );
