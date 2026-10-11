@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { Plus, RefreshCw, Save } from 'lucide-react';
 import { useApp } from '../../providers';
 import { api, AdminProductDraft, ShopProduct, VendorSummary } from '@/lib/api';
-import { Alert, Badge, Button, Card, Field, PageHeader, Spinner } from '@/components/shared';
+import { Alert, Badge, Button, Card, Checkbox, Field, Input, PageHeader, Select, Spinner, Textarea } from '@/components/shared';
 import { Dialog, DialogFooter } from '@/components/dialog';
 
 const EMPTY_PRODUCT: AdminProductDraft = {
@@ -130,31 +130,26 @@ export default function ProductsPage() {
                     {t('products.vendor')}: {product.vendorId} · {t('products.stock')}: {product.stock}
                   </p>
                 </div>
-                <label className="flex min-h-10 items-center gap-2 text-sm text-[var(--color-fg-primary)]">
-                  <input
-                    aria-label={`${t('listing.visible')}: ${product.name}`}
-                    type="checkbox"
-                    checked={product.homepageVisible !== false}
-                    onChange={(event) => updateDraft(product.id, { homepageVisible: event.target.checked })}
-                  />
-                  {t('listing.visible')}
-                </label>
+                <Checkbox
+                  aria-label={`${t('listing.visible')}: ${product.name}`}
+                  label={t('listing.visible')}
+                  checked={product.homepageVisible !== false}
+                  onChange={(event) => updateDraft(product.id, { homepageVisible: event.target.checked })}
+                />
                 <Field label={t('products.approval')}>
-                  <select
+                  <Select
                     aria-label={`${t('products.approval')}: ${product.name}`}
-                    className="ui-input"
                     value={product.approvalStatus || 'pending'}
                     onChange={(event) => updateDraft(product.id, { approvalStatus: event.target.value as ShopProduct['approvalStatus'] })}
                   >
                     <option value="pending">{t('products.pending')}</option>
                     <option value="approved">{t('products.approved')}</option>
                     <option value="rejected">{t('products.rejected')}</option>
-                  </select>
+                  </Select>
                 </Field>
                 <Field label={t('listing.priority')} hint={t('listing.priorityHint')}>
-                  <input
+                  <Input
                     aria-label={`${t('listing.priority')}: ${product.name}`}
-                    className="ui-input"
                     type="number"
                     min="0"
                     value={product.homepagePriority || 0}
@@ -184,43 +179,42 @@ export default function ProductsPage() {
       >
         <div className="grid gap-4 sm:grid-cols-2">
           <Field label={t('products.vendor')}>
-            <select aria-label={t('products.vendor')} className="ui-input" value={draft.vendorId} onChange={(event) => setDraft({ ...draft, vendorId: event.target.value })}>
+            <Select aria-label={t('products.vendor')} value={draft.vendorId} onChange={(event) => setDraft({ ...draft, vendorId: event.target.value })}>
               <option value="">{t('products.selectVendor')}</option>
               {vendors.filter((vendor) => vendor.approvalStatus === 'approved' && vendor.accountStatus === 'active').map((vendor) => (
                 <option key={vendor.id} value={vendor.id}>{vendor.vendorProfile?.businessName || vendor.displayName || vendor.email || vendor.id}</option>
               ))}
-            </select>
+            </Select>
           </Field>
           <Field label={t('products.name')}>
-            <input aria-label={t('products.name')} className="ui-input" value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} />
+            <Input aria-label={t('products.name')} value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} />
           </Field>
           <Field label={t('products.category')}>
-            <input aria-label={t('products.category')} className="ui-input" value={draft.category} onChange={(event) => setDraft({ ...draft, category: event.target.value })} />
+            <Input aria-label={t('products.category')} value={draft.category} onChange={(event) => setDraft({ ...draft, category: event.target.value })} />
           </Field>
           <Field label={t('products.brand')}>
-            <input aria-label={t('products.brand')} className="ui-input" value={draft.brand} onChange={(event) => setDraft({ ...draft, brand: event.target.value })} />
+            <Input aria-label={t('products.brand')} value={draft.brand} onChange={(event) => setDraft({ ...draft, brand: event.target.value })} />
           </Field>
           <Field label={t('products.price')}>
-            <input aria-label={t('products.price')} className="ui-input" type="number" min="1" value={draft.priceTzs || ''} onChange={(event) => setDraft({ ...draft, priceTzs: Number(event.target.value) || 0 })} />
+            <Input aria-label={t('products.price')} type="number" min="1" value={draft.priceTzs || ''} onChange={(event) => setDraft({ ...draft, priceTzs: Number(event.target.value) || 0 })} />
           </Field>
           <Field label={t('products.stock')}>
-            <input aria-label={t('products.stock')} className="ui-input" type="number" min="0" value={draft.stock} onChange={(event) => setDraft({ ...draft, stock: Number(event.target.value) || 0 })} />
+            <Input aria-label={t('products.stock')} type="number" min="0" value={draft.stock} onChange={(event) => setDraft({ ...draft, stock: Number(event.target.value) || 0 })} />
           </Field>
           <div className="sm:col-span-2">
             <Field label={t('products.productDescription')}>
-              <textarea aria-label={t('products.productDescription')} className="ui-input min-h-24" value={draft.description} onChange={(event) => setDraft({ ...draft, description: event.target.value })} />
+              <Textarea aria-label={t('products.productDescription')} className="!min-h-24" value={draft.description} onChange={(event) => setDraft({ ...draft, description: event.target.value })} />
             </Field>
           </div>
           <Field label={t('products.approval')}>
-            <select aria-label={t('products.approval')} className="ui-input" value={draft.approvalStatus} onChange={(event) => setDraft({ ...draft, approvalStatus: event.target.value as AdminProductDraft['approvalStatus'] })}>
+            <Select aria-label={t('products.approval')} value={draft.approvalStatus} onChange={(event) => setDraft({ ...draft, approvalStatus: event.target.value as AdminProductDraft['approvalStatus'] })}>
               <option value="pending">{t('products.pending')}</option>
               <option value="approved">{t('products.approved')}</option>
-            </select>
+            </Select>
           </Field>
-          <label className="flex items-center gap-2 self-end pb-3 text-sm text-[var(--color-fg-primary)]">
-            <input type="checkbox" checked={draft.homepageVisible} onChange={(event) => setDraft({ ...draft, homepageVisible: event.target.checked })} />
-            {t('listing.visible')}
-          </label>
+          <div className="self-end pb-3">
+            <Checkbox label={t('listing.visible')} checked={draft.homepageVisible} onChange={(event) => setDraft({ ...draft, homepageVisible: event.target.checked })} />
+          </div>
         </div>
         <DialogFooter>
           <Button variant="secondary" onClick={() => setCreateOpen(false)}>{t('admin.action.cancel')}</Button>
