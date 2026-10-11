@@ -4,7 +4,7 @@ import { RefreshCw, Plus, Pencil, CreditCard, ExternalLink, History, QrCode } fr
 import Link from 'next/link';
 import { useApp } from '../../providers';
 import { api, MemberSummary, MemberProfile, PaymentRequest, MemberCheckinRecord } from '@/lib/api';
-import { Badge, Button, PageHeader, Alert, Spinner, Card, Field } from '@/components/shared';
+import { Badge, Button, PageHeader, Alert, Spinner, Card, Field, Input, Select } from '@/components/shared';
 import { DataTable, ColumnDef } from '@/components/data-table';
 import { Dialog, DialogFooter, ConfirmDialog } from '@/components/dialog';
 import { statusTone, statusLabel, money, formatDateTime } from '@/lib/admin-utils';
@@ -368,33 +368,33 @@ export default function MembersPage() {
       >
         <div className="space-y-4">
           <Field label="Display name" error={formErrors.displayName}>
-            <input className="ui-input" value={draft.displayName || ''} onChange={e => { setDraft({ ...draft, displayName: e.target.value }); setFormErrors(prev => { const { displayName, ...rest } = prev; return rest; }); }} />
+            <Input value={draft.displayName || ''} onChange={e => { setDraft({ ...draft, displayName: e.target.value }); setFormErrors(prev => { const { displayName, ...rest } = prev; return rest; }); }} />
           </Field>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <Field label="Email" error={formErrors.email}>
-              <input className="ui-input" type="email" value={draft.email || ''} onChange={e => { setDraft({ ...draft, email: e.target.value }); setFormErrors(prev => { const { email, ...rest } = prev; return rest; }); }} />
+              <Input type="email" value={draft.email || ''} onChange={e => { setDraft({ ...draft, email: e.target.value }); setFormErrors(prev => { const { email, ...rest } = prev; return rest; }); }} />
             </Field>
             <Field label="Phone" error={formErrors.phone}>
-              <input className="ui-input" type="tel" value={draft.phone || ''} onChange={e => { setDraft({ ...draft, phone: e.target.value }); setFormErrors(prev => { const { phone, ...rest } = prev; return rest; }); }} placeholder="+255..." />
+              <Input type="tel" value={draft.phone || ''} onChange={e => { setDraft({ ...draft, phone: e.target.value }); setFormErrors(prev => { const { phone, ...rest } = prev; return rest; }); }} placeholder="+255..." />
             </Field>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <Field label="Gender">
-              <select className="ui-input" value={draft.memberProfile?.gender || ''} onChange={e => setDraft({ ...draft, memberProfile: { ...draft.memberProfile, gender: e.target.value } })}>
+              <Select value={draft.memberProfile?.gender || ''} onChange={e => setDraft({ ...draft, memberProfile: { ...draft.memberProfile, gender: e.target.value } })}>
                 <option value="">Select gender</option>
                 {GENDERS.map(g => <option key={g} value={g}>{g.charAt(0).toUpperCase() + g.slice(1)}</option>)}
-              </select>
+              </Select>
             </Field>
             <Field label="Date of birth">
-              <input className="ui-input" type="date" value={draft.memberProfile?.dateOfBirth || ''} onChange={e => setDraft({ ...draft, memberProfile: { ...draft.memberProfile, dateOfBirth: e.target.value } })} />
+              <Input type="date" value={draft.memberProfile?.dateOfBirth || ''} onChange={e => setDraft({ ...draft, memberProfile: { ...draft.memberProfile, dateOfBirth: e.target.value } })} />
             </Field>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <Field label="Height (cm)">
-              <input className="ui-input" type="number" value={draft.memberProfile?.heightCm || ''} onChange={e => setDraft({ ...draft, memberProfile: { ...draft.memberProfile, heightCm: e.target.value ? Number(e.target.value) : null } })} placeholder="e.g. 172" />
+              <Input type="number" value={draft.memberProfile?.heightCm || ''} onChange={e => setDraft({ ...draft, memberProfile: { ...draft.memberProfile, heightCm: e.target.value ? Number(e.target.value) : null } })} placeholder="e.g. 172" />
             </Field>
             <Field label="Weight (kg)">
-              <input className="ui-input" type="number" value={draft.memberProfile?.weightKg || ''} onChange={e => setDraft({ ...draft, memberProfile: { ...draft.memberProfile, weightKg: e.target.value ? Number(e.target.value) : null } })} placeholder="e.g. 74" />
+              <Input type="number" value={draft.memberProfile?.weightKg || ''} onChange={e => setDraft({ ...draft, memberProfile: { ...draft.memberProfile, weightKg: e.target.value ? Number(e.target.value) : null } })} placeholder="e.g. 74" />
             </Field>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -427,10 +427,10 @@ export default function MembersPage() {
               </div>
             </Field>
             <Field label="Fitness level">
-              <select className="ui-input" value={draft.memberProfile?.fitnessLevel || ''} onChange={e => setDraft({ ...draft, memberProfile: { ...draft.memberProfile, fitnessLevel: e.target.value } })}>
+              <Select value={draft.memberProfile?.fitnessLevel || ''} onChange={e => setDraft({ ...draft, memberProfile: { ...draft.memberProfile, fitnessLevel: e.target.value } })}>
                 <option value="">Select level</option>
                 {FITNESS_LEVELS.map(l => <option key={l} value={l}>{l.charAt(0).toUpperCase() + l.slice(1)}</option>)}
-              </select>
+              </Select>
             </Field>
           </div>
           <Field label="Preferred workout times" hint="Select all that apply.">
@@ -459,10 +459,10 @@ export default function MembersPage() {
             </div>
           </Field>
           <Field label="Status" error={formErrors.accountStatus}>
-            <select className="ui-input" value={draft.accountStatus || 'active'} onChange={e => { setDraft({ ...draft, accountStatus: e.target.value as 'active' | 'suspended' }); setFormErrors(prev => { const { accountStatus, ...rest } = prev; return rest; }); }}>
+            <Select value={draft.accountStatus || 'active'} onChange={e => { setDraft({ ...draft, accountStatus: e.target.value as 'active' | 'suspended' }); setFormErrors(prev => { const { accountStatus, ...rest } = prev; return rest; }); }}>
               <option value="active">Active</option>
               <option value="suspended">Suspended</option>
-            </select>
+            </Select>
           </Field>
         </div>
         <DialogFooter>
@@ -534,11 +534,11 @@ export default function MembersPage() {
         <div className="flex items-end gap-3 mb-4">
           <div className="flex-1">
             <label className="text-xs font-medium text-[var(--color-fg-quaternary)] mb-1 block">From</label>
-            <input className="ui-input" type="date" value={visitFrom} onChange={e => setVisitFrom(e.target.value)} />
+            <Input type="date" aria-label="From" value={visitFrom} onChange={e => setVisitFrom(e.target.value)} />
           </div>
           <div className="flex-1">
             <label className="text-xs font-medium text-[var(--color-fg-quaternary)] mb-1 block">To</label>
-            <input className="ui-input" type="date" value={visitTo} onChange={e => setVisitTo(e.target.value)} />
+            <Input type="date" aria-label="To" value={visitTo} onChange={e => setVisitTo(e.target.value)} />
           </div>
           <Button variant="secondary" size="sm" onClick={() => visitTarget && loadVisits(visitTarget.id, visitFrom || undefined, visitTo || undefined)} disabled={loadingVisits}>
             Filter
