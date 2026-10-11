@@ -2674,6 +2674,8 @@ export interface B2BOpsOverview {
   generatedAt: string;
   jobs: { total: number; ok: number; running: number; delayed: number; retrying: number; failed: number; paused: number; items: B2BJobStatus[] };
   exceptions: { live: number; bySeverity: Record<string, number>; byStatus: Record<string, number>; oldestDetectedAt: string | null; mostUrgent: B2BOpsException[] };
+  /** Whether staff are emailed about exceptions. Absent on older servers. */
+  alerts?: { recipients: number; emailConfigured: boolean; active: boolean } | null;
   pending: {
     billing: { draftInvoices: number; draftsOlderThan7Days: number; paymentNoticesToCheck: number; overdueInvoices: number; organizationsOnHold: number; paymentsNotFullyApplied: number };
     usage: { holdsOlderThan1Hour: number; passesAwaitingMemberPayment: number; passesAwaitingAccountLink: number };
