@@ -130,7 +130,7 @@ export default function OwnerStatementsPage() {
 
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
               <MetricCard label={copy.earnedLabel} value={money(s.earnedTzs)} sub={copy.visitsMembers(s.visits, s.members)} />
-              <MetricCard label={copy.network} value={signed(-s.networkAdjustmentTzs)} sub={copy.networkHint} />
+              <MetricCard label={copy.network} value={signed(s.networkAdjustmentTzs)} sub={copy.networkHint} />
               <MetricCard label={copy.adjustments} value={signed(s.adjustmentsTzs)} />
               <MetricCard label={s.status === 'paid' ? copy.paid : copy.toPay} value={<span data-testid="statement-net">{money(s.payableTzs)}</span>} />
             </div>
@@ -165,7 +165,7 @@ export default function OwnerStatementsPage() {
                             <td className="px-4 py-3 text-right tabular-nums">{l.visits}</td>
                             <td className="px-4 py-3">{text(`bracket_${l.bracket}`) ?? '—'}</td>
                             <td className="whitespace-nowrap px-4 py-3 text-right tabular-nums">{money(l.earnedTzs)}</td>
-                            <td className="whitespace-nowrap px-4 py-3 text-right tabular-nums">{l.networkAdjustmentTzs ? signed(-l.networkAdjustmentTzs) : '—'}</td>
+                            <td className="whitespace-nowrap px-4 py-3 text-right tabular-nums">{l.networkAdjustmentTzs ? signed(l.networkAdjustmentTzs) : '—'}</td>
                             <td className="whitespace-nowrap px-4 py-3 text-right font-medium tabular-nums">{money(l.finalTzs)}</td>
                           </tr>
                           {openLine === i && (
