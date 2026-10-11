@@ -133,7 +133,7 @@ export function SettlementStatementView({ statementId, onBack }: { statementId: 
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <MetricCard label="Earned at the gym’s rates" value={money(s.preliminaryTzs)} sub={`${s.qualifyingVisitCount} visits · ${s.memberCycleCount} members`} />
-        <MetricCard label="Network adjustment" value={signed(-s.networkAdjustmentTzs)} sub="Member caps applied" />
+        <MetricCard label="Network adjustment" value={signed(s.networkAdjustmentTzs)} sub="Member caps applied" />
         <MetricCard label="Adjustments" value={signed(s.adjustmentsTzs)} sub={proposed.length ? `${proposed.length} waiting for a decision` : 'Corrections and clawbacks'} />
         <MetricCard label={s.status === 'paid' ? 'Paid' : s.status === 'voided' ? 'Not paid (voided)' : 'To pay'} value={<span data-testid="settlement-net">{money(s.finalNetTzs)}</span>} sub={s.heldVisitCount ? `${s.heldVisitCount} visits held back` : undefined} />
       </div>
@@ -182,7 +182,7 @@ export function SettlementStatementView({ statementId, onBack }: { statementId: 
                           <td className="px-4 py-3 text-right tabular-nums">{l.qualifyingVisitCount}{l.heldVisitCount > 0 && <span className="ml-1 text-xs text-[var(--color-warning-700)]">+{l.heldVisitCount} held</span>}</td>
                           <td className="px-4 py-3">{BRACKET_LABEL[l.bracket ?? ''] ?? l.bracket ?? '—'}{l.monotonicGuardApplied && <span className="ml-1 text-xs text-[var(--color-fg-quaternary)]">(raised so more visits never pay less)</span>}</td>
                           <td className="whitespace-nowrap px-4 py-3 text-right tabular-nums">{money(l.preliminaryTzs)}</td>
-                          <td className="whitespace-nowrap px-4 py-3 text-right tabular-nums">{l.networkAdjustmentTzs ? signed(-l.networkAdjustmentTzs) : '—'}</td>
+                          <td className="whitespace-nowrap px-4 py-3 text-right tabular-nums">{l.networkAdjustmentTzs ? signed(l.networkAdjustmentTzs) : '—'}</td>
                           <td className="whitespace-nowrap px-4 py-3 text-right font-medium tabular-nums">{money(l.finalTzs)}</td>
                         </tr>
                         {isOpen && (

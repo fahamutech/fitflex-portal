@@ -7,12 +7,12 @@ type Json = Record<string, unknown>;
 const statement = (over: Json = {}) => ({
   id: 'st-1', runId: 'run-1', mode: 'live', gymId: 'gym-1', gymName: 'Mikocheni Fitness',
   periodStartDate: '2026-10-01', periodEndDate: '2026-10-31', memberCycleCount: 2, qualifyingVisitCount: 9, heldVisitCount: 0,
-  preliminaryTzs: 120000, networkAdjustmentTzs: 15000, adjustmentsTzs: 0, carryForwardTzs: 0, finalNetTzs: 105000,
+  preliminaryTzs: 120000, networkAdjustmentTzs: -15000, adjustmentsTzs: 0, carryForwardTzs: 0, finalNetTzs: 105000,
   status: 'draft', holdReason: null, submittedBy: null, ...over,
 });
 
 const lines = [
-  { id: 'ln-1', memberId: 'm-1', member: { publicId: 'FF-1001', displayName: 'Asha M' }, fundingType: 'platform_pass', qualifyingVisitCount: 5, heldVisitCount: 0, bracket: 'weekly', rawPreliminaryTzs: 70000, preliminaryTzs: 70000, monotonicGuardApplied: false, networkAdjustmentTzs: 15000, finalTzs: 55000, rateCardSnapshot: { wholesaleDailyTzs: 12000, wholesaleWeeklyTzs: 70000, wholesaleMonthlyTzs: 200000 } },
+  { id: 'ln-1', memberId: 'm-1', member: { publicId: 'FF-1001', displayName: 'Asha M' }, fundingType: 'platform_pass', qualifyingVisitCount: 5, heldVisitCount: 0, bracket: 'weekly', rawPreliminaryTzs: 70000, preliminaryTzs: 70000, monotonicGuardApplied: false, networkAdjustmentTzs: -15000, finalTzs: 55000, rateCardSnapshot: { wholesaleDailyTzs: 12000, wholesaleWeeklyTzs: 70000, wholesaleMonthlyTzs: 200000 } },
   { id: 'ln-2', memberId: 'm-2', member: { publicId: 'FF-1002', displayName: null }, fundingType: 'b2b_benefit', qualifyingVisitCount: 4, heldVisitCount: 0, bracket: 'weekly', rawPreliminaryTzs: 50000, preliminaryTzs: 50000, monotonicGuardApplied: false, networkAdjustmentTzs: 0, finalTzs: 50000, rateCardSnapshot: null },
 ];
 const visits = [

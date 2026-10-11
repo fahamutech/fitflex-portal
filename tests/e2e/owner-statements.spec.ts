@@ -4,7 +4,7 @@ const API = process.env.FITFLEX_API_URL || 'http://localhost:3000';
 
 const paid = {
   id: 'st-sep', gymId: 'gym-1', gymName: 'Mikocheni Fitness', periodStartDate: '2026-09-01', periodEndDate: '2026-09-30', status: 'paid', onHold: false,
-  members: 2, visits: 9, earnedTzs: 120000, networkAdjustmentTzs: 15000, adjustmentsTzs: -3500, carriedForwardTzs: 0, payableTzs: 101500,
+  members: 2, visits: 9, earnedTzs: 120000, networkAdjustmentTzs: -15000, adjustmentsTzs: -3500, carriedForwardTzs: 0, payableTzs: 101500,
   paidAt: '2026-10-05T09:00:00.000Z', paymentReference: 'MPESA-QK7H2L9', receiptUrl: null, payoutAccountLast4: '4821',
 };
 const preparing = { ...paid, id: 'st-oct', periodStartDate: '2026-10-01', periodEndDate: '2026-10-31', status: 'preparing', onHold: true, adjustmentsTzs: 0, payableTzs: 105000, paidAt: null, paymentReference: null, payoutAccountLast4: null };
@@ -22,7 +22,7 @@ test('gym owner sees their statements, how one was calculated and how it was pai
       return route.fulfill({ json: {
         statement: paid,
         lines: [
-          { memberCode: 'FF-1001', funding: 'pass', visits: 5, visitDates: ['2026-09-03', '2026-09-04', '2026-09-08', '2026-09-10', '2026-09-12'], bracket: 'weekly', rates: { dailyTzs: 12000, weeklyTzs: 70000, monthlyTzs: 200000 }, earnedTzs: 70000, networkAdjustmentTzs: 15000, finalTzs: 55000 },
+          { memberCode: 'FF-1001', funding: 'pass', visits: 5, visitDates: ['2026-09-03', '2026-09-04', '2026-09-08', '2026-09-10', '2026-09-12'], bracket: 'weekly', rates: { dailyTzs: 12000, weeklyTzs: 70000, monthlyTzs: 200000 }, earnedTzs: 70000, networkAdjustmentTzs: -15000, finalTzs: 55000 },
           { memberCode: 'FF-1002', funding: 'sponsored', visits: 4, visitDates: [], bracket: 'weekly', rates: null, earnedTzs: 50000, networkAdjustmentTzs: 0, finalTzs: 50000 },
         ],
         adjustments: [{ amountTzs: -3500, type: 'clawback', reason: 'Visit voided after last month was paid', appliedAt: '2026-10-02T08:00:00.000Z' }],
@@ -40,6 +40,8 @@ test('gym owner sees their statements, how one was calculated and how it was pai
   await page.getByTestId('statement-row-st-sep').click();
   await expect(page).toHaveURL(/statement=st-sep/);
   await expect(page.getByTestId('statement-net')).toHaveText('TZS 101,500');
+  // The network adjustment is money taken off: shown with a minus sign.
+  await expect(page.getByText('−TZS 15,000').first()).toBeVisible();
   await expect(page.getByTestId('statement-reference')).toHaveText('MPESA-QK7H2L9');
   await expect(page.getByText('····4821')).toBeVisible();
   await expect(page.getByTestId('statement-lines')).toContainText('Sponsored');

@@ -1,5 +1,6 @@
 'use client';
 import { useEffect, useState } from 'react';
+import Link from 'next/link';
 import {
   Users,
   CalendarCheck,
@@ -9,6 +10,8 @@ import {
 } from 'lucide-react';
 import { useApp } from '../providers';
 import { api, DashboardResponse } from '@/lib/api';
+import { money } from '@/lib/admin-utils';
+import { period, shortDay } from '@/lib/settlements';
 import {
   MetricCard,
   Card,
@@ -58,11 +61,8 @@ export default function DashboardPage() {
   if (error) return <Alert tone="error">{error}</Alert>;
   if (!data)  return null;
 
-  const payoutLabel = data.payout.flatFee
-    ? 'Flat monthly fee'
-    : `${data.payout.commissionPct ?? 0}% commission · ${
-        data.payout.payoutDelayDays === 0 ? 'instant' : `T+${data.payout.payoutDelayDays}d`
-      }`;
+  // What FitFlex pays this gym: absent for staff without the payments permission.
+  const pay = data.settlement ?? null;
   const activeMemberType = data.memberType ?? memberType;
   const activeMemberTypeLabel =
     activeMemberType === 'direct'
@@ -90,13 +90,14 @@ export default function DashboardPage() {
       <Card>
         <CardContent className="flex flex-wrap items-center gap-3">
           <Badge tone="brand" dot>{data.gym.tier} tier</Badge>
-          <span className="text-sm text-[var(--color-fg-quaternary)]">·</span>
-          <span className="text-sm text-[var(--color-fg-tertiary)]">
-            TZS {data.gym.perVisitRate.toLocaleString()} / visit
-          </span>
-          <span className="text-sm text-[var(--color-fg-quaternary)]">·</span>
-          <Badge tone="gray">Band {data.payout.band}</Badge>
-          <span className="text-sm text-[var(--color-fg-quaternary)] hidden sm:inline">{payoutLabel}</span>
+          {pay?.rates && (
+            <>
+              <span className="text-sm text-[var(--color-fg-quaternary)]">·</span>
+              <span className="text-sm text-[var(--color-fg-tertiary)]" data-testid="dash-rates">
+                {t('dash.pay.rates')}: {money(pay.rates.dailyTzs)} {t('dash.pay.perDay')} · {money(pay.rates.weeklyTzs)} {t('dash.pay.perWeek')} · {money(pay.rates.monthlyTzs)} {t('dash.pay.perMonth')}
+              </span>
+            </>
+          )}
         </CardContent>
       </Card>
 
@@ -147,12 +148,16 @@ export default function DashboardPage() {
           icon={<Users className="h-5 w-5" />}
           sub={t('dash.month.sub')}
         />
-        <MetricCard
-          label={t('dash.band')}
-          value={`Band ${data.payout.band}`}
-          icon={<TrendingUp className="h-5 w-5" />}
-          sub={`${t('dash.band.sub')} · ${payoutLabel}`}
-        />
+        {pay && (
+          <MetricCard
+            label={t('dash.pay.latest')}
+            value={<span data-testid="dash-latest">{pay.latest ? money(pay.latest.payableTzs) : t('dash.pay.none')}</span>}
+            icon={<Banknote className="h-5 w-5" />}
+            sub={pay.latest
+              ? `${period(pay.latest)} · ${t(`dash.pay.status.${pay.latest.status}`)}${pay.latest.onHold ? ` · ${t('dash.pay.onHold')}` : ''}`
+              : t('dash.pay.noneSub')}
+          />
+        )}
       </div>
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -204,48 +209,35 @@ export default function DashboardPage() {
         </Card>
       )}
 
-      {/* Estimated payout card */}
-      {!data.payout.flatFee && data.payout.net != null && (
-        <MetricCard
-          label={t('dash.netPayout')}
-          value={`TZS ${data.payout.net.toLocaleString()}`}
-          icon={<Banknote className="h-5 w-5" />}
-          sub="Estimated net — subject to reconciliation"
-        />
-      )}
+      {pay && (
+        <>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <MetricCard
+              label={t('dash.pay.awaiting')}
+              value={<span data-testid="dash-awaiting">{money(pay.awaitingPaymentTzs)}</span>}
+              icon={<Banknote className="h-5 w-5" />}
+              sub={t('dash.pay.awaitingSub')}
+            />
+            <MetricCard
+              label={t('dash.pay.lastPaid')}
+              value={pay.lastPaid ? money(pay.lastPaid.payableTzs) : t('dash.pay.noPayment')}
+              icon={<TrendingUp className="h-5 w-5" />}
+              sub={pay.lastPaid ? `${period(pay.lastPaid)}${pay.lastPaid.paidAt ? ` · ${shortDay(pay.lastPaid.paidAt)}` : ''}` : undefined}
+            />
+          </div>
 
-      {/* Payout details */}
-      <Card>
-        <CardHeader>
-          <h2 className="text-sm font-semibold text-[var(--color-fg-primary)]">Payout details</h2>
-        </CardHeader>
-        <CardContent>
-          <dl className="grid gap-y-3 sm:grid-cols-2 text-sm">
-            <div>
-              <dt className="text-[var(--color-fg-quaternary)]">Band</dt>
-              <dd className="mt-0.5 font-medium text-[var(--color-fg-primary)]">{data.payout.band}</dd>
-            </div>
-            <div>
-              <dt className="text-[var(--color-fg-quaternary)]">Commission</dt>
-              <dd className="mt-0.5 font-medium text-[var(--color-fg-primary)]">
-                {data.payout.flatFee ? '—' : `${data.payout.commissionPct ?? 0}%`}
-              </dd>
-            </div>
-            <div>
-              <dt className="text-[var(--color-fg-quaternary)]">Payout timing</dt>
-              <dd className="mt-0.5 font-medium text-[var(--color-fg-primary)]">
-                {data.payout.payoutDelayDays === 0 ? 'Instant' : `T+${data.payout.payoutDelayDays} days`}
-              </dd>
-            </div>
-            <div>
-              <dt className="text-[var(--color-fg-quaternary)]">Fee structure</dt>
-              <dd className="mt-0.5 font-medium text-[var(--color-fg-primary)]">
-                {data.payout.flatFee ? 'Flat monthly' : 'Per-visit commission'}
-              </dd>
-            </div>
-          </dl>
-        </CardContent>
-      </Card>
+          <Card>
+            <CardHeader>
+              <h2 className="text-sm font-semibold text-[var(--color-fg-primary)]">{t('dash.pay.how')}</h2>
+              <Link href="/owner/statements" className="text-sm font-medium text-[var(--color-brand-700)] hover:underline">{t('dash.pay.viewStatements')}</Link>
+            </CardHeader>
+            <CardContent className="space-y-3 text-sm text-[var(--color-fg-tertiary)]">
+              {!pay.rates && <Alert tone="warning">{t('dash.pay.noRates')}</Alert>}
+              <p>{t('dash.pay.howBody')}</p>
+            </CardContent>
+          </Card>
+        </>
+      )}
 
     </div>
   );

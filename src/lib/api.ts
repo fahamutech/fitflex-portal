@@ -1059,7 +1059,13 @@ export interface DashboardResponse {
     fitflexVisits: number;
     fitflexMembers: number;
   }>;
-  payout: { band: number; commissionPct?: number; net?: number; flatFee?: boolean; payoutDelayDays?: number };
+  /** What FitFlex pays the gym. Null for staff without the payments permission. */
+  settlement?: {
+    rates: { dailyTzs: number; weeklyTzs: number; monthlyTzs: number } | null;
+    latest: OwnerStatement | null;
+    awaitingPaymentTzs: number;
+    lastPaid: { periodStartDate: string; payableTzs: number; paidAt: string | null } | null;
+  } | null;
 }
 
 export interface CheckIn {
