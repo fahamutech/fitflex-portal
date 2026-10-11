@@ -28,6 +28,7 @@ const EN = {
   sentTitle: 'Invitations sent', sentEmpty: 'No invitations sent yet.',
   lapsed: (amount: string) => `Paid TZS ${amount} but never accepted. Send it again or record a refund.`,
   resend: 'New link', cancel: 'Cancel', reissue: 'Send again', refunded: 'Refunded', done: 'Done.',
+  canMessage: 'Can send messages to members',
   roles: { member: 'Member', staff: 'Staff', trainer: 'Trainer' } as Record<InviteRole, string>,
   status: { pending: 'Waiting', claimed: 'Opened', accepted: 'Accepted', declined: 'Declined', cancelled: 'Cancelled', expired: 'Expired' } as Record<string, string>,
   failed: 'The request could not be completed.',
@@ -61,6 +62,7 @@ const SW: typeof EN = {
   sentTitle: 'Mialiko iliyotumwa', sentEmpty: 'Bado hakuna mialiko iliyotumwa.',
   lapsed: amount => `Amelipa TZS ${amount} lakini hakukubali. Tuma tena au rekodi marejesho.`,
   resend: 'Kiungo kipya', cancel: 'Ghairi', reissue: 'Tuma tena', refunded: 'Amerudishiwa', done: 'Imekamilika.',
+  canMessage: 'Anaweza kutuma ujumbe kwa wanachama',
   roles: { member: 'Mwanachama', staff: 'Mfanyakazi', trainer: 'Mkufunzi' },
   status: { pending: 'Unasubiri', claimed: 'Umefunguliwa', accepted: 'Umekubaliwa', declined: 'Umekataliwa', cancelled: 'Umeghairiwa', expired: 'Umeisha muda' },
   failed: 'Ombi halikukamilika.',
@@ -118,6 +120,7 @@ export function InviteForm({ token, gymId, role, sw, onSent }: { token: string; 
   const [contact, setContact] = useState('');
   const [plan, setPlan] = useState<Plan>('M');
   const [paid, setPaid] = useState('');
+  const [canMessage, setCanMessage] = useState(false);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<{ tone: 'success' | 'error' | 'info'; text: string } | null>(null);
   const [link, setLink] = useState<string | null>(null);
@@ -138,7 +141,7 @@ export function InviteForm({ token, gymId, role, sw, onSent }: { token: string; 
       const body: GymInvitationInput = {
         role, ...contactOf(contact),
         ...(role === 'member' ? memberPlan(plan, paid) : {}),
-        ...(role === 'staff' ? { aclPermissions: STAFF_SCOPES } : {}),
+        ...(role === 'staff' ? { aclPermissions: [...STAFF_SCOPES, ...(canMessage ? ['communications'] : [])] } : {}),
       };
       const res = await api.gymCreateInvitation(token, gymId, body);
       setNotice({ tone: res.created ? 'success' : 'info', text: res.created ? copy.sent : copy.alreadySent });
@@ -155,6 +158,9 @@ export function InviteForm({ token, gymId, role, sw, onSent }: { token: string; 
       <Field label={copy.plan}><select aria-label={`${copy.roles[role]}: ${copy.plan}`} className="ui-input" value={plan} onChange={e => setPlan(e.target.value as Plan)}><option value="D">{copy.D}</option><option value="W">{copy.W}</option><option value="M">{copy.M}</option></select></Field>
       <Field label={copy.paid} hint={copy.paidHint}><input aria-label={`${copy.roles[role]}: ${copy.paid}`} className="ui-input" inputMode="numeric" pattern="[0-9]*" value={paid} onChange={e => setPaid(e.target.value)} /></Field>
     </div>}
+    {role === 'staff' && <label className="flex items-center gap-2 text-sm">
+      <input type="checkbox" data-testid="invite-can-message" checked={canMessage} onChange={e => setCanMessage(e.target.checked)} />{copy.canMessage}
+    </label>}
     <div className="flex flex-wrap gap-2">
       <Button type="submit" disabled={busy}>{copy.send}</Button>
       <Button type="button" variant="secondary" disabled={busy || !contact.trim()} onClick={check}>{copy.check}</Button>

@@ -787,14 +787,16 @@ const variableLabel = (t: T, v: string) => t(`comms.var.${v}`) || v;
 function Warnings({ t, warnings }: { t: T; warnings: CommsPreview['warnings'] }) {
   return (
     <>
-      {warnings.map(w => (
-        <Alert key={`${w.code}-${w.channel ?? ''}-${w.variable ?? ''}`} tone={w.code === 'nobody_reachable' ? 'error' : 'warning'}
-          data-testid={`warning-${w.code}${w.variable ? `-${w.variable}` : ''}`}>
-          {fill(t(warningKey(w)), {
-            n: w.count ?? '', of: w.of ?? '', channel: w.channel ? t(`comms.channel.${w.channel}`) : '',
-            variable: w.variable ? variableLabel(t, w.variable) : '',
-          })}
-        </Alert>
+      {/* A warning this build has no wording for (a newer server's) is left out, not shown blank. */}
+      {warnings.filter(w => Boolean(t(warningKey(w)))).map(w => (
+        <div key={`${w.code}-${w.channel ?? ''}-${w.variable ?? ''}`} data-testid={`warning-${w.code}${w.variable ? `-${w.variable}` : ''}`}>
+          <Alert tone={w.code === 'nobody_reachable' ? 'error' : 'warning'}>
+            {fill(t(warningKey(w)), {
+              n: w.count ?? '', of: w.of ?? '', channel: w.channel ? t(`comms.channel.${w.channel}`) : '',
+              variable: w.variable ? variableLabel(t, w.variable) : '',
+            })}
+          </Alert>
+        </div>
       ))}
     </>
   );
