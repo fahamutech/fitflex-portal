@@ -3,7 +3,7 @@ import { useEffect, useState, useMemo } from 'react';
 import { Plus, Pencil, Trash2, RefreshCw, X } from 'lucide-react';
 import { useApp } from '../../providers';
 import { api, Gym, GymOwner, TrainerProfile } from '@/lib/api';
-import { Badge, Button, PageHeader, Alert, Spinner, Card, Field } from '@/components/shared';
+import { Badge, Button, PageHeader, Alert, Spinner, Card, Field, Input, Select } from '@/components/shared';
 import { DataTable, ColumnDef } from '@/components/data-table';
 import { Dialog, DialogFooter, ConfirmDialog } from '@/components/dialog';
 import { ImageUpload } from '@/components/image-upload';
@@ -387,10 +387,10 @@ export default function TrainersPage() {
       <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} title={editing ? 'Edit trainer' : 'Add trainer'} description={editing ? `Editing ${trainerNames(editing).label || editing.email}` : 'Register a new trainer.'} size="md">
         <div className="space-y-4">
           <Field label="Name" error={formErrors.displayName} hint={editing?.nickname ? `Clients see the nickname this trainer chose: ${editing.nickname}` : undefined}>
-            <input className="ui-input" value={draft.displayName || ''} onChange={e => { setDraft({ ...draft, displayName: e.target.value }); setFormErrors(prev => { const { displayName, ...rest } = prev; return rest; }); }} />
+            <Input value={draft.displayName || ''} onChange={e => { setDraft({ ...draft, displayName: e.target.value }); setFormErrors(prev => { const { displayName, ...rest } = prev; return rest; }); }} />
           </Field>
           <Field label="Email" error={formErrors.email}>
-            <input className="ui-input" type="email" value={draft.email || ''} onChange={e => { setDraft({ ...draft, email: e.target.value }); setFormErrors(prev => { const { email, ...rest } = prev; return rest; }); }} />
+            <Input type="email" value={draft.email || ''} onChange={e => { setDraft({ ...draft, email: e.target.value }); setFormErrors(prev => { const { email, ...rest } = prev; return rest; }); }} />
           </Field>
           <Field label="Trainer images" hint="Upload up to five profile and portfolio photos. PNG, JPG, or WEBP.">
             <ImageUpload
@@ -429,13 +429,13 @@ export default function TrainersPage() {
           </Field>
           <div className="flex gap-3">
             <Field label="Currency" error={undefined}>
-              <select className="ui-input" value={sessionCurrency} onChange={e => setSessionCurrency(e.target.value as 'TZS' | 'USD')}>
+              <Select value={sessionCurrency} onChange={e => setSessionCurrency(e.target.value as 'TZS' | 'USD')}>
                 <option value="TZS">TZS</option>
                 <option value="USD">USD</option>
-              </select>
+              </Select>
             </Field>
             <Field label="Per session rate" error={formErrors.hourlyRateTzs}>
-              <input className="ui-input" type="number" value={rateInput} onChange={e => { setRateInput(e.target.value); setFormErrors(prev => { const { hourlyRateTzs, ...rest } = prev; return rest; }); }} placeholder={sessionCurrency === 'USD' ? 'e.g. 30' : 'e.g. 15000'} />
+              <Input type="number" value={rateInput} onChange={e => { setRateInput(e.target.value); setFormErrors(prev => { const { hourlyRateTzs, ...rest } = prev; return rest; }); }} placeholder={sessionCurrency === 'USD' ? 'e.g. 30' : 'e.g. 15000'} />
             </Field>
           </div>
           <Field label="Gyms" hint="Optional. Leave empty for an independent trainer." error={formErrors.gyms}>
@@ -455,9 +455,8 @@ export default function TrainersPage() {
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               {SOCIAL_PLATFORMS.map(({ id, label }) => (
                 <Field key={id} label={label} error={formErrors[`social_${id}`]}>
-                  <input
+                  <Input
                     aria-label={label}
-                    className="ui-input"
                     value={draft.socialLinks?.[id] || ''}
                     placeholder="@handle or profile link"
                     onChange={e => {
@@ -474,8 +473,8 @@ export default function TrainersPage() {
               {draftAvailability.map((entry, i) => (
                 <div key={i} className="p-3 rounded-xl border border-[var(--color-border-secondary)] bg-[var(--color-bg-secondary)] space-y-2">
                   <div className="flex gap-2 items-center">
-                    <select
-                      className="ui-input flex-1"
+                    <Select
+                      className="flex-1"
                       value={entry.gymId}
                       onChange={e => {
                         const next = [...draftAvailability];
@@ -485,7 +484,7 @@ export default function TrainersPage() {
                     >
                       <option value="">Any gym</option>
                       {gyms.filter(g => draftGymIds.includes(g.id)).map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
-                    </select>
+                    </Select>
                     <button
                       type="button"
                       onClick={() => setDraftAvailability(prev => prev.filter((_, j) => j !== i))}
@@ -548,11 +547,11 @@ export default function TrainersPage() {
             </div>
           </Field>
           <Field label="Status" error={formErrors.status}>
-            <select className="ui-input" value={draft.status || 'active'} onChange={e => { setDraft({ ...draft, status: e.target.value as 'active' | 'inactive' | 'suspended' }); setFormErrors(prev => { const { status, ...rest } = prev; return rest; }); }}>
+            <Select value={draft.status || 'active'} onChange={e => { setDraft({ ...draft, status: e.target.value as 'active' | 'inactive' | 'suspended' }); setFormErrors(prev => { const { status, ...rest } = prev; return rest; }); }}>
               <option value="active">Active</option>
               <option value="inactive">Inactive</option>
               <option value="suspended">Suspended</option>
-            </select>
+            </Select>
           </Field>
           <label className="flex items-center gap-3 rounded-[var(--radius-lg)] border border-[var(--color-border-secondary)] p-3 text-sm text-[var(--color-fg-primary)]">
             <input
@@ -574,9 +573,8 @@ export default function TrainersPage() {
               {t('listing.visible')}
             </label>
             <Field label={t('listing.priority')} hint={t('listing.priorityHint')}>
-              <input
+              <Input
                 aria-label={t('listing.priority')}
-                className="ui-input"
                 type="number"
                 min="0"
                 value={draft.homepagePriority ?? 0}
