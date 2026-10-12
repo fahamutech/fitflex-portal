@@ -157,7 +157,7 @@ export default function SettlementsPage() {
                     ))}
                   </TBody>
                   <tfoot>
-                    <Tr className="text-sm">
+                    <Tr className="border-t border-[var(--color-border-secondary)] text-sm [&>td]:!border-b-0">
                       <Td className="font-medium" colSpan={5}>{shown.length} {shown.length === 1 ? 'statement' : 'statements'}</Td>
                       <Td className="whitespace-nowrap text-right font-semibold tabular-nums" data-testid="settlement-total">{money(total)}</Td>
                       <Td />
