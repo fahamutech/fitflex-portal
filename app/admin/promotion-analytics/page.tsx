@@ -7,7 +7,7 @@ import { TYPE_KEY as ENTITY_TYPE_KEY } from '@/lib/moderation';
 import { PLACEMENTS, PLACEMENT_KEY, PROMOTION_TYPES, STATUS_KEY, STATUS_TONE, TYPE_KEY, addDays, eatToday, errorKey, isYmd, pct } from '@/lib/promotions';
 import { money } from '@/lib/admin-utils';
 import type { MessageKey } from '@/lib/i18n';
-import { Alert, Badge, Button, Card, CardContent, Field, PageHeader, Spinner } from '@/components/shared';
+import { Alert, Badge, Button, Card, CardContent, Field, PageHeader, Spinner, Table, TBody, Td, Th, THead, Tr } from '@/components/shared';
 import { MetricTiles, NotTrackedNotice, PromotionPerformanceView, UnverifiedNotice } from '@/components/promotion-analytics';
 
 const ENTITY_TYPES: ModerationEntityType[] = ['gym', 'trainer', 'vendor', 'product'];
@@ -136,36 +136,34 @@ export default function PromotionAnalyticsPage() {
                 <p className="text-xs text-[var(--color-fg-quaternary)]">{t('pan.tableHint')} {t('pan.noRate')}</p>
               </div>
               {(data.items ?? []).length === 0 ? <p className="p-10 text-center text-sm text-[var(--color-fg-quaternary)]" data-testid="pan-empty">{t('pan.empty')}</p> : (
-                <div className="overflow-x-auto">
-                  <table className="w-full min-w-[1200px] text-sm" data-testid="pan-table">
-                    <thead className="text-left text-xs text-[var(--color-fg-tertiary)]"><tr className="border-b border-[var(--color-border-secondary)]">
-                      <th className="px-4 py-2.5 font-medium">{t('pan.col.listing')}</th><th className="px-4 py-2.5 font-medium">{t('pan.col.type')}</th><th className="px-4 py-2.5 font-medium">{t('pan.col.status')}</th>
-                      {(['impressions', 'clicks', 'ctr', 'views', 'saves', 'actionClicks', 'bookings', 'subscriptions', 'purchases', 'conversionRate'] as const).map(c => <th key={c} className="px-4 py-2.5 text-right font-medium">{t(`pan.col.${c}` as MessageKey)}</th>)}
-                    </tr></thead>
-                    <tbody className="divide-y divide-[var(--color-border-secondary)]">
-                      {(data.items ?? []).map(r => (
-                        <tr key={r.promotion.id} tabIndex={0} className="cursor-pointer hover:bg-[var(--color-bg-secondary)]" data-testid={`pan-row-${r.promotion.id}`}
-                          onClick={() => update(q => q.set('item', r.promotion.id))}
-                          onKeyDown={e => { if (e.key === 'Enter') update(q => q.set('item', r.promotion.id)); }}>
-                          <td className="max-w-[18rem] px-4 py-3 [overflow-wrap:anywhere]"><span className="font-medium">{r.promotion.entityName ?? r.promotion.entityId}</span>
-                            <p className="text-xs text-[var(--color-fg-quaternary)]">{t(ENTITY_TYPE_KEY[r.promotion.entityType])}</p></td>
-                          <td className="px-4 py-3">{t(TYPE_KEY[r.promotion.type])}</td>
-                          <td className="px-4 py-3"><Badge tone={STATUS_TONE[r.promotion.status] ?? 'gray'} dot>{STATUS_KEY[r.promotion.status] ? t(STATUS_KEY[r.promotion.status]) : r.promotion.status}</Badge></td>
-                          <td className="px-4 py-3 text-right tabular-nums" data-testid="pan-cell-impressions">{num(r.impressions)}</td>
-                          <td className="px-4 py-3 text-right tabular-nums" data-testid="pan-cell-clicks">{num(r.clicks)}</td>
-                          <td className="px-4 py-3 text-right tabular-nums" data-testid="pan-cell-ctr">{pct(r.clickThroughRate)}</td>
-                          <td className="px-4 py-3 text-right tabular-nums">{num(r.detailViews)}</td>
-                          <td className="px-4 py-3 text-right tabular-nums">{num(r.saves)}</td>
-                          <td className="px-4 py-3 text-right tabular-nums">{num(r.bookingClicks + r.subscriptionClicks)}</td>
-                          <td className="px-4 py-3 text-right tabular-nums" data-testid="pan-cell-bookings">{num(r.bookings)}{Number(r.bookingValueTzs) > 0 && <span className="block text-xs text-[var(--color-fg-quaternary)]">{money(r.bookingValueTzs)}</span>}</td>
-                          <td className="px-4 py-3 text-right tabular-nums" data-testid="pan-cell-subscriptions">{num(r.subscriptions)}{Number(r.subscriptionValueTzs) > 0 && <span className="block text-xs text-[var(--color-fg-quaternary)]">{money(r.subscriptionValueTzs)}</span>}</td>
-                          <td className="px-4 py-3 text-right tabular-nums" data-testid="pan-cell-purchases">{num(r.purchases)}{Number(r.purchaseValueTzs) > 0 && <span className="block text-xs text-[var(--color-fg-quaternary)]">{money(r.purchaseValueTzs)}</span>}</td>
-                          <td className="px-4 py-3 text-right tabular-nums" data-testid="pan-cell-conversionRate">{pct(r.conversionRate)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                <Table aria-label={t('pan.perPromotion')} wrapperClassName="rounded-none border-0" className="min-w-[1200px]" data-testid="pan-table">
+                  <THead><Tr>
+                    <Th>{t('pan.col.listing')}</Th><Th>{t('pan.col.type')}</Th><Th>{t('pan.col.status')}</Th>
+                    {(['impressions', 'clicks', 'ctr', 'views', 'saves', 'actionClicks', 'bookings', 'subscriptions', 'purchases', 'conversionRate'] as const).map(c => <Th key={c} className="!text-right">{t(`pan.col.${c}` as MessageKey)}</Th>)}
+                  </Tr></THead>
+                  <TBody>
+                    {(data.items ?? []).map(r => (
+                      <Tr key={r.promotion.id} tabIndex={0} className="cursor-pointer hover:bg-[var(--color-bg-secondary)]" data-testid={`pan-row-${r.promotion.id}`}
+                        onClick={() => update(q => q.set('item', r.promotion.id))}
+                        onKeyDown={e => { if (e.key === 'Enter') update(q => q.set('item', r.promotion.id)); }}>
+                        <Td className="max-w-[18rem] [overflow-wrap:anywhere]"><span className="font-medium">{r.promotion.entityName ?? r.promotion.entityId}</span>
+                          <p className="text-xs text-[var(--color-fg-quaternary)]">{t(ENTITY_TYPE_KEY[r.promotion.entityType])}</p></Td>
+                        <Td>{t(TYPE_KEY[r.promotion.type])}</Td>
+                        <Td><Badge tone={STATUS_TONE[r.promotion.status] ?? 'gray'} dot>{STATUS_KEY[r.promotion.status] ? t(STATUS_KEY[r.promotion.status]) : r.promotion.status}</Badge></Td>
+                        <Td className="text-right tabular-nums" data-testid="pan-cell-impressions">{num(r.impressions)}</Td>
+                        <Td className="text-right tabular-nums" data-testid="pan-cell-clicks">{num(r.clicks)}</Td>
+                        <Td className="text-right tabular-nums" data-testid="pan-cell-ctr">{pct(r.clickThroughRate)}</Td>
+                        <Td className="text-right tabular-nums">{num(r.detailViews)}</Td>
+                        <Td className="text-right tabular-nums">{num(r.saves)}</Td>
+                        <Td className="text-right tabular-nums">{num(r.bookingClicks + r.subscriptionClicks)}</Td>
+                        <Td className="text-right tabular-nums" data-testid="pan-cell-bookings">{num(r.bookings)}{Number(r.bookingValueTzs) > 0 && <span className="block text-xs text-[var(--color-fg-quaternary)]">{money(r.bookingValueTzs)}</span>}</Td>
+                        <Td className="text-right tabular-nums" data-testid="pan-cell-subscriptions">{num(r.subscriptions)}{Number(r.subscriptionValueTzs) > 0 && <span className="block text-xs text-[var(--color-fg-quaternary)]">{money(r.subscriptionValueTzs)}</span>}</Td>
+                        <Td className="text-right tabular-nums" data-testid="pan-cell-purchases">{num(r.purchases)}{Number(r.purchaseValueTzs) > 0 && <span className="block text-xs text-[var(--color-fg-quaternary)]">{money(r.purchaseValueTzs)}</span>}</Td>
+                        <Td className="text-right tabular-nums" data-testid="pan-cell-conversionRate">{pct(r.conversionRate)}</Td>
+                      </Tr>
+                    ))}
+                  </TBody>
+                </Table>
               )}
             </CardContent>
           </Card>
