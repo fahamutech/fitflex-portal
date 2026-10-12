@@ -4,7 +4,7 @@ import { RefreshCw, Plus, Pencil, CreditCard, ExternalLink, History, QrCode } fr
 import Link from 'next/link';
 import { useApp } from '../../providers';
 import { api, MemberSummary, MemberProfile, PaymentRequest, MemberCheckinRecord } from '@/lib/api';
-import { Badge, Button, PageHeader, Alert, Spinner, Card, Field, Input, Select } from '@/components/shared';
+import { Badge, Button, PageHeader, Alert, Spinner, Card, Field, Input, Select, Table, TBody, Td, Th, THead, Tr } from '@/components/shared';
 import { DataTable, ColumnDef } from '@/components/data-table';
 import { Dialog, DialogFooter, ConfirmDialog } from '@/components/dialog';
 import { statusTone, statusLabel, money, formatDateTime } from '@/lib/admin-utils';
@@ -272,19 +272,21 @@ export default function MembersPage() {
     {
       key: 'pendingPayment', header: 'Payment', sortable: false,
       cell: (m) => m.pendingPayment ? (
-        <button
+        <Button
+          variant="link"
           onClick={(e) => { e.stopPropagation(); openPayments(m); }}
-          className="inline-flex items-center gap-1 text-xs text-[var(--color-warning-700)] hover:underline"
+          className="h-auto px-0 text-xs font-normal text-[var(--color-warning-700)]"
         >
           <Badge tone="warning">Pending</Badge>
-        </button>
+        </Button>
       ) : (
-        <button
+        <Button
+          variant="link"
           onClick={(e) => { e.stopPropagation(); openPayments(m); }}
-          className="inline-flex items-center gap-1 text-xs text-[var(--color-fg-quaternary)] hover:text-[var(--color-brand-700)] hover:underline"
+          className="h-auto px-0 text-xs font-normal text-[var(--color-fg-quaternary)] hover:text-[var(--color-brand-700)]"
         >
           View
-        </button>
+        </Button>
       ),
     },
   ];
@@ -486,32 +488,30 @@ export default function MembersPage() {
         ) : memberPayments.length === 0 ? (
           <div className="text-center py-8 text-sm text-[var(--color-fg-quaternary)]">No payments found for this member.</div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-[var(--color-border-secondary)]">
-                  <th className="text-left py-2 px-3 text-xs font-medium text-[var(--color-fg-quaternary)]">ID</th>
-                  <th className="text-left py-2 px-3 text-xs font-medium text-[var(--color-fg-quaternary)]">Tier</th>
-                  <th className="text-right py-2 px-3 text-xs font-medium text-[var(--color-fg-quaternary)]">Amount</th>
-                  <th className="text-left py-2 px-3 text-xs font-medium text-[var(--color-fg-quaternary)]">Status</th>
-                  <th className="text-left py-2 px-3 text-xs font-medium text-[var(--color-fg-quaternary)]">Date</th>
-                  <th className="text-left py-2 px-3 text-xs font-medium text-[var(--color-fg-quaternary)]">Reference</th>
-                </tr>
-              </thead>
-              <tbody>
-                {memberPayments.map(p => (
-                  <tr key={p.id} className="border-b border-[var(--color-border-secondary)] last:border-0">
-                    <td className="py-2 px-3 font-mono text-xs">{p.id.slice(0, 12)}…</td>
-                    <td className="py-2 px-3"><Badge tone="brand">{(p.tier ?? '—').toUpperCase()}</Badge></td>
-                    <td className="py-2 px-3 text-right tabular-nums">{money(p.amountTzs)}</td>
-                    <td className="py-2 px-3"><Badge tone={statusTone(p.status)}>{statusLabel(p.status)}</Badge></td>
-                    <td className="py-2 px-3 text-xs whitespace-nowrap">{formatDateTime(p.requestedAt)}</td>
-                    <td className="py-2 px-3 text-xs">{p.reference || '—'}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <Table aria-label="Payments">
+            <THead>
+              <Tr>
+                <Th>ID</Th>
+                <Th>Tier</Th>
+                <Th className="!text-right">Amount</Th>
+                <Th>Status</Th>
+                <Th>Date</Th>
+                <Th>Reference</Th>
+              </Tr>
+            </THead>
+            <TBody>
+              {memberPayments.map(p => (
+                <Tr key={p.id}>
+                  <Td className="font-mono text-xs">{p.id.slice(0, 12)}…</Td>
+                  <Td><Badge tone="brand">{(p.tier ?? '—').toUpperCase()}</Badge></Td>
+                  <Td className="text-right tabular-nums">{money(p.amountTzs)}</Td>
+                  <Td><Badge tone={statusTone(p.status)}>{statusLabel(p.status)}</Badge></Td>
+                  <Td className="text-xs whitespace-nowrap">{formatDateTime(p.requestedAt)}</Td>
+                  <Td className="text-xs">{p.reference || '—'}</Td>
+                </Tr>
+              ))}
+            </TBody>
+          </Table>
         )}
         <DialogFooter>
           <Link href="/admin/payments">
@@ -550,32 +550,32 @@ export default function MembersPage() {
         ) : visitRecords.length === 0 ? (
           <div className="text-center py-8 text-sm text-[var(--color-fg-quaternary)]">No visits found in this date range.</div>
         ) : (
-          <div className="overflow-x-auto">
+          <div>
             <div className="text-xs text-[var(--color-fg-quaternary)] mb-2">{visitRecords.length} visit(s)</div>
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-[var(--color-border-secondary)]">
-                  <th className="text-left py-2 px-3 text-xs font-medium text-[var(--color-fg-quaternary)]">Date</th>
-                  <th className="text-left py-2 px-3 text-xs font-medium text-[var(--color-fg-quaternary)]">Gym</th>
-                  <th className="text-left py-2 px-3 text-xs font-medium text-[var(--color-fg-quaternary)]">Gym Tier</th>
-                  <th className="text-left py-2 px-3 text-xs font-medium text-[var(--color-fg-quaternary)]">Pass Tier</th>
-                  <th className="text-left py-2 px-3 text-xs font-medium text-[var(--color-fg-quaternary)]">Visit #</th>
-                  <th className="text-left py-2 px-3 text-xs font-medium text-[var(--color-fg-quaternary)]">Method</th>
-                </tr>
-              </thead>
-              <tbody>
+            <Table aria-label="Visit History">
+              <THead>
+                <Tr>
+                  <Th>Date</Th>
+                  <Th>Gym</Th>
+                  <Th>Gym Tier</Th>
+                  <Th>Pass Tier</Th>
+                  <Th>Visit #</Th>
+                  <Th>Method</Th>
+                </Tr>
+              </THead>
+              <TBody>
                 {visitRecords.map(v => (
-                  <tr key={v.id} className="border-b border-[var(--color-border-secondary)] last:border-0">
-                    <td className="py-2 px-3 text-xs whitespace-nowrap">{formatDateTime(v.timestamp)}</td>
-                    <td className="py-2 px-3 text-xs">{v.gym?.name || v.gymId}</td>
-                    <td className="py-2 px-3"><Badge tone="brand">{v.gymTier}</Badge></td>
-                    <td className="py-2 px-3"><Badge tone="gray">{v.passTier || '—'}</Badge></td>
-                    <td className="py-2 px-3 text-xs tabular-nums">{v.visitNumberInCycle ?? '—'}</td>
-                    <td className="py-2 px-3 text-xs capitalize">{v.method?.replace(/_/g, ' ') || '—'}</td>
-                  </tr>
+                  <Tr key={v.id}>
+                    <Td className="text-xs whitespace-nowrap">{formatDateTime(v.timestamp)}</Td>
+                    <Td className="text-xs">{v.gym?.name || v.gymId}</Td>
+                    <Td><Badge tone="brand">{v.gymTier}</Badge></Td>
+                    <Td><Badge tone="gray">{v.passTier || '—'}</Badge></Td>
+                    <Td className="text-xs tabular-nums">{v.visitNumberInCycle ?? '—'}</Td>
+                    <Td className="text-xs capitalize">{v.method?.replace(/_/g, ' ') || '—'}</Td>
+                  </Tr>
                 ))}
-              </tbody>
-            </table>
+              </TBody>
+            </Table>
           </div>
         )}
         <DialogFooter>
