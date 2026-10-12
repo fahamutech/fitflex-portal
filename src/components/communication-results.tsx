@@ -6,7 +6,7 @@
 
 import { useEffect, useState } from 'react';
 import { CommsResults } from '@/lib/api';
-import { Alert, Card, Spinner } from './shared';
+import { Alert, Button, Card, Spinner, Table, TBody, Td, Th, THead, Tr } from './shared';
 import { T, errorText, fill, when } from './communication-shared';
 
 const tzs = (n: number) => `TZS ${Math.round(n).toLocaleString('en-US')}`;
@@ -90,35 +90,35 @@ export function SourcesTable({ t, r, nameOf, onOpen }: {
 }) {
   if (!r.sources?.length) return null;
   return (
-    <div className="overflow-x-auto" data-testid="result-sources">
+    <div data-testid="result-sources">
       <p className="mb-1 text-sm font-semibold">{t('comms.results.bySource')}</p>
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="text-left text-xs text-[var(--color-fg-quaternary)]">
-            <th className="py-1 pr-3">{t('comms.results.source')}</th>
-            <th className="py-1 pr-3 text-right">{t('comms.results.recipients')}</th>
-            <th className="py-1 pr-3 text-right">{t('comms.results.opened')}</th>
-            <th className="py-1 pr-3 text-right">{t('comms.results.clicked')}</th>
-            <th className="py-1 pr-3 text-right">{t('comms.results.paid')}</th>
-            <th className="py-1 text-right">{t('comms.results.revenue')}</th>
-          </tr>
-        </thead>
-        <tbody>
+      <Table aria-label={t('comms.results.bySource')}>
+        <THead>
+          <Tr>
+            <Th>{t('comms.results.source')}</Th>
+            <Th className="!text-right">{t('comms.results.recipients')}</Th>
+            <Th className="!text-right">{t('comms.results.opened')}</Th>
+            <Th className="!text-right">{t('comms.results.clicked')}</Th>
+            <Th className="!text-right">{t('comms.results.paid')}</Th>
+            <Th className="!text-right">{t('comms.results.revenue')}</Th>
+          </Tr>
+        </THead>
+        <TBody>
           {r.sources.map(s => (
-            <tr key={`${s.type}:${s.id}`} className="border-t border-[var(--color-border-secondary)]" data-testid={`source-${s.id}`}>
-              <td className="py-1 pr-3">
-                <button type="button" className="text-left hover:underline disabled:no-underline" disabled={!onOpen} onClick={() => onOpen?.(s)}>{nameOf(s)}</button>
+            <Tr key={`${s.type}:${s.id}`} data-testid={`source-${s.id}`}>
+              <Td>
+                <Button type="button" variant="link" className="h-auto px-0 text-left font-normal text-inherit hover:underline disabled:no-underline disabled:opacity-100" disabled={!onOpen} onClick={() => onOpen?.(s)}>{nameOf(s)}</Button>
                 <span className="block text-xs text-[var(--color-fg-quaternary)]">{t(`comms.results.type.${s.type}`)}{s.lastSentAt ? ` · ${when(s.lastSentAt)}` : ''}</span>
-              </td>
-              <td className="py-1 pr-3 text-right tabular-nums">{s.recipients}</td>
-              <td className="py-1 pr-3 text-right tabular-nums">{s.opened}</td>
-              <td className="py-1 pr-3 text-right tabular-nums">{s.clicked}</td>
-              <td className="py-1 pr-3 text-right tabular-nums">{s.paid}</td>
-              <td className="py-1 text-right tabular-nums">{tzs(s.attributedTzs)}</td>
-            </tr>
+              </Td>
+              <Td className="text-right tabular-nums">{s.recipients}</Td>
+              <Td className="text-right tabular-nums">{s.opened}</Td>
+              <Td className="text-right tabular-nums">{s.clicked}</Td>
+              <Td className="text-right tabular-nums">{s.paid}</Td>
+              <Td className="text-right tabular-nums">{tzs(s.attributedTzs)}</Td>
+            </Tr>
           ))}
-        </tbody>
-      </table>
+        </TBody>
+      </Table>
     </div>
   );
 }
