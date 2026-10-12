@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 import { RefreshCw, Save, Plus, Trash2, X } from 'lucide-react';
 import { useApp } from '../../providers';
 import { api, PlatformSettings, SubscriptionTierConfig, PayoutBandConfig } from '@/lib/api';
-import { Button, PageHeader, Alert, Spinner, Card, Field, Input, Select } from '@/components/shared';
+import { Button, PageHeader, Alert, Spinner, Card, Field, Input, Select, Table, TBody, Td, Th, THead, Tr } from '@/components/shared';
 import { money } from '@/lib/admin-utils';
 
 const EMPTY_TIER: SubscriptionTierConfig = { key: '', label: '', monthlyPrice: 0, visits: 0, gymAccess: 'standard' };
@@ -176,48 +176,46 @@ export default function SettingsPage() {
               <Plus className="h-3.5 w-3.5" /> Add tier
             </Button>
           </div>
-          <div className="overflow-x-auto">
-            <table className="ui-table min-w-full">
-              <thead>
-                <tr>
-                  <th>Tier Key</th>
-                  <th>Label</th>
-                  <th className="text-right">Monthly Price ({currency})</th>
-                  <th className="text-right">Visits / Month</th>
-                  <th>Gym Access Level</th>
-                  <th className="w-10"></th>
-                </tr>
-              </thead>
-              <tbody>
-                {tiers.map((t, i) => (
-                  <tr key={t.key || i}>
-                    <td>
-                      <Input size="sm" className="font-mono" aria-label="Tier Key" value={t.key} onChange={e => updateTier(i, 'key', e.target.value)} />
-                    </td>
-                    <td>
-                      <Input size="sm" aria-label="Label" value={t.label} onChange={e => updateTier(i, 'label', e.target.value)} />
-                    </td>
-                    <td>
-                      <Input size="sm" className="text-right font-mono tabular-nums" aria-label={`Monthly Price (${currency})`} type="number" value={t.monthlyPrice} onChange={e => updateTier(i, 'monthlyPrice', Number(e.target.value))} />
-                    </td>
-                    <td>
-                      <Input size="sm" className="text-right font-mono tabular-nums" aria-label="Visits / Month" type="number" value={t.visits} onChange={e => updateTier(i, 'visits', Number(e.target.value))} placeholder="-1 = unlimited" />
-                    </td>
-                    <td>
-                      <Select size="sm" aria-label="Gym Access Level" value={t.gymAccess} onChange={e => updateTier(i, 'gymAccess', e.target.value)}>
-                        {GYM_ACCESS_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
-                      </Select>
-                    </td>
-                    <td>
-                      <Button variant="ghost" size="sm" onClick={() => setTiers(prev => prev.filter((_, idx) => idx !== i))}>
-                        <Trash2 className="h-3.5 w-3.5 text-[var(--color-error-600)]" />
-                      </Button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <Table aria-label="Subscription Tiers">
+            <THead>
+              <Tr>
+                <Th>Tier Key</Th>
+                <Th>Label</Th>
+                <Th className="!text-right">Monthly Price ({currency})</Th>
+                <Th className="!text-right">Visits / Month</Th>
+                <Th>Gym Access Level</Th>
+                <Th className="w-10"></Th>
+              </Tr>
+            </THead>
+            <TBody>
+              {tiers.map((t, i) => (
+                <Tr key={t.key || i}>
+                  <Td>
+                    <Input size="sm" className="font-mono" aria-label="Tier Key" value={t.key} onChange={e => updateTier(i, 'key', e.target.value)} />
+                  </Td>
+                  <Td>
+                    <Input size="sm" aria-label="Label" value={t.label} onChange={e => updateTier(i, 'label', e.target.value)} />
+                  </Td>
+                  <Td>
+                    <Input size="sm" className="text-right font-mono tabular-nums" aria-label={`Monthly Price (${currency})`} type="number" value={t.monthlyPrice} onChange={e => updateTier(i, 'monthlyPrice', Number(e.target.value))} />
+                  </Td>
+                  <Td>
+                    <Input size="sm" className="text-right font-mono tabular-nums" aria-label="Visits / Month" type="number" value={t.visits} onChange={e => updateTier(i, 'visits', Number(e.target.value))} placeholder="-1 = unlimited" />
+                  </Td>
+                  <Td>
+                    <Select size="sm" aria-label="Gym Access Level" value={t.gymAccess} onChange={e => updateTier(i, 'gymAccess', e.target.value)}>
+                      {GYM_ACCESS_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
+                    </Select>
+                  </Td>
+                  <Td>
+                    <Button variant="ghost" size="sm" onClick={() => setTiers(prev => prev.filter((_, idx) => idx !== i))}>
+                      <Trash2 className="h-3.5 w-3.5 text-[var(--color-error-600)]" />
+                    </Button>
+                  </Td>
+                </Tr>
+              ))}
+            </TBody>
+          </Table>
           {tiers.length > 0 && (
             <div className="flex flex-wrap gap-3 mt-2">
               {tiers.map(t => (
@@ -244,48 +242,46 @@ export default function SettingsPage() {
           <p className="text-xs text-[var(--color-fg-quaternary)]">
             Payout timing and commission are determined by the number of unique FitFlex visits the gym receives per month.
           </p>
-          <div className="overflow-x-auto">
-            <table className="ui-table min-w-full">
-              <thead>
-                <tr>
-                  <th>Band</th>
-                  <th className="text-right">Min Visits</th>
-                  <th className="text-right">Max Visits</th>
-                  <th>Payout Timing</th>
-                  <th className="text-right">Commission %</th>
-                  <th className="w-10"></th>
-                </tr>
-              </thead>
-              <tbody>
-                {bands.map((b, i) => (
-                  <tr key={b.key || i}>
-                    <td>
-                      <Input size="sm" aria-label="Band" value={b.label} onChange={e => updateBand(i, 'label', e.target.value)} />
-                    </td>
-                    <td>
-                      <Input size="sm" className="text-right font-mono tabular-nums" aria-label="Min Visits" type="number" value={b.minVisits} onChange={e => updateBand(i, 'minVisits', Number(e.target.value))} />
-                    </td>
-                    <td>
-                      <Input size="sm" className="text-right font-mono tabular-nums" aria-label="Max Visits" type="number" value={b.maxVisits} onChange={e => updateBand(i, 'maxVisits', Number(e.target.value))} placeholder="-1 = no cap" />
-                    </td>
-                    <td>
-                      <Select size="sm" aria-label="Payout Timing" value={b.payoutTiming} onChange={e => updateBand(i, 'payoutTiming', e.target.value)}>
-                        {TIMING_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
-                      </Select>
-                    </td>
-                    <td>
-                      <Input size="sm" className="text-right font-mono tabular-nums" aria-label="Commission %" type="number" value={b.commissionPct} onChange={e => updateBand(i, 'commissionPct', Number(e.target.value))} />
-                    </td>
-                    <td>
-                      <Button variant="ghost" size="sm" onClick={() => setBands(prev => prev.filter((_, idx) => idx !== i))}>
-                        <Trash2 className="h-3.5 w-3.5 text-[var(--color-error-600)]" />
-                      </Button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <Table aria-label="Payout Bands">
+            <THead>
+              <Tr>
+                <Th>Band</Th>
+                <Th className="!text-right">Min Visits</Th>
+                <Th className="!text-right">Max Visits</Th>
+                <Th>Payout Timing</Th>
+                <Th className="!text-right">Commission %</Th>
+                <Th className="w-10"></Th>
+              </Tr>
+            </THead>
+            <TBody>
+              {bands.map((b, i) => (
+                <Tr key={b.key || i}>
+                  <Td>
+                    <Input size="sm" aria-label="Band" value={b.label} onChange={e => updateBand(i, 'label', e.target.value)} />
+                  </Td>
+                  <Td>
+                    <Input size="sm" className="text-right font-mono tabular-nums" aria-label="Min Visits" type="number" value={b.minVisits} onChange={e => updateBand(i, 'minVisits', Number(e.target.value))} />
+                  </Td>
+                  <Td>
+                    <Input size="sm" className="text-right font-mono tabular-nums" aria-label="Max Visits" type="number" value={b.maxVisits} onChange={e => updateBand(i, 'maxVisits', Number(e.target.value))} placeholder="-1 = no cap" />
+                  </Td>
+                  <Td>
+                    <Select size="sm" aria-label="Payout Timing" value={b.payoutTiming} onChange={e => updateBand(i, 'payoutTiming', e.target.value)}>
+                      {TIMING_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
+                    </Select>
+                  </Td>
+                  <Td>
+                    <Input size="sm" className="text-right font-mono tabular-nums" aria-label="Commission %" type="number" value={b.commissionPct} onChange={e => updateBand(i, 'commissionPct', Number(e.target.value))} />
+                  </Td>
+                  <Td>
+                    <Button variant="ghost" size="sm" onClick={() => setBands(prev => prev.filter((_, idx) => idx !== i))}>
+                      <Trash2 className="h-3.5 w-3.5 text-[var(--color-error-600)]" />
+                    </Button>
+                  </Td>
+                </Tr>
+              ))}
+            </TBody>
+          </Table>
           {bands.length > 0 && (
             <div className="flex flex-wrap gap-3 mt-2">
               {bands.map(b => (
