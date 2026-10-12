@@ -8,9 +8,7 @@ import {
 } from 'lucide-react';
 import { useApp } from '../../providers';
 import { api, AnalyticsOverview, Rate, WorkoutTally, ApiError } from '@/lib/api';
-import {
-  MetricCard, Card, CardHeader, CardContent, Button, PageHeader, Alert, Spinner,
-} from '@/components/shared';
+import { MetricCard, Card, CardHeader, CardContent, Button, PageHeader, Alert, Spinner, Table, TBody, Td, Th, THead, Tr } from '@/components/shared';
 
 const BRAND = '#079455';
 const GRID  = 'var(--color-border-secondary)';
@@ -286,26 +284,24 @@ function Overview({ d }: { d: AnalyticsOverview }) {
         <Card>
           <CardHeader><span className="text-sm font-semibold">Most visited gyms</span></CardHeader>
           <CardContent>
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="text-left text-xs text-[var(--color-fg-quaternary)]">
-                    <th className="py-2 font-medium">Gym</th>
-                    <th className="py-2 text-right font-medium">Check-ins</th>
-                    <th className="py-2 text-right font-medium">Members</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-[var(--color-border-secondary)]">
-                  {gy.topGyms.map(r => (
-                    <tr key={r.gymId}>
-                      <td className="py-2 text-[var(--color-fg-primary)]">{r.name ?? r.gymId}</td>
-                      <td className="py-2 text-right tabular-nums">{num(r.checkins)}</td>
-                      <td className="py-2 text-right tabular-nums">{num(r.members)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <Table aria-label="Most visited gyms">
+              <THead>
+                <Tr>
+                  <Th>Gym</Th>
+                  <Th className="!text-right">Check-ins</Th>
+                  <Th className="!text-right">Members</Th>
+                </Tr>
+              </THead>
+              <TBody>
+                {gy.topGyms.map(r => (
+                  <Tr key={r.gymId}>
+                    <Td className="!text-[var(--color-fg-primary)]">{r.name ?? r.gymId}</Td>
+                    <Td className="text-right tabular-nums">{num(r.checkins)}</Td>
+                    <Td className="text-right tabular-nums">{num(r.members)}</Td>
+                  </Tr>
+                ))}
+              </TBody>
+            </Table>
           </CardContent>
         </Card>
       )}
