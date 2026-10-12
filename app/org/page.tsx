@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 import { ArrowLeft } from 'lucide-react';
 import { useApp } from '../providers';
 import { api, ApiError, ORG_BILLING_ROLES, B2BInvoiceDetail, B2BOrgBilling, B2BPayment, B2BSponsorInvoice, B2BStatement } from '@/lib/api';
-import { Alert, Badge, Button, Card, CardContent, PageHeader, Segmented, Spinner } from '@/components/shared';
+import { Alert, Badge, Button, Card, CardContent, PageHeader, Segmented, Spinner, Table, TBody, Td, Th, THead, Tr } from '@/components/shared';
 import { Aging, Balances, InvoiceDocument, InvoiceStatus, PrintButton, StatementTable, INVOICE_KIND, PAYMENT_METHOD, day } from '@/components/b2b-finance';
 import { OrgPaying } from '@/components/b2b-collections';
 import { money } from '@/lib/admin-utils';
@@ -152,27 +152,27 @@ export default function OrganizationBillingPage() {
             <Card>
               <CardContent className="py-4">
                 {payments.length === 0 ? <p className="text-sm text-[var(--color-fg-quaternary)]">FitFlex hasn’t recorded a payment from you yet.</p> : (
-                  <table className="w-full text-sm" data-testid="org-payments">
-                    <thead>
-                      <tr className="border-b border-[var(--color-border-secondary)] text-left text-xs text-[var(--color-fg-quaternary)]">
-                        <th className="py-2 pr-3">Received</th><th className="py-2 pr-3">Receipt</th><th className="py-2 pr-3">How</th><th className="py-2 pr-3">Your reference</th>
-                        <th className="py-2 pr-3 text-right">Amount</th><th className="py-2 pr-3 text-right">Not yet applied</th><th className="py-2">Status</th>
-                      </tr>
-                    </thead>
-                    <tbody>
+                  <Table aria-label="Payments" data-testid="org-payments">
+                    <THead>
+                      <Tr>
+                        <Th>Received</Th><Th>Receipt</Th><Th>How</Th><Th>Your reference</Th>
+                        <Th className="!text-right">Amount</Th><Th className="!text-right">Not yet applied</Th><Th>Status</Th>
+                      </Tr>
+                    </THead>
+                    <TBody>
                       {payments.map(p => (
-                        <tr key={p.id} className="border-b border-[var(--color-border-secondary)]">
-                          <td className="py-2 pr-3 whitespace-nowrap">{day(p.receivedAt)}</td>
-                          <td className="py-2 pr-3 font-medium">{p.number}</td>
-                          <td className="py-2 pr-3">{PAYMENT_METHOD[p.method] ?? p.method}</td>
-                          <td className="py-2 pr-3">{p.reference}</td>
-                          <td className="py-2 pr-3 text-right">{money(p.amountTzs)}</td>
-                          <td className="py-2 pr-3 text-right">{p.unallocatedTzs ? money(p.unallocatedTzs) : ''}</td>
-                          <td className="py-2">{p.status === 'reversed' ? <Badge tone="danger">Reversed</Badge> : <Badge tone="success">Received</Badge>}</td>
-                        </tr>
+                        <Tr key={p.id}>
+                          <Td className="whitespace-nowrap">{day(p.receivedAt)}</Td>
+                          <Td className="font-medium">{p.number}</Td>
+                          <Td>{PAYMENT_METHOD[p.method] ?? p.method}</Td>
+                          <Td>{p.reference}</Td>
+                          <Td className="text-right">{money(p.amountTzs)}</Td>
+                          <Td className="text-right">{p.unallocatedTzs ? money(p.unallocatedTzs) : ''}</Td>
+                          <Td>{p.status === 'reversed' ? <Badge tone="danger">Reversed</Badge> : <Badge tone="success">Received</Badge>}</Td>
+                        </Tr>
                       ))}
-                    </tbody>
-                  </table>
+                    </TBody>
+                  </Table>
                 )}
               </CardContent>
             </Card>
@@ -209,27 +209,27 @@ function InvoiceList({ invoices, onOpen, empty, title }: { invoices: B2BSponsorI
       <CardContent className="py-4">
         {title && <div className="mb-2 text-sm font-semibold">{title}</div>}
         {invoices.length === 0 ? <p className="text-sm text-[var(--color-fg-quaternary)]">{empty}</p> : (
-          <table className="w-full text-sm" data-testid="org-invoices">
-            <thead>
-              <tr className="border-b border-[var(--color-border-secondary)] text-left text-xs text-[var(--color-fg-quaternary)]">
-                <th className="py-2 pr-3">Number</th><th className="py-2 pr-3">For</th><th className="py-2 pr-3">Issued</th><th className="py-2 pr-3">Due</th>
-                <th className="py-2 pr-3 text-right">Total</th><th className="py-2 pr-3 text-right">Still owed</th><th className="py-2">Status</th>
-              </tr>
-            </thead>
-            <tbody>
+          <Table aria-label={title} data-testid="org-invoices">
+            <THead>
+              <Tr>
+                <Th>Number</Th><Th>For</Th><Th>Issued</Th><Th>Due</Th>
+                <Th className="!text-right">Total</Th><Th className="!text-right">Still owed</Th><Th>Status</Th>
+              </Tr>
+            </THead>
+            <TBody>
               {invoices.map(i => (
-                <tr key={i.id} className="border-b border-[var(--color-border-secondary)]">
-                  <td className="py-2 pr-3"><button className="font-medium text-[var(--color-fg-brand)]" onClick={() => onOpen(i.id)} data-testid={`org-invoice-${i.id}`}>{i.number}</button></td>
-                  <td className="py-2 pr-3">{INVOICE_KIND[i.kind] ?? i.kind} · {i.period}</td>
-                  <td className="py-2 pr-3 whitespace-nowrap">{day(i.issuedAt)}</td>
-                  <td className="py-2 pr-3 whitespace-nowrap">{i.totalTzs > 0 ? day(i.dueDate) : '—'}</td>
-                  <td className="py-2 pr-3 text-right">{money(i.totalTzs)}</td>
-                  <td className="py-2 pr-3 text-right">{i.outstandingTzs && i.outstandingTzs > 0 ? money(i.outstandingTzs) : ''}</td>
-                  <td className="py-2"><InvoiceStatus invoice={i} /></td>
-                </tr>
+                <Tr key={i.id}>
+                  <Td><Button variant="link" className="h-auto px-0 font-medium" onClick={() => onOpen(i.id)} data-testid={`org-invoice-${i.id}`}>{i.number}</Button></Td>
+                  <Td>{INVOICE_KIND[i.kind] ?? i.kind} · {i.period}</Td>
+                  <Td className="whitespace-nowrap">{day(i.issuedAt)}</Td>
+                  <Td className="whitespace-nowrap">{i.totalTzs > 0 ? day(i.dueDate) : '—'}</Td>
+                  <Td className="text-right">{money(i.totalTzs)}</Td>
+                  <Td className="text-right">{i.outstandingTzs && i.outstandingTzs > 0 ? money(i.outstandingTzs) : ''}</Td>
+                  <Td><InvoiceStatus invoice={i} /></Td>
+                </Tr>
               ))}
-            </tbody>
-          </table>
+            </TBody>
+          </Table>
         )}
       </CardContent>
     </Card>
