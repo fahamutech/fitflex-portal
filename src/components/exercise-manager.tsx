@@ -1,10 +1,10 @@
 'use client';
 import { useEffect, useMemo, useState } from 'react';
-import { Plus, RefreshCw } from 'lucide-react';
+import { Download, Plus, RefreshCw, Upload } from 'lucide-react';
 import { useApp } from '../../app/providers';
-import { api, ApiError, Exercise, ExerciseInput, ExerciseOptions } from '@/lib/api';
+import { api, ApiError, Exercise, ExerciseImportResult, ExerciseImportRow, ExerciseInput, ExerciseOptions } from '@/lib/api';
 import { Alert, Badge, Button, Card, CardContent, EmptyState, Field, PageHeader, Spinner } from '@/components/shared';
-import { Dialog } from '@/components/dialog';
+import { Dialog, DialogFooter } from '@/components/dialog';
 
 // The words for ids the library uses. Anything not listed is shown as its id in plain words.
 const WORDS: Record<string, string> = {
@@ -32,6 +32,55 @@ const FIELD_ERRORS: Record<string, string> = {
   instructions: 'Write 1 to 8 short steps, one per line.',
   alternatives: 'Choose up to 6 alternatives, none of them the exercise itself.',
 };
+// What a row of an imported file can get wrong, in the file's own words.
+const CELL_ERRORS: Record<string, string> = {
+  name: 'The name is missing or longer than 80 characters.',
+  category: 'The category isn’t one FitFlex knows.',
+  targetAreas: 'target_areas needs at least one area, and every one must be an area FitFlex knows.',
+  secondaryAreas: 'One of the secondary_areas isn’t an area FitFlex knows.',
+  movementPattern: 'The movement_pattern isn’t one FitFlex knows.',
+  difficulty: 'The difficulty must be beginner, intermediate or advanced.',
+  equipment: 'One of the equipment entries isn’t one FitFlex knows. Use “none” for bodyweight.',
+  environment: 'The environment needs at least one of gym, home, outdoor.',
+  suitableGoals: 'goals needs at least one goal, and every one must be a goal FitFlex knows.',
+  defaultSets: 'sets must be a whole number of 1 or more.',
+  defaultReps_or_defaultDuration: 'Fill in reps or seconds — one of them, as a whole number of 1 or more.',
+  restSeconds: 'rest_seconds must be a whole number, 0 or more.',
+  tracksWeight: 'tracks_weight must be yes or no.',
+  active: 'switched_on must be yes or no.',
+  instructions: 'instructions needs 1 to 8 steps, separated by “ | ”.',
+  alternatives: 'alternatives takes up to 6 exercise ids that exist, none of them the exercise itself.',
+};
+const ROW_ERRORS: Record<string, string> = {
+  unknown_id: 'No exercise has this id. To add a new exercise, leave the id empty.',
+  listed_twice: 'This exercise is already on an earlier line of the file.',
+};
+const rowProblem = (r: ExerciseImportRow) =>
+  ROW_ERRORS[r.error ?? ''] ?? CELL_ERRORS[r.field ?? ''] ?? `Something in this row isn’t valid${r.field ? ` (${r.field})` : ''}.`;
+// The fields of an exercise as the file names them.
+const COLUMN: Record<string, string> = {
+  name: 'name', description: 'description', category: 'category', targetAreas: 'target areas', secondaryAreas: 'secondary areas',
+  movementPattern: 'movement pattern', difficulty: 'difficulty', equipment: 'equipment', environment: 'environment',
+  suitableGoals: 'goals', defaultSets: 'sets', defaultReps: 'reps', defaultDuration: 'seconds', restSeconds: 'rest',
+  tracksWeight: 'tracks weight', instructions: 'instructions', alternatives: 'alternatives', active: 'switched on', i18n: 'Swahili',
+};
+const FILE_ERRORS: Record<string, string> = {
+  empty_file: 'That file has no exercises in it.',
+  file_too_big: 'That file is too big. The limit is 1 MB.',
+  missing_header: 'The first line of the file must name the columns, as in the exported file (id, name, …).',
+  too_many_rows: 'That file has more than 1,000 rows. Split it into smaller files.',
+  last_active_exercise: 'This file would switch every exercise off. At least one must stay on.',
+};
+const MAX_FILE_CHARS = 1_000_000;
+
+/** Hands the browser a file to save. The mark at the front makes Excel read it as UTF-8. */
+function saveCsv(filename: string, csv: string) {
+  const url = URL.createObjectURL(new Blob(['\uFEFF', csv], { type: 'text/csv;charset=utf-8' }));
+  const a = document.createElement('a');
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(url);
+}
 const ERRORS: Record<string, string> = {
   last_active_exercise: 'This is the only exercise switched on, so it can’t be switched off.',
   not_edited: 'This exercise is already as FitFlex shipped it.',
@@ -43,7 +92,7 @@ const message = (e: unknown) => {
   if (!(e instanceof ApiError)) return 'That didn’t work. Please try again.';
   const body = e.body as { error?: string; field?: string } | null;
   if (body?.error === 'invalid_exercise') return FIELD_ERRORS[body.field ?? ''] ?? 'Something in the form isn’t valid.';
-  return ERRORS[body?.error ?? ''] ?? 'That didn’t work. Please try again.';
+  return ERRORS[body?.error ?? ''] ?? FILE_ERRORS[body?.error ?? ''] ?? 'That didn’t work. Please try again.';
 };
 
 const list = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []);
@@ -113,6 +162,26 @@ export function ExerciseManager() {
   const [status, setStatus] = useState<'all' | 'on' | 'off'>('all');
   const [editing, setEditing] = useState<Exercise | 'new' | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [importing, setImporting] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const [done, setDone] = useState<string | null>(null);
+
+  const download = async () => {
+    if (!token) return;
+    setExporting(true);
+    setError(null);
+    setDone(null);
+    try {
+      const out = await api.exportExercises(token);
+      if (typeof out?.csv !== 'string') throw new Error('no file');
+      saveCsv(`fitflex-exercises-${new Date().toISOString().slice(0, 10)}.csv`, out.csv);
+      setDone(`${out.count} exercises downloaded. Edit the file in a spreadsheet, save it as CSV, then bring it back with Import.`);
+    } catch (e) {
+      setError(e instanceof ApiError ? message(e) : 'The file couldn’t be made. Please try again.');
+    } finally {
+      setExporting(false);
+    }
+  };
 
   const load = async () => {
     if (!token) return;
@@ -167,11 +236,14 @@ export function ExerciseManager() {
         actions={
           <>
             <Button variant="secondary" size="sm" onClick={load}><RefreshCw className="h-4 w-4" />Refresh</Button>
+            <Button variant="secondary" size="sm" onClick={download} disabled={exporting || !rows?.length} data-testid="exercise-export"><Download className="h-4 w-4" />{exporting ? 'Exporting…' : 'Export'}</Button>
+            <Button variant="secondary" size="sm" onClick={() => { setDone(null); setImporting(true); }} data-testid="exercise-import"><Upload className="h-4 w-4" />Import</Button>
             <Button size="sm" onClick={() => setEditing('new')} disabled={!options} data-testid="exercise-new"><Plus className="h-4 w-4" />New exercise</Button>
           </>
         }
       />
       {error && <Alert tone="error">{error}</Alert>}
+      {done && <Alert tone="success"><span data-testid="exercise-done">{done}</span></Alert>}
 
       <div className="flex flex-wrap items-end gap-3">
         <div className="min-w-56 flex-1">
@@ -258,6 +330,16 @@ export function ExerciseManager() {
           existing={editing === 'new' ? null : editing}
           onClose={() => setEditing(null)}
           onSaved={async () => { setEditing(null); await load(); }}
+        />
+      )}
+      {importing && (
+        <ExerciseImport
+          onClose={() => setImporting(false)}
+          onApplied={async (s) => {
+            setImporting(false);
+            setDone(`Import done: ${s.create} added, ${s.update} changed${s.errors ? `, ${s.errors} skipped because of a problem` : ''}.`);
+            await load();
+          }}
         />
       )}
     </div>
@@ -489,6 +571,138 @@ function ExerciseForm({ options, all, existing, onClose, onSaved }: {
           <Button type="submit" disabled={busy} data-testid="exercise-save">{existing ? 'Save changes' : 'Add exercise'}</Button>
         </div>
       </form>
+    </Dialog>
+  );
+}
+
+const ACTION: Record<ExerciseImportRow['action'], { label: string; tone: 'gray' | 'brand' | 'warning' | 'danger' }> = {
+  create: { label: 'New', tone: 'brand' },
+  update: { label: 'Changed', tone: 'warning' },
+  unchanged: { label: 'No change', tone: 'gray' },
+  error: { label: 'Problem', tone: 'danger' },
+};
+const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+
+/**
+ * Bringing an edited file back: choose it, see exactly what it would do,
+ * then apply. Nothing is saved until Apply is pressed.
+ */
+function ExerciseImport({ onClose, onApplied }: { onClose: () => void; onApplied: (summary: ExerciseImportResult['summary']) => void }) {
+  const { token } = useApp();
+  const [csv, setCsv] = useState('');
+  const [filename, setFilename] = useState('');
+  const [preview, setPreview] = useState<ExerciseImportResult | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const send = async (text: string, dryRun: boolean) => {
+    if (!token) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const out = await api.importExercises(token, text, dryRun);
+      if (!out || !Array.isArray(out.rows) || !out.summary) throw new Error('no result');
+      if (dryRun) setPreview(out);
+      else onApplied(out.summary);
+    } catch (e) {
+      setError(e instanceof ApiError ? message(e) : 'The file couldn’t be read by the server. Please try again.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const pick = async (file?: File) => {
+    setPreview(null);
+    setError(null);
+    setCsv('');
+    setFilename(file?.name ?? '');
+    if (!file) return;
+    const text = await file.text();
+    if (text.length > MAX_FILE_CHARS) { setError(FILE_ERRORS.file_too_big); return; }
+    if (!text.trim()) { setError(FILE_ERRORS.empty_file); return; }
+    setCsv(text);
+    await send(text, true);
+  };
+
+  const s = preview?.summary;
+  const todo = s ? s.create + s.update : 0;
+  // Rows that do nothing aren't worth reading; problems come first.
+  const listed = (preview?.rows ?? []).filter(r => r.action !== 'unchanged')
+    .sort((a, b) => Number(b.action === 'error') - Number(a.action === 'error') || a.line - b.line);
+  const SHOWN = 200;
+
+  return (
+    <Dialog open onClose={onClose} title="Import exercises" size="xl"
+      description="Choose a CSV file in the same layout as the exported one. You’ll see what it would change before anything is saved.">
+      <div className="space-y-4" data-testid="exercise-import-dialog">
+        <ul className="list-disc space-y-1 pl-5 text-sm text-[var(--color-fg-tertiary)]">
+          <li>A row with an id changes that exercise. A row with the id left empty adds a new exercise.</li>
+          <li>Exercises that aren’t in the file are left alone. Nothing is ever removed — to retire one, set switched_on to “no”.</li>
+          <li>A column you delete from the file is left as it is. Lists use “;” between entries, and instruction steps use “ | ”.</li>
+        </ul>
+        <input type="file" accept=".csv,text/csv,text/plain" className="text-sm" disabled={busy}
+          onChange={e => pick(e.target.files?.[0])} aria-label="Choose a CSV file" data-testid="exercise-import-file" />
+        {busy && !preview && <div className="flex items-center gap-2 text-sm text-[var(--color-fg-tertiary)]"><Spinner className="h-4 w-4" />Checking {filename}…</div>}
+        {error && <Alert tone="error"><span data-testid="exercise-import-error">{error}</span></Alert>}
+
+        {preview && s && (
+          <>
+            <p className="text-sm font-medium text-[var(--color-fg-primary)]" data-testid="exercise-import-summary">
+              {plural(s.create, 'new exercise', 'new exercises')} · {s.update} changed · {s.unchanged} with no change · {plural(s.errors, 'row with a problem', 'rows with a problem')}
+            </p>
+            {preview.unknownColumns.length > 0 && (
+              <Alert tone="warning">
+                {preview.unknownColumns.length === 1 ? 'This column isn’t one FitFlex reads and is ignored: ' : 'These columns aren’t ones FitFlex reads and are ignored: '}
+                {preview.unknownColumns.join(', ')}.
+              </Alert>
+            )}
+            {s.errors > 0 && (
+              <Alert tone="warning">
+                {todo > 0
+                  ? `Rows with a problem are skipped; the other ${todo} will still be saved. Fix the file and import it again to bring the rest in.`
+                  : 'Every row that differs has a problem, so there is nothing to save. Fix the file and choose it again.'}
+              </Alert>
+            )}
+            {listed.length === 0 ? (
+              <p className="text-sm text-[var(--color-fg-tertiary)]">This file matches the library as it is now. There is nothing to save.</p>
+            ) : (
+              <div className="max-h-80 overflow-auto rounded-[var(--radius-lg)] border border-[var(--color-border-secondary)]">
+                <table className="w-full text-sm" data-testid="exercise-import-rows">
+                  <thead className="sticky top-0 border-b border-[var(--color-border-secondary)] bg-[var(--color-bg-secondary)] text-left text-xs text-[var(--color-fg-tertiary)]">
+                    <tr>
+                      <th className="px-3 py-2 font-medium">Line</th>
+                      <th className="px-3 py-2 font-medium">Exercise</th>
+                      <th className="px-3 py-2 font-medium">What happens</th>
+                      <th className="px-3 py-2 font-medium">Detail</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {listed.slice(0, SHOWN).map(r => (
+                      <tr key={r.line} className="border-b border-[var(--color-border-secondary)] align-top last:border-0" data-testid={`exercise-import-row-${r.line}`}>
+                        <td className="px-3 py-2 tabular-nums">{r.line}</td>
+                        <td className="px-3 py-2">{r.name || r.id || '—'}</td>
+                        <td className="px-3 py-2"><Badge tone={ACTION[r.action].tone}>{ACTION[r.action].label}</Badge></td>
+                        <td className="px-3 py-2">
+                          {r.action === 'error' ? rowProblem(r)
+                            : r.action === 'update' ? `Changes: ${(r.changed ?? []).map(k => COLUMN[k] ?? k).join(', ')}`
+                              : 'Added as a new exercise.'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {listed.length > SHOWN && <p className="px-3 py-2 text-xs text-[var(--color-fg-tertiary)]">Showing the first {SHOWN} of {listed.length} rows.</p>}
+              </div>
+            )}
+          </>
+        )}
+      </div>
+      <DialogFooter>
+        <Button variant="secondary" onClick={onClose} disabled={busy}>Cancel</Button>
+        <Button disabled={busy || !preview || todo === 0} onClick={() => send(csv, false)} data-testid="exercise-import-apply">
+          {busy && preview ? 'Saving…' : todo > 0 ? `Apply ${plural(todo, 'change', 'changes')}` : 'Apply'}
+        </Button>
+      </DialogFooter>
     </Dialog>
   );
 }

@@ -32,7 +32,7 @@ const OPTIONS = {
 const ADMIN = { id: 'admin-1', userType: 'admin', email: 'admin@example.com', displayName: 'Local Admin' };
 
 /** A signed-in admin and a small fake of the exercise API. */
-async function setup(page: Page, state: { exercises: Json[]; calls: Call[]; fail?: Json }) {
+async function setup(page: Page, state: { exercises: Json[]; calls: Call[]; fail?: Json; csv?: string; preview?: Json }) {
   await page.addInitScript((u) => {
     localStorage.setItem('token', 'e2e-token');
     localStorage.setItem('user', JSON.stringify(u));
@@ -46,7 +46,13 @@ async function setup(page: Page, state: { exercises: Json[]; calls: Call[]; fail
     if (path === '/admin/exercises' && req.method() === 'GET') {
       return route.fulfill({ json: { exercises: state.exercises, options: OPTIONS } });
     }
+    if (path === '/admin/exercises/export') return route.fulfill({ json: { csv: state.csv ?? '', count: state.exercises.length } });
     if (req.method() !== 'GET' && state.fail) return route.fulfill({ status: 400, json: state.fail });
+    if (path === '/admin/exercises/import') {
+      const applied = body?.dryRun === false;
+      if (applied) Object.assign(state.exercises[0], { defaultReps: 12, source: 'edited' });
+      return route.fulfill({ json: { ...state.preview, applied } });
+    }
     if (path === '/admin/exercises' && req.method() === 'POST') {
       const created = exercise({ ...body, id: 'ex_new', source: 'custom' });
       state.exercises.push(created);
@@ -224,4 +230,86 @@ test('a server answer without the library shows a message, never a blank screen'
   await page.getByTestId('exercise-open-ex_odd').click();
   await expect(page.getByTestId('exercise-form')).toBeVisible();
   expect(errors).toEqual([]);
+});
+
+const FILE = 'id,name,reps\r\nex_push_up,Push-up,12\r\n,Kettlebell Swing,15\r\nex_nope,Ghost,10\r\nex_plank,Plank,\r\n';
+const PREVIEW = {
+  summary: { create: 1, update: 1, unchanged: 1, errors: 1 },
+  rows: [
+    { line: 2, id: 'ex_push_up', name: 'Push-up', action: 'update', changed: ['defaultReps', 'i18n'] },
+    { line: 3, id: 'ex_kettlebell_swing', name: 'Kettlebell Swing', action: 'create' },
+    { line: 4, id: 'ex_nope', name: 'Ghost', action: 'error', error: 'unknown_id', field: 'id' },
+    { line: 5, id: 'ex_plank', name: 'Plank', action: 'unchanged' },
+  ],
+  unknownColumns: ['colour'],
+};
+const upload = (page: Page, text: string) =>
+  page.getByTestId('exercise-import-file').setInputFiles({ name: 'exercises.csv', mimeType: 'text/csv', buffer: Buffer.from(text) });
+
+test('the library downloads as a file a spreadsheet can open', async ({ page }) => {
+  const state = { exercises: [exercise()], calls: [] as Call[], csv: 'id,name\r\nex_push_up,Push-up\r\n' };
+  await setup(page, state);
+  await page.goto('/admin/exercises');
+  const [download] = await Promise.all([page.waitForEvent('download'), page.getByTestId('exercise-export').click()]);
+  expect(download.suggestedFilename()).toMatch(/^fitflex-exercises-\d{4}-\d{2}-\d{2}\.csv$/);
+  const chunks: Buffer[] = [];
+  for await (const c of await download.createReadStream()) chunks.push(c as Buffer);
+  const saved = Buffer.concat(chunks);
+  expect([...saved.subarray(0, 3)]).toEqual([0xef, 0xbb, 0xbf]);
+  expect(saved.subarray(3).toString('utf8')).toBe(state.csv);
+  await expect(page.getByTestId('exercise-done')).toContainText('1 exercises downloaded');
+});
+
+test('an imported file is previewed first, and only saved when applied', async ({ page }) => {
+  const state = { exercises: [exercise()], calls: [] as Call[], preview: PREVIEW };
+  await setup(page, state);
+  await page.goto('/admin/exercises');
+  await page.getByTestId('exercise-import').click();
+  await expect(page.getByTestId('exercise-import-apply')).toBeDisabled();
+  await upload(page, FILE);
+
+  await expect(page.getByTestId('exercise-import-summary')).toHaveText('1 new exercise · 1 changed · 1 with no change · 1 row with a problem');
+  // Problems first, then by line; rows that change nothing are left out.
+  const rows = page.getByTestId('exercise-import-rows').locator('tbody tr');
+  await expect(rows).toHaveCount(3);
+  await expect(rows.nth(0)).toContainText('4');
+  await expect(rows.nth(0)).toContainText('No exercise has this id');
+  await expect(page.getByTestId('exercise-import-row-2')).toContainText('Changes: reps, Swahili');
+  await expect(page.getByTestId('exercise-import-row-3')).toContainText('Added as a new exercise');
+  await expect(page.getByTestId('exercise-import-dialog')).toContainText('colour');
+  await expect(page.getByTestId('exercise-import-dialog')).toContainText('the other 2 will still be saved');
+  // So far only a preview has been asked for.
+  expect(state.calls).toEqual([{ method: 'POST', path: '/admin/exercises/import', body: { csv: FILE, dryRun: true } }]);
+
+  await page.getByTestId('exercise-import-apply').click();
+  await expect(page.getByTestId('exercise-import-dialog')).toHaveCount(0);
+  await expect(page.getByTestId('exercise-done')).toHaveText('Import done: 1 added, 1 changed, 1 skipped because of a problem.');
+  expect(state.calls[1]).toEqual({ method: 'POST', path: '/admin/exercises/import', body: { csv: FILE, dryRun: false } });
+  // The list was read again.
+  await expect(page.getByTestId('exercise-row-ex_push_up')).toContainText('3 × 12');
+});
+
+test('a file with nothing to save, or one the server refuses, cannot be applied', async ({ page }) => {
+  const state: { exercises: Json[]; calls: Call[]; preview?: Json; fail?: Json } = {
+    exercises: [exercise()], calls: [],
+    preview: { summary: { create: 0, update: 0, unchanged: 1, errors: 0 }, rows: [{ line: 2, id: 'ex_push_up', name: 'Push-up', action: 'unchanged' }], unknownColumns: [] },
+  };
+  await setup(page, state);
+  await page.goto('/admin/exercises');
+  await page.getByTestId('exercise-import').click();
+  await upload(page, 'id,name\nex_push_up,Push-up\n');
+  await expect(page.getByTestId('exercise-import-dialog')).toContainText('This file matches the library as it is now');
+  await expect(page.getByTestId('exercise-import-apply')).toBeDisabled();
+
+  state.fail = { error: 'missing_header' };
+  await upload(page, 'colour,shape\nred,round\n');
+  await expect(page.getByTestId('exercise-import-error')).toContainText('first line of the file must name the columns');
+  await expect(page.getByTestId('exercise-import-summary')).toHaveCount(0);
+  await expect(page.getByTestId('exercise-import-apply')).toBeDisabled();
+
+  // An empty file never reaches the server.
+  const sent = state.calls.length;
+  await upload(page, '  \n');
+  await expect(page.getByTestId('exercise-import-error')).toHaveText('That file has no exercises in it.');
+  expect(state.calls.length).toBe(sent);
 });

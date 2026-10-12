@@ -424,6 +424,11 @@ export const api = {
     request<{ exercise: Exercise }>(`/admin/exercises/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify(body) }, token),
   resetExercise: (token: string, id: string) =>
     request<{ exercise: Exercise }>(`/admin/exercises/${encodeURIComponent(id)}/reset`, { method: 'POST' }, token),
+  exportExercises: (token: string) =>
+    request<{ csv: string; count: number }>('/admin/exercises/export', {}, token),
+  /** A preview unless `dryRun` is false; only then is anything saved. */
+  importExercises: (token: string, csv: string, dryRun: boolean) =>
+    request<ExerciseImportResult>('/admin/exercises/import', { method: 'POST', body: JSON.stringify({ csv, dryRun }) }, token),
   // ─── Gym settlements (admin; reads need 'payments', each step its own scope) ───
   settlementRuns: (token: string, mode?: SettlementMode) =>
     request<SettlementRun[]>(`/admin/settlements/runs${qs({ mode })}`, {}, token),
@@ -2857,6 +2862,24 @@ export interface Exercise extends ExerciseInput {
   /** `builtin` ships with FitFlex, `edited` is a built-in FitFlex changed, `custom` was added here. */
   source: 'builtin' | 'edited' | 'custom';
   updatedAt?: string | null;
+}
+/** One row of an imported exercise file and what happens to it. */
+export interface ExerciseImportRow {
+  /** The line of the file the row starts on. */
+  line: number;
+  id: string | null;
+  name: string;
+  action: 'create' | 'update' | 'unchanged' | 'error';
+  /** For an update: the fields that change. */
+  changed?: string[];
+  error?: 'invalid_exercise' | 'unknown_id' | 'listed_twice';
+  field?: string;
+}
+export interface ExerciseImportResult {
+  applied: boolean;
+  summary: { create: number; update: number; unchanged: number; errors: number };
+  rows: ExerciseImportRow[];
+  unknownColumns: string[];
 }
 export interface ExerciseOptions {
   categories: string[];
