@@ -5,7 +5,7 @@ import { useApp } from '../../app/providers';
 import {
   api, ApiError, userContact, B2BBeneficiary, B2BProgramLifecycle, B2BBenefit, B2BOrganization, B2BProgram, CorporateEmployee,
 } from '@/lib/api';
-import { Alert, Badge, Button, Card, CardContent, Field, Input, PageHeader, Select, Spinner } from '@/components/shared';
+import { Alert, Badge, Button, Card, CardContent, Field, Input, PageHeader, Select, Spinner, Table, TBody, Td, Th, THead, Tr } from '@/components/shared';
 import { money } from '@/lib/admin-utils';
 import { ChallengeManager } from '@/components/challenge-manager';
 import { PeopleImport } from '@/components/b2b-people-import';
@@ -202,21 +202,21 @@ function Beneficiaries({ token, mine, readOnlyNote }: { token: string; mine: Min
             </form>
           </div>
           {!people ? <Spinner className="h-5 w-5" /> : people.length === 0 ? <p className="text-sm text-[var(--color-fg-quaternary)]">Nobody yet.</p> : (
-            <table className="w-full text-sm" data-testid="org-people-list">
-              <thead>
-                <tr className="border-b border-[var(--color-border-secondary)] text-left text-xs text-[var(--color-fg-quaternary)]">
-                  <th className="py-2 pr-3">Name</th><th className="py-2 pr-3">Type</th><th className="py-2 pr-3">Group</th><th className="py-2 pr-3">Reference</th><th className="py-2 pr-3">Status</th><th className="py-2"></th>
-                </tr>
-              </thead>
-              <tbody>
+            <Table aria-label={`${total} ${total === 1 ? 'person' : 'people'}`} data-testid="org-people-list">
+              <THead>
+                <Tr>
+                  <Th>Name</Th><Th>Type</Th><Th>Group</Th><Th>Reference</Th><Th>Status</Th><Th></Th>
+                </Tr>
+              </THead>
+              <TBody>
                 {people.map(p => (
-                  <tr key={p.id} className="border-b border-[var(--color-border-secondary)]">
-                    <td className="py-2 pr-3 font-medium">{p.displayName ?? '—'}{!p.userId && <span className="ml-2 text-xs font-normal text-[var(--color-fg-quaternary)]">no FitFlex account linked</span>}</td>
-                    <td className="py-2 pr-3">{types[p.beneficiaryType] ?? p.beneficiaryType}</td>
-                    <td className="py-2 pr-3">{p.groupName ?? ''}</td>
-                    <td className="py-2 pr-3">{p.externalReference ?? ''}</td>
-                    <td className="py-2 pr-3"><Badge tone={TONE[p.status] ?? 'gray'}>{p.status}</Badge></td>
-                    <td className="py-2 text-right">
+                  <Tr key={p.id}>
+                    <Td className="font-medium">{p.displayName ?? '—'}{!p.userId && <span className="ml-2 text-xs font-normal text-[var(--color-fg-quaternary)]">no FitFlex account linked</span>}</Td>
+                    <Td>{types[p.beneficiaryType] ?? p.beneficiaryType}</Td>
+                    <Td>{p.groupName ?? ''}</Td>
+                    <Td>{p.externalReference ?? ''}</Td>
+                    <Td><Badge tone={TONE[p.status] ?? 'gray'}>{p.status}</Badge></Td>
+                    <Td className="text-right">
                       {canManage && !p.readOnly && (
                         <span className="flex justify-end gap-2">
                           {p.status !== 'active' && <Button size="sm" variant="secondary" disabled={busy} onClick={() => run(async () => { await api.setB2BBeneficiaryStatus(token, orgId, p.id, 'active'); }, 'Could not activate them.')}>Activate</Button>}
@@ -224,11 +224,11 @@ function Beneficiaries({ token, mine, readOnlyNote }: { token: string; mine: Min
                           {p.status !== 'inactive' && <Button size="sm" variant="secondary" disabled={busy} onClick={() => { if (window.confirm('Remove this person from your programmes? What they already used stays on record.')) run(async () => { await api.setB2BBeneficiaryStatus(token, orgId, p.id, 'inactive'); }, 'Could not remove them.'); }}>Remove</Button>}
                         </span>
                       )}
-                    </td>
-                  </tr>
+                    </Td>
+                  </Tr>
                 ))}
-              </tbody>
-            </table>
+              </TBody>
+            </Table>
           )}
           <p className="text-xs text-[var(--color-fg-quaternary)]">Only active people are covered. Suspending or removing someone stops new use straight away; a sponsored pass already started runs to the end of its month.</p>
         </CardContent>
@@ -306,21 +306,21 @@ function CompanyStaff({ token }: { token: string }) {
         <CardContent className="space-y-3 py-4">
           <div className="text-sm font-semibold">{staff?.length ?? 0} {staff?.length === 1 ? 'employee' : 'employees'}</div>
           {!staff ? <Spinner className="h-5 w-5" /> : staff.length === 0 ? <p className="text-sm text-[var(--color-fg-quaternary)]">No employees yet.</p> : (
-            <table className="w-full text-sm" data-testid="company-staff-list">
-              <thead>
-                <tr className="border-b border-[var(--color-border-secondary)] text-left text-xs text-[var(--color-fg-quaternary)]">
-                  <th className="py-2 pr-3">Name</th><th className="py-2 pr-3">Department</th><th className="py-2 pr-3">FitFlex account</th><th className="py-2 pr-3">Status</th><th className="py-2"></th>
-                </tr>
-              </thead>
-              <tbody>
+            <Table aria-label={`${staff?.length ?? 0} ${staff?.length === 1 ? 'employee' : 'employees'}`} data-testid="company-staff-list">
+              <THead>
+                <Tr>
+                  <Th>Name</Th><Th>Department</Th><Th>FitFlex account</Th><Th>Status</Th><Th></Th>
+                </Tr>
+              </THead>
+              <TBody>
                 {staff.map(s => (
-                  <tr key={s.id} className="border-b border-[var(--color-border-secondary)] align-top">
-                    <td className="py-2 pr-3 font-medium">{s.displayName}<div className="text-xs font-normal text-[var(--color-fg-quaternary)]">{s.email || s.phone || ''}</div></td>
-                    <td className="py-2 pr-3">{s.department ?? ''}</td>
-                    <td className="py-2 pr-3">
+                  <Tr key={s.id} className="align-top">
+                    <Td className="font-medium">{s.displayName}<div className="text-xs font-normal text-[var(--color-fg-quaternary)]">{s.email || s.phone || ''}</div></Td>
+                    <Td>{s.department ?? ''}</Td>
+                    <Td>
                       {s.userId ? (
                         <span className="flex items-center gap-2"><Badge tone="success">Linked</Badge>
-                          <button className="text-xs text-[var(--color-fg-quaternary)] underline" disabled={busy} onClick={() => run(async () => { await api.linkCorporateStaff(token, s.id, null); }, 'Could not unlink.')}>Unlink</button>
+                          <Button variant="link" className="h-auto px-0 text-xs font-normal text-[var(--color-fg-quaternary)] underline" disabled={busy} onClick={() => run(async () => { await api.linkCorporateStaff(token, s.id, null); }, 'Could not unlink.')}>Unlink</Button>
                         </span>
                       ) : (
                         <span className="flex flex-wrap items-center gap-2">
@@ -329,19 +329,19 @@ function CompanyStaff({ token }: { token: string }) {
                             onClick={() => run(async () => { await api.linkCorporateStaff(token, s.id, userContact(link[s.id])); setLink({ ...link, [s.id]: '' }); return `${s.displayName} is linked to their FitFlex account.`; }, 'Could not link them.')}>Link</Button>
                         </span>
                       )}
-                    </td>
-                    <td className="py-2 pr-3"><Badge tone={TONE[s.status] ?? 'gray'}>{s.status === 'exited' ? 'left' : s.status}</Badge></td>
-                    <td className="py-2 text-right">
+                    </Td>
+                    <Td><Badge tone={TONE[s.status] ?? 'gray'}>{s.status === 'exited' ? 'left' : s.status}</Badge></Td>
+                    <Td className="text-right">
                       <span className="flex justify-end gap-2">
                         {s.status !== 'active' && s.status !== 'exited' && <Button size="sm" variant="secondary" disabled={busy} onClick={() => run(async () => { await api.setCorporateStaffStatus(token, s.id, 'active'); }, 'Could not activate them.')}>Activate</Button>}
                         {s.status === 'active' && <Button size="sm" variant="secondary" disabled={busy} onClick={() => run(async () => { await api.setCorporateStaffStatus(token, s.id, 'suspended'); }, 'Could not suspend them.')}>Suspend</Button>}
                         {s.status !== 'exited' && <Button size="sm" variant="secondary" disabled={busy} onClick={() => { if (window.confirm('Mark this employee as having left? Their seat goes back to your pool.')) run(async () => { await api.setCorporateStaffStatus(token, s.id, 'exited'); }, 'Could not update them.'); }}>Left</Button>}
                       </span>
-                    </td>
-                  </tr>
+                    </Td>
+                  </Tr>
                 ))}
-              </tbody>
-            </table>
+              </TBody>
+            </Table>
           )}
           <p className="text-xs text-[var(--color-fg-quaternary)]">An employee is covered once they are active and linked to the FitFlex account they use in the app.</p>
         </CardContent>
@@ -457,24 +457,24 @@ function Programmes({ token, mine }: { token: string; mine: Mine }) {
                   Covers: {p.eligibility.scope === 'all' ? 'everyone on your list' : p.eligibility.scope === 'groups' ? `the groups ${p.eligibility.groups.join(', ')}` : `${p.eligibility.beneficiaryIds.length} chosen people`}
                 </div>
                 {!benefits[p.id] ? <Spinner className="h-5 w-5" /> : benefits[p.id].length === 0 ? <p className="text-[var(--color-fg-quaternary)]">No benefits yet.</p> : (
-                  <table className="w-full">
-                    <thead>
-                      <tr className="border-b border-[var(--color-border-secondary)] text-left text-xs text-[var(--color-fg-quaternary)]">
-                        <th className="py-2 pr-3">Benefit</th><th className="py-2 pr-3">What</th><th className="py-2 pr-3">Who pays</th><th className="py-2 pr-3">How much</th><th className="py-2">Status</th>
-                      </tr>
-                    </thead>
-                    <tbody>
+                  <Table aria-label={p.name}>
+                    <THead>
+                      <Tr>
+                        <Th>Benefit</Th><Th>What</Th><Th>Who pays</Th><Th>How much</Th><Th>Status</Th>
+                      </Tr>
+                    </THead>
+                    <TBody>
                       {benefits[p.id].map(b => (
-                        <tr key={b.id} className="border-b border-[var(--color-border-secondary)]">
-                          <td className="py-2 pr-3 font-medium">{b.name}</td>
-                          <td className="py-2 pr-3">{types[b.benefitType]?.label ?? b.benefitType}{b.passTier ? ` · ${b.passTier}` : ''}{b.fixedFeeTzs ? ` · TZS ${b.fixedFeeTzs.toLocaleString('en-US')} a person a month` : ''}</td>
-                          <td className="py-2 pr-3">{b.fundingSummary}</td>
-                          <td className="py-2 pr-3">{USAGE(b)}</td>
-                          <td className="py-2"><Badge tone={TONE[b.status] ?? 'gray'}>{b.status}</Badge></td>
-                        </tr>
+                        <Tr key={b.id}>
+                          <Td className="font-medium">{b.name}</Td>
+                          <Td>{types[b.benefitType]?.label ?? b.benefitType}{b.passTier ? ` · ${b.passTier}` : ''}{b.fixedFeeTzs ? ` · TZS ${b.fixedFeeTzs.toLocaleString('en-US')} a person a month` : ''}</Td>
+                          <Td>{b.fundingSummary}</Td>
+                          <Td>{USAGE(b)}</Td>
+                          <Td><Badge tone={TONE[b.status] ?? 'gray'}>{b.status}</Badge></Td>
+                        </Tr>
                       ))}
-                    </tbody>
-                  </table>
+                    </TBody>
+                  </Table>
                 )}
               </div>
             )}
