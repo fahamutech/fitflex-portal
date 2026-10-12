@@ -5,7 +5,7 @@ import { useApp } from '../../providers';
 import { api, GeoArea, Promotion } from '@/lib/api';
 import { TYPE_KEY as ENTITY_TYPE_KEY } from '@/lib/moderation';
 import { PLACEMENT_KEY, STATUS_KEY, STATUS_TONE, TABS, TAB_KEY, Tab, TYPE_KEY, dateTime, errorKey, tabOf } from '@/lib/promotions';
-import { Alert, Badge, Button, Card, CardContent, PageHeader, Spinner } from '@/components/shared';
+import { Alert, Badge, Button, Card, CardContent, PageHeader, Spinner, Table, TBody, Td, Th, THead, Tr } from '@/components/shared';
 import { PromotionWizard } from '@/components/promotion-wizard';
 import { PromotionDetailView } from '@/components/promotion-detail';
 
@@ -93,35 +93,33 @@ export default function PromotionsPage() {
               <Megaphone className="h-6 w-6" />{tab === 'requests' ? t('pro.empty.requests') : t('pro.empty.other')}
             </div>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[760px] text-sm" data-testid="promotion-table">
-                <thead className="text-left text-xs text-[var(--color-fg-tertiary)]">
-                  <tr className="border-b border-[var(--color-border-secondary)]">
-                    <th className="px-4 py-2.5 font-medium">{t('pro.col.entity')}</th>
-                    <th className="px-4 py-2.5 font-medium">{t('pro.col.type')}</th>
-                    <th className="px-4 py-2.5 font-medium">{t('pro.col.placements')}</th>
-                    <th className="px-4 py-2.5 font-medium">{t('pro.col.period')}</th>
-                    <th className="px-4 py-2.5 font-medium">{t('pro.col.priority')}</th>
-                    <th className="px-4 py-2.5 font-medium">{t('pro.col.status')}</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-[var(--color-border-secondary)]">
-                  {shown.map(p => (
-                    <tr key={p.id} tabIndex={0} onKeyDown={e => { if (e.key === 'Enter') go(`item=${encodeURIComponent(p.id)}`); }} className="cursor-pointer hover:bg-[var(--color-bg-secondary)]" onClick={() => go(`item=${encodeURIComponent(p.id)}`)} data-testid={`promotion-row-${p.id}`}>
-                      <td className="max-w-[18rem] px-4 py-3 [overflow-wrap:anywhere]">
-                        <span className="font-medium">{p.entity?.name ?? p.entityId}</span>
-                        <p className="text-xs text-[var(--color-fg-quaternary)]">{t(ENTITY_TYPE_KEY[p.entityType])}</p>
-                      </td>
-                      <td className="px-4 py-3">{t(TYPE_KEY[p.type])}{p.isCommercial && <span className="ml-2"><Badge tone="warning">{t('pro.commercial')}</Badge></span>}</td>
-                      <td className="max-w-[14rem] px-4 py-3 text-xs">{(p.placements ?? []).map(pl => t(PLACEMENT_KEY[pl])).join(', ')}</td>
-                      <td className="whitespace-nowrap px-4 py-3 text-xs">{dateTime(p.startsAt)}<br />→ {dateTime(p.endsAt)}</td>
-                      <td className="px-4 py-3 tabular-nums">{p.priority}</td>
-                      <td className="px-4 py-3"><Badge tone={STATUS_TONE[p.effectiveStatus]} dot>{t(STATUS_KEY[p.effectiveStatus])}</Badge></td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <Table aria-label={t('pro.title')} wrapperClassName="rounded-none border-0" className="min-w-[760px]" data-testid="promotion-table">
+              <THead>
+                <Tr>
+                  <Th>{t('pro.col.entity')}</Th>
+                  <Th>{t('pro.col.type')}</Th>
+                  <Th>{t('pro.col.placements')}</Th>
+                  <Th>{t('pro.col.period')}</Th>
+                  <Th>{t('pro.col.priority')}</Th>
+                  <Th>{t('pro.col.status')}</Th>
+                </Tr>
+              </THead>
+              <TBody>
+                {shown.map(p => (
+                  <Tr key={p.id} tabIndex={0} onKeyDown={e => { if (e.key === 'Enter') go(`item=${encodeURIComponent(p.id)}`); }} className="cursor-pointer hover:bg-[var(--color-bg-secondary)]" onClick={() => go(`item=${encodeURIComponent(p.id)}`)} data-testid={`promotion-row-${p.id}`}>
+                    <Td className="max-w-[18rem] [overflow-wrap:anywhere]">
+                      <span className="font-medium">{p.entity?.name ?? p.entityId}</span>
+                      <p className="text-xs text-[var(--color-fg-quaternary)]">{t(ENTITY_TYPE_KEY[p.entityType])}</p>
+                    </Td>
+                    <Td>{t(TYPE_KEY[p.type])}{p.isCommercial && <span className="ml-2"><Badge tone="warning">{t('pro.commercial')}</Badge></span>}</Td>
+                    <Td className="max-w-[14rem] text-xs">{(p.placements ?? []).map(pl => t(PLACEMENT_KEY[pl])).join(', ')}</Td>
+                    <Td className="whitespace-nowrap text-xs">{dateTime(p.startsAt)}<br />→ {dateTime(p.endsAt)}</Td>
+                    <Td className="tabular-nums">{p.priority}</Td>
+                    <Td><Badge tone={STATUS_TONE[p.effectiveStatus]} dot>{t(STATUS_KEY[p.effectiveStatus])}</Badge></Td>
+                  </Tr>
+                ))}
+              </TBody>
+            </Table>
           )}
         </CardContent>
       </Card>
