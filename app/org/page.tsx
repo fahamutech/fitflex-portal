@@ -219,7 +219,7 @@ function InvoiceList({ invoices, onOpen, empty, title }: { invoices: B2BSponsorI
             <TBody>
               {invoices.map(i => (
                 <Tr key={i.id}>
-                  <Td><Button variant="link" className="h-auto px-0 font-medium" onClick={() => onOpen(i.id)} data-testid={`org-invoice-${i.id}`}>{i.number}</Button></Td>
+                  <Td><Button variant="link" className="h-auto px-0 text-left font-medium" onClick={() => onOpen(i.id)} data-testid={`org-invoice-${i.id}`}>{i.number}</Button></Td>
                   <Td>{INVOICE_KIND[i.kind] ?? i.kind} · {i.period}</Td>
                   <Td className="whitespace-nowrap">{day(i.issuedAt)}</Td>
                   <Td className="whitespace-nowrap">{i.totalTzs > 0 ? day(i.dueDate) : '—'}</Td>

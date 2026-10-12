@@ -271,7 +271,7 @@ function People({ token, orgId, query, tick }: { token: string; orgId: string; q
               <TBody>
                 {rows.map(r => (
                   <Tr key={r.beneficiaryId}>
-                    <Td><Button variant="link" className="h-auto px-0 font-medium" onClick={() => setOpen(r.beneficiaryId)} data-testid={`person-${r.beneficiaryId}`}>{r.name ?? r.externalReference ?? 'Not linked yet'}</Button></Td>
+                    <Td><Button variant="link" className="h-auto px-0 text-left font-medium" onClick={() => setOpen(r.beneficiaryId)} data-testid={`person-${r.beneficiaryId}`}>{r.name ?? r.externalReference ?? 'Not linked yet'}</Button></Td>
                     <Td>{r.group ?? ''}</Td>
                     <Td>{r.status === 'active' ? (r.active ? <Badge tone="success">Used a benefit</Badge> : <Badge tone="gray">No use yet</Badge>) : <Badge tone="warning">{words(r.status)}</Badge>}</Td>
                     <Td className="text-right">{num(r.sponsoredUses + r.passCheckins)}</Td>

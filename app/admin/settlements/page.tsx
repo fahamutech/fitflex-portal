@@ -139,7 +139,7 @@ export default function SettlementsPage() {
                     {shown.map(r => (
                       <Tr key={r.id} className="cursor-pointer hover:bg-[var(--color-bg-secondary)]" onClick={() => open(r.id)} data-testid={`settlement-row-${r.id}`}>
                         <Td>
-                          <Button variant="link" className="h-auto px-0 font-medium text-[var(--color-fg-primary)]" onClick={e => { e.stopPropagation(); open(r.id); }}>
+                          <Button variant="link" className="h-auto px-0 text-left font-medium text-[var(--color-fg-primary)]" onClick={e => { e.stopPropagation(); open(r.id); }}>
                             {r.gymName || 'Unnamed gym'}
                           </Button>
                         </Td>

@@ -178,7 +178,7 @@ export default function B2BOperationsPage() {
                       return (
                         <Tr key={x.id} className="align-top">
                           <Td>
-                            <Button variant="link" className="h-auto px-0 font-medium" onClick={() => setOpen(x)} data-testid={`exception-${x.id}`}>{x.title}</Button>
+                            <Button variant="link" className="h-auto px-0 text-left font-medium" onClick={() => setOpen(x)} data-testid={`exception-${x.id}`}>{x.title}</Button>
                             <div className="text-xs text-[var(--color-fg-quaternary)]">{TYPE_LABEL[x.type] ?? x.type}{x.job ? ` · ${data.jobs.items.find(j => j.name === x.job)?.title ?? x.job}` : ''}</div>
                             {!live && x.resolution && <div className="mt-0.5 max-w-md text-xs text-[var(--color-fg-tertiary)]">{x.resolution}</div>}
                           </Td>

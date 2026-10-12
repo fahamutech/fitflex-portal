@@ -196,7 +196,7 @@ export function MessageLog({ scope, token, t, gymId, onOpenMember }: {
                 <Tr key={m.id} className="align-top" data-testid={`log-${m.id}`}>
                   <Td className="whitespace-nowrap text-xs">{when(m.createdAt)}</Td>
                   <Td>
-                    <Button type="button" variant="link" className="h-auto px-0 font-medium text-inherit hover:underline" onClick={() => onOpenMember(m.memberId, m.memberName)} data-testid={`member-${m.memberId}`}>
+                    <Button type="button" variant="link" className="h-auto px-0 text-left font-medium text-inherit hover:underline" onClick={() => onOpenMember(m.memberId, m.memberName)} data-testid={`member-${m.memberId}`}>
                       {m.memberName || t('comms.history.unknownMember')}
                     </Button>
                   </Td>

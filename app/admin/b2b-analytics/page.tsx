@@ -109,7 +109,7 @@ export default function B2BAnalyticsPage() {
                     <TBody>
                       {data.topOrganizations.map(o => (
                         <Tr key={o.organizationId}>
-                          <Td><Button variant="link" className="h-auto px-0 font-medium" onClick={() => setOrg({ id: o.organizationId, name: o.name ?? o.organizationId })}>{o.name ?? o.organizationId}</Button></Td>
+                          <Td><Button variant="link" className="h-auto px-0 text-left font-medium" onClick={() => setOrg({ id: o.organizationId, name: o.name ?? o.organizationId })}>{o.name ?? o.organizationId}</Button></Td>
                           <Td className="text-right">{num(o.uses + o.passCheckins)}</Td><Td className="text-right">{num(o.activeBeneficiaries)}</Td><Td className="text-right">{money(o.sponsorTzs)}</Td>
                         </Tr>
                       ))}
