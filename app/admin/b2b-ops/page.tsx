@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 import { RefreshCw } from 'lucide-react';
 import { useApp } from '../../providers';
 import { api, ApiError, B2BJobRun, B2BJobStatus, B2BOpsException, B2BOpsOverview } from '@/lib/api';
-import { Alert, Badge, Button, Card, CardContent, CardHeader, Field, PageHeader, Segmented, Spinner } from '@/components/shared';
+import { Alert, Badge, Button, Card, CardContent, CardHeader, Field, PageHeader, Segmented, Spinner, Table, TBody, Td, Th, THead, Tr } from '@/components/shared';
 import { Dialog } from '@/components/dialog';
 
 const ERRORS: Record<string, string> = {
@@ -39,8 +39,6 @@ const SEVERITY: Record<string, 'danger' | 'warning' | 'gray'> = { high: 'danger'
 const STATUS_LABEL: Record<string, string> = { open: 'Open', investigating: 'Being looked at', retrying: 'Retrying', resolved: 'Resolved', ignored: 'Ignored', permanently_failed: 'Gave up retrying' };
 const TYPE_LABEL: Record<string, string> = { job_failed: 'Job did not finish', job_item_failed: 'Item not processed', data_quality: 'Records do not add up', billing_watch: 'Waiting too long' };
 const TRIGGER: Record<string, string> = { schedule: 'On schedule', catch_up: 'Caught up', retry: 'Retry', manual: 'By hand' };
-const HEAD = 'border-b border-[var(--color-border-secondary)] text-left text-xs text-[var(--color-fg-quaternary)]';
-const ROW = 'border-b border-[var(--color-border-secondary)] align-top';
 
 /**
  * FitFlex staff: the recurring B2B work. Which jobs ran, which did not, what
@@ -131,36 +129,34 @@ export default function B2BOperationsPage() {
           <Card>
             <CardHeader><span className="text-sm font-semibold">Jobs</span></CardHeader>
             <CardContent>
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm" data-testid="ops-jobs">
-                  <thead><tr className={HEAD}><th className="py-2 pr-3">Job</th><th className="py-2 pr-3">Runs</th><th className="py-2 pr-3">State</th><th className="py-2 pr-3">Last run</th><th className="py-2 pr-3">Next due</th><th className="py-2" /></tr></thead>
-                  <tbody>
-                    {data.jobs.items.map(j => (
-                      <tr key={j.name} className={ROW}>
-                        <td className="py-2 pr-3"><div className="font-medium">{j.title}{j.domain === 'finance' && <span className="ml-2 text-xs font-normal text-[var(--color-fg-quaternary)]">finance</span>}</div><div className="max-w-md text-xs text-[var(--color-fg-quaternary)]">{j.description}</div></td>
-                        <td className="py-2 pr-3 whitespace-nowrap">{scheduleText(j.schedule)}</td>
-                        <td className="py-2 pr-3"><Badge tone={STATE[j.state].tone}>{STATE[j.state].label}</Badge>{j.paused && j.pauseReason && <div className="mt-1 max-w-48 text-xs text-[var(--color-fg-tertiary)]">{j.pauseReason}</div>}</td>
-                        <td className="py-2 pr-3 text-xs">
-                          {j.lastRun ? (<>
-                            <div>{when(j.lastRun.startedAt)} · {j.lastRun.status === 'ok' ? `${j.lastRun.processed ?? 0} handled${j.lastRun.failed ? `, ${j.lastRun.failed} failed` : ''}` : j.lastRun.status}</div>
-                            {j.lastRun.error && <div className="max-w-64 text-[var(--color-error-600)]">{j.lastRun.error}</div>}
-                          </>) : 'Nothing recorded yet'}
-                        </td>
-                        <td className="py-2 pr-3 whitespace-nowrap text-xs">{when(j.nextDue)}</td>
-                        <td className="py-2 text-right whitespace-nowrap">
-                          <span className="inline-flex gap-2">
-                            <Button size="sm" variant="secondary" onClick={() => setRunsOf(j)}>History</Button>
-                            {canAct && <Button size="sm" variant="secondary" disabled={busy !== null} onClick={() => runNow(j)} data-testid={`run-${j.name}`}>{busy === `run:${j.name}` ? 'Running…' : 'Run now'}</Button>}
-                            {canAct && (j.paused
-                              ? <Button size="sm" variant="secondary" disabled={busy !== null} onClick={() => resume(j)}>Resume</Button>
-                              : <Button size="sm" variant="secondary" onClick={() => setPausing(j)}>Pause</Button>)}
-                          </span>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              <Table aria-label="Jobs" data-testid="ops-jobs">
+                <THead><Tr><Th>Job</Th><Th>Runs</Th><Th>State</Th><Th>Last run</Th><Th>Next due</Th><Th /></Tr></THead>
+                <TBody>
+                  {data.jobs.items.map(j => (
+                    <Tr key={j.name} className="align-top">
+                      <Td><div className="font-medium">{j.title}{j.domain === 'finance' && <span className="ml-2 text-xs font-normal text-[var(--color-fg-quaternary)]">finance</span>}</div><div className="max-w-md text-xs text-[var(--color-fg-quaternary)]">{j.description}</div></Td>
+                      <Td className="whitespace-nowrap">{scheduleText(j.schedule)}</Td>
+                      <Td><Badge tone={STATE[j.state].tone}>{STATE[j.state].label}</Badge>{j.paused && j.pauseReason && <div className="mt-1 max-w-48 text-xs text-[var(--color-fg-tertiary)]">{j.pauseReason}</div>}</Td>
+                      <Td className="text-xs">
+                        {j.lastRun ? (<>
+                          <div>{when(j.lastRun.startedAt)} · {j.lastRun.status === 'ok' ? `${j.lastRun.processed ?? 0} handled${j.lastRun.failed ? `, ${j.lastRun.failed} failed` : ''}` : j.lastRun.status}</div>
+                          {j.lastRun.error && <div className="max-w-64 text-[var(--color-error-600)]">{j.lastRun.error}</div>}
+                        </>) : 'Nothing recorded yet'}
+                      </Td>
+                      <Td className="whitespace-nowrap text-xs">{when(j.nextDue)}</Td>
+                      <Td className="text-right whitespace-nowrap">
+                        <span className="inline-flex gap-2">
+                          <Button size="sm" variant="secondary" onClick={() => setRunsOf(j)}>History</Button>
+                          {canAct && <Button size="sm" variant="secondary" disabled={busy !== null} onClick={() => runNow(j)} data-testid={`run-${j.name}`}>{busy === `run:${j.name}` ? 'Running…' : 'Run now'}</Button>}
+                          {canAct && (j.paused
+                            ? <Button size="sm" variant="secondary" disabled={busy !== null} onClick={() => resume(j)}>Resume</Button>
+                            : <Button size="sm" variant="secondary" onClick={() => setPausing(j)}>Pause</Button>)}
+                        </span>
+                      </Td>
+                    </Tr>
+                  ))}
+                </TBody>
+              </Table>
               <p className="mt-2 text-xs text-[var(--color-fg-quaternary)]">
                 Times are East Africa Time. A daily job that is missed or fails is run again automatically, up to three times. Every job is safe to run twice: “Run now” only does what is still missing.
               </p>
@@ -174,40 +170,38 @@ export default function B2BOperationsPage() {
             </CardHeader>
             <CardContent>
               {!exceptions ? <Spinner className="h-6 w-6" /> : exceptions.length === 0 ? <p className="text-sm text-[var(--color-fg-quaternary)]">{filter === 'live' ? 'Nothing needs anyone right now.' : 'None.'}</p> : (
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm" data-testid="ops-exceptions">
-                    <thead><tr className={HEAD}><th className="py-2 pr-3">What</th><th className="py-2 pr-3">Severity</th><th className="py-2 pr-3">Status</th><th className="py-2 pr-3">First seen</th><th className="py-2 pr-3 text-right">Seen</th><th className="py-2" /></tr></thead>
-                    <tbody>
-                      {exceptions.map((x) => {
-                        const live = !['resolved', 'ignored'].includes(x.status);
-                        return (
-                          <tr key={x.id} className={ROW}>
-                            <td className="py-2 pr-3">
-                              <button className="text-left font-medium text-[var(--color-fg-brand)]" onClick={() => setOpen(x)} data-testid={`exception-${x.id}`}>{x.title}</button>
-                              <div className="text-xs text-[var(--color-fg-quaternary)]">{TYPE_LABEL[x.type] ?? x.type}{x.job ? ` · ${data.jobs.items.find(j => j.name === x.job)?.title ?? x.job}` : ''}</div>
-                              {!live && x.resolution && <div className="mt-0.5 max-w-md text-xs text-[var(--color-fg-tertiary)]">{x.resolution}</div>}
-                            </td>
-                            <td className="py-2 pr-3"><Badge tone={SEVERITY[x.severity]}>{x.severity}</Badge></td>
-                            <td className="py-2 pr-3 whitespace-nowrap">{STATUS_LABEL[x.status] ?? x.status}{x.retryCount > 0 && <span className="text-xs text-[var(--color-fg-quaternary)]"> · retried {x.retryCount}×</span>}</td>
-                            <td className="py-2 pr-3 whitespace-nowrap text-xs">{when(x.detectedAt)}</td>
-                            <td className="py-2 pr-3 text-right">{x.occurrences}×</td>
-                            <td className="py-2 text-right whitespace-nowrap">
-                              {canAct && (
-                                <span className="inline-flex gap-2">
-                                  {live && x.status !== 'investigating' && <Button size="sm" variant="secondary" disabled={busy !== null} onClick={() => mark(x, 'investigating')}>Looking into it</Button>}
-                                  {live && x.job && <Button size="sm" variant="secondary" disabled={busy !== null} onClick={() => retry(x)} data-testid={`retry-${x.id}`}>{busy === `x:${x.id}` ? 'Retrying…' : 'Retry'}</Button>}
-                                  {live && <Button size="sm" variant="secondary" onClick={() => setClosing({ x, status: 'resolved' })}>Resolve</Button>}
-                                  {live && <Button size="sm" variant="secondary" onClick={() => setClosing({ x, status: 'ignored' })}>Ignore</Button>}
-                                  {!live && <Button size="sm" variant="secondary" disabled={busy !== null} onClick={() => mark(x, 'open')}>Reopen</Button>}
-                                </span>
-                              )}
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
+                <Table aria-label="Exceptions" data-testid="ops-exceptions">
+                  <THead><Tr><Th>What</Th><Th>Severity</Th><Th>Status</Th><Th>First seen</Th><Th className="!text-right">Seen</Th><Th /></Tr></THead>
+                  <TBody>
+                    {exceptions.map((x) => {
+                      const live = !['resolved', 'ignored'].includes(x.status);
+                      return (
+                        <Tr key={x.id} className="align-top">
+                          <Td>
+                            <Button variant="link" className="h-auto px-0 font-medium" onClick={() => setOpen(x)} data-testid={`exception-${x.id}`}>{x.title}</Button>
+                            <div className="text-xs text-[var(--color-fg-quaternary)]">{TYPE_LABEL[x.type] ?? x.type}{x.job ? ` · ${data.jobs.items.find(j => j.name === x.job)?.title ?? x.job}` : ''}</div>
+                            {!live && x.resolution && <div className="mt-0.5 max-w-md text-xs text-[var(--color-fg-tertiary)]">{x.resolution}</div>}
+                          </Td>
+                          <Td><Badge tone={SEVERITY[x.severity]}>{x.severity}</Badge></Td>
+                          <Td className="whitespace-nowrap">{STATUS_LABEL[x.status] ?? x.status}{x.retryCount > 0 && <span className="text-xs text-[var(--color-fg-quaternary)]"> · retried {x.retryCount}×</span>}</Td>
+                          <Td className="whitespace-nowrap text-xs">{when(x.detectedAt)}</Td>
+                          <Td className="text-right">{x.occurrences}×</Td>
+                          <Td className="text-right whitespace-nowrap">
+                            {canAct && (
+                              <span className="inline-flex gap-2">
+                                {live && x.status !== 'investigating' && <Button size="sm" variant="secondary" disabled={busy !== null} onClick={() => mark(x, 'investigating')}>Looking into it</Button>}
+                                {live && x.job && <Button size="sm" variant="secondary" disabled={busy !== null} onClick={() => retry(x)} data-testid={`retry-${x.id}`}>{busy === `x:${x.id}` ? 'Retrying…' : 'Retry'}</Button>}
+                                {live && <Button size="sm" variant="secondary" onClick={() => setClosing({ x, status: 'resolved' })}>Resolve</Button>}
+                                {live && <Button size="sm" variant="secondary" onClick={() => setClosing({ x, status: 'ignored' })}>Ignore</Button>}
+                                {!live && <Button size="sm" variant="secondary" disabled={busy !== null} onClick={() => mark(x, 'open')}>Reopen</Button>}
+                              </span>
+                            )}
+                          </Td>
+                        </Tr>
+                      );
+                    })}
+                  </TBody>
+                </Table>
               )}
               <p className="mt-2 text-xs text-[var(--color-fg-quaternary)]">
                 An exception clears itself when the problem goes away. Resolving or ignoring one records your reason and changes nothing in the records it is about. Finance exceptions can only be closed or retried by someone who can approve billing.
@@ -256,18 +250,18 @@ function Runs({ token, job, onClose }: { token: string; job: B2BJobStatus; onClo
   return (
     <Dialog open onClose={onClose} title={`${job.title}: recent runs`} description={job.schedule.type === 'every' ? 'This job runs often, so only runs that did something or failed are kept.' : undefined} size="xl">
       {!rows ? <Spinner className="h-6 w-6" /> : rows.length === 0 ? <p className="text-sm text-[var(--color-fg-quaternary)]">No runs recorded yet.</p> : (
-        <table className="w-full text-sm" data-testid="job-runs">
-          <thead><tr className={HEAD}><th className="py-2 pr-3">Started</th><th className="py-2 pr-3">Why</th><th className="py-2 pr-3">Attempt</th><th className="py-2 pr-3">Result</th><th className="py-2 pr-3 text-right">Handled</th><th className="py-2 pr-3 text-right">Failed</th><th className="py-2">Error</th></tr></thead>
-          <tbody>
+        <Table aria-label={`${job.title}: recent runs`} data-testid="job-runs">
+          <THead><Tr><Th>Started</Th><Th>Why</Th><Th>Attempt</Th><Th>Result</Th><Th className="!text-right">Handled</Th><Th className="!text-right">Failed</Th><Th>Error</Th></Tr></THead>
+          <TBody>
             {rows.map(r => (
-              <tr key={r.id} className={ROW}>
-                <td className="py-1.5 pr-3 whitespace-nowrap">{when(r.startedAt)}</td><td className="py-1.5 pr-3">{r.trigger ? TRIGGER[r.trigger] : ''}</td><td className="py-1.5 pr-3">{r.attempt}</td>
-                <td className="py-1.5 pr-3">{r.status === 'ok' ? <Badge tone="success">OK</Badge> : r.status === 'failed' ? <Badge tone="danger">Failed</Badge> : <Badge tone="brand">Running</Badge>}</td>
-                <td className="py-1.5 pr-3 text-right">{r.processed ?? ''}</td><td className="py-1.5 pr-3 text-right">{r.failed || ''}</td><td className="py-1.5 text-xs text-[var(--color-error-600)]">{r.error ?? ''}</td>
-              </tr>
+              <Tr key={r.id} className="align-top">
+                <Td className="whitespace-nowrap">{when(r.startedAt)}</Td><Td>{r.trigger ? TRIGGER[r.trigger] : ''}</Td><Td>{r.attempt}</Td>
+                <Td>{r.status === 'ok' ? <Badge tone="success">OK</Badge> : r.status === 'failed' ? <Badge tone="danger">Failed</Badge> : <Badge tone="brand">Running</Badge>}</Td>
+                <Td className="text-right">{r.processed ?? ''}</Td><Td className="text-right">{r.failed || ''}</Td><Td className="text-xs !text-[var(--color-error-600)]">{r.error ?? ''}</Td>
+              </Tr>
             ))}
-          </tbody>
-        </table>
+          </TBody>
+        </Table>
       )}
     </Dialog>
   );
