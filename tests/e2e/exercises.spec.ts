@@ -189,3 +189,39 @@ test('a refused save says which field is wrong and keeps the form', async ({ pag
   await expect(page.getByTestId('exercise-name')).toHaveValue('Mystery move');
   await expect(page.getByTestId('exercise-row-ex_new')).toHaveCount(0);
 });
+
+test('a server answer without the library shows a message, never a blank screen', async ({ page }) => {
+  const errors: string[] = [];
+  page.on('pageerror', e => errors.push(e.message));
+  await page.addInitScript((u) => {
+    localStorage.setItem('token', 'e2e-token');
+    localStorage.setItem('user', JSON.stringify(u));
+  }, ADMIN);
+  // "OK", but nothing like the library — what broke the screen in production.
+  let answer: unknown = {};
+  await page.route(`${API}/**`, route => route.fulfill({ json: new URL(route.request().url()).pathname === '/admin/exercises' ? answer : [] }));
+
+  for (const sent of [{}, [], { message: 'running' }, null, { exercises: 'nope' }]) {
+    answer = sent;
+    await page.goto('/admin/exercises');
+    await expect(page.getByText('The exercise library didn’t load')).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Exercises' })).toBeVisible();
+    await expect(page.getByTestId('exercise-new')).toBeDisabled();
+  }
+
+  // Odd rows are tidied or left out; the good ones still show.
+  answer = {
+    exercises: [
+      exercise(),
+      { id: 'ex_odd', name: 'Odd one', targetAreas: null, equipment: 'none', instructions: null, defaultSets: null },
+      { name: 'No id' }, null, 'text',
+    ],
+    options: { categories: ['strength'] },
+  };
+  await page.goto('/admin/exercises');
+  await expect(page.getByTestId('exercise-count')).toHaveText('2 of 2 shown · 2 switched on');
+  await expect(page.getByTestId('exercise-row-ex_odd')).toContainText('Odd one');
+  await page.getByTestId('exercise-open-ex_odd').click();
+  await expect(page.getByTestId('exercise-form')).toBeVisible();
+  expect(errors).toEqual([]);
+});

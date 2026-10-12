@@ -36,6 +36,7 @@ const ERRORS: Record<string, string> = {
   last_active_exercise: 'This is the only exercise switched on, so it can’t be switched off.',
   not_edited: 'This exercise is already as FitFlex shipped it.',
   not_found: 'That exercise no longer exists. Refresh and try again.',
+  exercise_library_unavailable: 'The exercise library couldn’t be loaded just now. Please try again in a minute.',
   acl_forbidden: 'You don’t have permission to manage exercises.',
 };
 const message = (e: unknown) => {
@@ -44,6 +45,55 @@ const message = (e: unknown) => {
   if (body?.error === 'invalid_exercise') return FIELD_ERRORS[body.field ?? ''] ?? 'Something in the form isn’t valid.';
   return ERRORS[body?.error ?? ''] ?? 'That didn’t work. Please try again.';
 };
+
+const list = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []);
+
+/**
+ * An exercise as the screen can safely draw it, whatever the server sent:
+ * every list is a list and every word is a word. Null when it isn't an
+ * exercise at all.
+ */
+function tidy(raw: unknown): Exercise | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const e = raw as Partial<Exercise>;
+  if (typeof e.id !== 'string' || typeof e.name !== 'string') return null;
+  return {
+    ...e,
+    id: e.id,
+    name: e.name,
+    description: typeof e.description === 'string' ? e.description : '',
+    category: typeof e.category === 'string' ? e.category : 'strength',
+    difficulty: typeof e.difficulty === 'string' ? e.difficulty : 'beginner',
+    targetAreas: list(e.targetAreas),
+    secondaryAreas: list(e.secondaryAreas),
+    equipment: list(e.equipment),
+    environment: list(e.environment),
+    suitableGoals: list(e.suitableGoals),
+    instructions: list(e.instructions),
+    alternatives: list(e.alternatives),
+    defaultSets: Number(e.defaultSets) || 1,
+    restSeconds: Number(e.restSeconds) || 0,
+    active: e.active !== false,
+    source: e.source === 'edited' || e.source === 'custom' ? e.source : 'builtin',
+  };
+}
+
+const EMPTY_OPTIONS: ExerciseOptions = {
+  categories: [], targetAreaGroups: [], movementPatterns: [], difficulties: [], equipment: [], environments: [], goals: [],
+};
+/** The choices for the form, with every list present. */
+function tidyOptions(raw: unknown): ExerciseOptions | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const o = raw as Partial<ExerciseOptions>;
+  const groups = Array.isArray(o.targetAreaGroups)
+    ? o.targetAreaGroups.filter(g => g && typeof g.id === 'string').map(g => ({ id: g.id, areas: list(g.areas) }))
+    : [];
+  return {
+    ...EMPTY_OPTIONS,
+    categories: list(o.categories), targetAreaGroups: groups, movementPatterns: list(o.movementPatterns),
+    difficulties: list(o.difficulties), equipment: list(o.equipment), environments: list(o.environments), goals: list(o.goals),
+  };
+}
 
 const SOURCE: Record<Exercise['source'], { label: string; tone: 'gray' | 'brand' | 'warning' }> = {
   builtin: { label: 'Built in', tone: 'gray' },
@@ -68,9 +118,17 @@ export function ExerciseManager() {
     if (!token) return;
     setError(null);
     try {
-      const r = await api.adminExercises(token);
-      setRows(r.exercises);
-      setOptions(r.options);
+      const r: unknown = await api.adminExercises(token);
+      const sent = (r && typeof r === 'object' ? (r as { exercises?: unknown }).exercises : null);
+      // The server answered, but not with the library: say so, and never draw from it.
+      if (!Array.isArray(sent)) {
+        const seen = JSON.stringify(r ?? null).slice(0, 160);
+        setError(`The exercise library didn’t load: the server answered without it. Please try again in a minute. (Server said: ${seen})`);
+        setRows(prev => prev ?? []);
+        return;
+      }
+      setRows(sent.map(tidy).filter((e): e is Exercise => e !== null));
+      setOptions(tidyOptions((r as { options?: unknown }).options));
     } catch (e) {
       setError(message(e));
       setRows(prev => prev ?? []);
@@ -109,7 +167,7 @@ export function ExerciseManager() {
         actions={
           <>
             <Button variant="secondary" size="sm" onClick={load}><RefreshCw className="h-4 w-4" />Refresh</Button>
-            <Button size="sm" onClick={() => setEditing('new')} data-testid="exercise-new"><Plus className="h-4 w-4" />New exercise</Button>
+            <Button size="sm" onClick={() => setEditing('new')} disabled={!options} data-testid="exercise-new"><Plus className="h-4 w-4" />New exercise</Button>
           </>
         }
       />
@@ -240,11 +298,11 @@ function ExerciseForm({ options, all, existing, onClose, onSaved }: {
   const [f, setF] = useState(() => ({
     name: existing?.name ?? '',
     description: existing?.description ?? '',
-    category: existing?.category ?? options.categories[0],
+    category: existing?.category ?? options.categories[0] ?? 'strength',
     targetAreas: existing?.targetAreas ?? [] as string[],
     secondaryAreas: existing?.secondaryAreas ?? [] as string[],
     movementPattern: existing?.movementPattern ?? '',
-    difficulty: existing?.difficulty ?? options.difficulties[0],
+    difficulty: existing?.difficulty ?? options.difficulties[0] ?? 'beginner',
     equipment: existing?.equipment ?? ['none'],
     environment: existing?.environment ?? [...options.environments],
     suitableGoals: existing?.suitableGoals ?? [] as string[],
