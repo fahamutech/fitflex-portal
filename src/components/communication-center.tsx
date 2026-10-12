@@ -13,7 +13,7 @@ import {
   CommsPreview, CommsPurpose, CommsRecipients, CommsScope, CommsStatus, CommsTemplate, CommsText, Gym,
 } from '@/lib/api';
 import type { MessageKey } from '@/lib/i18n';
-import { Alert, Badge, Button, Card, Checkbox, EmptyState, Field, Input, MetricCard, PageHeader, Radio, Segmented, Select, Spinner } from './shared';
+import { Alert, Badge, Button, Card, Checkbox, EmptyState, Field, Input, MetricCard, PageHeader, Radio, Segmented, Select, Spinner, Table, TBody, Td, Tr } from './shared';
 import { ConfirmDialog } from './dialog';
 import {
   DEEP_LINKS, LOCALES, MessageCard, PURPOSES, PushCard, SENDER_VARIABLES, T, VARIABLES, errorText, fill, skipLabel, textOk,
@@ -574,7 +574,7 @@ function Composer({ scope, token, t, locale, gymId, campaign, templateId, onClos
             </Field>
             <p className="text-sm font-semibold">{t('comms.audience.narrow')}</p>
             {savedFilter ? (
-              <Alert tone="info">{t('comms.audience.customSetElsewhere')} <button type="button" className="underline" onClick={() => setSavedFilter(undefined)}>{t('comms.audience.clearCustom')}</button></Alert>
+              <Alert tone="info">{t('comms.audience.customSetElsewhere')} <Button type="button" variant="link" className="inline h-auto px-0 font-medium text-inherit underline" onClick={() => setSavedFilter(undefined)}>{t('comms.audience.clearCustom')}</Button></Alert>
             ) : recipients === 'trainers' ? (
               <div className="grid gap-4 sm:grid-cols-2">
                 <Field label={t('comms.audience.trainerPass')}>
@@ -861,16 +861,16 @@ function Detail({ scope, token, t, id, onBack, onEdit, onOpenMember }: {
         <Card className="mt-4 p-4" data-testid="delivery">
           <p className="mb-2 text-sm font-semibold">{t('comms.detail.delivery')}</p>
           {Object.keys(data.progress).length === 0 ? <p className="text-sm">{t('comms.detail.noDeliveries')}</p> : (
-            <table className="w-full text-sm">
-              <tbody>
+            <Table aria-label={t('comms.detail.delivery')}>
+              <TBody>
                 {Object.entries(data.progress).map(([ch, counts]) => (
-                  <tr key={ch} className="border-t border-[var(--color-border-secondary)]">
-                    <td className="py-2 font-medium">{t(`comms.channel.${ch}`)}</td>
-                    <td className="py-2">{Object.entries(counts).map(([s, n]) => `${t(`comms.msgStatus.${s}`)} ${n}`).join(' · ')}</td>
-                  </tr>
+                  <Tr key={ch}>
+                    <Td className="font-medium">{t(`comms.channel.${ch}`)}</Td>
+                    <Td>{Object.entries(counts).map(([s, n]) => `${t(`comms.msgStatus.${s}`)} ${n}`).join(' · ')}</Td>
+                  </Tr>
                 ))}
-              </tbody>
-            </table>
+              </TBody>
+            </Table>
           )}
           {c.counts && Object.keys(c.counts.skipped).length > 0 && (
             <div className="mt-3 text-xs text-[var(--color-fg-quaternary)]">
