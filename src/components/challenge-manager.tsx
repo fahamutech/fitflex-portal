@@ -9,9 +9,7 @@ import {
   Rate, RewardFunding, RewardItem, RewardItemInput, RewardQueue, RewardRule, RewardType,
 } from '@/lib/api';
 import { REWARD_TYPES, RULES, ruleLabel, STATUS, typeLabel } from '@/lib/rewards';
-import {
-  Alert, Badge, Button, Card, CardContent, CardHeader, Checkbox, Field, Input, MetricCard, PageHeader, Radio, Select, Spinner, Textarea,
-} from '@/components/shared';
+import { Alert, Badge, Button, Card, CardContent, CardHeader, Checkbox, Field, Input, MetricCard, PageHeader, Radio, Select, Spinner, Textarea, Table, TBody, Td, Th, THead, Tr } from '@/components/shared';
 import { Dialog } from '@/components/dialog';
 
 const TYPES: { value: ChallengeType; label: string; unit: string }[] = [
@@ -375,26 +373,24 @@ function ChallengeDetail({ scope, apiScope, rewardsBase, staff, challenge: c, on
           <Card>
             <CardHeader><span className="text-sm font-semibold">By {wordsFor(isOrg(apiScope)).unit}</span></CardHeader>
             <CardContent>
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm" data-testid="department-table">
-                  <thead><tr className="text-left text-xs text-[var(--color-fg-quaternary)]">
-                    <th className="py-2 font-medium">{wordsFor(isOrg(apiScope)).Unit}</th>
-                    <th className="py-2 text-right font-medium">Taking part</th>
-                    <th className="py-2 text-right font-medium">Completed</th>
-                    <th className="py-2 text-right font-medium">Avg progress</th>
-                  </tr></thead>
-                  <tbody className="divide-y divide-[var(--color-border-secondary)]">
-                    {p.byDepartment.map((d, i) => (
-                      <tr key={i}>
-                        <td className="py-2">{d.other ? `Smaller groups (under ${p.minGroupSize ?? 3})` : d.department}</td>
-                        <td className="py-2 text-right tabular-nums">{num(d.joined)} of {num(d.eligible)} ({pct(d.participationRate)})</td>
-                        <td className="py-2 text-right tabular-nums">{d.completed == null ? '—' : num(d.completed)}</td>
-                        <td className="py-2 text-right tabular-nums">{d.averageProgress == null ? '—' : pct(d.averageProgress)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              <Table aria-label={`By ${wordsFor(isOrg(apiScope)).unit}`} data-testid="department-table">
+                <THead><Tr>
+                  <Th>{wordsFor(isOrg(apiScope)).Unit}</Th>
+                  <Th className="!text-right">Taking part</Th>
+                  <Th className="!text-right">Completed</Th>
+                  <Th className="!text-right">Avg progress</Th>
+                </Tr></THead>
+                <TBody>
+                  {p.byDepartment.map((d, i) => (
+                    <Tr key={i}>
+                      <Td>{d.other ? `Smaller groups (under ${p.minGroupSize ?? 3})` : d.department}</Td>
+                      <Td className="text-right tabular-nums">{num(d.joined)} of {num(d.eligible)} ({pct(d.participationRate)})</Td>
+                      <Td className="text-right tabular-nums">{d.completed == null ? '—' : num(d.completed)}</Td>
+                      <Td className="text-right tabular-nums">{d.averageProgress == null ? '—' : pct(d.averageProgress)}</Td>
+                    </Tr>
+                  ))}
+                </TBody>
+              </Table>
               <p className="mt-2 text-xs text-[var(--color-fg-quaternary)]">
                 Progress and completion show only for groups of {p.minGroupSize ?? 3} or more taking part, so the table stays readable. Each person’s progress is under Insights.
               </p>
