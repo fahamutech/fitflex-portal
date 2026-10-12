@@ -130,7 +130,7 @@ function CampaignView({ id, areas, canManage, onBack }: { id: string; areas: Geo
   const c = data?.campaign;
   return (
     <div className="space-y-6" data-testid="campaign-detail">
-      <button onClick={onBack} className="-ml-2 flex min-h-10 items-center gap-1.5 px-2 text-sm text-[var(--color-fg-tertiary)] hover:text-[var(--color-fg-primary)]" data-testid="campaign-back"><ArrowLeft className="h-4 w-4" />{t('pro.back')}</button>
+      <Button variant="link" onClick={onBack} className="-ml-2 h-auto min-h-10 gap-1.5 px-2 text-sm font-normal text-[var(--color-fg-tertiary)] hover:text-[var(--color-fg-primary)] hover:no-underline" data-testid="campaign-back"><ArrowLeft className="h-4 w-4" />{t('pro.back')}</Button>
       {error && <Alert tone="error"><span className="flex flex-wrap items-center justify-between gap-2">{error}<Button size="sm" variant="secondary" onClick={load} data-testid="campaign-retry">{t('pro.retry')}</Button></span></Alert>}
       {notice && <Alert tone="success">{notice}</Alert>}
       {!data && !error && <Spinner className="h-6 w-6" />}
