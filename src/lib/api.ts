@@ -1935,6 +1935,8 @@ export interface B2BBenefitInput {
   terms?: string | null;
   /** Sponsored pass only: the pass tier the member gets. */
   passTier?: string | null;
+  /** Sponsored pass only, set by FitFlex: the fee per person per month, instead of the pass price less the programme's discount. */
+  fixedFeeTzs?: number | null;
 }
 export interface B2BBenefit extends B2BBenefitInput {
   id: string;
@@ -2588,10 +2590,13 @@ export interface B2BAgreement {
   status: 'draft' | 'active' | 'ended'; effectiveFrom: string; effectiveTo: string | null;
   billingCycle: string; currency: string; prepaidTermsDays: number; usageTermsDays: number;
   platformFeeTzs: number | null; vatRateBps: number | null; notes: string | null;
+  /** The organisation's agreed fee per person per month for a sponsored pass, by tier. */
+  passRates?: Record<string, number> | null;
 }
 export interface B2BAgreementInput {
   effectiveFrom: string; effectiveTo?: string | null; prepaidTermsDays?: number; usageTermsDays?: number;
   platformFeeTzs?: number | null; vatRateBps?: number | null; contractReference?: string | null;
+  passRates?: Record<string, number> | null;
 }
 export interface B2BBillingAccount {
   organizationId: string; contactName: string | null; email: string | null; phone: string | null;
@@ -2766,7 +2771,7 @@ export interface B2BInvoiceDetail {
 export interface B2BOrgBilling extends B2BBalances {
   organization: { id: string; name: string };
   account: B2BBillingAccount;
-  terms: { reference: string | null; contractReference?: string | null; billingCycle: string; prepaidTermsDays: number; usageTermsDays: number; platformFeeTzs: number | null; effectiveFrom?: string; effectiveTo?: string | null };
+  terms: { reference: string | null; contractReference?: string | null; billingCycle: string; prepaidTermsDays: number; usageTermsDays: number; platformFeeTzs: number | null; passRates?: Record<string, number> | null; effectiveFrom?: string; effectiveTo?: string | null };
   recentInvoices: B2BSponsorInvoice[];
 }
 export interface B2BBillingDashboard {
@@ -2785,7 +2790,7 @@ export interface B2BReconciliation {
   lines: Array<{
     lineId: string; kind: string; description: string; amountTzs: number; active: boolean;
     consumption: { id: string; status: string; businessDate: string; sourceType: string; sourceId: string; providerType: string; providerId: string; grossTzs: number; sponsorTzs: number; beneficiaryTzs: number } | null;
-    entitlement: { id: string; status: string; passTier: string; listPriceTzs: number; discountBps: number; feeTzs: number; sponsorTzs: number; memberTzs: number; subscriptionId: string | null } | null;
+    entitlement: { id: string; status: string; passTier: string; listPriceTzs: number; discountBps: number; feeTzs: number; priceBasis?: string | null; sponsorTzs: number; memberTzs: number; subscriptionId: string | null } | null;
     provider: { outcome?: string; statementId?: string | null; statementStatus?: string | null; gymsOwedTzs?: number; collectedForPassTzs?: number } | null;
   }>;
   settlements: B2BInvoiceSettlement[];

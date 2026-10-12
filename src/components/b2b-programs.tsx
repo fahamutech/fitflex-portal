@@ -43,6 +43,8 @@ const ERRORS: Record<string, string> = {
   invalid_pass_tier: 'Choose the pass tier this benefit gives.',
   pass_needs_funding: 'A sponsored pass needs someone to pay for it.',
   invalid_discount: 'The discount must be between 0% and 99.99%.',
+  invalid_fixed_fee: 'Enter the fee in whole TZS, more than zero and no more than the pass price.',
+  fixed_fee_needs_pass: 'Only a sponsored pass can have a fee of its own.',
   budget_still_exhausted: 'The budget is fully spent. Raise it (Edit) before resuming.',
 };
 const message = (err: unknown, fallback: string) =>
@@ -62,7 +64,7 @@ const list = (s: string) => s.split(',').map(x => x.trim()).filter(Boolean);
 const intOrNull = (s: string) => (s.trim() === '' ? null : Number(s));
 
 function usageText(b: B2BBenefit) {
-  if (b.benefitType === FLAT_FEE) return `Flat monthly fee for a ${b.passTier ?? ''} pass; visits follow the pass`;
+  if (b.benefitType === FLAT_FEE) return `Flat monthly fee for a ${b.passTier ?? ''} pass${b.fixedFeeTzs ? ` (TZS ${b.fixedFeeTzs.toLocaleString('en-US')} a person)` : ''}; visits follow the pass`;
   if (b.usagePeriod === 'unlimited') return 'Unlimited';
   const per = b.usagePeriod === 'program' ? 'for the programme' : `per ${b.usagePeriod}`;
   const parts = [b.usageLimit != null ? `${b.usageLimit} uses ${per}` : null,
@@ -84,7 +86,7 @@ function eligibilityText(p: B2BProgram) {
 const EMPTY_PROGRAM = { name: '', description: '', programType: 'wellness', startDate: '', endDate: '', budget: '', discount: '', scope: 'all', groups: [] as string[], ids: [] as string[], types: '' };
 const EMPTY_BENEFIT = {
   name: '', description: '', benefitType: 'gym_access', fundingType: 'full', sponsorAmount: '', sponsorPct: '', sponsorCap: '', copay: '',
-  usagePeriod: 'month', usageLimit: '', periodCap: '', startDate: '', endDate: '', terms: '', passTier: 'pro',
+  usagePeriod: 'month', usageLimit: '', periodCap: '', startDate: '', endDate: '', terms: '', passTier: 'pro', fixedFee: '',
   providerScope: 'all', gymIds: '', gymTiers: [] as string[], trainerIds: '', vendorIds: '', productCategories: '', challengeIds: '', groups: '', types: '',
 };
 
@@ -182,7 +184,7 @@ export function B2BPrograms({ token, org, beneficiaries, onChanged }: { token: s
     sponsorAmount: b.sponsorAmountTzs?.toString() ?? '', sponsorPct: b.sponsorShareBps != null ? String(b.sponsorShareBps / 100) : '',
     sponsorCap: b.sponsorCapTzs?.toString() ?? '', copay: b.beneficiaryAmountTzs?.toString() ?? '',
     usagePeriod: b.usagePeriod, usageLimit: b.usageLimit?.toString() ?? '', periodCap: b.periodSponsorCapTzs?.toString() ?? '',
-    startDate: b.startDate ?? '', endDate: b.endDate ?? '', terms: b.terms ?? '', passTier: b.passTier ?? 'pro',
+    startDate: b.startDate ?? '', endDate: b.endDate ?? '', terms: b.terms ?? '', passTier: b.passTier ?? 'pro', fixedFee: b.fixedFeeTzs?.toString() ?? '',
     providerScope: b.providerRules.scope, gymIds: (b.providerRules.gymIds ?? []).join(', '), gymTiers: b.providerRules.gymTiers ?? [],
     trainerIds: (b.providerRules.trainerIds ?? []).join(', '), vendorIds: (b.providerRules.vendorIds ?? []).join(', '),
     productCategories: (b.providerRules.productCategories ?? []).join(', '), challengeIds: (b.providerRules.challengeIds ?? []).join(', '),
@@ -211,6 +213,7 @@ export function B2BPrograms({ token, org, beneficiaries, onChanged }: { token: s
       beneficiaryAmountTzs: f.fundingType === 'beneficiary_fixed' ? intOrNull(f.copay) : null,
       // A sponsored pass is a flat monthly fee: the pass itself sets the visits.
       passTier: flat ? f.passTier : null,
+      fixedFeeTzs: flat ? intOrNull(f.fixedFee) : null,
       usagePeriod: flat ? 'unlimited' : f.usagePeriod,
       usageLimit: flat || f.usagePeriod === 'unlimited' ? null : intOrNull(f.usageLimit),
       periodSponsorCapTzs: flat || f.usagePeriod === 'unlimited' || f.fundingType === 'none' ? null : intOrNull(f.periodCap),
@@ -221,7 +224,7 @@ export function B2BPrograms({ token, org, beneficiaries, onChanged }: { token: s
     const existing = f.id ? open.benefits.find(b => b.id === f.id) : null;
     const wordingOnly = existing?.status === 'active' && live;
     return run(async () => {
-      if (f.id) await api.updateB2BBenefit(token, org.id, open.program.id, f.id, wordingOnly ? { name: body.name, description: body.description, terms: body.terms } : body);
+      if (f.id) await api.updateB2BBenefit(token, org.id, open.program.id, f.id, wordingOnly ? { name: body.name, description: body.description, terms: body.terms, ...(flat ? { fixedFeeTzs: body.fixedFeeTzs } : {}) } : body);
       else await api.createB2BBenefit(token, org.id, open.program.id, body);
       setBenefitForm(null);
       await refresh(open.program.id);
@@ -312,6 +315,11 @@ export function B2BPrograms({ token, org, beneficiaries, onChanged }: { token: s
           <select className="ui-input" value={bf.passTier} onChange={e => setBenefitForm({ ...bf, passTier: e.target.value })} data-testid="benefit-pass-tier">
             {PASS_TIERS.map(t => <option key={t} value={t}>{t}</option>)}
           </select>
+        </Field>
+      )}
+      {bf.benefitType === FLAT_FEE && (
+        <Field label="Fee per person per month, TZS (optional)" hint="Leave empty to use the organisation's agreed rate, or the pass price less the programme's discount. Applies to months not yet invoiced.">
+          <input className="ui-input" inputMode="numeric" value={bf.fixedFee} onChange={e => setBenefitForm({ ...bf, fixedFee: e.target.value })} data-testid="benefit-fixed-fee" />
         </Field>
       )}
       {bf.fundingType === 'sponsor_fixed' && <Field label={bf.benefitType === FLAT_FEE ? 'Sponsor pays per person per month (TZS)' : 'Sponsor pays per use (TZS)'}><input className="ui-input" inputMode="numeric" value={bf.sponsorAmount} onChange={e => setBenefitForm({ ...bf, sponsorAmount: e.target.value })} data-testid="benefit-sponsor-amount" /></Field>}

@@ -126,6 +126,7 @@ export default function OrganizationBillingPage() {
                     <div>Invoices raised in advance (passes, platform fee): {overview.terms.prepaidTermsDays === 0 ? 'due when issued' : `due in ${overview.terms.prepaidTermsDays} days`}</div>
                     <div>Invoices raised after the month (per-use benefits): due in {overview.terms.usageTermsDays} days</div>
                     {overview.terms.platformFeeTzs != null && <div>Platform fee: {money(overview.terms.platformFeeTzs)} a month</div>}
+                    {Object.entries(overview.terms.passRates ?? {}).map(([tier, v]) => <div key={tier} data-testid={`terms-rate-${tier}`}>Sponsored {tier} pass: {money(v)} a person a month</div>)}
                     <div className="text-xs text-[var(--color-fg-quaternary)]">{overview.terms.reference ? `Agreement ${overview.terms.reference}${overview.terms.contractReference ? ` · ${overview.terms.contractReference}` : ''}` : 'FitFlex standard terms'} · billed monthly · amounts include VAT</div>
                   </CardContent>
                 </Card>
