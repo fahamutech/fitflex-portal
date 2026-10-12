@@ -16,7 +16,22 @@ function isTrainerPass(payment: PaymentRequest): boolean {
   return payment.subscription?.type === 'trainer_pass' || (!payment.subscription && payment.note === 'trainer_pass');
 }
 
+/**
+ * A FitFlex Pass upgrade pays the difference to move the member's running plan
+ * to a higher tier; its note is `upgrade:<plan id>:<tier it was>` (the server
+ * keeps it as it is). Null for any other payment.
+ */
+function upgradeOf(payment: PaymentRequest): { fromTier: string | null } | null {
+  const m = /^upgrade:[^:]+(?::(.+))?$/.exec(payment.note || '');
+  return m ? { fromTier: m[1] || null } : null;
+}
+
 function paymentTierLabel(payment: PaymentRequest): string {
+  const up = upgradeOf(payment);
+  if (up) {
+    const to = (payment.tier || '').toUpperCase();
+    return up.fromTier ? `UPGRADE · ${up.fromTier.toUpperCase()} → ${to}` : `UPGRADE → ${to}`;
+  }
   if (payment.bookingGroupId) return 'TRAINER SESSION';
   if (payment.orderId) return 'SHOP ORDER';
   const plan = (payment.subscription?.plan || payment.plan || '').toUpperCase();
@@ -24,6 +39,13 @@ function paymentTierLabel(payment: PaymentRequest): string {
   if (payment.subscription?.type === 'direct_sub') return plan ? `GYM PLAN · ${plan}` : 'GYM PLAN';
   const tier = payment.tier || payment.subscription?.tier;
   return typeof tier === 'string' && tier.trim() ? tier.toUpperCase() : '—';
+}
+
+/** What an admin reads in the note column of an upgrade: the member's plan keeps its end date. */
+function upgradeNoteText(payment: PaymentRequest): string | null {
+  if (!upgradeOf(payment)) return null;
+  const ends = payment.subscription?.expiresAt;
+  return ends ? `Pays the difference; plan stays until ${formatDateTime(ends)}` : 'Pays the difference; plan keeps its end date';
 }
 
 export default function PaymentsPage() {
@@ -124,7 +146,7 @@ export default function PaymentsPage() {
       key: 'tier', header: 'Tier', sortable: true,
       cell: (p) => (
         <div>
-          <Badge tone={isTrainerPass(p) ? 'warning' : 'brand'}>{paymentTierLabel(p)}</Badge>
+          <Badge tone={upgradeOf(p) ? 'gray' : isTrainerPass(p) ? 'warning' : 'brand'}>{paymentTierLabel(p)}</Badge>
           {p.gym && <div className="mt-1 text-xs text-[var(--color-fg-tertiary)]">{p.gym.name}</div>}
         </div>
       ),
@@ -133,7 +155,7 @@ export default function PaymentsPage() {
     { key: 'requestedAt', header: 'Date', sortable: true, cell: (p) => <span className="text-xs tabular-nums whitespace-nowrap">{formatDateTime(p.requestedAt)}</span> },
     { key: 'status', header: 'Status', sortable: true, cell: (p) => <Badge tone={statusTone(p.status)}>{statusLabel(p.status)}</Badge> },
     { key: 'reference', header: 'Reference', cell: (p) => <span className="text-xs">{p.reference || '—'}</span> },
-    { key: 'note', header: 'Note', cell: (p) => <span className="text-xs max-w-[200px] truncate block">{p.note || '—'}</span> },
+    { key: 'note', header: 'Note', cell: (p) => <span className="text-xs max-w-[200px] truncate block">{upgradeNoteText(p) ?? (p.note || '—')}</span> },
   ];
 
   return (
@@ -212,7 +234,7 @@ export default function PaymentsPage() {
                       <Undo2 className="h-3.5 w-3.5" />
                     </Button>
                   )}
-                  <Button variant="ghost" size="sm" onClick={() => { setEditTarget(payment); setEditFields({ reference: payment.reference || '', note: payment.note || '' }); }}>
+                  <Button variant="ghost" size="sm" onClick={() => { setEditTarget(payment); setEditFields({ reference: payment.reference || '', note: upgradeOf(payment) ? '' : (payment.note || '') }); }}>
                     Edit
                   </Button>
                 </>
@@ -227,7 +249,7 @@ export default function PaymentsPage() {
         onClose={() => setActionTarget(null)}
         onConfirm={handleAction}
         title={actionTarget ? `${actionTarget.action.charAt(0).toUpperCase() + actionTarget.action.slice(1)} payment` : ''}
-        description={`Set payment for ${actionTarget?.payment.member?.displayName || actionTarget?.payment.memberId} (${money(actionTarget?.payment.amountTzs)}${actionTarget && isTrainerPass(actionTarget.payment) ? ` — ${paymentTierLabel(actionTarget.payment).toLowerCase()}${actionTarget.payment.gym ? ` at ${actionTarget.payment.gym.name}` : ''}` : ''}) to "${actionTarget?.action}"?${actionTarget?.action === 'approved' && isTrainerPass(actionTarget.payment) ? ' The pass period starts now.' : ''}`}
+        description={`Set payment for ${actionTarget?.payment.member?.displayName || actionTarget?.payment.memberId} (${money(actionTarget?.payment.amountTzs)}${actionTarget && (isTrainerPass(actionTarget.payment) || upgradeOf(actionTarget.payment)) ? ` — ${paymentTierLabel(actionTarget.payment).toLowerCase()}${actionTarget.payment.gym ? ` at ${actionTarget.payment.gym.name}` : ''}` : ''}) to "${actionTarget?.action}"?${actionTarget?.action === 'approved' && isTrainerPass(actionTarget.payment) ? ' The pass period starts now.' : ''}${actionTarget?.action === 'approved' && upgradeOf(actionTarget.payment) ? ' The plan is upgraded now and keeps its end date.' : ''}`}
         confirmLabel={actionTarget?.action === 'approved' ? 'Approve' : actionTarget?.action === 'rejected' ? 'Reject' : 'Cancel payment'}
         tone={actionTarget?.action === 'approved' ? 'primary' : 'danger'}
         busy={busy}
