@@ -3,6 +3,7 @@ import { createContext, ReactNode, useCallback, useContext, useEffect, useState 
 import { Locale, MessageKey, t as translate } from '@/lib/i18n';
 import { api, ApiError, setOnUnauthorized, type PersonaSummary } from '@/lib/api';
 import { PwaRegistration } from '@/components/pwa-registration';
+import { ToastProvider } from '@/components/ui/toast';
 
 export interface PortalAppUser {
   id: string;
@@ -62,6 +63,10 @@ export function Providers({ children }: { children: ReactNode }) {
     if (t && u) { setToken(t); setUser(JSON.parse(u)); }
     setReady(true);
   }, []);
+
+  // Keep the document language in step with the chosen language (screen
+  // readers, hyphenation, browser translation prompts).
+  useEffect(() => { document.documentElement.lang = locale; }, [locale]);
 
   const setLocale = (l: Locale) => { localStorage.setItem('locale', l); setLocaleState(l); };
   const signIn = (tk: string, u: AppCtx['user']) => {
@@ -126,7 +131,7 @@ export function Providers({ children }: { children: ReactNode }) {
   return (
     <Ctx.Provider value={{ ready, locale, setLocale, t: (k) => translate(locale, k), token, user, signIn, signOut, hasPermission, switchablePersonas, switchPersona, invitesEnabled }}>
       <PwaRegistration />
-      {children}
+      <ToastProvider>{children}</ToastProvider>
     </Ctx.Provider>
   );
 }

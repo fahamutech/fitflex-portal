@@ -115,6 +115,11 @@ test('member-operator check-in core flow', async ({ page }) => {
 test('locale switcher toggles UI to Swahili', async ({ page }) => {
   await page.goto('/login');
   await expect(page.getByRole('heading')).toContainText('Operator / Admin login');
-  await page.getByTestId('locale-select').selectOption('sw');
+  // One-tap toggle (replaced the dropdown on the login header).
+  await page.getByTestId('lang-toggle').click();
   await expect(page.getByRole('heading')).toContainText('mwendeshaji');
+  await expect(page.locator('html')).toHaveAttribute('lang', 'sw');
+  await page.getByTestId('lang-toggle').click();
+  await expect(page.getByRole('heading')).toContainText('Operator / Admin login');
+  await expect(page.locator('html')).toHaveAttribute('lang', 'en');
 });
