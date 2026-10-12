@@ -294,13 +294,14 @@ export default function TrainersPage() {
       cell: (t) => (
         <div className="flex flex-wrap gap-1">
           {t.gymIds.map(id => (
-            <button
+            <Button
               key={id}
+              variant="link"
               onClick={(e) => { e.stopPropagation(); setFilterGymId(id); }}
-              className="text-xs text-[var(--color-brand-700)] hover:underline inline-flex items-center gap-0.5"
+              className="h-auto px-0 text-xs font-normal"
             >
               {gymName(id)}
-            </button>
+            </Button>
           ))}
           {t.gymIds.length === 0 && <span className="text-xs text-[var(--color-fg-quaternary)]">—</span>}
         </div>
