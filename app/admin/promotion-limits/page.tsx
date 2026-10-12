@@ -4,7 +4,7 @@ import { RefreshCw } from 'lucide-react';
 import { useApp } from '../../providers';
 import { api, PlacementLimit } from '@/lib/api';
 import { PLACEMENTS, PLACEMENT_KEY, TYPE_KEY, errorKey } from '@/lib/promotions';
-import { Alert, Badge, Button, Card, CardContent, Field, PageHeader, Spinner } from '@/components/shared';
+import { Alert, Badge, Button, Card, CardContent, Field, PageHeader, Spinner, Table, TBody, Td, Th, THead, Tr } from '@/components/shared';
 import { Dialog } from '@/components/dialog';
 
 /** How many promotions each placement holds, how hard a promotion may push, and how ties rotate. */
@@ -36,25 +36,23 @@ export default function PromotionLimitsPage() {
         <Card key={pl}>
           <CardContent className="p-0">
             <h2 className="border-b border-[var(--color-border-secondary)] px-4 py-3 font-semibold">{t(PLACEMENT_KEY[pl])}</h2>
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[620px] text-sm" data-testid={`limits-${pl}`}>
-                <thead className="text-left text-xs text-[var(--color-fg-tertiary)]">
-                  <tr><th className="px-4 py-2 font-medium">{t('pro.col.type')}</th><th className="px-4 py-2 font-medium">{t('pro.lim.slots')}</th>
-                    <th className="px-4 py-2 font-medium">{t('pro.lim.boost')}</th><th className="px-4 py-2 font-medium">{t('pro.lim.rotation')}</th><th /></tr>
-                </thead>
-                <tbody className="divide-y divide-[var(--color-border-secondary)]">
-                  {rows.filter(r => r.placement === pl).map(r => (
-                    <tr key={r.promotionType} data-testid={`limit-${pl}-${r.promotionType}`}>
-                      <td className="px-4 py-2.5">{t(TYPE_KEY[r.promotionType])}</td>
-                      <td className="px-4 py-2.5 tabular-nums">{r.used} / {r.maxSlots} <Badge tone={r.source === 'config' ? 'brand' : 'gray'}>{r.source === 'config' ? t('pro.lim.custom') : t('pro.lim.default')}</Badge></td>
-                      <td className="px-4 py-2.5 tabular-nums">{Math.round((r.maxBoostFraction ?? 0) * 100)}%</td>
-                      <td className="px-4 py-2.5 text-xs">{r.rotationMode === 'none' ? t('pro.lim.noRotation') : t('pro.lim.every').replace('{minutes}', String(r.rotationWindowMinutes))}</td>
-                      <td className="px-4 py-2.5 text-right">{canEdit && <Button size="sm" variant="secondary" onClick={() => { setNotice(null); setEdit(r); }} data-testid={`limit-edit-${pl}-${r.promotionType}`}>{t('pro.action.edit')}</Button>}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <Table aria-label={t(PLACEMENT_KEY[pl])} wrapperClassName="rounded-none border-0" className="min-w-[620px]" data-testid={`limits-${pl}`}>
+              <THead>
+                <Tr><Th>{t('pro.col.type')}</Th><Th>{t('pro.lim.slots')}</Th>
+                  <Th>{t('pro.lim.boost')}</Th><Th>{t('pro.lim.rotation')}</Th><Th /></Tr>
+              </THead>
+              <TBody>
+                {rows.filter(r => r.placement === pl).map(r => (
+                  <Tr key={r.promotionType} data-testid={`limit-${pl}-${r.promotionType}`}>
+                    <Td>{t(TYPE_KEY[r.promotionType])}</Td>
+                    <Td className="tabular-nums">{r.used} / {r.maxSlots} <Badge tone={r.source === 'config' ? 'brand' : 'gray'}>{r.source === 'config' ? t('pro.lim.custom') : t('pro.lim.default')}</Badge></Td>
+                    <Td className="tabular-nums">{Math.round((r.maxBoostFraction ?? 0) * 100)}%</Td>
+                    <Td className="text-xs">{r.rotationMode === 'none' ? t('pro.lim.noRotation') : t('pro.lim.every').replace('{minutes}', String(r.rotationWindowMinutes))}</Td>
+                    <Td className="text-right">{canEdit && <Button size="sm" variant="secondary" onClick={() => { setNotice(null); setEdit(r); }} data-testid={`limit-edit-${pl}-${r.promotionType}`}>{t('pro.action.edit')}</Button>}</Td>
+                  </Tr>
+                ))}
+              </TBody>
+            </Table>
           </CardContent>
         </Card>
       ))}
