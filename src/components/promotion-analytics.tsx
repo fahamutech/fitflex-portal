@@ -206,7 +206,7 @@ export function PromotionPerformanceView({ id, from, to, onBack }: { id: string;
               <CardHeader><h2 className="font-semibold">{t('pan.detail.placements')}</h2></CardHeader>
               <CardContent className="p-0">
                 {(data.byPlacement ?? []).length === 0 ? <p className="p-6 text-sm text-[var(--color-fg-quaternary)]" data-testid="pan-placements-empty">{t('pan.detail.noPlacements')}</p> : (
-                  <Table aria-label={t('pan.detail.placements')} className="min-w-[640px]" data-testid="pan-placements">
+                  <Table aria-label={t('pan.detail.placements')} wrapperClassName="rounded-none border-0" className="min-w-[640px]" data-testid="pan-placements">
                     <THead><Tr>
                       <Th>{t('pan.col.placement')}</Th><Th className="!text-right">{t('pan.col.impressions')}</Th>
                       <Th className="!text-right">{t('pan.col.clicks')}</Th><Th className="!text-right">{t('pan.col.ctr')}</Th>

@@ -123,7 +123,7 @@ export default function SettlementsPage() {
                   {rows.length === 0 ? 'No statements yet. They appear after a month has been run.' : `No ${STATEMENT_STATUS[tab].label.toLowerCase()} statements.`}
                 </div>
               ) : (
-                <Table aria-label="Statements" className="min-w-[760px]" data-testid="settlement-table">
+                <Table aria-label="Statements" wrapperClassName="rounded-none border-0" className="min-w-[760px]" data-testid="settlement-table">
                   <THead>
                     <Tr>
                       <Th>Gym</Th>
@@ -174,7 +174,7 @@ export default function SettlementsPage() {
             {runs == null ? <div className="p-6"><Spinner className="h-6 w-6" /></div> : runs.length === 0 ? (
               <div className="p-10 text-center text-sm text-[var(--color-fg-quaternary)]">No {mode} runs yet.</div>
             ) : (
-              <Table aria-label="Runs" className="min-w-[720px]" data-testid="settlement-runs-table">
+              <Table aria-label="Runs" wrapperClassName="rounded-none border-0" className="min-w-[720px]" data-testid="settlement-runs-table">
                 <THead>
                   <Tr>
                     <Th>Month</Th>
