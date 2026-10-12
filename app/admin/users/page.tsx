@@ -33,6 +33,7 @@ const ACL_SCOPES = [
   { key: 'approvals', label: 'Approvals' },
   { key: 'kyc',       label: 'Partner verification' },
   { key: 'account_recovery', label: 'Account recovery' },
+  { key: 'exercises', label: 'Exercises' },
   { key: 'settings',  label: 'Settings' },
   { key: 'users',     label: 'Portal Users' },
   { key: 'communications', label: 'Messages' },
