@@ -13,6 +13,8 @@ import { money } from '@/lib/admin-utils';
 
 type Tab = 'invoices' | 'payments' | 'statement' | 'agreement';
 
+const BASIS: Record<string, string> = { agreement_rate: 'agreed rate', benefit_fee: 'benefit fee', programme_discount: 'programme discount' };
+const ratesText = (r?: Record<string, number> | null) => Object.entries(r ?? {}).map(([tier, v]) => `${tier} ${v.toLocaleString('en-US')}`).join(', ');
 const ERRORS: Record<string, string> = {
   cannot_settle_own_invoice: 'You issued this invoice, so someone else has to record its payment.',
   cannot_issue_own_note: 'You drafted this note, so someone else has to issue it.',
@@ -33,6 +35,7 @@ const ERRORS: Record<string, string> = {
   invalid_effective_from: 'Enter the start date.',
   invalid_payment_terms: 'Payment terms are a number of days between 0 and 365.',
   invalid_platform_fee: 'Enter the monthly fee in whole TZS.',
+  invalid_pass_rates: 'Enter each pass rate in whole TZS, more than zero.',
   invalid_email: 'That email address doesn’t look right.',
   organization_not_active: 'The organisation is not active.',
   acl_forbidden: 'Your permissions don’t include this.',
@@ -192,7 +195,7 @@ function OrganizationBilling({ token, org, can, userId, onBack }: { token: strin
   const [picked, setPicked] = useState<Record<string, string>>({});
   const [applying, setApplying] = useState<B2BPayment | null>(null);
   const [feePeriod, setFeePeriod] = useState(thisMonth());
-  const [draft, setDraft] = useState({ effectiveFrom: '', prepaidTermsDays: '0', usageTermsDays: '14', platformFee: '', vatPct: '', contractReference: '' });
+  const [draft, setDraft] = useState({ effectiveFrom: '', prepaidTermsDays: '0', usageTermsDays: '14', platformFee: '', vatPct: '', contractReference: '', rates: { basic: '', pro: '', premium: '', executive: '' } as Record<string, string> });
   const [contact, setContact] = useState({ contactName: '', email: '', phone: '' });
 
   const load = async () => {
@@ -324,7 +327,7 @@ function OrganizationBilling({ token, org, can, userId, onBack }: { token: strin
                         <td className="py-1 pr-2 text-right">{money(l.amountTzs)}</td>
                         <td className="py-1 pr-2">
                           {l.consumption && `${l.consumption.sourceType === 'gym_checkin' ? 'Gym visit' : 'Trainer session'} on ${l.consumption.businessDate} · value ${money(l.consumption.grossTzs)} · sponsor ${money(l.consumption.sponsorTzs)} · ${l.consumption.status}`}
-                          {l.entitlement && `${l.entitlement.passTier} pass · list ${money(l.entitlement.listPriceTzs)} · fee ${money(l.entitlement.feeTzs)} · sponsor ${money(l.entitlement.sponsorTzs)} · member ${money(l.entitlement.memberTzs)} · ${l.entitlement.status}`}
+                          {l.entitlement && `${l.entitlement.passTier} pass · list ${money(l.entitlement.listPriceTzs)} · fee ${money(l.entitlement.feeTzs)}${BASIS[l.entitlement.priceBasis ?? ''] ? ` (${BASIS[l.entitlement.priceBasis ?? '']})` : ''} · sponsor ${money(l.entitlement.sponsorTzs)} · member ${money(l.entitlement.memberTzs)} · ${l.entitlement.status}`}
                           {!l.consumption && !l.entitlement && (l.kind === 'fee' ? 'The agreement’s platform fee' : 'A correction')}
                         </td>
                         <td className="py-1">
@@ -506,7 +509,7 @@ function OrganizationBilling({ token, org, can, userId, onBack }: { token: strin
                   <ul className="space-y-1">
                     {agreements?.agreements.map(a => (
                       <li key={a.id} className="flex flex-wrap items-center justify-between gap-2">
-                        <span>{a.reference} · {day(a.effectiveFrom)} to {a.effectiveTo ? day(a.effectiveTo) : 'open'}{a.platformFeeTzs ? ` · fee ${money(a.platformFeeTzs)}` : ''}</span>
+                        <span>{a.reference} · {day(a.effectiveFrom)} to {a.effectiveTo ? day(a.effectiveTo) : 'open'}{a.platformFeeTzs ? ` · fee ${money(a.platformFeeTzs)}` : ''}{ratesText(a.passRates) ? ` · pass rates: ${ratesText(a.passRates)}` : ''}</span>
                         <span className="flex items-center gap-2">
                           <Badge tone={a.status === 'active' ? 'success' : 'gray'}>{a.status === 'active' ? 'In force' : a.status === 'draft' ? 'Draft' : 'Ended'}</Badge>
                           {a.status === 'draft' && <Button size="sm" disabled={busy || !can.bill} onClick={() => run(async () => { await api.activateB2BAgreement(token, a.id); }, 'Could not activate the agreement.')} data-testid={`agreement-activate-${a.id}`}>Activate</Button>}
@@ -523,6 +526,14 @@ function OrganizationBilling({ token, org, can, userId, onBack }: { token: strin
                     <Field label="Platform fee a month, TZS incl. VAT (optional)"><input className="ui-input" inputMode="numeric" value={draft.platformFee} onChange={e => setDraft({ ...draft, platformFee: e.target.value })} data-testid="agreement-fee" /></Field>
                     <Field label="Usual VAT rate % (optional)" hint="Offered when an invoice is issued."><input className="ui-input" inputMode="decimal" value={draft.vatPct} onChange={e => setDraft({ ...draft, vatPct: e.target.value })} /></Field>
                   </div>
+                  <div className="space-y-2">
+                    <div className="text-xs text-[var(--color-fg-tertiary)]">Sponsored pass rate per person per month, TZS (optional). A tier left empty uses the pass price less the programme's discount; a fee set on a benefit comes first.</div>
+                    <div className="grid gap-3 sm:grid-cols-4">
+                      {Object.keys(draft.rates).map(tier => (
+                        <Field key={tier} label={tier[0].toUpperCase() + tier.slice(1)}><input className="ui-input" inputMode="numeric" value={draft.rates[tier]} onChange={e => setDraft({ ...draft, rates: { ...draft.rates, [tier]: e.target.value } })} data-testid={`agreement-rate-${tier}`} /></Field>
+                      ))}
+                    </div>
+                  </div>
                   <Button size="sm" disabled={busy || !can.bill || !draft.effectiveFrom} data-testid="agreement-create"
                     onClick={() => run(async () => {
                       const { agreement } = await api.createB2BAgreement(token, org.id, {
@@ -530,6 +541,7 @@ function OrganizationBilling({ token, org, can, userId, onBack }: { token: strin
                         platformFeeTzs: draft.platformFee.trim() ? whole(draft.platformFee) : null,
                         vatRateBps: draft.vatPct.trim() ? Math.round(Number(draft.vatPct) * 100) : null,
                         contractReference: draft.contractReference.trim() || null,
+                        passRates: Object.fromEntries(Object.entries(draft.rates).filter(([, v]) => v.trim()).map(([k, v]) => [k, Number.isNaN(whole(v)) ? -1 : whole(v)])),
                       });
                       return `${agreement.reference} drafted. Activate it to put it in force.`;
                     }, 'Could not draft the agreement.')}>Draft agreement</Button>

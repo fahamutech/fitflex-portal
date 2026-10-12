@@ -467,7 +467,7 @@ function Programmes({ token, mine }: { token: string; mine: Mine }) {
                       {benefits[p.id].map(b => (
                         <tr key={b.id} className="border-b border-[var(--color-border-secondary)]">
                           <td className="py-2 pr-3 font-medium">{b.name}</td>
-                          <td className="py-2 pr-3">{types[b.benefitType]?.label ?? b.benefitType}{b.passTier ? ` · ${b.passTier}` : ''}</td>
+                          <td className="py-2 pr-3">{types[b.benefitType]?.label ?? b.benefitType}{b.passTier ? ` · ${b.passTier}` : ''}{b.fixedFeeTzs ? ` · TZS ${b.fixedFeeTzs.toLocaleString('en-US')} a person a month` : ''}</td>
                           <td className="py-2 pr-3">{b.fundingSummary}</td>
                           <td className="py-2 pr-3">{USAGE(b)}</td>
                           <td className="py-2"><Badge tone={TONE[b.status] ?? 'gray'}>{b.status}</Badge></td>
