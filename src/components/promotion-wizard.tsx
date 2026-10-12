@@ -164,7 +164,7 @@ export function PromotionWizard({ editId, onClose, onSaved }: { editId?: string 
   if (error && !ref) {
     return (
       <div className="space-y-4" data-testid="promotion-wizard">
-        <button onClick={onClose} className="-ml-2 flex min-h-10 items-center gap-1.5 px-2 text-sm text-[var(--color-fg-tertiary)] hover:text-[var(--color-fg-primary)]" data-testid="wizard-cancel"><ArrowLeft className="h-4 w-4" />{t('pro.back')}</button>
+        <Button variant="link" onClick={onClose} className="-ml-2 h-auto min-h-10 gap-1.5 px-2 text-sm font-normal text-[var(--color-fg-tertiary)] hover:text-[var(--color-fg-primary)] hover:no-underline" data-testid="wizard-cancel"><ArrowLeft className="h-4 w-4" />{t('pro.back')}</Button>
         <Alert tone="error"><span className="flex flex-wrap items-center justify-between gap-2">{error}<Button size="sm" variant="secondary" onClick={() => setReload(n => n + 1)} data-testid="wizard-retry">{t('pro.retry')}</Button></span></Alert>
       </div>
     );
@@ -172,9 +172,9 @@ export function PromotionWizard({ editId, onClose, onSaved }: { editId?: string 
 
   return (
     <div className="space-y-6" data-testid="promotion-wizard">
-      <button onClick={onClose} className="-ml-2 flex min-h-10 items-center gap-1.5 px-2 text-sm text-[var(--color-fg-tertiary)] hover:text-[var(--color-fg-primary)]" data-testid="wizard-cancel">
+      <Button variant="link" onClick={onClose} className="-ml-2 h-auto min-h-10 gap-1.5 px-2 text-sm font-normal text-[var(--color-fg-tertiary)] hover:text-[var(--color-fg-primary)] hover:no-underline" data-testid="wizard-cancel">
         <ArrowLeft className="h-4 w-4" />{t('pro.back')}
-      </button>
+      </Button>
       <div>
         <h1 className="text-xl font-semibold text-[var(--color-fg-primary)]">{editId ? t('pro.wiz.titleEdit') : t('pro.wiz.title')}</h1>
         <p className="text-sm text-[var(--color-fg-tertiary)]">{t('pro.wiz.description')}</p>
@@ -396,7 +396,7 @@ function CommercialStep({ d, set, campaigns }: { d: Draft; set: (p: Partial<Draf
               {d.partner && (
                 <p className="flex items-center justify-between rounded-[var(--radius-md)] bg-[var(--color-bg-secondary)] p-2 text-sm" data-testid="wizard-partner-selected">
                   <span className="min-w-0 [overflow-wrap:anywhere]">{d.partner.name}</span>
-                  <button type="button" className="min-h-10 shrink-0 px-2 text-xs text-[var(--color-fg-tertiary)] hover:underline" onClick={() => set({ partner: null })}>{t('pro.wiz.commercial.clear')}</button>
+                  <Button type="button" variant="link" className="h-auto min-h-10 shrink-0 px-2 text-xs font-normal text-[var(--color-fg-tertiary)]" onClick={() => set({ partner: null })}>{t('pro.wiz.commercial.clear')}</Button>
                 </p>
               )}
               <Input type="search" placeholder={t('pro.wiz.commercial.partnerSearch')} aria-label={t('pro.wiz.commercial.partnerSearch')} value={q} onChange={e => setQ(e.target.value)} data-testid="wizard-partner-search" />
