@@ -4,7 +4,7 @@ import { Check, Gift, History, Lock, PackageCheck, RefreshCw, RotateCcw, X } fro
 import { useApp } from '../../app/providers';
 import { api, ApiError, ChallengeApiScope, ChallengeScope, RewardAward, RewardQueue as Queue, RewardStatus } from '@/lib/api';
 import { reasonLabel, STATUS, typeLabel } from '@/lib/rewards';
-import { Alert, Badge, Button, Card, CardContent, Field, PageHeader, Spinner } from '@/components/shared';
+import { Alert, Badge, Button, Card, CardContent, Field, PageHeader, Spinner, Table, TBody, Td, Th, THead, Tr } from '@/components/shared';
 import { Dialog } from '@/components/dialog';
 
 const TABS: RewardStatus[] = ['pending', 'approved', 'issued', 'rejected'];
@@ -64,7 +64,7 @@ export function RewardQueue({ scope: role, title, description, organizationId }:
       {challengeId && (
         <Alert tone="info">
           Showing rewards from {challengeName ?? 'one challenge'}.{' '}
-          <button className="font-medium underline" onClick={() => { history.replaceState(null, '', window.location.pathname); setChallengeId(null); }}>Show all</button>
+          <Button variant="link" className="inline h-auto px-0 font-medium text-inherit underline" onClick={() => { history.replaceState(null, '', window.location.pathname); setChallengeId(null); }}>Show all</Button>
         </Alert>
       )}
       {error && <Alert tone="error">{error}</Alert>}
@@ -86,55 +86,53 @@ export function RewardQueue({ scope: role, title, description, organizationId }:
               {tab === 'pending' ? 'Nothing waiting. Rewards appear here as members earn them.' : `No ${STATUS[tab].label.toLowerCase()} rewards.`}
             </p>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[760px] text-sm" data-testid="reward-table">
-                <thead className="text-left text-xs text-[var(--color-fg-tertiary)]">
-                  <tr className="border-b border-[var(--color-border-secondary)]">
-                    <th className="px-4 py-2.5 font-medium">Member</th>
-                    <th className="px-4 py-2.5 font-medium">Reward</th>
-                    <th className="px-4 py-2.5 font-medium">Challenge</th>
-                    <th className="px-4 py-2.5 font-medium">Why</th>
-                    <th className="px-4 py-2.5 font-medium">{tab === 'issued' ? 'Issued' : 'Earned'}</th>
-                    <th className="px-4 py-2.5 font-medium"><span className="sr-only">Actions</span></th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-[var(--color-border-secondary)]">
-                  {rows.map(r => (
-                    <tr key={r.id} data-testid={`reward-${r.id}`}>
-                      <td className="px-4 py-3">
-                        <p className="font-medium">{r.member.displayName ?? 'Member'}</p>
-                        {r.member.department && <p className="text-xs text-[var(--color-fg-quaternary)]">{r.member.department}</p>}
-                      </td>
-                      <td className="min-w-[180px] px-4 py-3">
-                        <p className="font-medium">{r.reward.label}</p>
-                        <p className="text-xs text-[var(--color-fg-quaternary)]">{typeLabel(r.reward.type)}{r.reward.value ? ` · ${r.reward.value}` : ''}</p>
-                        {r.status === 'issued' && r.reference && <p className="text-xs">Ref: <span className="font-mono">{r.reference}</span></p>}
-                        {r.status === 'rejected' && r.note && <p className="text-xs text-[var(--color-fg-error-primary,inherit)]">{r.note}</p>}
-                      </td>
-                      <td className="px-4 py-3">{r.challenge.name ?? '—'}</td>
-                      <td className="px-4 py-3">{reasonLabel(r.reward.rule, r.rank)}</td>
-                      <td className="px-4 py-3 whitespace-nowrap">{when(r.status === 'issued' ? r.issuedAt : r.earnedAt)}</td>
-                      <td className="whitespace-nowrap px-4 py-3">
-                        <div className="flex justify-end gap-2">
-                          {r.status === 'pending' && <>
-                            <Button size="sm" onClick={() => setStep({ award: r, to: 'approved' })} data-testid="reward-approve"><Check className="h-4 w-4" />Approve</Button>
-                            <Button size="sm" variant="secondary" onClick={() => setStep({ award: r, to: 'rejected' })}><X className="h-4 w-4" />Reject</Button>
-                          </>}
-                          {r.status === 'approved' && <>
-                            <Button size="sm" onClick={() => setStep({ award: r, to: 'issued' })} data-testid="reward-issue"><PackageCheck className="h-4 w-4" />Mark issued</Button>
-                            <Button size="sm" variant="secondary" onClick={() => setStep({ award: r, to: 'rejected' })}><X className="h-4 w-4" />Reject</Button>
-                          </>}
-                          {r.status === 'rejected' && (
-                            <Button size="sm" variant="secondary" onClick={() => setStep({ award: r, to: 'pending' })}><RotateCcw className="h-4 w-4" />Reopen</Button>
-                          )}
-                          <Button size="sm" variant="secondary" aria-label={`History for ${r.reward.label}`} onClick={() => setTrail(r)}><History className="h-4 w-4" /></Button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <Table aria-label={title} wrapperClassName="rounded-none border-0" className="min-w-[760px]" data-testid="reward-table">
+              <THead>
+                <Tr>
+                  <Th>Member</Th>
+                  <Th>Reward</Th>
+                  <Th>Challenge</Th>
+                  <Th>Why</Th>
+                  <Th>{tab === 'issued' ? 'Issued' : 'Earned'}</Th>
+                  <Th><span className="sr-only">Actions</span></Th>
+                </Tr>
+              </THead>
+              <TBody>
+                {rows.map(r => (
+                  <Tr key={r.id} data-testid={`reward-${r.id}`}>
+                    <Td>
+                      <p className="font-medium">{r.member.displayName ?? 'Member'}</p>
+                      {r.member.department && <p className="text-xs text-[var(--color-fg-quaternary)]">{r.member.department}</p>}
+                    </Td>
+                    <Td className="min-w-[180px]">
+                      <p className="font-medium">{r.reward.label}</p>
+                      <p className="text-xs text-[var(--color-fg-quaternary)]">{typeLabel(r.reward.type)}{r.reward.value ? ` · ${r.reward.value}` : ''}</p>
+                      {r.status === 'issued' && r.reference && <p className="text-xs">Ref: <span className="font-mono">{r.reference}</span></p>}
+                      {r.status === 'rejected' && r.note && <p className="text-xs text-[var(--color-fg-error-primary,inherit)]">{r.note}</p>}
+                    </Td>
+                    <Td>{r.challenge.name ?? '—'}</Td>
+                    <Td>{reasonLabel(r.reward.rule, r.rank)}</Td>
+                    <Td className="whitespace-nowrap">{when(r.status === 'issued' ? r.issuedAt : r.earnedAt)}</Td>
+                    <Td className="whitespace-nowrap">
+                      <div className="flex justify-end gap-2">
+                        {r.status === 'pending' && <>
+                          <Button size="sm" onClick={() => setStep({ award: r, to: 'approved' })} data-testid="reward-approve"><Check className="h-4 w-4" />Approve</Button>
+                          <Button size="sm" variant="secondary" onClick={() => setStep({ award: r, to: 'rejected' })}><X className="h-4 w-4" />Reject</Button>
+                        </>}
+                        {r.status === 'approved' && <>
+                          <Button size="sm" onClick={() => setStep({ award: r, to: 'issued' })} data-testid="reward-issue"><PackageCheck className="h-4 w-4" />Mark issued</Button>
+                          <Button size="sm" variant="secondary" onClick={() => setStep({ award: r, to: 'rejected' })}><X className="h-4 w-4" />Reject</Button>
+                        </>}
+                        {r.status === 'rejected' && (
+                          <Button size="sm" variant="secondary" onClick={() => setStep({ award: r, to: 'pending' })}><RotateCcw className="h-4 w-4" />Reopen</Button>
+                        )}
+                        <Button size="sm" variant="secondary" aria-label={`History for ${r.reward.label}`} onClick={() => setTrail(r)}><History className="h-4 w-4" /></Button>
+                      </div>
+                    </Td>
+                  </Tr>
+                ))}
+              </TBody>
+            </Table>
           )}
         </CardContent>
       </Card>
