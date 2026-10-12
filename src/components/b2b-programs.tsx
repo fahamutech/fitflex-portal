@@ -402,9 +402,9 @@ export function B2BPrograms({ token, org, beneficiaries, onChanged }: { token: s
           )
         ) : (
           <div className="space-y-4" data-testid="program-detail">
-            <button className="flex items-center gap-1 text-xs text-[var(--color-fg-quaternary)]" onClick={() => { setOpen(null); setProgramForm(null); setBenefitForm(null); setEligibility(null); setUsage(null); }}>
+            <Button variant="link" className="h-auto gap-1 px-0 text-xs font-normal text-[var(--color-fg-quaternary)] hover:no-underline" onClick={() => { setOpen(null); setProgramForm(null); setBenefitForm(null); setEligibility(null); setUsage(null); }}>
               <ArrowLeft className="h-3 w-3" />All programmes
-            </button>
+            </Button>
             {programForm ? programFormView : (
               <>
                 <div className="flex flex-wrap items-center justify-between gap-2">
