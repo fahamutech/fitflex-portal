@@ -227,6 +227,7 @@ test.describe('one organisation', () => {
     await expect.poll(() => mock.writes(/organizations\/org-1\/agreements$/).length).toBe(1);
     expect(mock.writes(/organizations\/org-1\/agreements$/)[0].body).toEqual({
       effectiveFrom: '2026-12-01', prepaidTermsDays: 7, usageTermsDays: 21, platformFeeTzs: 75000, vatRateBps: 1800, contractReference: 'C-77',
+      passRates: {}, // sent since pass-rate overrides were added; none are set here
     });
     await page.getByTestId('agreement-activate-agr-1').click();
     await expect.poll(() => mock.writes(/agreements\/agr-1\/activate$/).length).toBe(1);

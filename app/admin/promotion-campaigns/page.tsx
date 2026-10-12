@@ -8,7 +8,7 @@ import { MetricTiles, NotTrackedNotice, UnverifiedNotice } from '@/components/pr
 import { TYPE_KEY as ENTITY_TYPE_KEY } from '@/lib/moderation';
 import { PLACEMENT_KEY, STATUS_KEY, STATUS_TONE, TYPE_KEY, addDays, dateTime, eatToday, errorBody, errorKey, scopeSummary } from '@/lib/promotions';
 import type { MessageKey } from '@/lib/i18n';
-import { Alert, Badge, Button, Card, CardContent, CardHeader, Field, PageHeader, Spinner } from '@/components/shared';
+import { Alert, Badge, Button, Card, CardContent, CardHeader, Field, PageHeader, Spinner, Table, TBody, Td, Th, THead, Tr } from '@/components/shared';
 import { Dialog } from '@/components/dialog';
 import { DateTimeInput } from '@/components/datetime-input';
 import { AreaPicker } from '@/components/area-picker';
@@ -63,23 +63,21 @@ export default function CampaignsPage() {
         <CardContent className="p-0">
           {rows == null ? <div className="p-6"><Spinner className="h-6 w-6" /></div> : rows.length === 0 ? (error ? null :
             <p className="p-10 text-center text-sm text-[var(--color-fg-quaternary)]" data-testid="campaign-empty">{t('pro.camp.empty')}</p>) : (
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[640px] text-sm" data-testid="campaign-table">
-                <thead className="text-left text-xs text-[var(--color-fg-tertiary)]"><tr className="border-b border-[var(--color-border-secondary)]">
-                  <th className="px-4 py-2.5 font-medium">{t('mod.col.name')}</th><th className="px-4 py-2.5 font-medium">{t('pro.col.period')}</th>
-                  <th className="px-4 py-2.5 font-medium">{t('pro.camp.promotions')}</th><th className="px-4 py-2.5 font-medium">{t('pro.col.status')}</th></tr></thead>
-                <tbody className="divide-y divide-[var(--color-border-secondary)]">
-                  {rows.map(c => (
-                    <tr key={c.id} tabIndex={0} onKeyDown={e => { if (e.key === 'Enter') open(c.id); }} className="cursor-pointer hover:bg-[var(--color-bg-secondary)]" onClick={() => open(c.id)} data-testid={`campaign-row-${c.id}`}>
-                      <td className="max-w-[20rem] px-4 py-3 font-medium [overflow-wrap:anywhere]">{c.name}</td>
-                      <td className="whitespace-nowrap px-4 py-3 text-xs">{dateTime(c.startsAt)}<br />→ {dateTime(c.endsAt)}</td>
-                      <td className="px-4 py-3 tabular-nums">{c.promotionCount ?? 0}</td>
-                      <td className="px-4 py-3"><Badge tone={STATUS_C[c.status].tone} dot>{t(STATUS_C[c.status].key)}</Badge></td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <Table aria-label={t('pro.camp.title')} wrapperClassName="rounded-none border-0" className="min-w-[640px]" data-testid="campaign-table">
+              <THead><Tr>
+                <Th>{t('mod.col.name')}</Th><Th>{t('pro.col.period')}</Th>
+                <Th>{t('pro.camp.promotions')}</Th><Th>{t('pro.col.status')}</Th></Tr></THead>
+              <TBody>
+                {rows.map(c => (
+                  <Tr key={c.id} tabIndex={0} onKeyDown={e => { if (e.key === 'Enter') open(c.id); }} className="cursor-pointer hover:bg-[var(--color-bg-secondary)]" onClick={() => open(c.id)} data-testid={`campaign-row-${c.id}`}>
+                    <Td className="max-w-[20rem] font-medium [overflow-wrap:anywhere]">{c.name}</Td>
+                    <Td className="whitespace-nowrap text-xs">{dateTime(c.startsAt)}<br />→ {dateTime(c.endsAt)}</Td>
+                    <Td className="tabular-nums">{c.promotionCount ?? 0}</Td>
+                    <Td><Badge tone={STATUS_C[c.status].tone} dot>{t(STATUS_C[c.status].key)}</Badge></Td>
+                  </Tr>
+                ))}
+              </TBody>
+            </Table>
           )}
         </CardContent>
       </Card>
@@ -132,7 +130,7 @@ function CampaignView({ id, areas, canManage, onBack }: { id: string; areas: Geo
   const c = data?.campaign;
   return (
     <div className="space-y-6" data-testid="campaign-detail">
-      <button onClick={onBack} className="-ml-2 flex min-h-10 items-center gap-1.5 px-2 text-sm text-[var(--color-fg-tertiary)] hover:text-[var(--color-fg-primary)]" data-testid="campaign-back"><ArrowLeft className="h-4 w-4" />{t('pro.back')}</button>
+      <Button variant="link" onClick={onBack} className="-ml-2 h-auto min-h-10 gap-1.5 px-2 text-sm font-normal text-[var(--color-fg-tertiary)] hover:text-[var(--color-fg-primary)] hover:no-underline" data-testid="campaign-back"><ArrowLeft className="h-4 w-4" />{t('pro.back')}</Button>
       {error && <Alert tone="error"><span className="flex flex-wrap items-center justify-between gap-2">{error}<Button size="sm" variant="secondary" onClick={load} data-testid="campaign-retry">{t('pro.retry')}</Button></span></Alert>}
       {notice && <Alert tone="success">{notice}</Alert>}
       {!data && !error && <Spinner className="h-6 w-6" />}

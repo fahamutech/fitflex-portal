@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 import {
   api, ApiError, B2BCollectionsQueue, B2BOrgPaying, B2BPaymentInstructions, B2BPaymentNotice, B2BSponsorInvoice,
 } from '@/lib/api';
-import { Alert, Badge, Button, Card, CardContent, Field, Spinner } from '@/components/shared';
+import { Alert, Badge, Button, Card, CardContent, Checkbox, Field, Input, Select, Spinner, Table, TBody, Td, Textarea, Th, THead, Tr } from '@/components/shared';
 import { Dialog } from '@/components/dialog';
 import { PAYMENT_METHOD, day } from '@/components/b2b-finance';
 import { money } from '@/lib/admin-utils';
@@ -134,25 +134,23 @@ export function OrgPaying({ token, orgId, invoices, preselect, onChanged }: {
                   <Field label="Which invoices is it for?" hint="Optional. Leave empty and FitFlex applies it to your oldest invoices first.">
                     <div className="max-h-40 space-y-1 overflow-auto">
                       {open.map(i => (
-                        <label key={i.id} className="flex items-center gap-2 text-sm">
-                          <input type="checkbox" aria-label={i.number ?? i.id} checked={f.invoiceIds.includes(i.id)} onChange={() => toggle(i.id)} />
-                          <span>{i.number} · {money(i.outstandingTzs ?? 0)} owed{i.dueDate ? ` · due ${day(i.dueDate)}` : ''}</span>
-                        </label>
+                        <Checkbox key={i.id} aria-label={i.number ?? i.id} checked={f.invoiceIds.includes(i.id)} onChange={() => toggle(i.id)}
+                          label={<span className="font-normal text-[var(--color-fg-secondary)]">{i.number} · {money(i.outstandingTzs ?? 0)} owed{i.dueDate ? ` · due ${day(i.dueDate)}` : ''}</span>} />
                       ))}
                     </div>
                   </Field>
                 )}
                 <div className="grid gap-3 sm:grid-cols-2">
-                  <Field label="Amount paid (TZS)"><input className="ui-input" inputMode="numeric" required value={f.amount} onChange={e => setF({ ...f, amount: e.target.value })} data-testid="notice-amount" /></Field>
-                  <Field label="Date paid"><input className="ui-input" type="date" required max={todayEat()} value={f.paidOn} onChange={e => setF({ ...f, paidOn: e.target.value })} /></Field>
+                  <Field label="Amount paid (TZS)"><Input inputMode="numeric" required value={f.amount} onChange={e => setF({ ...f, amount: e.target.value })} data-testid="notice-amount" /></Field>
+                  <Field label="Date paid"><Input type="date" required max={todayEat()} value={f.paidOn} onChange={e => setF({ ...f, paidOn: e.target.value })} /></Field>
                   <Field label="How">
-                    <select className="ui-input" value={f.method} onChange={e => setF({ ...f, method: e.target.value })}>
+                    <Select value={f.method} onChange={e => setF({ ...f, method: e.target.value })}>
                       {Object.entries(PAYMENT_METHOD).map(([k, label]) => <option key={k} value={k}>{label}</option>)}
-                    </select>
+                    </Select>
                   </Field>
-                  <Field label="Bank or mobile-money reference"><input className="ui-input" required maxLength={200} value={f.reference} onChange={e => setF({ ...f, reference: e.target.value })} data-testid="notice-reference" /></Field>
+                  <Field label="Bank or mobile-money reference"><Input required maxLength={200} value={f.reference} onChange={e => setF({ ...f, reference: e.target.value })} data-testid="notice-reference" /></Field>
                 </div>
-                <Field label="Note (optional)"><input className="ui-input" maxLength={1000} value={f.note} onChange={e => setF({ ...f, note: e.target.value })} /></Field>
+                <Field label="Note (optional)"><Input maxLength={1000} value={f.note} onChange={e => setF({ ...f, note: e.target.value })} /></Field>
                 <Field label="Proof of payment (optional)" hint="A photo or screenshot of the slip or confirmation message.">
                   <input type="file" accept="image/*" className="text-sm" onChange={e => setF({ ...f, proof: e.target.files?.[0] ?? null })} />
                 </Field>
@@ -167,30 +165,30 @@ export function OrgPaying({ token, orgId, invoices, preselect, onChanged }: {
         <CardContent className="py-4">
           <div className="mb-2 text-sm font-semibold">Your payment notices</div>
           {paying.notices.length === 0 ? <p className="text-sm text-[var(--color-fg-quaternary)]">None yet.</p> : (
-            <table className="w-full text-sm" data-testid="org-notices">
-              <thead>
-                <tr className="border-b border-[var(--color-border-secondary)] text-left text-xs text-[var(--color-fg-quaternary)]">
-                  <th className="py-2 pr-3">Paid on</th><th className="py-2 pr-3">How</th><th className="py-2 pr-3">Reference</th><th className="py-2 pr-3">For</th>
-                  <th className="py-2 pr-3 text-right">Amount</th><th className="py-2 pr-3">Status</th><th className="py-2" />
-                </tr>
-              </thead>
-              <tbody>
+            <Table data-testid="org-notices" aria-label="Your payment notices">
+              <THead>
+                <Tr>
+                  <Th>Paid on</Th><Th>How</Th><Th>Reference</Th><Th>For</Th>
+                  <Th className="!text-right">Amount</Th><Th>Status</Th><Th />
+                </Tr>
+              </THead>
+              <TBody>
                 {paying.notices.map(n => (
-                  <tr key={n.id} className="border-b border-[var(--color-border-secondary)] align-top">
-                    <td className="py-2 pr-3 whitespace-nowrap">{day(n.paidOn)}</td>
-                    <td className="py-2 pr-3">{PAYMENT_METHOD[n.method] ?? n.method}</td>
-                    <td className="py-2 pr-3">{n.reference}</td>
-                    <td className="py-2 pr-3">{n.invoices?.length ? n.invoices.map(i => i.number).join(', ') : 'Oldest invoices first'}</td>
-                    <td className="py-2 pr-3 text-right">{money(n.amountTzs)}</td>
-                    <td className="py-2 pr-3">
+                  <Tr key={n.id} className="align-top">
+                    <Td className="whitespace-nowrap">{day(n.paidOn)}</Td>
+                    <Td>{PAYMENT_METHOD[n.method] ?? n.method}</Td>
+                    <Td>{n.reference}</Td>
+                    <Td>{n.invoices?.length ? n.invoices.map(i => i.number).join(', ') : 'Oldest invoices first'}</Td>
+                    <Td className="text-right">{money(n.amountTzs)}</Td>
+                    <Td>
                       <Badge tone={NOTICE_TONE[n.status]}>{NOTICE_LABEL[n.status]}</Badge>
                       {n.status === 'rejected' && n.decisionNote && <div className="mt-1 text-xs text-[var(--color-fg-tertiary)]">{n.decisionNote}</div>}
-                    </td>
-                    <td className="py-2 text-right">{n.status === 'submitted' && paying.canPay && <Button variant="secondary" size="sm" onClick={() => withdraw(n.id)}>Withdraw</Button>}</td>
-                  </tr>
+                    </Td>
+                    <Td className="text-right">{n.status === 'submitted' && paying.canPay && <Button variant="secondary" size="sm" onClick={() => withdraw(n.id)}>Withdraw</Button>}</Td>
+                  </Tr>
                 ))}
-              </tbody>
-            </table>
+              </TBody>
+            </Table>
           )}
         </CardContent>
       </Card>
@@ -259,73 +257,73 @@ export function CollectionsPanel({ token, can, onOpenOrganization, onChanged }: 
         <div>
           <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-[var(--color-fg-quaternary)]">Payment notices to check</div>
           {q.notices.length === 0 ? <p className="text-sm text-[var(--color-fg-quaternary)]">Nothing to check.</p> : (
-            <table className="w-full text-sm" data-testid="notices-to-check">
-              <thead>
-                <tr className="border-b border-[var(--color-border-secondary)] text-left text-xs text-[var(--color-fg-quaternary)]">
-                  <th className="py-2 pr-3">Organisation</th><th className="py-2 pr-3">Paid on</th><th className="py-2 pr-3">How</th><th className="py-2 pr-3">Reference</th>
-                  <th className="py-2 pr-3">For</th><th className="py-2 pr-3 text-right">Amount</th><th className="py-2" />
-                </tr>
-              </thead>
-              <tbody>
+            <Table data-testid="notices-to-check" aria-label="Payment notices to check">
+              <THead>
+                <Tr>
+                  <Th>Organisation</Th><Th>Paid on</Th><Th>How</Th><Th>Reference</Th>
+                  <Th>For</Th><Th className="!text-right">Amount</Th><Th />
+                </Tr>
+              </THead>
+              <TBody>
                 {q.notices.map(n => (
-                  <tr key={n.id} className="border-b border-[var(--color-border-secondary)] align-top">
-                    <td className="py-2 pr-3"><button className="font-medium text-[var(--color-fg-brand)]" onClick={() => onOpenOrganization({ id: n.organizationId, name: n.organizationName ?? n.organizationId })}>{n.organizationName ?? n.organizationId}</button></td>
-                    <td className="py-2 pr-3 whitespace-nowrap">{day(n.paidOn)}</td>
-                    <td className="py-2 pr-3">{PAYMENT_METHOD[n.method] ?? n.method}</td>
-                    <td className="py-2 pr-3">
+                  <Tr key={n.id} className="align-top">
+                    <Td><Button variant="link" className="h-auto px-0 text-left font-medium" onClick={() => onOpenOrganization({ id: n.organizationId, name: n.organizationName ?? n.organizationId })}>{n.organizationName ?? n.organizationId}</Button></Td>
+                    <Td className="whitespace-nowrap">{day(n.paidOn)}</Td>
+                    <Td>{PAYMENT_METHOD[n.method] ?? n.method}</Td>
+                    <Td>
                       {n.reference}
                       {n.note && <div className="text-xs text-[var(--color-fg-quaternary)]">{n.note}</div>}
                       {n.proofUrl && <a className="text-xs text-[var(--color-fg-brand)]" href={n.proofUrl} target="_blank" rel="noreferrer">View proof</a>}
-                    </td>
-                    <td className="py-2 pr-3">{n.invoices?.length ? n.invoices.map(i => `${i.number} (${money(i.outstandingTzs)} owed)`).join(', ') : 'Oldest invoices first'}</td>
-                    <td className="py-2 pr-3 text-right">{money(n.amountTzs)}</td>
-                    <td className="py-2 text-right whitespace-nowrap">
+                    </Td>
+                    <Td>{n.invoices?.length ? n.invoices.map(i => `${i.number} (${money(i.outstandingTzs)} owed)`).join(', ') : 'Oldest invoices first'}</Td>
+                    <Td className="text-right">{money(n.amountTzs)}</Td>
+                    <Td className="text-right whitespace-nowrap">
                       {can.pay && (
                         <span className="inline-flex gap-2">
                           <Button size="sm" onClick={() => setDeciding({ notice: n, action: 'confirm' })} data-testid={`confirm-${n.id}`}>Confirm</Button>
                           <Button size="sm" variant="secondary" onClick={() => setDeciding({ notice: n, action: 'reject' })}>Not found</Button>
                         </span>
                       )}
-                    </td>
-                  </tr>
+                    </Td>
+                  </Tr>
                 ))}
-              </tbody>
-            </table>
+              </TBody>
+            </Table>
           )}
         </div>
 
         <div>
           <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-[var(--color-fg-quaternary)]">Overdue invoices</div>
           {q.overdue.length === 0 ? <p className="text-sm text-[var(--color-fg-quaternary)]">Nothing is overdue.</p> : (
-            <table className="w-full text-sm" data-testid="overdue-invoices">
-              <thead>
-                <tr className="border-b border-[var(--color-border-secondary)] text-left text-xs text-[var(--color-fg-quaternary)]">
-                  <th className="py-2 pr-3">Organisation</th><th className="py-2 pr-3">Invoice</th><th className="py-2 pr-3">Due</th><th className="py-2 pr-3 text-right">Days late</th>
-                  <th className="py-2 pr-3 text-right">Owed</th><th className="py-2 pr-3">Last reminder</th><th className="py-2" />
-                </tr>
-              </thead>
-              <tbody>
+            <Table data-testid="overdue-invoices" aria-label="Overdue invoices">
+              <THead>
+                <Tr>
+                  <Th>Organisation</Th><Th>Invoice</Th><Th>Due</Th><Th className="!text-right">Days late</Th>
+                  <Th className="!text-right">Owed</Th><Th>Last reminder</Th><Th />
+                </Tr>
+              </THead>
+              <TBody>
                 {q.overdue.map(i => (
-                  <tr key={i.id} className="border-b border-[var(--color-border-secondary)]">
-                    <td className="py-2 pr-3">
-                      <button className="font-medium text-[var(--color-fg-brand)]" onClick={() => onOpenOrganization({ id: i.organizationId, name: i.organizationName ?? i.organizationId })}>{i.organizationName ?? i.organizationId}</button>
+                  <Tr key={i.id}>
+                    <Td>
+                      <Button variant="link" className="h-auto px-0 text-left font-medium" onClick={() => onOpenOrganization({ id: i.organizationId, name: i.organizationName ?? i.organizationId })}>{i.organizationName ?? i.organizationId}</Button>
                       {i.onHold && <span className="ml-2"><Badge tone="danger">On hold</Badge></span>}
-                    </td>
-                    <td className="py-2 pr-3">{i.number}</td>
-                    <td className="py-2 pr-3 whitespace-nowrap">{day(i.dueDate)}</td>
-                    <td className="py-2 pr-3 text-right">{i.daysOverdue}</td>
-                    <td className="py-2 pr-3 text-right">{money(i.outstandingTzs)}</td>
-                    <td className="py-2 pr-3">{i.lastReminder ? `${STAGE[i.lastReminder.stage] ?? i.lastReminder.stage} · ${day(i.lastReminder.sentAt)}` : 'None yet'}</td>
-                    <td className="py-2 text-right whitespace-nowrap">
+                    </Td>
+                    <Td>{i.number}</Td>
+                    <Td className="whitespace-nowrap">{day(i.dueDate)}</Td>
+                    <Td className="text-right">{i.daysOverdue}</Td>
+                    <Td className="text-right">{money(i.outstandingTzs)}</Td>
+                    <Td>{i.lastReminder ? `${STAGE[i.lastReminder.stage] ?? i.lastReminder.stage} · ${day(i.lastReminder.sentAt)}` : 'None yet'}</Td>
+                    <Td className="text-right whitespace-nowrap">
                       <span className="inline-flex gap-2">
                         {can.bill && <Button size="sm" variant="secondary" onClick={() => remind(i.id, i.number)} data-testid={`remind-${i.id}`}>Remind now</Button>}
                         {can.approve && !i.onHold && <Button size="sm" variant="secondary" onClick={() => setHolding({ id: i.organizationId, name: i.organizationName ?? i.organizationId, onHold: true })}>Put on hold</Button>}
                       </span>
-                    </td>
-                  </tr>
+                    </Td>
+                  </Tr>
                 ))}
-              </tbody>
-            </table>
+              </TBody>
+            </Table>
           )}
           <p className="mt-2 text-xs text-[var(--color-fg-quaternary)]">
             Reminders go out automatically 3 days before the due day, on it, and 7, 14 and 30 days after. Nothing is put on hold automatically and no late fee is charged.
@@ -388,13 +386,13 @@ function DecideNotice({ token, notice, action, onClose, onDone }: { token: strin
         {action === 'confirm' ? (
           <>
             <Field label="Amount on the statement (TZS)" hint={`The organisation said ${money(notice.amountTzs)}. Record what actually arrived.`}>
-              <input className="ui-input" inputMode="numeric" required value={amount} onChange={e => setAmount(e.target.value)} data-testid="confirm-amount" />
+              <Input inputMode="numeric" required value={amount} onChange={e => setAmount(e.target.value)} data-testid="confirm-amount" />
             </Field>
-            <Field label="Note (optional, internal)"><input className="ui-input" maxLength={1000} value={text} onChange={e => setText(e.target.value)} /></Field>
+            <Field label="Note (optional, internal)"><Input maxLength={1000} value={text} onChange={e => setText(e.target.value)} /></Field>
             <p className="text-xs text-[var(--color-fg-quaternary)]">Only confirm once you have seen the money on the bank or mobile-money statement. This records the payment and settles the invoices.</p>
           </>
         ) : (
-          <Field label="Why" hint="The organisation sees this."><textarea className="ui-input" rows={3} required maxLength={500} value={text} onChange={e => setText(e.target.value)} data-testid="reject-reason" /></Field>
+          <Field label="Why" hint="The organisation sees this."><Textarea rows={3} required maxLength={500} value={text} onChange={e => setText(e.target.value)} data-testid="reject-reason" /></Field>
         )}
         <div className="flex justify-end gap-2 border-t border-[var(--color-border-secondary)] pt-3">
           <Button type="button" variant="secondary" onClick={onClose}>Cancel</Button>
@@ -427,7 +425,7 @@ function HoldDialog({ token, org, onClose, onDone }: { token: string; org: { id:
         {org.onHold ? (
           <>
             <p className="text-sm text-[var(--color-fg-tertiary)]">No new sponsored-pass invoices are prepared and pay-per-use benefits stop being funded until you lift it. Passes already paid for carry on. The organisation sees the reason.</p>
-            <Field label="Reason"><textarea className="ui-input" rows={2} required maxLength={500} value={reason} onChange={e => setReason(e.target.value)} data-testid="hold-reason" /></Field>
+            <Field label="Reason"><Textarea rows={2} required maxLength={500} value={reason} onChange={e => setReason(e.target.value)} data-testid="hold-reason" /></Field>
           </>
         ) : <p className="text-sm text-[var(--color-fg-tertiary)]">Sponsored passes and pay-per-use benefits resume straight away.</p>}
         <div className="flex justify-end gap-2 border-t border-[var(--color-border-secondary)] pt-3">
@@ -465,10 +463,10 @@ function PaymentDetailsDialog({ token, current, onClose, onDone }: { token: stri
         {error && <Alert tone="error">{error}</Alert>}
         <div className="grid gap-3 sm:grid-cols-2">
           {DETAIL_FIELDS.map(([k, label]) => (
-            <Field key={k} label={label}><input className="ui-input" value={f[k]} onChange={e => setF({ ...f, [k]: e.target.value })} data-testid={`details-${k}`} /></Field>
+            <Field key={k} label={label}><Input value={f[k]} onChange={e => setF({ ...f, [k]: e.target.value })} data-testid={`details-${k}`} /></Field>
           ))}
         </div>
-        <Field label="Anything else organisations should know (optional)"><textarea className="ui-input" rows={2} maxLength={1000} value={f.notes} onChange={e => setF({ ...f, notes: e.target.value })} /></Field>
+        <Field label="Anything else organisations should know (optional)"><Textarea rows={2} maxLength={1000} value={f.notes} onChange={e => setF({ ...f, notes: e.target.value })} /></Field>
         <div className="flex justify-end gap-2 border-t border-[var(--color-border-secondary)] pt-3">
           <Button type="button" variant="secondary" onClick={onClose}>Cancel</Button>
           <Button type="submit" disabled={busy} data-testid="details-save">Save</Button>

@@ -11,7 +11,7 @@ import {
   api, CommsChannel, CommsHistoryFilters, CommsMessage, CommsOutcome, CommsRecipient, CommsScope, CommsStats,
   CommsTimelineItem,
 } from '@/lib/api';
-import { Alert, Badge, Button, Card, EmptyState, Field, Input, PageHeader, Spinner } from './shared';
+import { Alert, Badge, Button, Card, EmptyState, Field, Input, PageHeader, Spinner, Table, TBody, Td, Th, THead, Tr } from './shared';
 import { Dialog } from './dialog';
 import { PURPOSES, T, errorText, fill, skipLabel, when } from './communication-shared';
 
@@ -181,34 +181,34 @@ export function MessageLog({ scope, token, t, gymId, onOpenMember }: {
       <FilterBar t={t} filters={filters} onChange={setFilters} show={{ search: true, category: true, type: true, dates: true }} />
       {paged.error && <Alert tone="error">{paged.error}</Alert>}
       {!paged.items ? <Spinner /> : !paged.items.length ? <Empty t={t} filtered={filtered} emptyKey="comms.history.noMessages" /> : (
-        <Card className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="text-left text-xs text-[var(--color-fg-quaternary)]">
-                <th className="px-4 py-2">{t('comms.history.at.created')}</th>
-                <th className="px-4 py-2">{t('comms.history.member')}</th>
-                <th className="px-4 py-2">{t('comms.history.message')}</th>
-                <th className="px-4 py-2">{t('comms.history.channelAndStatus')}</th>
-              </tr>
-            </thead>
-            <tbody>
+        <Card>
+          <Table wrapperClassName="rounded-none border-0">
+            <THead>
+              <Tr>
+                <Th>{t('comms.history.at.created')}</Th>
+                <Th>{t('comms.history.member')}</Th>
+                <Th>{t('comms.history.message')}</Th>
+                <Th>{t('comms.history.channelAndStatus')}</Th>
+              </Tr>
+            </THead>
+            <TBody>
               {paged.items.map(m => (
-                <tr key={m.id} className="border-t border-[var(--color-border-secondary)] align-top" data-testid={`log-${m.id}`}>
-                  <td className="whitespace-nowrap px-4 py-2 text-xs">{when(m.createdAt)}</td>
-                  <td className="px-4 py-2">
-                    <button type="button" className="text-left font-medium hover:underline" onClick={() => onOpenMember(m.memberId, m.memberName)} data-testid={`member-${m.memberId}`}>
+                <Tr key={m.id} className="align-top" data-testid={`log-${m.id}`}>
+                  <Td className="whitespace-nowrap text-xs">{when(m.createdAt)}</Td>
+                  <Td>
+                    <Button type="button" variant="link" className="h-auto px-0 text-left font-medium text-inherit hover:underline" onClick={() => onOpenMember(m.memberId, m.memberName)} data-testid={`member-${m.memberId}`}>
                       {m.memberName || t('comms.history.unknownMember')}
-                    </button>
-                  </td>
-                  <td className="px-4 py-2">
+                    </Button>
+                  </Td>
+                  <Td>
                     <span className="block max-w-xs truncate">{m.title}</span>
                     <span className="text-xs text-[var(--color-fg-quaternary)]">{[m.campaignName, t(`comms.purpose.${m.messageType}`)].filter(Boolean).join(' · ')}</span>
-                  </td>
-                  <td className="px-4 py-2"><StatusChip t={t} m={m} onOpen={setOpen} /></td>
-                </tr>
+                  </Td>
+                  <Td><StatusChip t={t} m={m} onOpen={setOpen} /></Td>
+                </Tr>
               ))}
-            </tbody>
-          </table>
+            </TBody>
+          </Table>
         </Card>
       )}
       <More t={t} paged={paged} />
@@ -234,9 +234,9 @@ export function Recipients({ scope, token, t, campaignId, onOpenMember }: {
           <Card className="divide-y divide-[var(--color-border-secondary)]">
             {paged.items.map((r: CommsRecipient) => (
               <div key={r.memberId} className="flex flex-wrap items-start gap-3 px-4 py-3" data-testid={`recipient-${r.memberId}`}>
-                <button type="button" className="w-40 text-left text-sm font-medium hover:underline" onClick={() => onOpenMember(r.memberId, r.memberName)}>
+                <Button type="button" variant="link" className="h-auto w-40 justify-start px-0 text-sm font-medium text-inherit hover:underline" onClick={() => onOpenMember(r.memberId, r.memberName)}>
                   {r.memberName || t('comms.history.unknownMember')}
-                </button>
+                </Button>
                 <div className="flex-1 space-y-0.5">{r.channels.map(m => <StatusChip key={m.id} t={t} m={m} onOpen={setOpen} />)}</div>
                 <OutcomeBadge t={t} outcome={r.outcome} />
               </div>

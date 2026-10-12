@@ -4,7 +4,7 @@ import { KeyRound, RefreshCw } from 'lucide-react';
 import { useApp } from '../../providers';
 import { api, RecoveryFilter, RecoveryRow } from '@/lib/api';
 import { RECOVERY_FILTERS, RECOVERY_TONE, whenText } from '@/lib/recovery';
-import { Alert, Badge, Button, Card, CardContent, PageHeader, Spinner } from '@/components/shared';
+import { Alert, Badge, Button, Card, CardContent, PageHeader, Spinner, Table, TBody, Td, Th, THead, Tr } from '@/components/shared';
 import { RecoveryCase } from '@/components/account-recovery';
 import { fill } from '@/components/communication-shared';
 import type { MessageKey } from '@/lib/i18n';
@@ -92,39 +92,37 @@ export default function AccountRecoveryPage() {
                   <KeyRound className="h-6 w-6" />{t('rec.empty')}
                 </div>
               ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full min-w-[720px] text-sm" data-testid="rec-table">
-                    <thead className="text-left text-xs text-[var(--color-fg-tertiary)]">
-                      <tr className="border-b border-[var(--color-border-secondary)]">
-                        <th className="px-4 py-2.5 font-medium">{t('rec.col.name')}</th>
-                        <th className="px-4 py-2.5 font-medium">{t('rec.col.asked')}</th>
-                        <th className="px-4 py-2.5 font-medium">{t('rec.col.moveTo')}</th>
-                        <th className="px-4 py-2.5 font-medium">{t('rec.col.wait')}</th>
-                        <th className="px-4 py-2.5 font-medium">{t('rec.col.answers')}</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-[var(--color-border-secondary)]">
-                      {rows.map(r => (
-                        <tr key={r.id} className="cursor-pointer hover:bg-[var(--color-bg-secondary)]" onClick={() => open(r.id)} data-testid={`rec-row-${r.id}`}>
-                          <td className="px-4 py-3">
-                            <button className="text-left font-medium hover:underline" onClick={e => { e.stopPropagation(); open(r.id); }}>{r.claimedName}</button>
-                            <p className="text-xs text-[var(--color-fg-quaternary)]">{t('rec.accountName')}: {r.accountName || '—'}</p>
-                          </td>
-                          <td className="px-4 py-3 text-xs tabular-nums">{whenText(r.createdAt, locale)}</td>
-                          <td className="px-4 py-3">{kind(r.newIdentifierType)}</td>
-                          <td className="px-4 py-3">
-                            {r.status !== 'open' ? <Badge tone={RECOVERY_TONE[r.status]}>{t(`rec.status.${r.status}` as MessageKey)}</Badge>
-                              : r.ready ? <Badge tone="success">{t('rec.ready')}</Badge>
-                              : <span className="text-xs">{fill(t('rec.canDecideAfter'), { time: whenText(r.waitUntil, locale) })}</span>}
-                          </td>
-                          <td className="px-4 py-3">
-                            <Badge tone={r.answered ? 'brand' : 'gray'}>{t(r.answered ? 'rec.answered' : 'rec.notAnswered')}</Badge>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                <Table aria-label={t('rec.title')} wrapperClassName="rounded-none border-0" className="min-w-[720px]" data-testid="rec-table">
+                  <THead>
+                    <Tr>
+                      <Th>{t('rec.col.name')}</Th>
+                      <Th>{t('rec.col.asked')}</Th>
+                      <Th>{t('rec.col.moveTo')}</Th>
+                      <Th>{t('rec.col.wait')}</Th>
+                      <Th>{t('rec.col.answers')}</Th>
+                    </Tr>
+                  </THead>
+                  <TBody>
+                    {rows.map(r => (
+                      <Tr key={r.id} className="cursor-pointer hover:bg-[var(--color-bg-secondary)]" onClick={() => open(r.id)} data-testid={`rec-row-${r.id}`}>
+                        <Td>
+                          <Button variant="link" className="h-auto px-0 text-left font-medium text-inherit" onClick={e => { e.stopPropagation(); open(r.id); }}>{r.claimedName}</Button>
+                          <p className="text-xs text-[var(--color-fg-quaternary)]">{t('rec.accountName')}: {r.accountName || '—'}</p>
+                        </Td>
+                        <Td className="text-xs tabular-nums">{whenText(r.createdAt, locale)}</Td>
+                        <Td>{kind(r.newIdentifierType)}</Td>
+                        <Td>
+                          {r.status !== 'open' ? <Badge tone={RECOVERY_TONE[r.status]}>{t(`rec.status.${r.status}` as MessageKey)}</Badge>
+                            : r.ready ? <Badge tone="success">{t('rec.ready')}</Badge>
+                            : <span className="text-xs">{fill(t('rec.canDecideAfter'), { time: whenText(r.waitUntil, locale) })}</span>}
+                        </Td>
+                        <Td>
+                          <Badge tone={r.answered ? 'brand' : 'gray'}>{t(r.answered ? 'rec.answered' : 'rec.notAnswered')}</Badge>
+                        </Td>
+                      </Tr>
+                    ))}
+                  </TBody>
+                </Table>
               )}
             </CardContent>
           </Card>

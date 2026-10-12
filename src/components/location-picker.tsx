@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
+import { Button } from '@/components/shared';
 
 // Fix default marker icon path issue in Leaflet + bundlers
 const DefaultIcon = L.icon({
@@ -112,14 +113,14 @@ export function LocationPicker({ lat, lng, onChange, height = '260px' }: Locatio
           onChange={e => setSearchQuery(e.target.value)}
           onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleSearch(); } }}
         />
-        <button
+        <Button
           type="button"
           onClick={handleSearch}
           disabled={searching}
-          className="px-3 py-1.5 text-xs font-medium rounded-[var(--radius-md)] bg-[var(--color-brand-600)] text-white hover:bg-[var(--color-brand-700)] disabled:opacity-50 transition-colors"
+          className="px-3 text-xs font-medium"
         >
           {searching ? 'Searching...' : 'Search'}
-        </button>
+        </Button>
       </div>
       <div ref={mapRef} style={{ height, width: '100%', borderRadius: 'var(--radius-lg)', overflow: 'hidden', border: '1px solid var(--color-border-secondary)', position: 'relative', zIndex: 0 }} />
       {lat != null && lng != null && (

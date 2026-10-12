@@ -227,14 +227,15 @@ export default function LoginPage() {
                 >
                   {t('login.emailMethod')}
                 </Button>
-                <button
+                <Button
                   type="button"
+                  variant="link"
                   onClick={() => { setMethod('hr'); setError(null); }}
-                  className="w-full text-center text-sm font-medium text-[var(--color-fg-brand)] hover:underline"
+                  className="h-auto w-full px-0 text-sm font-medium"
                   data-testid="hr-method-btn"
                 >
                   {t('login.hrMethod')}
-                </button>
+                </Button>
               </>
             )}
 
@@ -253,13 +254,14 @@ export default function LoginPage() {
                 <Button type="submit" size="lg" className="w-full" disabled={busy} data-testid="hr-submit">
                   {busy ? <><Spinner className="h-4 w-4 text-white" /> {t('login.signingIn')}</> : t('login.submit')}
                 </Button>
-                <button
+                <Button
                   type="button"
+                  variant="link"
                   onClick={() => { setMethod('choose'); setError(null); }}
-                  className="w-full text-center text-xs text-[var(--color-fg-quaternary)] hover:text-[var(--color-fg-secondary)] transition-colors"
+                  className="h-auto w-full px-0 text-xs font-normal text-[var(--color-fg-quaternary)] hover:text-[var(--color-fg-secondary)] hover:no-underline"
                 >
                   {t('login.back')}
-                </button>
+                </Button>
               </form>
             )}
 
@@ -273,23 +275,25 @@ export default function LoginPage() {
                 <Button type="button" size="lg" className="w-full" disabled={busy} onClick={onVerifiedContinue} data-testid="verify-email-continue">
                   {busy ? <><Spinner className="h-4 w-4 text-white" /> {t('login.signingIn')}</> : t('login.verifyContinue')}
                 </Button>
-                <button
+                <Button
                   type="button"
+                  variant="link"
                   onClick={resendVerification}
                   disabled={busy}
-                  className="w-full text-center text-sm font-medium text-[var(--color-fg-brand)] hover:underline"
+                  className="h-auto w-full px-0 text-sm font-medium"
                   data-testid="verify-email-resend"
                 >
                   {t('login.verifyResend')}
-                </button>
-                <button
+                </Button>
+                <Button
                   type="button"
+                  variant="link"
                   onClick={useOtherAccount}
-                  className="w-full text-center text-xs text-[var(--color-fg-quaternary)] hover:text-[var(--color-fg-secondary)] transition-colors"
+                  className="h-auto w-full px-0 text-xs font-normal text-[var(--color-fg-quaternary)] hover:text-[var(--color-fg-secondary)] hover:no-underline"
                   data-testid="verify-email-other-account"
                 >
                   {t('login.verifyOtherAccount')}
-                </button>
+                </Button>
               </div>
             )}
 
@@ -320,13 +324,14 @@ export default function LoginPage() {
                 <Button type="submit" size="lg" className="w-full" disabled={busy} data-testid="email-submit">
                   {busy ? <><Spinner className="h-4 w-4 text-white" /> {t('login.signingIn')}</> : t('login.submit')}
                 </Button>
-                <button
+                <Button
                   type="button"
+                  variant="link"
                   onClick={() => { setMethod('choose'); setError(null); }}
-                  className="w-full text-center text-xs text-[var(--color-fg-quaternary)] hover:text-[var(--color-fg-secondary)] transition-colors"
+                  className="h-auto w-full px-0 text-xs font-normal text-[var(--color-fg-quaternary)] hover:text-[var(--color-fg-secondary)] hover:no-underline"
                 >
                   {t('login.back')}
-                </button>
+                </Button>
               </form>
             )}
           </CardContent>

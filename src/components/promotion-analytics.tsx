@@ -9,7 +9,7 @@ import { TYPE_KEY as ENTITY_TYPE_KEY } from '@/lib/moderation';
 import { PLACEMENT_KEY, STATUS_KEY, STATUS_TONE, TYPE_KEY, errorKey, pct, ratio, ymdLabel } from '@/lib/promotions';
 import { money } from '@/lib/admin-utils';
 import type { MessageKey } from '@/lib/i18n';
-import { Alert, Badge, Button, Card, CardContent, CardHeader, Spinner } from '@/components/shared';
+import { Alert, Badge, Button, Card, CardContent, CardHeader, Spinner, Table, TBody, Td, Th, THead, Tr } from '@/components/shared';
 
 // Colour-blind-safe pair (Okabe-Ito blue and vermillion) that also differ by line style and marker.
 const C_IMPRESSIONS = '#0072B2';
@@ -112,9 +112,9 @@ export function PromotionPerformanceView({ id, from, to, onBack }: { id: string;
 
   return (
     <div className="space-y-6" data-testid="pan-detail">
-      <button onClick={onBack} className="-ml-2 flex min-h-10 items-center gap-1.5 px-2 text-sm text-[var(--color-fg-tertiary)] hover:text-[var(--color-fg-primary)]" data-testid="pan-back">
+      <Button variant="link" onClick={onBack} className="-ml-2 h-auto min-h-10 gap-1.5 px-2 text-sm font-normal text-[var(--color-fg-tertiary)] hover:text-[var(--color-fg-primary)] hover:no-underline" data-testid="pan-back">
         <ArrowLeft className="h-4 w-4" />{t('pro.back')}
-      </button>
+      </Button>
       {error && <Alert tone="error"><span className="flex flex-wrap items-center justify-between gap-2">{error}<Button size="sm" variant="secondary" onClick={() => setTick(n => n + 1)} data-testid="pan-detail-retry">{t('pro.retry')}</Button></span></Alert>}
       {!data && !error && <Spinner className="h-6 w-6" />}
       {data && p && (
@@ -206,26 +206,24 @@ export function PromotionPerformanceView({ id, from, to, onBack }: { id: string;
               <CardHeader><h2 className="font-semibold">{t('pan.detail.placements')}</h2></CardHeader>
               <CardContent className="p-0">
                 {(data.byPlacement ?? []).length === 0 ? <p className="p-6 text-sm text-[var(--color-fg-quaternary)]" data-testid="pan-placements-empty">{t('pan.detail.noPlacements')}</p> : (
-                  <div className="overflow-x-auto">
-                    <table className="w-full min-w-[640px] text-sm" data-testid="pan-placements">
-                      <thead className="text-left text-xs text-[var(--color-fg-tertiary)]"><tr className="border-b border-[var(--color-border-secondary)]">
-                        <th className="px-4 py-2.5 font-medium">{t('pan.col.placement')}</th><th className="px-4 py-2.5 text-right font-medium">{t('pan.col.impressions')}</th>
-                        <th className="px-4 py-2.5 text-right font-medium">{t('pan.col.clicks')}</th><th className="px-4 py-2.5 text-right font-medium">{t('pan.col.ctr')}</th>
-                        <th className="px-4 py-2.5 text-right font-medium">{t('pan.col.bookings')}</th><th className="px-4 py-2.5 text-right font-medium">{t('pan.col.subscriptions')}</th></tr></thead>
-                      <tbody className="divide-y divide-[var(--color-border-secondary)]">
-                        {(data.byPlacement ?? []).map(r => (
-                          <tr key={r.placement} data-testid={`pan-placement-${r.placement}`}>
-                            <td className="px-4 py-3">{PLACEMENT_KEY[r.placement] ? t(PLACEMENT_KEY[r.placement]) : r.placement}</td>
-                            <td className="px-4 py-3 text-right tabular-nums">{num(r.impressions)}</td>
-                            <td className="px-4 py-3 text-right tabular-nums">{num(r.clicks)}</td>
-                            <td className="px-4 py-3 text-right tabular-nums">{pct(r.clickThroughRate)}</td>
-                            <td className="px-4 py-3 text-right tabular-nums" data-testid="pan-placement-bookings">{num(r.bookings)}{Number(r.bookingValueTzs) > 0 && <span className="block text-xs text-[var(--color-fg-quaternary)]">{money(r.bookingValueTzs)}</span>}</td>
-                            <td className="px-4 py-3 text-right tabular-nums" data-testid="pan-placement-subscriptions">{num(r.subscriptions)}{Number(r.subscriptionValueTzs) > 0 && <span className="block text-xs text-[var(--color-fg-quaternary)]">{money(r.subscriptionValueTzs)}</span>}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
+                  <Table aria-label={t('pan.detail.placements')} wrapperClassName="rounded-none border-0" className="min-w-[640px]" data-testid="pan-placements">
+                    <THead><Tr>
+                      <Th>{t('pan.col.placement')}</Th><Th className="!text-right">{t('pan.col.impressions')}</Th>
+                      <Th className="!text-right">{t('pan.col.clicks')}</Th><Th className="!text-right">{t('pan.col.ctr')}</Th>
+                      <Th className="!text-right">{t('pan.col.bookings')}</Th><Th className="!text-right">{t('pan.col.subscriptions')}</Th></Tr></THead>
+                    <TBody>
+                      {(data.byPlacement ?? []).map(r => (
+                        <Tr key={r.placement} data-testid={`pan-placement-${r.placement}`}>
+                          <Td>{PLACEMENT_KEY[r.placement] ? t(PLACEMENT_KEY[r.placement]) : r.placement}</Td>
+                          <Td className="text-right tabular-nums">{num(r.impressions)}</Td>
+                          <Td className="text-right tabular-nums">{num(r.clicks)}</Td>
+                          <Td className="text-right tabular-nums">{pct(r.clickThroughRate)}</Td>
+                          <Td className="text-right tabular-nums" data-testid="pan-placement-bookings">{num(r.bookings)}{Number(r.bookingValueTzs) > 0 && <span className="block text-xs text-[var(--color-fg-quaternary)]">{money(r.bookingValueTzs)}</span>}</Td>
+                          <Td className="text-right tabular-nums" data-testid="pan-placement-subscriptions">{num(r.subscriptions)}{Number(r.subscriptionValueTzs) > 0 && <span className="block text-xs text-[var(--color-fg-quaternary)]">{money(r.subscriptionValueTzs)}</span>}</Td>
+                        </Tr>
+                      ))}
+                    </TBody>
+                  </Table>
                 )}
               </CardContent>
             </Card>

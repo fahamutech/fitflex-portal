@@ -8,7 +8,7 @@ import { ArrowLeft, Check, X } from 'lucide-react';
 import { api, RecoveryDetail, RecoveryRefusalReason } from '@/lib/api';
 import type { Locale, MessageKey } from '@/lib/i18n';
 import { REFUSAL_REASONS, RECOVERY_TONE, canDecideAt, recoveryErrorKey, whenText } from '@/lib/recovery';
-import { Alert, Badge, Button, Card, CardContent, Field, PageHeader, Spinner } from './shared';
+import { Alert, Badge, Button, Card, CardContent, Field, PageHeader, Spinner, Table, TBody, Td, Th, THead, Tr } from './shared';
 import { ConfirmDialog, Dialog, DialogFooter } from './dialog';
 import { fill } from './communication-shared';
 
@@ -109,26 +109,24 @@ export function RecoveryCase({ id, token, t, locale, onBack }: { id: string; tok
       <Card>
         <CardContent className="space-y-3 p-5">
           <h2 className="text-base font-semibold">{t('rec.compare')}</h2>
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[560px] text-sm" data-testid="rec-compare">
-              <thead className="text-left text-xs text-[var(--color-fg-tertiary)]">
-                <tr className="border-b border-[var(--color-border-secondary)]">
-                  <th className="py-2 pr-4 font-medium">{t('rec.col.question')}</th>
-                  <th className="py-2 pr-4 font-medium">{t('rec.col.theirAnswer')}</th>
-                  <th className="py-2 font-medium">{t('rec.col.accountFact')}</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-[var(--color-border-secondary)]">
-                {QUESTIONS.map(q => (
-                  <tr key={q} data-testid={`rec-q-${q}`}>
-                    <td className="py-2 pr-4 text-[var(--color-fg-tertiary)]">{t(`rec.q.${q}` as MessageKey)}</td>
-                    <td className="py-2 pr-4 font-medium">{r.evidence?.[q]?.trim() || <span className="font-normal text-[var(--color-fg-quaternary)]">{t('rec.noAnswer')}</span>}</td>
-                    <td className="py-2">{q === 'other' ? '' : facts[q] || <span className="text-[var(--color-fg-quaternary)]">{t('rec.noFact')}</span>}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <Table aria-label={t('rec.compare')} className="min-w-[560px]" data-testid="rec-compare">
+            <THead>
+              <Tr>
+                <Th>{t('rec.col.question')}</Th>
+                <Th>{t('rec.col.theirAnswer')}</Th>
+                <Th>{t('rec.col.accountFact')}</Th>
+              </Tr>
+            </THead>
+            <TBody>
+              {QUESTIONS.map(q => (
+                <Tr key={q} data-testid={`rec-q-${q}`}>
+                  <Td className="!text-[var(--color-fg-tertiary)]">{t(`rec.q.${q}` as MessageKey)}</Td>
+                  <Td className="font-medium">{r.evidence?.[q]?.trim() || <span className="font-normal text-[var(--color-fg-quaternary)]">{t('rec.noAnswer')}</span>}</Td>
+                  <Td>{q === 'other' ? '' : facts[q] || <span className="text-[var(--color-fg-quaternary)]">{t('rec.noFact')}</span>}</Td>
+                </Tr>
+              ))}
+            </TBody>
+          </Table>
         </CardContent>
       </Card>
 

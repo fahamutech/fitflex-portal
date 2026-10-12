@@ -9,9 +9,7 @@ import {
   Rate, RewardFunding, RewardItem, RewardItemInput, RewardQueue, RewardRule, RewardType,
 } from '@/lib/api';
 import { REWARD_TYPES, RULES, ruleLabel, STATUS, typeLabel } from '@/lib/rewards';
-import {
-  Alert, Badge, Button, Card, CardContent, CardHeader, Field, MetricCard, PageHeader, Spinner,
-} from '@/components/shared';
+import { Alert, Badge, Button, Card, CardContent, CardHeader, Checkbox, Field, Input, MetricCard, PageHeader, Radio, Select, Spinner, Textarea, Table, TBody, Td, Th, THead, Tr } from '@/components/shared';
 import { Dialog } from '@/components/dialog';
 
 const TYPES: { value: ChallengeType; label: string; unit: string }[] = [
@@ -269,17 +267,17 @@ function RewardEditor({ items, teamsOk, onChange }: {
         const hint = REWARD_TYPES.find(t => t.value === r.type)?.valueHint;
         return (
           <div key={r.id ?? `new_${i}`} className="grid gap-2 rounded-[var(--radius-lg)] border border-[var(--color-border-secondary)] p-3 sm:grid-cols-12" data-testid={`reward-row-${i}`}>
-            <select className="ui-input sm:col-span-3" aria-label="Reward type" value={r.type} onChange={e => edit(i, { type: e.target.value as RewardType })}>
+            <Select className="sm:col-span-3" aria-label="Reward type" value={r.type} onChange={e => edit(i, { type: e.target.value as RewardType })}>
               {REWARD_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
-            </select>
-            <input className="ui-input sm:col-span-4" aria-label="Reward name" placeholder="e.g. 7-day FitFlex Gym Pass" maxLength={80} value={r.label} onChange={e => edit(i, { label: e.target.value })} />
-            <input className="ui-input sm:col-span-2" aria-label="Reward value" placeholder={hint || 'Value'} maxLength={40} value={r.value ?? ''} onChange={e => edit(i, { value: e.target.value })} />
+            </Select>
+            <Input className="sm:col-span-4" aria-label="Reward name" placeholder="e.g. 7-day FitFlex Gym Pass" maxLength={80} value={r.label} onChange={e => edit(i, { label: e.target.value })} />
+            <Input className="sm:col-span-2" aria-label="Reward value" placeholder={hint || 'Value'} maxLength={40} value={r.value ?? ''} onChange={e => edit(i, { value: e.target.value })} />
             <div className="flex gap-2 sm:col-span-3">
-              <select className="ui-input min-w-0 flex-1" aria-label="Who earns it" value={r.rule} onChange={e => edit(i, { rule: e.target.value as RewardRule, topN: e.target.value === 'top' ? r.topN ?? 3 : null })}>
+              <Select className="min-w-0 flex-1" aria-label="Who earns it" value={r.rule} onChange={e => edit(i, { rule: e.target.value as RewardRule, topN: e.target.value === 'top' ? r.topN ?? 3 : null })}>
                 {RULES.filter(x => x.value !== 'team' || teamsOk || r.rule === 'team').map(x => <option key={x.value} value={x.value}>{x.label}</option>)}
-              </select>
+              </Select>
               {r.rule === 'top' && (
-                <input className="ui-input w-16" type="number" min={1} max={100} aria-label="How many top places" value={r.topN ?? ''} onChange={e => edit(i, { topN: e.target.value === '' ? null : Number(e.target.value) })} />
+                <Input className="w-16" type="number" min={1} max={100} aria-label="How many top places" value={r.topN ?? ''} onChange={e => edit(i, { topN: e.target.value === '' ? null : Number(e.target.value) })} />
               )}
               <button type="button" className="shrink-0 rounded-md p-2 text-[var(--color-fg-quaternary)] hover:bg-[var(--color-bg-secondary)]" aria-label={`Remove ${r.label || 'reward'}`} onClick={() => onChange(items.filter((_, j) => j !== i))}>
                 <X className="h-4 w-4" />
@@ -375,26 +373,24 @@ function ChallengeDetail({ scope, apiScope, rewardsBase, staff, challenge: c, on
           <Card>
             <CardHeader><span className="text-sm font-semibold">By {wordsFor(isOrg(apiScope)).unit}</span></CardHeader>
             <CardContent>
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm" data-testid="department-table">
-                  <thead><tr className="text-left text-xs text-[var(--color-fg-quaternary)]">
-                    <th className="py-2 font-medium">{wordsFor(isOrg(apiScope)).Unit}</th>
-                    <th className="py-2 text-right font-medium">Taking part</th>
-                    <th className="py-2 text-right font-medium">Completed</th>
-                    <th className="py-2 text-right font-medium">Avg progress</th>
-                  </tr></thead>
-                  <tbody className="divide-y divide-[var(--color-border-secondary)]">
-                    {p.byDepartment.map((d, i) => (
-                      <tr key={i}>
-                        <td className="py-2">{d.other ? `Smaller groups (under ${p.minGroupSize ?? 3})` : d.department}</td>
-                        <td className="py-2 text-right tabular-nums">{num(d.joined)} of {num(d.eligible)} ({pct(d.participationRate)})</td>
-                        <td className="py-2 text-right tabular-nums">{d.completed == null ? '—' : num(d.completed)}</td>
-                        <td className="py-2 text-right tabular-nums">{d.averageProgress == null ? '—' : pct(d.averageProgress)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              <Table aria-label={`By ${wordsFor(isOrg(apiScope)).unit}`} data-testid="department-table">
+                <THead><Tr>
+                  <Th>{wordsFor(isOrg(apiScope)).Unit}</Th>
+                  <Th className="!text-right">Taking part</Th>
+                  <Th className="!text-right">Completed</Th>
+                  <Th className="!text-right">Avg progress</Th>
+                </Tr></THead>
+                <TBody>
+                  {p.byDepartment.map((d, i) => (
+                    <Tr key={i}>
+                      <Td>{d.other ? `Smaller groups (under ${p.minGroupSize ?? 3})` : d.department}</Td>
+                      <Td className="text-right tabular-nums">{num(d.joined)} of {num(d.eligible)} ({pct(d.participationRate)})</Td>
+                      <Td className="text-right tabular-nums">{d.completed == null ? '—' : num(d.completed)}</Td>
+                      <Td className="text-right tabular-nums">{d.averageProgress == null ? '—' : pct(d.averageProgress)}</Td>
+                    </Tr>
+                  ))}
+                </TBody>
+              </Table>
               <p className="mt-2 text-xs text-[var(--color-fg-quaternary)]">
                 Progress and completion show only for groups of {p.minGroupSize ?? 3} or more taking part, so the table stays readable. Each person’s progress is under Insights.
               </p>
@@ -566,26 +562,26 @@ function ChallengeForm({ scope, apiScope, staff, existing, onClose, onSaved }: {
       <form onSubmit={save} className="space-y-4" data-testid="challenge-form">
         {error && <Alert tone="error">{error}</Alert>}
         <Field label="Name">
-          <input className="ui-input" value={f.name} onChange={e => set('name', e.target.value)} maxLength={80} required
+          <Input value={f.name} onChange={e => set('name', e.target.value)} maxLength={80} required
             placeholder={scope === 'admin' ? 'FitFlex 50K Steps Challenge' : org ? 'Wellness Challenge' : 'Company Wellness Challenge'} data-testid="challenge-name" />
         </Field>
         <Field label="Description (optional)">
-          <textarea className="ui-input" rows={2} value={f.description} onChange={e => set('description', e.target.value)} maxLength={500} />
+          <Textarea rows={2} value={f.description} onChange={e => set('description', e.target.value)} maxLength={500} />
         </Field>
         <div className="grid gap-4 sm:grid-cols-2">
           <Field label="Measures">
-            <select className="ui-input" value={f.type} disabled={locked} onChange={e => set('type', e.target.value as ChallengeType)} data-testid="challenge-type">
+            <Select value={f.type} disabled={locked} onChange={e => set('type', e.target.value as ChallengeType)} data-testid="challenge-type">
               {TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
-            </select>
+            </Select>
           </Field>
           <Field label={`Target (${unitFor(f.type)})`}>
-            <input className="ui-input" type="number" min={1} step="any" value={f.target} onChange={e => set('target', e.target.value)} required data-testid="challenge-target" />
+            <Input type="number" min={1} step="any" value={f.target} onChange={e => set('target', e.target.value)} required data-testid="challenge-target" />
           </Field>
           <Field label="Starts">
-            <input className="ui-input" type="date" value={f.startDate} disabled={started} onChange={e => set('startDate', e.target.value)} required data-testid="challenge-start" />
+            <Input type="date" value={f.startDate} disabled={started} onChange={e => set('startDate', e.target.value)} required data-testid="challenge-start" />
           </Field>
           <Field label="Ends">
-            <input className="ui-input" type="date" value={f.endDate} onChange={e => set('endDate', e.target.value)} required data-testid="challenge-end" />
+            <Input type="date" value={f.endDate} onChange={e => set('endDate', e.target.value)} required data-testid="challenge-end" />
           </Field>
         </div>
         {locked && <p className="text-xs text-[var(--color-fg-quaternary)]">What it measures{started ? ', its format and its start date' : ' and its format'} are fixed now that it has {started ? 'started' : 'participants'}.</p>}
@@ -603,7 +599,7 @@ function ChallengeForm({ scope, apiScope, staff, existing, onClose, onSaved }: {
         </Field>
         {!existing && f.mode === 'teams' && (
           <Field label="Team names (comma separated)">
-            <input className="ui-input" value={f.teams} onChange={e => set('teams', e.target.value)} placeholder="Red, Blue, Green" data-testid="challenge-teams" />
+            <Input value={f.teams} onChange={e => set('teams', e.target.value)} placeholder="Red, Blue, Green" data-testid="challenge-teams" />
           </Field>
         )}
 
@@ -613,17 +609,12 @@ function ChallengeForm({ scope, apiScope, staff, existing, onClose, onSaved }: {
               ? [['all', 'All FitFlex members'], ['tiers', 'Members on chosen passes']]
               : [['all', org ? 'Everyone' : 'All employees'], ['departments', `Chosen ${w.units}`], ['employees', `Chosen ${w.people}`]]
             ).map(([k, label]) => (
-              <label key={k} className="flex items-center gap-2 text-sm">
-                <input type="radio" name="elig" aria-label={label} checked={f.eligKind === k} onChange={() => set('eligKind', k as Eligibility['kind'])} data-testid={`elig-${k}`} />
-                {label}
-              </label>
+              <Radio key={k} name="elig" label={label} checked={f.eligKind === k} onChange={() => set('eligKind', k as Eligibility['kind'])} data-testid={`elig-${k}`} />
             ))}
             {f.eligKind === 'tiers' && (
               <div className="flex flex-wrap gap-3 pl-6">
                 {TIERS.map(t => (
-                  <label key={t.value} className="flex items-center gap-1.5 text-sm">
-                    <input type="checkbox" aria-label={t.label} checked={f.tiers.includes(t.value)} onChange={() => toggle('tiers', t.value)} data-testid={`tier-${t.value}`} />{t.label}
-                  </label>
+                  <Checkbox key={t.value} label={t.label} checked={f.tiers.includes(t.value)} onChange={() => toggle('tiers', t.value)} data-testid={`tier-${t.value}`} />
                 ))}
               </div>
             )}
@@ -631,21 +622,17 @@ function ChallengeForm({ scope, apiScope, staff, existing, onClose, onSaved }: {
               <div className="flex flex-wrap gap-3 pl-6">
                 {departments.length === 0 && <p className="text-xs text-[var(--color-fg-quaternary)]">No {w.units} on your {w.list} yet.</p>}
                 {departments.map(d => (
-                  <label key={d} className="flex items-center gap-1.5 text-sm">
-                    <input type="checkbox" aria-label={d} checked={f.departments.includes(d)} onChange={() => toggle('departments', d)} data-testid={`dept-${d}`} />{d}
-                  </label>
+                  <Checkbox key={d} label={d} checked={f.departments.includes(d)} onChange={() => toggle('departments', d)} data-testid={`dept-${d}`} />
                 ))}
               </div>
             )}
             {f.eligKind === 'employees' && (
               <div className="space-y-2 pl-6">
-                <input className="ui-input" aria-label={`Search ${w.people}`} placeholder={`Search ${w.people}`} value={search} onChange={e => setSearch(e.target.value)} />
+                <Input aria-label={`Search ${w.people}`} placeholder={`Search ${w.people}`} value={search} onChange={e => setSearch(e.target.value)} />
                 <div className="max-h-48 space-y-1 overflow-y-auto rounded-[var(--radius-md)] border border-[var(--color-border-secondary)] p-2">
                   {people.map(p => (
-                    <label key={p.id} className="flex items-center gap-2 text-sm">
-                      <input type="checkbox" aria-label={p.displayName} checked={f.employeeIds.includes(p.id)} onChange={() => toggle('employeeIds', p.id)} />
-                      {p.displayName}{p.department ? <span className="text-xs text-[var(--color-fg-quaternary)]">· {p.department}</span> : null}
-                    </label>
+                    <Checkbox key={p.id} aria-label={p.displayName} checked={f.employeeIds.includes(p.id)} onChange={() => toggle('employeeIds', p.id)}
+                      label={<>{p.displayName}{p.department ? <span className="text-xs text-[var(--color-fg-quaternary)]">· {p.department}</span> : null}</>} />
                   ))}
                   {people.length === 0 && <p className="text-xs text-[var(--color-fg-quaternary)]">No matching {w.people}.</p>}
                 </div>
@@ -658,9 +645,9 @@ function ChallengeForm({ scope, apiScope, staff, existing, onClose, onSaved }: {
         <RewardEditor items={f.rewards} teamsOk={f.mode !== 'individual'} onChange={v => set('rewards', v)} />
         <div className="grid gap-4 sm:grid-cols-2">
           <Field label="Rewards funded by">
-            <select className="ui-input" value={f.rewardFunding} onChange={e => set('rewardFunding', e.target.value as RewardFunding)} data-testid="challenge-funding">
+            <Select value={f.rewardFunding} onChange={e => set('rewardFunding', e.target.value as RewardFunding)} data-testid="challenge-funding">
               {FUNDERS[scope].map(x => <option key={x.value} value={x.value}>{x.value === 'company' ? w.owner : x.label}</option>)}
-            </select>
+            </Select>
           </Field>
         </div>
 

@@ -9,7 +9,7 @@ import { RefreshCw } from 'lucide-react';
 import {
   api, CommsLocale, WhatsAppApproval, WhatsAppExpected, WhatsAppRegistry, WhatsAppStatus,
 } from '@/lib/api';
-import { Alert, Badge, Button, Card, Field, Input, MetricCard, Spinner } from './shared';
+import { Alert, Badge, Button, Card, Field, Input, MetricCard, Spinner, Table, TBody, Td, Th, THead, Tr } from './shared';
 import { ConfirmDialog } from './dialog';
 import { T, errorText, fill } from './communication-shared';
 
@@ -97,25 +97,23 @@ export function WhatsAppAdmin({ token, t }: { token: string; t: T }) {
           </Button>
         </div>
         <p className="mb-3 text-xs text-[var(--color-fg-quaternary)]">{t(configured ? 'comms.wa.templatesHelp' : 'comms.wa.templatesNeedProvider')}</p>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="text-left text-xs text-[var(--color-fg-quaternary)]">
-                <th className="py-2 pr-3">{t('comms.wa.col.template')}</th>
-                <th className="py-2 pr-3">{t('comms.wa.col.providerName')}</th>
-                <th className="py-2 pr-3">{t('comms.wa.col.variables')}</th>
-                <th className="py-2">{t('comms.wa.col.status')}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {registry.expected.map(e => (
-                <ExpectedRow key={`${e.providerTemplateName}-${e.language}`} t={t} e={e} disabled={!configured || busy}
-                  onRegister={() => act(() => api.waRegister(token, { providerTemplateName: e.providerTemplateName, language: e.language, category: e.category, variables: e.variables }))}
-                  onStatus={s => act(() => api.waUpdate(token, e.registered!.id, { approvalStatus: s }))} />
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <Table aria-label={t('comms.wa.templates')}>
+          <THead>
+            <Tr>
+              <Th>{t('comms.wa.col.template')}</Th>
+              <Th>{t('comms.wa.col.providerName')}</Th>
+              <Th>{t('comms.wa.col.variables')}</Th>
+              <Th>{t('comms.wa.col.status')}</Th>
+            </Tr>
+          </THead>
+          <TBody>
+            {registry.expected.map(e => (
+              <ExpectedRow key={`${e.providerTemplateName}-${e.language}`} t={t} e={e} disabled={!configured || busy}
+                onRegister={() => act(() => api.waRegister(token, { providerTemplateName: e.providerTemplateName, language: e.language, category: e.category, variables: e.variables }))}
+                onStatus={s => act(() => api.waUpdate(token, e.registered!.id, { approvalStatus: s }))} />
+            ))}
+          </TBody>
+        </Table>
       </Card>
 
       {configured && <TestSend t={t} registry={registry} disabled={busy || !status.available}
@@ -139,14 +137,14 @@ function ExpectedRow({ t, e, disabled, onRegister, onStatus }: {
   t: T; e: WhatsAppExpected; disabled: boolean; onRegister: () => void; onStatus: (s: WhatsAppApproval) => void;
 }) {
   return (
-    <tr className="border-t border-[var(--color-border-secondary)] align-top" data-testid={`wa-row-${e.providerTemplateName}-${e.language}`}>
-      <td className="py-2 pr-3">
+    <Tr className="align-top" data-testid={`wa-row-${e.providerTemplateName}-${e.language}`}>
+      <Td>
         <span className="block font-medium">{t(`comms.tpl.${e.templateKey}`) || e.templateKey}</span>
         <span className="text-xs text-[var(--color-fg-quaternary)]">{t(`comms.lang.${e.language}`)} · {t(`comms.wa.cat.${e.category}`)}</span>
-      </td>
-      <td className="py-2 pr-3"><code className="text-xs">{e.providerTemplateName}</code></td>
-      <td className="py-2 pr-3 text-xs">{e.variables.map((v, i) => `{{${i + 1}}} ${t(`comms.var.${v}`)}`).join(', ')}</td>
-      <td className="py-2">
+      </Td>
+      <Td><code className="text-xs">{e.providerTemplateName}</code></Td>
+      <Td className="text-xs">{e.variables.map((v, i) => `{{${i + 1}}} ${t(`comms.var.${v}`)}`).join(', ')}</Td>
+      <Td>
         {e.registered ? (
           <div className="flex items-center gap-2">
             <Badge tone={APPROVAL_TONE[e.registered.approvalStatus]}>{t(`comms.wa.approval.${e.registered.approvalStatus}`)}</Badge>
@@ -161,8 +159,8 @@ function ExpectedRow({ t, e, disabled, onRegister, onStatus }: {
             <Button size="sm" variant="secondary" disabled={disabled} onClick={onRegister}>{t('comms.wa.register')}</Button>
           </div>
         )}
-      </td>
-    </tr>
+      </Td>
+    </Tr>
   );
 }
 

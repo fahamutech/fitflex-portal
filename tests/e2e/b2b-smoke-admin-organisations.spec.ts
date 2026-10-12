@@ -218,6 +218,7 @@ test.describe('programmes', () => {
     expect(mock.writes(/\/prog-1\/benefits$/)[0].body).toEqual({
       name: 'Weekend gym visits', description: null, benefitType: 'gym_access', fundingType: 'full', sponsorAmountTzs: null, sponsorShareBps: null, sponsorCapTzs: null,
       beneficiaryAmountTzs: null, passTier: null, usagePeriod: 'week', usageLimit: 3, periodSponsorCapTzs: null, startDate: null, endDate: null, terms: 'Weekends only',
+      fixedFeeTzs: null, // the per-person fee is sent since it was added; empty here
       providerRules: { scope: 'selected', gymIds: ['gym-1', 'gym-2'], gymTiers: ['premium', 'luxury_executive'] }, eligibility: null,
     });
 

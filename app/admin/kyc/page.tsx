@@ -4,7 +4,7 @@ import { RefreshCw, ShieldCheck } from 'lucide-react';
 import { useApp } from '../../providers';
 import { api, KycCaseRow, KycCaseStatus, KycPartnerType } from '@/lib/api';
 import { CASE_STATUS, PARTNER_TYPE_LABEL, QUEUE_TABS, day, errorMessage } from '@/lib/kyc';
-import { Alert, Badge, Button, Card, CardContent, PageHeader, Spinner } from '@/components/shared';
+import { Alert, Badge, Button, Card, CardContent, PageHeader, Spinner, Table, TBody, Td, Th, THead, Tr } from '@/components/shared';
 import { KycCaseView } from '@/components/kyc-case';
 
 const TYPES: Array<KycPartnerType | 'all'> = ['all', 'gym_owner', 'trainer', 'vendor', 'corporate'];
@@ -92,41 +92,39 @@ export default function KycPage() {
               {tab === 'submitted' ? 'Nothing waiting for review. Cases appear here when partners submit.' : `No ${CASE_STATUS[tab].label.toLowerCase()} cases.`}
             </div>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[720px] text-sm" data-testid="kyc-table">
-                <thead className="text-left text-xs text-[var(--color-fg-tertiary)]">
-                  <tr className="border-b border-[var(--color-border-secondary)]">
-                    <th className="px-4 py-2.5 font-medium">Partner</th>
-                    <th className="px-4 py-2.5 font-medium">Type</th>
-                    <th className="px-4 py-2.5 font-medium">Status</th>
-                    <th className="px-4 py-2.5 font-medium">Submitted</th>
-                    <th className="px-4 py-2.5 font-medium">Last activity</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-[var(--color-border-secondary)]">
-                  {shown.map(r => (
-                    <tr key={r.id} className="cursor-pointer hover:bg-[var(--color-bg-secondary)]" onClick={() => open(r.id)} data-testid={`kyc-row-${r.id}`}>
-                      <td className="px-4 py-3">
-                        <button className="text-left font-medium text-[var(--color-fg-primary)] hover:underline" onClick={e => { e.stopPropagation(); open(r.id); }}>
-                          {r.partnerName || r.legalName || 'Unnamed partner'}
-                        </button>
-                        {r.legalName && r.legalName !== r.partnerName && <p className="text-xs text-[var(--color-fg-quaternary)]">{r.legalName}</p>}
-                      </td>
-                      <td className="px-4 py-3">{PARTNER_TYPE_LABEL[r.partnerType]} <span className="text-xs text-[var(--color-fg-quaternary)]">· Tier {r.tier}</span></td>
-                      <td className="px-4 py-3">
-                        <Badge tone={CASE_STATUS[r.status].tone}>{CASE_STATUS[r.status].label}</Badge>
-                        {r.round > 1 && <span className="ml-2 text-xs text-[var(--color-fg-quaternary)]">Round {r.round}</span>}
-                        {!!r.documentsToReview && r.status !== 'in_review' && r.status !== 'submitted' && (
-                          <span className="ml-2"><Badge tone="warning">{r.documentsToReview} to review</Badge></span>
-                        )}
-                      </td>
-                      <td className="whitespace-nowrap px-4 py-3">{day(r.submittedAt)}</td>
-                      <td className="whitespace-nowrap px-4 py-3">{day(r.updatedAt)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <Table aria-label="Partner verification" wrapperClassName="rounded-none border-0" className="min-w-[720px]" data-testid="kyc-table">
+              <THead>
+                <Tr>
+                  <Th>Partner</Th>
+                  <Th>Type</Th>
+                  <Th>Status</Th>
+                  <Th>Submitted</Th>
+                  <Th>Last activity</Th>
+                </Tr>
+              </THead>
+              <TBody>
+                {shown.map(r => (
+                  <Tr key={r.id} className="cursor-pointer hover:bg-[var(--color-bg-secondary)]" onClick={() => open(r.id)} data-testid={`kyc-row-${r.id}`}>
+                    <Td>
+                      <Button variant="link" className="h-auto px-0 text-left font-medium text-[var(--color-fg-primary)]" onClick={e => { e.stopPropagation(); open(r.id); }}>
+                        {r.partnerName || r.legalName || 'Unnamed partner'}
+                      </Button>
+                      {r.legalName && r.legalName !== r.partnerName && <p className="text-xs text-[var(--color-fg-quaternary)]">{r.legalName}</p>}
+                    </Td>
+                    <Td>{PARTNER_TYPE_LABEL[r.partnerType]} <span className="text-xs text-[var(--color-fg-quaternary)]">· Tier {r.tier}</span></Td>
+                    <Td>
+                      <Badge tone={CASE_STATUS[r.status].tone}>{CASE_STATUS[r.status].label}</Badge>
+                      {r.round > 1 && <span className="ml-2 text-xs text-[var(--color-fg-quaternary)]">Round {r.round}</span>}
+                      {!!r.documentsToReview && r.status !== 'in_review' && r.status !== 'submitted' && (
+                        <span className="ml-2"><Badge tone="warning">{r.documentsToReview} to review</Badge></span>
+                      )}
+                    </Td>
+                    <Td className="whitespace-nowrap">{day(r.submittedAt)}</Td>
+                    <Td className="whitespace-nowrap">{day(r.updatedAt)}</Td>
+                  </Tr>
+                ))}
+              </TBody>
+            </Table>
           )}
         </CardContent>
       </Card>

@@ -4,7 +4,7 @@ import { RefreshCw, ShieldCheck } from 'lucide-react';
 import { useApp } from '../../providers';
 import { api, ModerationCounts, ModerationEntityType, ModerationRow, ModerationStatus } from '@/lib/api';
 import { ENTITY_TYPES, STATUS_KEY, STATUS_TAB_ORDER, STATUS_TONE, TYPE_KEY, dateTime, errorKey } from '@/lib/moderation';
-import { Alert, Badge, Button, Card, CardContent, PageHeader, Spinner } from '@/components/shared';
+import { Alert, Badge, Button, Card, CardContent, PageHeader, Spinner, Table, TBody, Td, Th, THead, Tr } from '@/components/shared';
 import { ModerationEntityView } from '@/components/moderation-entity';
 
 const PAGE = 25;
@@ -106,31 +106,29 @@ export default function ModerationPage() {
               {status === 'pending' ? t('mod.empty.pending') : t('mod.empty.other')}
             </div>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[640px] text-sm" data-testid="moderation-table">
-                <thead className="text-left text-xs text-[var(--color-fg-tertiary)]">
-                  <tr className="border-b border-[var(--color-border-secondary)]">
-                    <th className="px-4 py-2.5 font-medium">{t('mod.col.name')}</th>
-                    <th className="px-4 py-2.5 font-medium">{t('mod.col.status')}</th>
-                    <th className="px-4 py-2.5 font-medium">{t('mod.col.decision')}</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-[var(--color-border-secondary)]">
-                  {rows.map(r => (
-                    <tr key={r.id} className="cursor-pointer hover:bg-[var(--color-bg-secondary)]" onClick={() => open(r.id)} data-testid={`moderation-row-${r.id}`}>
-                      <td className="max-w-[18rem] px-4 py-3 [overflow-wrap:anywhere]">
-                        <button className="text-left font-medium text-[var(--color-fg-primary)] hover:underline" onClick={e => { e.stopPropagation(); open(r.id); }}>{r.name}</button>
-                        {r.subtitle && <p className="text-xs text-[var(--color-fg-quaternary)]">{r.subtitle}</p>}
-                      </td>
-                      <td className="px-4 py-3"><Badge tone={STATUS_TONE[r.moderationStatus]} dot>{t(STATUS_KEY[r.moderationStatus])}</Badge></td>
-                      <td className="px-4 py-3 text-xs text-[var(--color-fg-tertiary)]">
-                        {r.decidedAt ? <>{dateTime(r.decidedAt)}{r.reason && <p className="mt-0.5 max-w-xs truncate text-[var(--color-fg-secondary)]" title={r.reason}>{r.reason}</p>}</> : '—'}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <Table aria-label={t('mod.title')} wrapperClassName="rounded-none border-0" className="min-w-[640px]" data-testid="moderation-table">
+              <THead>
+                <Tr>
+                  <Th>{t('mod.col.name')}</Th>
+                  <Th>{t('mod.col.status')}</Th>
+                  <Th>{t('mod.col.decision')}</Th>
+                </Tr>
+              </THead>
+              <TBody>
+                {rows.map(r => (
+                  <Tr key={r.id} className="cursor-pointer hover:bg-[var(--color-bg-secondary)]" onClick={() => open(r.id)} data-testid={`moderation-row-${r.id}`}>
+                    <Td className="max-w-[18rem] [overflow-wrap:anywhere]">
+                      <Button variant="link" className="h-auto px-0 text-left font-medium text-[var(--color-fg-primary)]" onClick={e => { e.stopPropagation(); open(r.id); }}>{r.name}</Button>
+                      {r.subtitle && <p className="text-xs text-[var(--color-fg-quaternary)]">{r.subtitle}</p>}
+                    </Td>
+                    <Td><Badge tone={STATUS_TONE[r.moderationStatus]} dot>{t(STATUS_KEY[r.moderationStatus])}</Badge></Td>
+                    <Td className="text-xs !text-[var(--color-fg-tertiary)]">
+                      {r.decidedAt ? <>{dateTime(r.decidedAt)}{r.reason && <p className="mt-0.5 max-w-xs truncate text-[var(--color-fg-secondary)]" title={r.reason}>{r.reason}</p>}</> : '—'}
+                    </Td>
+                  </Tr>
+                ))}
+              </TBody>
+            </Table>
           )}
         </CardContent>
       </Card>

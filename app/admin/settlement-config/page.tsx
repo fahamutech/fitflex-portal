@@ -8,7 +8,7 @@ import {
 } from '@/lib/api';
 import { BadgeTone, money } from '@/lib/admin-utils';
 import { PASS_TIER_KEYS, SETTLED_GYM_TIERS, configError, percent, shortDay, tierLabel, todayEAT, wholesale } from '@/lib/settlements';
-import { Alert, Badge, Button, Card, CardContent, Field, Input, PageHeader, Segmented, Spinner } from '@/components/shared';
+import { Alert, Badge, Button, Card, CardContent, Field, Input, PageHeader, Segmented, Spinner, Table, TBody, Td, Th, THead, Tr } from '@/components/shared';
 import { Dialog, DialogFooter } from '@/components/dialog';
 
 type Tab = 'rate-cards' | 'rules' | 'pass-tiers';
@@ -17,8 +17,6 @@ type Ask =
   | { kind: 'activate' | 'reject'; of: SettlementConfigKind; row: Row; label: string }
   | { kind: 'new'; of: SettlementConfigKind };
 
-const th = 'px-4 py-2.5 font-medium';
-const td = 'px-4 py-3';
 
 /** Draft, in force, replaced or rejected — and from when. */
 function standing(row: Row, today: string): { label: string; tone: BadgeTone; when: string } {
@@ -103,12 +101,10 @@ export default function SettlementConfigPage() {
   const table = (testid: string, head: ReactNode, body: ReactNode, empty: boolean) => empty
     ? <p className="p-10 text-center text-sm text-[var(--color-fg-quaternary)]">Nothing here yet.</p>
     : (
-      <div className="overflow-x-auto">
-        <table className="w-full min-w-[820px] text-sm" data-testid={testid}>
-          <thead className="text-left text-xs text-[var(--color-fg-tertiary)]"><tr className="border-b border-[var(--color-border-secondary)]">{head}</tr></thead>
-          <tbody className="divide-y divide-[var(--color-border-secondary)]">{body}</tbody>
-        </table>
-      </div>
+      <Table aria-label={tab === 'rate-cards' ? 'Gym rate cards' : tab === 'rules' ? 'Discounts, ceilings and network share' : 'Passes'} wrapperClassName="rounded-none border-0" className="min-w-[820px]" data-testid={testid}>
+        <THead><Tr>{head}</Tr></THead>
+        <TBody>{body}</TBody>
+      </Table>
     );
 
   const ruleScope = (r: SettlementRule) => r.scopeType === 'global' ? 'All gyms'
@@ -156,42 +152,42 @@ export default function SettlementConfigPage() {
                   })}>Draft cards for gyms without one</Button>
               </div>
               {table('config-rate-cards', <>
-                <th className={th}>Gym</th><th className={th}>Retail day / week / month</th><th className={th}>Paid to gym day / week / month</th><th className={th}>Status</th><th className={th} />
+                <Th>Gym</Th><Th>Retail day / week / month</Th><Th>Paid to gym day / week / month</Th><Th>Status</Th><Th />
               </>, current<GymRateCard>(config.rateCards).map(c => (
-                <tr key={c.id} data-testid={`config-row-${c.id}`}>
-                  <td className={td}><span className="font-medium">{gymName(c.gymId)}</span><p className="text-xs text-[var(--color-fg-quaternary)]">{tierLabel(c.gymTier)} · v{c.version}</p></td>
-                  <td className={`${td} whitespace-nowrap tabular-nums`}>{trio(c.retailDailyTzs, c.retailWeeklyTzs, c.retailMonthlyTzs, v => money(v, '').trim())}</td>
-                  <td className={`${td} whitespace-nowrap tabular-nums`}>
+                <Tr key={c.id} data-testid={`config-row-${c.id}`}>
+                  <Td><span className="font-medium">{gymName(c.gymId)}</span><p className="text-xs text-[var(--color-fg-quaternary)]">{tierLabel(c.gymTier)} · v{c.version}</p></Td>
+                  <Td className="whitespace-nowrap tabular-nums">{trio(c.retailDailyTzs, c.retailWeeklyTzs, c.retailMonthlyTzs, v => money(v, '').trim())}</Td>
+                  <Td className="whitespace-nowrap tabular-nums">
                     {c.status === 'active'
                       ? trio(wholesale(c.retailDailyTzs, c.dailyDiscountBps, c.dailyCeilingTzs), wholesale(c.retailWeeklyTzs, c.weeklyDiscountBps, c.weeklyCeilingTzs), wholesale(c.retailMonthlyTzs, c.monthlyDiscountBps, c.monthlyCeilingTzs), v => money(v, '').trim())
                       : <span className="text-[var(--color-fg-quaternary)]">Set when activated</span>}
-                  </td>
-                  <td className={td}>{status(c)}</td>
-                  <td className={td}>{actions('rate-cards', c, `rate card for ${gymName(c.gymId)}`)}</td>
-                </tr>
+                  </Td>
+                  <Td>{status(c)}</Td>
+                  <Td>{actions('rate-cards', c, `rate card for ${gymName(c.gymId)}`)}</Td>
+                </Tr>
               )), current(config.rateCards).length === 0)}
             </>
           ) : tab === 'rules' ? table('config-rules', <>
-            <th className={th}>Applies to</th><th className={th}>Network share</th><th className={th}>Discount day / week / month</th><th className={th}>Ceiling day / week / month</th><th className={th}>Status</th><th className={th} />
+            <Th>Applies to</Th><Th>Network share</Th><Th>Discount day / week / month</Th><Th>Ceiling day / week / month</Th><Th>Status</Th><Th />
           </>, current<SettlementRule>(config.rules).map(r => (
-            <tr key={r.id} data-testid={`config-row-${r.id}`}>
-              <td className={td}><span className="font-medium">{ruleScope(r)}</span><p className="text-xs text-[var(--color-fg-quaternary)]">{r.name ? `${r.name} · ` : ''}v{r.version}</p></td>
-              <td className={`${td} tabular-nums`}>{percent(r.networkPayoutBps)}</td>
-              <td className={`${td} whitespace-nowrap tabular-nums`}>{trio(r.dailyDiscountBps, r.weeklyDiscountBps, r.monthlyDiscountBps, percent)}</td>
-              <td className={`${td} whitespace-nowrap tabular-nums`}>{trio(r.dailyCeilingTzs, r.weeklyCeilingTzs, r.monthlyCeilingTzs, v => money(v, '').trim())}</td>
-              <td className={td}>{status(r)}</td>
-              <td className={td}>{actions('rules', r, `rule for ${ruleScope(r).toLowerCase()}`)}</td>
-            </tr>
+            <Tr key={r.id} data-testid={`config-row-${r.id}`}>
+              <Td><span className="font-medium">{ruleScope(r)}</span><p className="text-xs text-[var(--color-fg-quaternary)]">{r.name ? `${r.name} · ` : ''}v{r.version}</p></Td>
+              <Td className="tabular-nums">{percent(r.networkPayoutBps)}</Td>
+              <Td className="whitespace-nowrap tabular-nums">{trio(r.dailyDiscountBps, r.weeklyDiscountBps, r.monthlyDiscountBps, percent)}</Td>
+              <Td className="whitespace-nowrap tabular-nums">{trio(r.dailyCeilingTzs, r.weeklyCeilingTzs, r.monthlyCeilingTzs, v => money(v, '').trim())}</Td>
+              <Td>{status(r)}</Td>
+              <Td>{actions('rules', r, `rule for ${ruleScope(r).toLowerCase()}`)}</Td>
+            </Tr>
           )), current(config.rules).length === 0) : table('config-pass-tiers', <>
-            <th className={th}>Pass</th><th className={`${th} text-right`}>Price</th><th className={`${th} text-right`}>Visits per cycle</th><th className={th}>Status</th><th className={th} />
+            <Th>Pass</Th><Th className="!text-right">Price</Th><Th className="!text-right">Visits per cycle</Th><Th>Status</Th><Th />
           </>, current<PassTierVersion>(config.passTierVersions).map(p => (
-            <tr key={p.id} data-testid={`config-row-${p.id}`}>
-              <td className={td}><span className="font-medium">{tierLabel(p.tierKey)}</span><p className="text-xs text-[var(--color-fg-quaternary)]">v{p.version}</p></td>
-              <td className={`${td} text-right tabular-nums`}>{money(p.priceTzs)}</td>
-              <td className={`${td} text-right tabular-nums`}>{p.visitAllowance}</td>
-              <td className={td}>{status(p)}</td>
-              <td className={td}>{actions('pass-tiers', p, `${tierLabel(p.tierKey)} pass version`)}</td>
-            </tr>
+            <Tr key={p.id} data-testid={`config-row-${p.id}`}>
+              <Td><span className="font-medium">{tierLabel(p.tierKey)}</span><p className="text-xs text-[var(--color-fg-quaternary)]">v{p.version}</p></Td>
+              <Td className="text-right tabular-nums">{money(p.priceTzs)}</Td>
+              <Td className="text-right tabular-nums">{p.visitAllowance}</Td>
+              <Td>{status(p)}</Td>
+              <Td>{actions('pass-tiers', p, `${tierLabel(p.tierKey)} pass version`)}</Td>
+            </Tr>
           )), current(config.passTierVersions).length === 0)}
         </CardContent>
       </Card>

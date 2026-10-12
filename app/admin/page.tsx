@@ -13,10 +13,7 @@ import { useApp } from '../providers';
 import {
   api, Gym, GymOwner, MemberSummary, PaymentRequest, RoleApproval, TrainerProfile,
 } from '@/lib/api';
-import {
-  MetricCard, Card, CardHeader, CardContent, Badge, Button,
-  PageHeader, Alert, Spinner,
-} from '@/components/shared';
+import { MetricCard, Card, CardHeader, CardContent, Badge, Button, PageHeader, Alert, Spinner, Table, TBody, Td, Th, THead, Tr } from '@/components/shared';
 import { money, statusTone, statusLabel } from '@/lib/admin-utils';
 
 const BRAND   = '#079455';
@@ -240,27 +237,27 @@ export default function AdminOverviewPage() {
                 <Button variant="ghost" size="sm">View all <ArrowUpRight className="h-3.5 w-3.5" /></Button>
               </Link>
             </CardHeader>
-            <div className="overflow-x-auto">
+            <div>
               {recentPayments.length === 0 ? (
                 <p className="px-6 py-8 text-center text-sm text-[var(--color-fg-quaternary)]">No payment requests yet.</p>
               ) : (
-                <table className="ui-table">
-                  <thead><tr><th>Member</th><th>Tier</th><th>Amount</th><th>Date</th><th>Status</th></tr></thead>
-                  <tbody>
+                <Table aria-label="Recent payment requests" wrapperClassName="rounded-none border-0">
+                  <THead><Tr><Th>Member</Th><Th>Tier</Th><Th>Amount</Th><Th>Date</Th><Th>Status</Th></Tr></THead>
+                  <TBody>
                     {recentPayments.map(p => (
-                      <tr key={p.id}>
-                        <td>
+                      <Tr key={p.id}>
+                        <Td>
                           <div className="font-medium text-[var(--color-fg-primary)] text-sm">{p.member?.displayName || p.member?.email || p.memberId}</div>
                           <div className="text-xs text-[var(--color-fg-quaternary)] font-mono">{p.id.slice(0, 22)}{'\u2026'}</div>
-                        </td>
-                        <td><Badge tone="brand">{(p.tier ?? '—').toUpperCase()}</Badge></td>
-                        <td className="font-medium tabular-nums">{money(p.amountTzs)}</td>
-                        <td className="text-xs tabular-nums whitespace-nowrap">{p.requestedAt ? new Date(p.requestedAt).toLocaleDateString() : '\u2014'}</td>
-                        <td><Badge tone={statusTone(p.status)}>{statusLabel(p.status)}</Badge></td>
-                      </tr>
+                        </Td>
+                        <Td><Badge tone="brand">{(p.tier ?? '—').toUpperCase()}</Badge></Td>
+                        <Td className="font-medium tabular-nums">{money(p.amountTzs)}</Td>
+                        <Td className="text-xs tabular-nums whitespace-nowrap">{p.requestedAt ? new Date(p.requestedAt).toLocaleDateString() : '\u2014'}</Td>
+                        <Td><Badge tone={statusTone(p.status)}>{statusLabel(p.status)}</Badge></Td>
+                      </Tr>
                     ))}
-                  </tbody>
-                </table>
+                  </TBody>
+                </Table>
               )}
             </div>
           </Card>}

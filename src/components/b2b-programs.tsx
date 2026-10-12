@@ -5,7 +5,7 @@ import {
   api, ApiError, B2BBeneficiary, B2BBenefit, B2BBenefitInput, B2BEligibilityRow, B2BOrganization,
   B2BProgram, B2BProgramInput, B2BProgramReference, B2BProgramUsage, B2BProviderRules,
 } from '@/lib/api';
-import { Alert, Badge, Button, Card, CardContent, CardHeader, Field, Spinner } from '@/components/shared';
+import { Alert, Badge, Button, Card, CardContent, CardHeader, Checkbox, Field, Input, Select, Spinner } from '@/components/shared';
 import { B2BBilling } from '@/components/b2b-billing';
 
 const ERRORS: Record<string, string> = {
@@ -239,47 +239,43 @@ export function B2BPrograms({ token, org, beneficiaries, onChanged }: { token: s
   // ── Render ──
   const programFormView = programForm && (
     <form onSubmit={saveProgram} className="grid gap-3 sm:grid-cols-2" data-testid="program-form">
-      <Field label="Name"><input className="ui-input" required value={programForm.name} onChange={e => setProgramForm({ ...programForm, name: e.target.value })} data-testid="program-name" /></Field>
+      <Field label="Name"><Input required value={programForm.name} onChange={e => setProgramForm({ ...programForm, name: e.target.value })} data-testid="program-name" /></Field>
       <Field label="Type">
-        <select className="ui-input" disabled={!!live} value={programForm.programType} onChange={e => setProgramForm({ ...programForm, programType: e.target.value })}>
+        <Select disabled={!!live} value={programForm.programType} onChange={e => setProgramForm({ ...programForm, programType: e.target.value })}>
           {ref && Object.entries(ref.programTypes).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-        </select>
+        </Select>
       </Field>
-      <Field label="Starts"><input className="ui-input" type="date" required disabled={!!live} value={programForm.startDate} onChange={e => setProgramForm({ ...programForm, startDate: e.target.value })} data-testid="program-start" /></Field>
-      <Field label="Ends (optional)"><input className="ui-input" type="date" value={programForm.endDate} onChange={e => setProgramForm({ ...programForm, endDate: e.target.value })} data-testid="program-end" /></Field>
-      <Field label="Sponsor budget, TZS (optional)"><input className="ui-input" inputMode="numeric" value={programForm.budget} onChange={e => setProgramForm({ ...programForm, budget: e.target.value })} /></Field>
-      <Field label="Discount on pass prices, % (optional)"><input className="ui-input" inputMode="decimal" value={programForm.discount} onChange={e => setProgramForm({ ...programForm, discount: e.target.value })} placeholder="0" data-testid="program-discount" /></Field>
+      <Field label="Starts"><Input type="date" required disabled={!!live} value={programForm.startDate} onChange={e => setProgramForm({ ...programForm, startDate: e.target.value })} data-testid="program-start" /></Field>
+      <Field label="Ends (optional)"><Input type="date" value={programForm.endDate} onChange={e => setProgramForm({ ...programForm, endDate: e.target.value })} data-testid="program-end" /></Field>
+      <Field label="Sponsor budget, TZS (optional)"><Input inputMode="numeric" value={programForm.budget} onChange={e => setProgramForm({ ...programForm, budget: e.target.value })} /></Field>
+      <Field label="Discount on pass prices, % (optional)"><Input inputMode="decimal" value={programForm.discount} onChange={e => setProgramForm({ ...programForm, discount: e.target.value })} placeholder="0" data-testid="program-discount" /></Field>
       <Field label="Who is eligible">
-        <select className="ui-input" disabled={!!live} value={programForm.scope} onChange={e => setProgramForm({ ...programForm, scope: e.target.value })} data-testid="program-scope">
+        <Select disabled={!!live} value={programForm.scope} onChange={e => setProgramForm({ ...programForm, scope: e.target.value })} data-testid="program-scope">
           <option value="all">All beneficiaries</option>
           <option value="groups">Selected groups</option>
           <option value="selected">Selected beneficiaries</option>
-        </select>
+        </Select>
       </Field>
       {programForm.scope === 'groups' && (
         <div className="sm:col-span-2 flex flex-wrap gap-3 text-sm" data-testid="program-groups">
           {groups.length === 0 && <span className="text-[var(--color-fg-quaternary)]">No groups yet: give beneficiaries a group first.</span>}
           {groups.map(g => (
-            <label key={g} className="flex items-center gap-1.5">
-              <input type="checkbox" disabled={!!live} checked={programForm.groups.includes(g)}
-                onChange={e => setProgramForm({ ...programForm, groups: e.target.checked ? [...programForm.groups, g] : programForm.groups.filter(x => x !== g) })} />{g}
-            </label>
+            <Checkbox key={g} label={g} disabled={!!live} checked={programForm.groups.includes(g)}
+              onChange={e => setProgramForm({ ...programForm, groups: e.target.checked ? [...programForm.groups, g] : programForm.groups.filter(x => x !== g) })} />
           ))}
         </div>
       )}
       {programForm.scope === 'selected' && (
         <div className="sm:col-span-2 max-h-40 space-y-1 overflow-y-auto text-sm">
           {beneficiaries.map(b => (
-            <label key={b.id} className="flex items-center gap-1.5">
-              <input type="checkbox" disabled={!!live} checked={programForm.ids.includes(b.id)}
-                onChange={e => setProgramForm({ ...programForm, ids: e.target.checked ? [...programForm.ids, b.id] : programForm.ids.filter(x => x !== b.id) })} />
-              {b.displayName ?? b.id} <span className="text-[var(--color-fg-quaternary)]">{b.groupName}</span>
-            </label>
+            <Checkbox key={b.id} disabled={!!live} checked={programForm.ids.includes(b.id)}
+              label={<>{b.displayName ?? b.id} <span className="text-[var(--color-fg-quaternary)]">{b.groupName}</span></>}
+              onChange={e => setProgramForm({ ...programForm, ids: e.target.checked ? [...programForm.ids, b.id] : programForm.ids.filter(x => x !== b.id) })} />
           ))}
         </div>
       )}
-      <Field label="Only these beneficiary types (optional, comma-separated)"><input className="ui-input" disabled={!!live} value={programForm.types} onChange={e => setProgramForm({ ...programForm, types: e.target.value })} placeholder="e.g. policyholder, employee" /></Field>
-      <Field label="Description"><input className="ui-input" value={programForm.description} onChange={e => setProgramForm({ ...programForm, description: e.target.value })} /></Field>
+      <Field label="Only these beneficiary types (optional, comma-separated)"><Input disabled={!!live} value={programForm.types} onChange={e => setProgramForm({ ...programForm, types: e.target.value })} placeholder="e.g. policyholder, employee" /></Field>
+      <Field label="Description"><Input value={programForm.description} onChange={e => setProgramForm({ ...programForm, description: e.target.value })} /></Field>
       <div className="sm:col-span-2 flex justify-end gap-2">
         <Button type="button" variant="secondary" onClick={() => setProgramForm(null)}>Cancel</Button>
         <Button type="submit" disabled={busy} data-testid="program-save">Save programme</Button>
@@ -294,84 +290,81 @@ export function B2BPrograms({ token, org, beneficiaries, onChanged }: { token: s
   const providerKeys = bf ? ref?.benefitTypes[bf.benefitType]?.providerKeys ?? [] : [];
   const benefitFormView = bf && (
     <form onSubmit={saveBenefit} className="grid gap-3 rounded-lg border border-[var(--color-border-secondary)] p-3 sm:grid-cols-2" data-testid="benefit-form">
-      <Field label="Benefit name"><input className="ui-input" required value={bf.name} onChange={e => setBenefitForm({ ...bf, name: e.target.value })} data-testid="benefit-name" /></Field>
+      <Field label="Benefit name"><Input required value={bf.name} onChange={e => setBenefitForm({ ...bf, name: e.target.value })} data-testid="benefit-name" /></Field>
       <Field label="Type">
-        <select className="ui-input" value={bf.benefitType} onChange={e => {
+        <Select value={bf.benefitType} onChange={e => {
           const benefitType = e.target.value;
           const allowed = fundingFor(benefitType);
           setBenefitForm({ ...bf, benefitType, providerScope: 'all', fundingType: allowed.includes(bf.fundingType) ? bf.fundingType : allowed[0] });
         }} data-testid="benefit-type">
           {ref && Object.entries(ref.benefitTypes).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
-        </select>
+        </Select>
       </Field>
-      <Field label="Who pays">
-        <select className="ui-input" value={bf.fundingType} onChange={e => setBenefitForm({ ...bf, fundingType: e.target.value })} data-testid="benefit-funding">
+      <Field label="Who pays" hint={bf.benefitType !== FLAT_FEE ? 'Per-use benefits are fully sponsored. To share the cost with members, add a sponsored pass.' : undefined}>
+        <Select value={bf.fundingType} onChange={e => setBenefitForm({ ...bf, fundingType: e.target.value })} data-testid="benefit-funding">
           {ref && Object.entries(ref.fundingTypes).filter(([k]) => fundingFor(bf.benefitType).includes(k)).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-        </select>
-        {bf.benefitType !== FLAT_FEE && <span className="text-xs text-[var(--color-fg-quaternary)]">Per-use benefits are fully sponsored. To share the cost with members, add a sponsored pass.</span>}
+        </Select>
       </Field>
       {bf.benefitType === FLAT_FEE && (
         <Field label="Pass tier">
-          <select className="ui-input" value={bf.passTier} onChange={e => setBenefitForm({ ...bf, passTier: e.target.value })} data-testid="benefit-pass-tier">
+          <Select value={bf.passTier} onChange={e => setBenefitForm({ ...bf, passTier: e.target.value })} data-testid="benefit-pass-tier">
             {PASS_TIERS.map(t => <option key={t} value={t}>{t}</option>)}
-          </select>
+          </Select>
         </Field>
       )}
       {bf.benefitType === FLAT_FEE && (
         <Field label="Fee per person per month, TZS (optional)" hint="Leave empty to use the organisation's agreed rate, or the pass price less the programme's discount. Applies to months not yet invoiced.">
-          <input className="ui-input" inputMode="numeric" value={bf.fixedFee} onChange={e => setBenefitForm({ ...bf, fixedFee: e.target.value })} data-testid="benefit-fixed-fee" />
+          <Input inputMode="numeric" value={bf.fixedFee} onChange={e => setBenefitForm({ ...bf, fixedFee: e.target.value })} data-testid="benefit-fixed-fee" />
         </Field>
       )}
-      {bf.fundingType === 'sponsor_fixed' && <Field label={bf.benefitType === FLAT_FEE ? 'Sponsor pays per person per month (TZS)' : 'Sponsor pays per use (TZS)'}><input className="ui-input" inputMode="numeric" value={bf.sponsorAmount} onChange={e => setBenefitForm({ ...bf, sponsorAmount: e.target.value })} data-testid="benefit-sponsor-amount" /></Field>}
+      {bf.fundingType === 'sponsor_fixed' && <Field label={bf.benefitType === FLAT_FEE ? 'Sponsor pays per person per month (TZS)' : 'Sponsor pays per use (TZS)'}><Input inputMode="numeric" value={bf.sponsorAmount} onChange={e => setBenefitForm({ ...bf, sponsorAmount: e.target.value })} data-testid="benefit-sponsor-amount" /></Field>}
       {bf.fundingType === 'sponsor_percentage' && (
         <>
-          <Field label="Sponsor share (%)"><input className="ui-input" inputMode="decimal" value={bf.sponsorPct} onChange={e => setBenefitForm({ ...bf, sponsorPct: e.target.value })} data-testid="benefit-sponsor-pct" /></Field>
-          {bf.benefitType !== FLAT_FEE && <Field label="Sponsor max per use, TZS (optional)"><input className="ui-input" inputMode="numeric" value={bf.sponsorCap} onChange={e => setBenefitForm({ ...bf, sponsorCap: e.target.value })} /></Field>}
+          <Field label="Sponsor share (%)"><Input inputMode="decimal" value={bf.sponsorPct} onChange={e => setBenefitForm({ ...bf, sponsorPct: e.target.value })} data-testid="benefit-sponsor-pct" /></Field>
+          {bf.benefitType !== FLAT_FEE && <Field label="Sponsor max per use, TZS (optional)"><Input inputMode="numeric" value={bf.sponsorCap} onChange={e => setBenefitForm({ ...bf, sponsorCap: e.target.value })} /></Field>}
         </>
       )}
-      {bf.fundingType === 'beneficiary_fixed' && <Field label={bf.benefitType === FLAT_FEE ? 'Member pays per month to unlock (TZS)' : 'Beneficiary copay per use (TZS)'}><input className="ui-input" inputMode="numeric" value={bf.copay} onChange={e => setBenefitForm({ ...bf, copay: e.target.value })} /></Field>}
+      {bf.fundingType === 'beneficiary_fixed' && <Field label={bf.benefitType === FLAT_FEE ? 'Member pays per month to unlock (TZS)' : 'Beneficiary copay per use (TZS)'}><Input inputMode="numeric" value={bf.copay} onChange={e => setBenefitForm({ ...bf, copay: e.target.value })} /></Field>}
       {bf.benefitType !== FLAT_FEE && (
         <Field label="Usage period">
-          <select className="ui-input" value={bf.usagePeriod} onChange={e => setBenefitForm({ ...bf, usagePeriod: e.target.value })} data-testid="benefit-period">
+          <Select value={bf.usagePeriod} onChange={e => setBenefitForm({ ...bf, usagePeriod: e.target.value })} data-testid="benefit-period">
             {ref?.usagePeriods.map(p => <option key={p} value={p}>{p === 'program' ? 'whole programme' : p}</option>)}
-          </select>
+          </Select>
         </Field>
       )}
       {bf.benefitType !== FLAT_FEE && bf.usagePeriod !== 'unlimited' && (
         <>
-          <Field label="Uses per period (blank = no count limit)"><input className="ui-input" inputMode="numeric" value={bf.usageLimit} onChange={e => setBenefitForm({ ...bf, usageLimit: e.target.value })} data-testid="benefit-limit" /></Field>
-          {bf.fundingType !== 'none' && <Field label="Sponsor money per period, TZS (optional)"><input className="ui-input" inputMode="numeric" value={bf.periodCap} onChange={e => setBenefitForm({ ...bf, periodCap: e.target.value })} /></Field>}
+          <Field label="Uses per period (blank = no count limit)"><Input inputMode="numeric" value={bf.usageLimit} onChange={e => setBenefitForm({ ...bf, usageLimit: e.target.value })} data-testid="benefit-limit" /></Field>
+          {bf.fundingType !== 'none' && <Field label="Sponsor money per period, TZS (optional)"><Input inputMode="numeric" value={bf.periodCap} onChange={e => setBenefitForm({ ...bf, periodCap: e.target.value })} /></Field>}
         </>
       )}
-      <Field label="Valid from (blank = programme start)"><input className="ui-input" type="date" value={bf.startDate} onChange={e => setBenefitForm({ ...bf, startDate: e.target.value })} /></Field>
-      <Field label="Valid to (blank = programme end)"><input className="ui-input" type="date" value={bf.endDate} onChange={e => setBenefitForm({ ...bf, endDate: e.target.value })} /></Field>
+      <Field label="Valid from (blank = programme start)"><Input type="date" value={bf.startDate} onChange={e => setBenefitForm({ ...bf, startDate: e.target.value })} /></Field>
+      <Field label="Valid to (blank = programme end)"><Input type="date" value={bf.endDate} onChange={e => setBenefitForm({ ...bf, endDate: e.target.value })} /></Field>
       {providerKeys.length > 0 && (
         <Field label="Providers">
-          <select className="ui-input" value={bf.providerScope} onChange={e => setBenefitForm({ ...bf, providerScope: e.target.value })} data-testid="benefit-provider-scope">
+          <Select value={bf.providerScope} onChange={e => setBenefitForm({ ...bf, providerScope: e.target.value })} data-testid="benefit-provider-scope">
             <option value="all">All eligible providers</option>
             <option value="selected">Only selected providers</option>
-          </select>
+          </Select>
         </Field>
       )}
-      {bf.providerScope === 'selected' && providerKeys.includes('gymIds') && <Field label="Gym IDs (comma-separated)"><input className="ui-input" value={bf.gymIds} onChange={e => setBenefitForm({ ...bf, gymIds: e.target.value })} /></Field>}
+      {bf.providerScope === 'selected' && providerKeys.includes('gymIds') && <Field label="Gym IDs (comma-separated)"><Input value={bf.gymIds} onChange={e => setBenefitForm({ ...bf, gymIds: e.target.value })} /></Field>}
       {bf.providerScope === 'selected' && providerKeys.includes('gymTiers') && (
         <div className="flex flex-wrap items-center gap-3 text-sm">
           <span className="text-[var(--color-fg-quaternary)]">Gym tiers:</span>
           {GYM_TIERS.map(t => (
-            <label key={t} className="flex items-center gap-1">
-              <input type="checkbox" checked={bf.gymTiers.includes(t)} onChange={e => setBenefitForm({ ...bf, gymTiers: e.target.checked ? [...bf.gymTiers, t] : bf.gymTiers.filter(x => x !== t) })} />{t}
-            </label>
+            <Checkbox key={t} label={t} checked={bf.gymTiers.includes(t)} onChange={e => setBenefitForm({ ...bf, gymTiers: e.target.checked ? [...bf.gymTiers, t] : bf.gymTiers.filter(x => x !== t) })} />
           ))}
         </div>
       )}
-      {bf.providerScope === 'selected' && providerKeys.includes('trainerIds') && <Field label="Trainer profile IDs"><input className="ui-input" value={bf.trainerIds} onChange={e => setBenefitForm({ ...bf, trainerIds: e.target.value })} /></Field>}
-      {bf.providerScope === 'selected' && providerKeys.includes('vendorIds') && <Field label="Vendor user IDs"><input className="ui-input" value={bf.vendorIds} onChange={e => setBenefitForm({ ...bf, vendorIds: e.target.value })} /></Field>}
-      {bf.providerScope === 'selected' && providerKeys.includes('productCategories') && <Field label="Product categories"><input className="ui-input" value={bf.productCategories} onChange={e => setBenefitForm({ ...bf, productCategories: e.target.value })} /></Field>}
-      {bf.providerScope === 'selected' && providerKeys.includes('challengeIds') && <Field label="Challenge IDs"><input className="ui-input" value={bf.challengeIds} onChange={e => setBenefitForm({ ...bf, challengeIds: e.target.value })} /></Field>}
-      <Field label="Only for groups (optional)"><input className="ui-input" value={bf.groups} onChange={e => setBenefitForm({ ...bf, groups: e.target.value })} placeholder={groups.join(', ')} /></Field>
-      <Field label="Only for beneficiary types (optional)"><input className="ui-input" value={bf.types} onChange={e => setBenefitForm({ ...bf, types: e.target.value })} /></Field>
-      <Field label="Terms"><input className="ui-input" value={bf.terms} onChange={e => setBenefitForm({ ...bf, terms: e.target.value })} /></Field>
-      <Field label="Description"><input className="ui-input" value={bf.description} onChange={e => setBenefitForm({ ...bf, description: e.target.value })} /></Field>
+      {bf.providerScope === 'selected' && providerKeys.includes('trainerIds') && <Field label="Trainer profile IDs"><Input value={bf.trainerIds} onChange={e => setBenefitForm({ ...bf, trainerIds: e.target.value })} /></Field>}
+      {bf.providerScope === 'selected' && providerKeys.includes('vendorIds') && <Field label="Vendor user IDs"><Input value={bf.vendorIds} onChange={e => setBenefitForm({ ...bf, vendorIds: e.target.value })} /></Field>}
+      {bf.providerScope === 'selected' && providerKeys.includes('productCategories') && <Field label="Product categories"><Input value={bf.productCategories} onChange={e => setBenefitForm({ ...bf, productCategories: e.target.value })} /></Field>}
+      {bf.providerScope === 'selected' && providerKeys.includes('challengeIds') && <Field label="Challenge IDs"><Input value={bf.challengeIds} onChange={e => setBenefitForm({ ...bf, challengeIds: e.target.value })} /></Field>}
+      <Field label="Only for groups (optional)"><Input value={bf.groups} onChange={e => setBenefitForm({ ...bf, groups: e.target.value })} placeholder={groups.join(', ')} /></Field>
+      <Field label="Only for beneficiary types (optional)"><Input value={bf.types} onChange={e => setBenefitForm({ ...bf, types: e.target.value })} /></Field>
+      <Field label="Terms"><Input value={bf.terms} onChange={e => setBenefitForm({ ...bf, terms: e.target.value })} /></Field>
+      <Field label="Description"><Input value={bf.description} onChange={e => setBenefitForm({ ...bf, description: e.target.value })} /></Field>
       <div className="sm:col-span-2 flex justify-end gap-2">
         <Button type="button" variant="secondary" onClick={() => setBenefitForm(null)}>Cancel</Button>
         <Button type="submit" disabled={busy} data-testid="benefit-save">Save benefit</Button>
@@ -409,9 +402,9 @@ export function B2BPrograms({ token, org, beneficiaries, onChanged }: { token: s
           )
         ) : (
           <div className="space-y-4" data-testid="program-detail">
-            <button className="flex items-center gap-1 text-xs text-[var(--color-fg-quaternary)]" onClick={() => { setOpen(null); setProgramForm(null); setBenefitForm(null); setEligibility(null); setUsage(null); }}>
+            <Button variant="link" className="h-auto gap-1 px-0 text-xs font-normal text-[var(--color-fg-quaternary)] hover:no-underline" onClick={() => { setOpen(null); setProgramForm(null); setBenefitForm(null); setEligibility(null); setUsage(null); }}>
               <ArrowLeft className="h-3 w-3" />All programmes
-            </button>
+            </Button>
             {programForm ? programFormView : (
               <>
                 <div className="flex flex-wrap items-center justify-between gap-2">
@@ -450,7 +443,7 @@ export function B2BPrograms({ token, org, beneficiaries, onChanged }: { token: s
                 {budgetPaused && (
                   <div className="space-y-2" data-testid="budget-paused">
                     <Alert tone="warning">Paused because the sponsor budget ran out. Raise the budget (Edit), then resume with a remark.</Alert>
-                    <input className="ui-input" placeholder="Why is it being resumed? (required)" value={remark} onChange={e => setRemark(e.target.value)} data-testid="resume-remark" />
+                    <Input placeholder="Why is it being resumed? (required)" aria-label="Why is it being resumed? (required)" value={remark} onChange={e => setRemark(e.target.value)} data-testid="resume-remark" />
                   </div>
                 )}
                 {usage && (

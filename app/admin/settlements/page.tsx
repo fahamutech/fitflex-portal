@@ -5,7 +5,7 @@ import { useApp } from '../../providers';
 import { api, GymSettlement, GymSettlementStatus, SettlementClawbacks, SettlementMode, SettlementRun } from '@/lib/api';
 import { money } from '@/lib/admin-utils';
 import { STATEMENT_STATUS, STATEMENT_TABS, clawbackSkipReason, lastMonth, period, settlementError, shortDay, signed, skipReason } from '@/lib/settlements';
-import { Alert, Badge, Button, Card, CardContent, Field, PageHeader, Segmented, Spinner } from '@/components/shared';
+import { Alert, Badge, Button, Card, CardContent, Field, PageHeader, Segmented, Spinner, Table, TBody, Td, Th, THead, Tr } from '@/components/shared';
 import { Dialog, DialogFooter } from '@/components/dialog';
 import { SettlementStatementView } from '@/components/settlement-statement';
 
@@ -123,49 +123,47 @@ export default function SettlementsPage() {
                   {rows.length === 0 ? 'No statements yet. They appear after a month has been run.' : `No ${STATEMENT_STATUS[tab].label.toLowerCase()} statements.`}
                 </div>
               ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full min-w-[760px] text-sm" data-testid="settlement-table">
-                    <thead className="text-left text-xs text-[var(--color-fg-tertiary)]">
-                      <tr className="border-b border-[var(--color-border-secondary)]">
-                        <th className="px-4 py-2.5 font-medium">Gym</th>
-                        <th className="px-4 py-2.5 font-medium">Month</th>
-                        <th className="px-4 py-2.5 text-right font-medium">Members</th>
-                        <th className="px-4 py-2.5 text-right font-medium">Visits</th>
-                        <th className="px-4 py-2.5 text-right font-medium">Earned</th>
-                        <th className="px-4 py-2.5 text-right font-medium">To pay</th>
-                        <th className="px-4 py-2.5 font-medium">Status</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-[var(--color-border-secondary)]">
-                      {shown.map(r => (
-                        <tr key={r.id} className="cursor-pointer hover:bg-[var(--color-bg-secondary)]" onClick={() => open(r.id)} data-testid={`settlement-row-${r.id}`}>
-                          <td className="px-4 py-3">
-                            <button className="text-left font-medium text-[var(--color-fg-primary)] hover:underline" onClick={e => { e.stopPropagation(); open(r.id); }}>
-                              {r.gymName || 'Unnamed gym'}
-                            </button>
-                          </td>
-                          <td className="whitespace-nowrap px-4 py-3">{period(r)}</td>
-                          <td className="px-4 py-3 text-right tabular-nums">{r.memberCycleCount}</td>
-                          <td className="px-4 py-3 text-right tabular-nums">{r.qualifyingVisitCount}</td>
-                          <td className="whitespace-nowrap px-4 py-3 text-right tabular-nums">{money(r.preliminaryTzs)}</td>
-                          <td className="whitespace-nowrap px-4 py-3 text-right font-medium tabular-nums">{money(r.finalNetTzs)}</td>
-                          <td className="px-4 py-3">
-                            <Badge tone={STATEMENT_STATUS[r.status].tone}>{STATEMENT_STATUS[r.status].label}</Badge>
-                            {r.holdReason && r.status !== 'voided' && <span className="ml-2"><Badge tone="danger">On hold</Badge></span>}
-                            {r.voidRequestedBy && r.status !== 'voided' && <span className="ml-2"><Badge tone="warning">Void requested</Badge></span>}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                    <tfoot>
-                      <tr className="border-t border-[var(--color-border-secondary)] text-sm">
-                        <td className="px-4 py-3 font-medium" colSpan={5}>{shown.length} {shown.length === 1 ? 'statement' : 'statements'}</td>
-                        <td className="whitespace-nowrap px-4 py-3 text-right font-semibold tabular-nums" data-testid="settlement-total">{money(total)}</td>
-                        <td />
-                      </tr>
-                    </tfoot>
-                  </table>
-                </div>
+                <Table aria-label="Statements" wrapperClassName="rounded-none border-0" className="min-w-[760px]" data-testid="settlement-table">
+                  <THead>
+                    <Tr>
+                      <Th>Gym</Th>
+                      <Th>Month</Th>
+                      <Th className="!text-right">Members</Th>
+                      <Th className="!text-right">Visits</Th>
+                      <Th className="!text-right">Earned</Th>
+                      <Th className="!text-right">To pay</Th>
+                      <Th>Status</Th>
+                    </Tr>
+                  </THead>
+                  <TBody>
+                    {shown.map(r => (
+                      <Tr key={r.id} className="cursor-pointer hover:bg-[var(--color-bg-secondary)]" onClick={() => open(r.id)} data-testid={`settlement-row-${r.id}`}>
+                        <Td>
+                          <Button variant="link" className="h-auto px-0 text-left font-medium text-[var(--color-fg-primary)]" onClick={e => { e.stopPropagation(); open(r.id); }}>
+                            {r.gymName || 'Unnamed gym'}
+                          </Button>
+                        </Td>
+                        <Td className="whitespace-nowrap">{period(r)}</Td>
+                        <Td className="text-right tabular-nums">{r.memberCycleCount}</Td>
+                        <Td className="text-right tabular-nums">{r.qualifyingVisitCount}</Td>
+                        <Td className="whitespace-nowrap text-right tabular-nums">{money(r.preliminaryTzs)}</Td>
+                        <Td className="whitespace-nowrap text-right font-medium tabular-nums">{money(r.finalNetTzs)}</Td>
+                        <Td>
+                          <Badge tone={STATEMENT_STATUS[r.status].tone}>{STATEMENT_STATUS[r.status].label}</Badge>
+                          {r.holdReason && r.status !== 'voided' && <span className="ml-2"><Badge tone="danger">On hold</Badge></span>}
+                          {r.voidRequestedBy && r.status !== 'voided' && <span className="ml-2"><Badge tone="warning">Void requested</Badge></span>}
+                        </Td>
+                      </Tr>
+                    ))}
+                  </TBody>
+                  <tfoot>
+                    <Tr className="border-t border-[var(--color-border-secondary)] text-sm [&>td]:!border-b-0">
+                      <Td className="font-medium" colSpan={5}>{shown.length} {shown.length === 1 ? 'statement' : 'statements'}</Td>
+                      <Td className="whitespace-nowrap text-right font-semibold tabular-nums" data-testid="settlement-total">{money(total)}</Td>
+                      <Td />
+                    </Tr>
+                  </tfoot>
+                </Table>
               )}
             </CardContent>
           </Card>
@@ -176,31 +174,29 @@ export default function SettlementsPage() {
             {runs == null ? <div className="p-6"><Spinner className="h-6 w-6" /></div> : runs.length === 0 ? (
               <div className="p-10 text-center text-sm text-[var(--color-fg-quaternary)]">No {mode} runs yet.</div>
             ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full min-w-[720px] text-sm" data-testid="settlement-runs-table">
-                  <thead className="text-left text-xs text-[var(--color-fg-tertiary)]">
-                    <tr className="border-b border-[var(--color-border-secondary)]">
-                      <th className="px-4 py-2.5 font-medium">Month</th>
-                      <th className="px-4 py-2.5 font-medium">Run on</th>
-                      <th className="px-4 py-2.5 font-medium">Status</th>
-                      <th className="px-4 py-2.5 text-right font-medium">Gyms</th>
-                      <th className="px-4 py-2.5 text-right font-medium">Settled</th>
-                      <th className="px-4 py-2.5 text-right font-medium">Skipped</th>
-                      <th className="px-4 py-2.5 text-right font-medium">Total</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-[var(--color-border-secondary)]">
-                    {runs.map(run => {
-                      const stats = run.configurationSnapshot?.stats;
-                      const skipped = run.configurationSnapshot?.exceptions ?? [];
-                      return (
-                        <RunRows key={run.id} run={run} open={openRun === run.id} onToggle={() => setOpenRun(openRun === run.id ? null : run.id)}
-                          statements={stats?.statements} settled={stats?.settledCycles} total={stats?.totalFinalTzs} skipped={skipped} />
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
+              <Table aria-label="Runs" wrapperClassName="rounded-none border-0" className="min-w-[720px]" data-testid="settlement-runs-table">
+                <THead>
+                  <Tr>
+                    <Th>Month</Th>
+                    <Th>Run on</Th>
+                    <Th>Status</Th>
+                    <Th className="!text-right">Gyms</Th>
+                    <Th className="!text-right">Settled</Th>
+                    <Th className="!text-right">Skipped</Th>
+                    <Th className="!text-right">Total</Th>
+                  </Tr>
+                </THead>
+                <TBody>
+                  {runs.map(run => {
+                    const stats = run.configurationSnapshot?.stats;
+                    const skipped = run.configurationSnapshot?.exceptions ?? [];
+                    return (
+                      <RunRows key={run.id} run={run} open={openRun === run.id} onToggle={() => setOpenRun(openRun === run.id ? null : run.id)}
+                        statements={stats?.statements} settled={stats?.settledCycles} total={stats?.totalFinalTzs} skipped={skipped} />
+                    );
+                  })}
+                </TBody>
+              </Table>
             )}
           </CardContent>
         </Card>
@@ -224,20 +220,20 @@ function RunRows({ run, open, onToggle, statements, settled, total, skipped }: {
   const label = run.status === 'locked' ? 'Complete' : run.status === 'failed' ? 'Failed' : 'In progress';
   return (
     <>
-      <tr className={skipped.length ? 'cursor-pointer hover:bg-[var(--color-bg-secondary)]' : ''} onClick={skipped.length ? onToggle : undefined} data-testid={`settlement-run-${run.id}`}>
-        <td className="whitespace-nowrap px-4 py-3 font-medium">{period(run)}</td>
-        <td className="whitespace-nowrap px-4 py-3">{shortDay(run.lockedAt || run.createdAt)}</td>
-        <td className="px-4 py-3"><Badge tone={tone}>{label}</Badge>{run.error && <span className="ml-2 text-xs text-[var(--color-error-600)]">{run.error}</span>}</td>
-        <td className="px-4 py-3 text-right tabular-nums">{statements ?? '—'}</td>
-        <td className="px-4 py-3 text-right tabular-nums">{settled ?? '—'}</td>
-        <td className="px-4 py-3 text-right tabular-nums">
-          {skipped.length ? <button className="underline" onClick={e => { e.stopPropagation(); onToggle(); }}>{skipped.length}</button> : 0}
-        </td>
-        <td className="whitespace-nowrap px-4 py-3 text-right tabular-nums">{total == null ? '—' : money(total)}</td>
-      </tr>
+      <Tr className={skipped.length ? 'cursor-pointer hover:bg-[var(--color-bg-secondary)]' : ''} onClick={skipped.length ? onToggle : undefined} data-testid={`settlement-run-${run.id}`}>
+        <Td className="whitespace-nowrap font-medium">{period(run)}</Td>
+        <Td className="whitespace-nowrap">{shortDay(run.lockedAt || run.createdAt)}</Td>
+        <Td><Badge tone={tone}>{label}</Badge>{run.error && <span className="ml-2 text-xs text-[var(--color-error-600)]">{run.error}</span>}</Td>
+        <Td className="text-right tabular-nums">{statements ?? '—'}</Td>
+        <Td className="text-right tabular-nums">{settled ?? '—'}</Td>
+        <Td className="text-right tabular-nums">
+          {skipped.length ? <Button variant="link" className="h-auto px-0 font-normal text-inherit underline" onClick={e => { e.stopPropagation(); onToggle(); }}>{skipped.length}</Button> : 0}
+        </Td>
+        <Td className="whitespace-nowrap text-right tabular-nums">{total == null ? '—' : money(total)}</Td>
+      </Tr>
       {open && skipped.length > 0 && (
-        <tr>
-          <td colSpan={7} className="bg-[var(--color-bg-secondary)] px-4 py-3">
+        <Tr>
+          <Td colSpan={7} className="bg-[var(--color-bg-secondary)]">
             <p className="mb-2 text-xs font-medium text-[var(--color-fg-tertiary)]">Member cycles left out of this run. They are picked up by a later run once fixed.</p>
             <ul className="space-y-1 text-xs">
               {skipped.map(x => (
@@ -247,8 +243,8 @@ function RunRows({ run, open, onToggle, statements, settled, total, skipped }: {
                 </li>
               ))}
             </ul>
-          </td>
-        </tr>
+          </Td>
+        </Tr>
       )}
     </>
   );

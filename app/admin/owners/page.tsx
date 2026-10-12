@@ -250,13 +250,14 @@ export default function OwnersPage() {
         return (
           <div className="flex flex-wrap gap-1">
             {ids.map(id => (
-              <button
+              <Button
                 key={id}
+                variant="link"
                 onClick={(e) => { e.stopPropagation(); setFilterGymId(id); }}
-                className="text-xs text-[var(--color-brand-700)] hover:underline inline-flex items-center gap-0.5"
+                className="h-auto px-0 text-xs font-normal"
               >
                 {gymName(id)}
-              </button>
+              </Button>
             ))}
           </div>
         );

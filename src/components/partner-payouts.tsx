@@ -5,7 +5,7 @@ import { useApp } from '../../app/providers';
 import { api, GymSettlementStatus, PartnerSettlement, PartnerSettlementAction, PartnerSettlementDetail, PartnerSettlementLine, PayoutKind } from '@/lib/api';
 import { money, trainerNames } from '@/lib/admin-utils';
 import { STATEMENT_STATUS, STATEMENT_TABS, shortDay } from '@/lib/settlements';
-import { Alert, Badge, Button, Card, CardContent, CardHeader, Field, PageHeader, Spinner } from '@/components/shared';
+import { Alert, Badge, Button, Card, CardContent, CardHeader, Field, Input, PageHeader, Spinner, Table, TBody, Td, Textarea, Th, THead, Tr } from '@/components/shared';
 import { Dialog, DialogFooter } from '@/components/dialog';
 
 /** What differs between a trainer's and a vendor's weekly statement. */
@@ -178,52 +178,50 @@ export function PartnerPayouts({ kind }: { kind: PayoutKind }) {
               {rows.length === 0 ? k.emptyAll : `No ${STATEMENT_STATUS[tab].label.toLowerCase()} statements.`}
             </div>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[720px] text-sm" data-testid={`${kind}-settlement-table`}>
-                <thead className="text-left text-xs text-[var(--color-fg-tertiary)]">
-                  <tr className="border-b border-[var(--color-border-secondary)]">
-                    <th className="px-4 py-2.5 font-medium">{k.column}</th>
-                    <th className="px-4 py-2.5 font-medium">Week</th>
-                    <th className="px-4 py-2.5 text-right font-medium">{k.countLabel}</th>
-                    <th className="px-4 py-2.5 text-right font-medium">{k.grossLabel}</th>
-                    <th className="px-4 py-2.5 text-right font-medium">Commission</th>
-                    <th className="px-4 py-2.5 text-right font-medium">To pay</th>
-                    <th className="px-4 py-2.5 font-medium">Status</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-[var(--color-border-secondary)]">
-                  {shown.map(r => (
-                    <tr key={r.id} className="cursor-pointer hover:bg-[var(--color-bg-secondary)]" onClick={() => open(r.id)} data-testid={`${kind}-settlement-row-${r.id}`}>
-                      <td className="px-4 py-3">
-                        <button className="text-left font-medium text-[var(--color-fg-primary)] hover:underline" onClick={e => { e.stopPropagation(); open(r.id); }}>
-                          {k.nameOf(r) || k.unnamed}
-                        </button>
-                        {k.ownNameOf(r) && (
-                          <div className="text-xs text-[var(--color-fg-quaternary)]" data-testid={`${kind}-settlement-own-name-${r.id}`}>{k.ownNameOf(r)}</div>
-                        )}
-                      </td>
-                      <td className="whitespace-nowrap px-4 py-3">{week(r)}</td>
-                      <td className="px-4 py-3 text-right tabular-nums">{k.countOf(r)}</td>
-                      <td className="whitespace-nowrap px-4 py-3 text-right tabular-nums">{money(k.grossOf(r))}</td>
-                      <td className="whitespace-nowrap px-4 py-3 text-right tabular-nums">{money(r.commissionTzs)}</td>
-                      <td className="whitespace-nowrap px-4 py-3 text-right font-medium tabular-nums">{money(r.finalNetTzs)}</td>
-                      <td className="px-4 py-3">
-                        <Badge tone={STATEMENT_STATUS[r.status].tone}>{STATEMENT_STATUS[r.status].label}</Badge>
-                        {r.holdReason && r.status !== 'voided' && <span className="ml-2"><Badge tone="danger">On hold</Badge></span>}
-                        {r.voidRequestedBy && r.status !== 'voided' && <span className="ml-2"><Badge tone="warning">Void requested</Badge></span>}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-                <tfoot>
-                  <tr className="border-t border-[var(--color-border-secondary)] text-sm">
-                    <td className="px-4 py-3 font-medium" colSpan={5}>{shown.length} {shown.length === 1 ? 'statement' : 'statements'}</td>
-                    <td className="whitespace-nowrap px-4 py-3 text-right font-semibold tabular-nums" data-testid={`${kind}-settlement-total`}>{money(total)}</td>
-                    <td />
-                  </tr>
-                </tfoot>
-              </table>
-            </div>
+            <Table aria-label={k.title} wrapperClassName="rounded-none border-0" className="min-w-[720px]" data-testid={`${kind}-settlement-table`}>
+              <THead>
+                <Tr>
+                  <Th>{k.column}</Th>
+                  <Th>Week</Th>
+                  <Th className="!text-right">{k.countLabel}</Th>
+                  <Th className="!text-right">{k.grossLabel}</Th>
+                  <Th className="!text-right">Commission</Th>
+                  <Th className="!text-right">To pay</Th>
+                  <Th>Status</Th>
+                </Tr>
+              </THead>
+              <TBody>
+                {shown.map(r => (
+                  <Tr key={r.id} className="cursor-pointer hover:bg-[var(--color-bg-secondary)]" onClick={() => open(r.id)} data-testid={`${kind}-settlement-row-${r.id}`}>
+                    <Td>
+                      <Button variant="link" className="h-auto px-0 text-left font-medium text-[var(--color-fg-primary)]" onClick={e => { e.stopPropagation(); open(r.id); }}>
+                        {k.nameOf(r) || k.unnamed}
+                      </Button>
+                      {k.ownNameOf(r) && (
+                        <div className="text-xs text-[var(--color-fg-quaternary)]" data-testid={`${kind}-settlement-own-name-${r.id}`}>{k.ownNameOf(r)}</div>
+                      )}
+                    </Td>
+                    <Td className="whitespace-nowrap">{week(r)}</Td>
+                    <Td className="text-right tabular-nums">{k.countOf(r)}</Td>
+                    <Td className="whitespace-nowrap text-right tabular-nums">{money(k.grossOf(r))}</Td>
+                    <Td className="whitespace-nowrap text-right tabular-nums">{money(r.commissionTzs)}</Td>
+                    <Td className="whitespace-nowrap text-right font-medium tabular-nums">{money(r.finalNetTzs)}</Td>
+                    <Td>
+                      <Badge tone={STATEMENT_STATUS[r.status].tone}>{STATEMENT_STATUS[r.status].label}</Badge>
+                      {r.holdReason && r.status !== 'voided' && <span className="ml-2"><Badge tone="danger">On hold</Badge></span>}
+                      {r.voidRequestedBy && r.status !== 'voided' && <span className="ml-2"><Badge tone="warning">Void requested</Badge></span>}
+                    </Td>
+                  </Tr>
+                ))}
+              </TBody>
+              <tfoot>
+                <Tr className="border-t border-[var(--color-border-secondary)] text-sm [&>td]:!border-b-0">
+                  <Td className="font-medium" colSpan={5}>{shown.length} {shown.length === 1 ? 'statement' : 'statements'}</Td>
+                  <Td className="whitespace-nowrap text-right font-semibold tabular-nums" data-testid={`${kind}-settlement-total`}>{money(total)}</Td>
+                  <Td />
+                </Tr>
+              </tfoot>
+            </Table>
           )}
         </CardContent>
       </Card>
@@ -232,50 +230,47 @@ export function PartnerPayouts({ kind }: { kind: PayoutKind }) {
 }
 
 function Lines({ kind, lines }: { kind: PayoutKind; lines: PartnerSettlementLine[] }) {
-  const th = 'px-4 py-2.5 font-medium';
-  const num = 'whitespace-nowrap px-4 py-3 text-right tabular-nums';
+  const num = 'whitespace-nowrap text-right tabular-nums';
   const row = (l: PartnerSettlementLine) => (l.voided ? 'text-[var(--color-fg-quaternary)] line-through' : '');
   return (
-    <div className="overflow-x-auto">
-      <table className="w-full min-w-[680px] text-sm">
-        <thead className="text-left text-xs text-[var(--color-fg-tertiary)]">
-          {kind === 'trainer' ? (
-            <tr className="border-b border-[var(--color-border-secondary)]">
-              <th className={th}>Date</th><th className={th}>Member</th><th className={th}>Why it is paid</th>
-              <th className={`${th} text-right`}>Price</th><th className={`${th} text-right`}>Member paid</th>
-              <th className={`${th} text-right`}>Commission</th><th className={`${th} text-right`}>Trainer</th>
-            </tr>
-          ) : (
-            <tr className="border-b border-[var(--color-border-secondary)]">
-              <th className={th}>Delivered</th><th className={th}>Order</th><th className={`${th} text-right`}>Items</th>
-              <th className={`${th} text-right`}>Sales</th><th className={`${th} text-right`}>Commission</th><th className={`${th} text-right`}>Vendor</th>
-            </tr>
-          )}
-        </thead>
-        <tbody className="divide-y divide-[var(--color-border-secondary)]">
-          {lines.map(l => kind === 'trainer' ? (
-            <tr key={l.id} className={row(l)}>
-              <td className="whitespace-nowrap px-4 py-3">{shortDay(l.date)}{l.slot ? ` · ${l.slot}` : ''}</td>
-              <td className="px-4 py-3">{l.memberName || '—'}</td>
-              <td className="px-4 py-3">{l.basis === 'completed' ? 'Marked completed' : 'Took place (not cancelled)'}</td>
-              <td className={num}>{money(l.listPriceTzs ?? 0)}</td>
-              <td className={num}>{money(l.memberPaidTzs ?? 0)}</td>
-              <td className={num}>{money(l.commissionTzs)}</td>
-              <td className={`${num} font-medium`}>{money(l.payoutTzs)}</td>
-            </tr>
-          ) : (
-            <tr key={l.id} className={row(l)}>
-              <td className="whitespace-nowrap px-4 py-3">{shortDay(l.deliveredOn)}</td>
-              <td className="px-4 py-3 font-mono text-xs">{l.orderId}</td>
-              <td className="px-4 py-3 text-right tabular-nums">{l.itemCount ?? 0}</td>
-              <td className={num}>{money(l.salesTzs ?? 0)}</td>
-              <td className={num}>{money(l.commissionTzs)}</td>
-              <td className={`${num} font-medium`}>{money(l.payoutTzs)}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+    <Table aria-label={kind === 'trainer' ? 'Sessions' : 'Orders'} wrapperClassName="rounded-none border-0" className="min-w-[680px]">
+      <THead>
+        {kind === 'trainer' ? (
+          <Tr>
+            <Th>Date</Th><Th>Member</Th><Th>Why it is paid</Th>
+            <Th className="!text-right">Price</Th><Th className="!text-right">Member paid</Th>
+            <Th className="!text-right">Commission</Th><Th className="!text-right">Trainer</Th>
+          </Tr>
+        ) : (
+          <Tr>
+            <Th>Delivered</Th><Th>Order</Th><Th className="!text-right">Items</Th>
+            <Th className="!text-right">Sales</Th><Th className="!text-right">Commission</Th><Th className="!text-right">Vendor</Th>
+          </Tr>
+        )}
+      </THead>
+      <TBody>
+        {lines.map(l => kind === 'trainer' ? (
+          <Tr key={l.id} className={row(l)}>
+            <Td className="whitespace-nowrap">{shortDay(l.date)}{l.slot ? ` · ${l.slot}` : ''}</Td>
+            <Td>{l.memberName || '—'}</Td>
+            <Td>{l.basis === 'completed' ? 'Marked completed' : 'Took place (not cancelled)'}</Td>
+            <Td className={num}>{money(l.listPriceTzs ?? 0)}</Td>
+            <Td className={num}>{money(l.memberPaidTzs ?? 0)}</Td>
+            <Td className={num}>{money(l.commissionTzs)}</Td>
+            <Td className={`${num} font-medium`}>{money(l.payoutTzs)}</Td>
+          </Tr>
+        ) : (
+          <Tr key={l.id} className={row(l)}>
+            <Td className="whitespace-nowrap">{shortDay(l.deliveredOn)}</Td>
+            <Td className="font-mono text-xs">{l.orderId}</Td>
+            <Td className="text-right tabular-nums">{l.itemCount ?? 0}</Td>
+            <Td className={num}>{money(l.salesTzs ?? 0)}</Td>
+            <Td className={num}>{money(l.commissionTzs)}</Td>
+            <Td className={`${num} font-medium`}>{money(l.payoutTzs)}</Td>
+          </Tr>
+        ))}
+      </TBody>
+    </Table>
   );
 }
 
@@ -403,10 +398,10 @@ function StatementView({ kind, id, onBack }: { kind: PayoutKind; id: string; onB
           {actionError && <Alert tone="error">{actionError}</Alert>}
           {pending?.hint && <p className="text-sm text-[var(--color-fg-tertiary)]">{pending.hint}</p>}
           {pending?.needs === 'reason' && (
-            <Field label="Reason"><textarea className="ui-input min-h-[80px]" value={input} onChange={e => setInput(e.target.value)} data-testid={`${kind}-settlement-input`} /></Field>
+            <Field label="Reason"><Textarea className="min-h-[80px]" value={input} onChange={e => setInput(e.target.value)} data-testid={`${kind}-settlement-input`} /></Field>
           )}
           {pending?.needs === 'reference' && (
-            <Field label="Payment reference"><input className="ui-input" value={input} onChange={e => setInput(e.target.value)} placeholder="e.g. MPESA QX12AB34" data-testid={`${kind}-settlement-input`} /></Field>
+            <Field label="Payment reference"><Input value={input} onChange={e => setInput(e.target.value)} placeholder="e.g. MPESA QX12AB34" data-testid={`${kind}-settlement-input`} /></Field>
           )}
         </div>
         <DialogFooter>

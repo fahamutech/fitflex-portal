@@ -5,9 +5,7 @@ import {
 } from 'lucide-react';
 import { useApp } from '../../providers';
 import { api, PortalUser, ApiError } from '@/lib/api';
-import {
-  Button, PageHeader, Alert, Spinner, Card, Badge, Field,
-} from '@/components/shared';
+import { Button, PageHeader, Alert, Spinner, Card, Badge, Field, Table, TBody, Td, Th, THead, Tr } from '@/components/shared';
 import { ConfirmDialog } from '@/components/dialog';
 
 const ACL_SCOPES = [
@@ -429,39 +427,39 @@ export default function PortalUsersPage() {
                 No portal users yet. Create one above.
               </p>
             ) : (
-              <table className="ui-table">
-                <thead>
-                  <tr>
-                    <th>User</th>
-                    <th>Type</th>
-                    <th>Status</th>
-                    <th>Permissions</th>
-                    <th>Created</th>
-                    <th className="w-20"></th>
-                  </tr>
-                </thead>
-                <tbody>
+              <Table aria-label="Portal Users">
+                <THead>
+                  <Tr>
+                    <Th>User</Th>
+                    <Th>Type</Th>
+                    <Th>Status</Th>
+                    <Th>Permissions</Th>
+                    <Th>Created</Th>
+                    <Th className="w-20"></Th>
+                  </Tr>
+                </THead>
+                <TBody>
                   {users.map(u => (
-                    <tr key={u.id}>
-                      <td>
+                    <Tr key={u.id}>
+                      <Td>
                         <div className="font-medium text-[var(--color-fg-primary)] text-sm">
                           {u.displayName || u.email}
                         </div>
                         {u.displayName && (
                           <div className="text-xs text-[var(--color-fg-quaternary)]">{u.email}</div>
                         )}
-                      </td>
-                      <td>
+                      </Td>
+                      <Td>
                         <Badge tone={u.portalUser ? 'brand' : 'default'}>
                           {u.portalUser ? 'Portal staff' : 'Super admin'}
                         </Badge>
-                      </td>
-                      <td>
+                      </Td>
+                      <Td>
                         <Badge tone={u.accountStatus === 'active' ? 'success' : 'danger'}>
                           {u.accountStatus}
                         </Badge>
-                      </td>
-                      <td>
+                      </Td>
+                      <Td>
                         {!u.portalUser ? (
                           <span className="text-xs text-[var(--color-fg-quaternary)] italic">All access</span>
                         ) : u.aclPermissions.length === 0 ? (
@@ -478,11 +476,11 @@ export default function PortalUsersPage() {
                             ))}
                           </div>
                         )}
-                      </td>
-                      <td className="text-xs tabular-nums text-[var(--color-fg-quaternary)]">
+                      </Td>
+                      <Td className="text-xs tabular-nums !text-[var(--color-fg-quaternary)]">
                         {u.createdAt ? new Date(u.createdAt).toLocaleDateString() : '—'}
-                      </td>
-                      <td>
+                      </Td>
+                      <Td>
                         {u.isEnvAdmin ? (
                           <span
                             title="Managed via FITFLEX_ADMIN_EMAILS environment variable"
@@ -512,11 +510,11 @@ export default function PortalUsersPage() {
                             )}
                           </div>
                         ) : null}
-                      </td>
-                    </tr>
+                      </Td>
+                    </Tr>
                   ))}
-                </tbody>
-              </table>
+                </TBody>
+              </Table>
             )}
           </div>
         </Card>
