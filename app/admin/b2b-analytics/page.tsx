@@ -100,7 +100,7 @@ export default function B2BAnalyticsPage() {
             </CardContent>
           </Card>
           <div className="grid gap-4 lg:grid-cols-2">
-            <Card>
+            <Card className="min-w-0">
               <CardHeader><span className="text-sm font-semibold">Organisations by usage</span></CardHeader>
               <CardContent>
                 {data.topOrganizations.length === 0 ? <p className="text-sm text-[var(--color-fg-quaternary)]">No sponsored usage in this period.</p> : (
@@ -118,7 +118,7 @@ export default function B2BAnalyticsPage() {
                 )}
               </CardContent>
             </Card>
-            <Card>
+            <Card className="min-w-0">
               <CardHeader><span className="text-sm font-semibold">Gyms and trainers by sponsored usage</span></CardHeader>
               <CardContent>
                 {data.topProviders.length === 0 ? <p className="text-sm text-[var(--color-fg-quaternary)]">No sponsored usage in this period.</p> : (
