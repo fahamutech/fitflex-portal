@@ -6,7 +6,7 @@ import {
   api, ApiError, B2BAnalyticsQuery, B2BBenefitAnalytics, B2BDashboard, B2BFinanceAnalytics, B2BPersonDetail, B2BPersonRow, B2BProgramAnalytics,
   B2BProviderAnalytics,
 } from '@/lib/api';
-import { Alert, Badge, Button, Card, CardContent, CardHeader, Input, PageHeader, Segmented, Select, Spinner } from '@/components/shared';
+import { Alert, Badge, Button, Card, CardContent, CardHeader, Input, PageHeader, Segmented, Select, Spinner, Table, TBody, Td, Th, THead, Tr } from '@/components/shared';
 import { Dialog } from '@/components/dialog';
 import { Aging, day } from '@/components/b2b-finance';
 import { money } from '@/lib/admin-utils';
@@ -71,11 +71,6 @@ function Kpi({ label, value, sub, trend }: { label: string; value: React.ReactNo
   );
 }
 
-function Th({ children, right }: { children?: React.ReactNode; right?: boolean }) {
-  return <th className={`py-2 pr-3 font-medium ${right ? 'text-right' : ''}`}>{children}</th>;
-}
-const HEAD = 'border-b border-[var(--color-border-secondary)] text-left text-xs text-[var(--color-fg-quaternary)]';
-const ROW = 'border-b border-[var(--color-border-secondary)]';
 
 export type InsightsCan = { people: boolean; billing: boolean; staff?: boolean };
 type Tab = 'overview' | 'people' | 'benefits' | 'providers' | 'billing' | 'reports';
@@ -198,16 +193,16 @@ function Overview({ d }: { d: B2BDashboard }) {
           <CardHeader><span className="text-sm font-semibold">Where people went</span></CardHeader>
           <CardContent>
             {d.providers.top.length === 0 ? <p className="text-sm text-[var(--color-fg-quaternary)]">No sponsored visits in this period.</p> : (
-              <table className="w-full text-sm" data-testid="insights-top-providers">
-                <thead><tr className={HEAD}><Th>Gym or trainer</Th><Th right>Visits</Th><Th right>Your spend</Th></tr></thead>
-                <tbody>
+              <Table aria-label="Where people went" data-testid="insights-top-providers">
+                <THead><Tr><Th>Gym or trainer</Th><Th className="!text-right">Visits</Th><Th className="!text-right">Your spend</Th></Tr></THead>
+                <TBody>
                   {d.providers.top.map(r => (
-                    <tr key={`${r.providerType}:${r.providerId}`} className={ROW}>
-                      <td className="py-2 pr-3">{r.name ?? r.providerId}</td><td className="py-2 pr-3 text-right">{num(r.visits)}</td><td className="py-2 pr-3 text-right">{cash(r.sponsorTzs)}</td>
-                    </tr>
+                    <Tr key={`${r.providerType}:${r.providerId}`}>
+                      <Td>{r.name ?? r.providerId}</Td><Td className="text-right">{num(r.visits)}</Td><Td className="text-right">{cash(r.sponsorTzs)}</Td>
+                    </Tr>
                   ))}
-                </tbody>
-              </table>
+                </TBody>
+              </Table>
             )}
           </CardContent>
         </Card>
@@ -269,28 +264,26 @@ function People({ token, orgId, query, tick }: { token: string; orgId: string; q
         </div>
         {error && <Alert tone="error">{error}</Alert>}
         {!rows ? !error && <Spinner className="h-6 w-6" /> : rows.length === 0 ? <p className="text-sm text-[var(--color-fg-quaternary)]">Nobody matches.</p> : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm" data-testid="insights-people">
-              <thead>
-                <tr className={HEAD}><Th>Name</Th><Th>Group</Th><Th>Status</Th><Th right>Sponsored visits</Th><Th right>Your spend</Th><Th right>All gym check-ins</Th><Th right>Workouts</Th><Th right>Steps</Th><Th>Last active</Th></tr>
-              </thead>
-              <tbody>
+            <Table aria-label="People" data-testid="insights-people">
+              <THead>
+                <Tr><Th>Name</Th><Th>Group</Th><Th>Status</Th><Th className="!text-right">Sponsored visits</Th><Th className="!text-right">Your spend</Th><Th className="!text-right">All gym check-ins</Th><Th className="!text-right">Workouts</Th><Th className="!text-right">Steps</Th><Th>Last active</Th></Tr>
+              </THead>
+              <TBody>
                 {rows.map(r => (
-                  <tr key={r.beneficiaryId} className={ROW}>
-                    <td className="py-2 pr-3"><button className="text-left font-medium text-[var(--color-fg-brand)]" onClick={() => setOpen(r.beneficiaryId)} data-testid={`person-${r.beneficiaryId}`}>{r.name ?? r.externalReference ?? 'Not linked yet'}</button></td>
-                    <td className="py-2 pr-3">{r.group ?? ''}</td>
-                    <td className="py-2 pr-3">{r.status === 'active' ? (r.active ? <Badge tone="success">Used a benefit</Badge> : <Badge tone="gray">No use yet</Badge>) : <Badge tone="warning">{words(r.status)}</Badge>}</td>
-                    <td className="py-2 pr-3 text-right">{num(r.sponsoredUses + r.passCheckins)}</td>
-                    <td className="py-2 pr-3 text-right">{r.sponsorTzs ? cash(r.sponsorTzs) : ''}</td>
-                    <td className="py-2 pr-3 text-right">{num(r.gymCheckins)}</td>
-                    <td className="py-2 pr-3 text-right">{num(r.workouts)}</td>
-                    <td className="py-2 pr-3 text-right">{num(r.steps)}</td>
-                    <td className="py-2 pr-3 whitespace-nowrap">{r.lastActiveDay ? day(r.lastActiveDay) : ''}</td>
-                  </tr>
+                  <Tr key={r.beneficiaryId}>
+                    <Td><Button variant="link" className="h-auto px-0 font-medium" onClick={() => setOpen(r.beneficiaryId)} data-testid={`person-${r.beneficiaryId}`}>{r.name ?? r.externalReference ?? 'Not linked yet'}</Button></Td>
+                    <Td>{r.group ?? ''}</Td>
+                    <Td>{r.status === 'active' ? (r.active ? <Badge tone="success">Used a benefit</Badge> : <Badge tone="gray">No use yet</Badge>) : <Badge tone="warning">{words(r.status)}</Badge>}</Td>
+                    <Td className="text-right">{num(r.sponsoredUses + r.passCheckins)}</Td>
+                    <Td className="text-right">{r.sponsorTzs ? cash(r.sponsorTzs) : ''}</Td>
+                    <Td className="text-right">{num(r.gymCheckins)}</Td>
+                    <Td className="text-right">{num(r.workouts)}</Td>
+                    <Td className="text-right">{num(r.steps)}</Td>
+                    <Td className="whitespace-nowrap">{r.lastActiveDay ? day(r.lastActiveDay) : ''}</Td>
+                  </Tr>
                 ))}
-              </tbody>
-            </table>
-          </div>
+              </TBody>
+            </Table>
         )}
         <p className="text-xs text-[var(--color-fg-quaternary)]">
           You see what your people do on FitFlex, including activity you didn’t pay for. You never see their weight or height, or anything another employer, insurer or club gives them. Each person is told this in the app.
@@ -322,19 +315,19 @@ function Person({ token, orgId, beneficiaryId, query, onClose }: { token: string
             <Kpi label="Activities recorded" value={num(p.totals.activities)} />
           </div>
           {section('Sponsored visits and sessions', p.sponsoredUsage.length === 0 && p.passCheckins.length === 0 ? none('None in this period.') : (
-            <table className="w-full text-sm">
-              <thead><tr className={HEAD}><Th>Date</Th><Th>What</Th><Th>Where</Th><Th>Benefit</Th><Th right>You paid</Th><Th right>They paid</Th></tr></thead>
-              <tbody>
+            <Table aria-label="Sponsored visits and sessions">
+              <THead><Tr><Th>Date</Th><Th>What</Th><Th>Where</Th><Th>Benefit</Th><Th className="!text-right">You paid</Th><Th className="!text-right">They paid</Th></Tr></THead>
+              <TBody>
                 {[...p.sponsoredUsage.map(r => ({ key: r.id, day: r.day, what: SERVICE[r.serviceType] ?? words(r.serviceType), where: r.provider, benefit: r.benefitName, sponsor: r.sponsorTzs as number | null, member: r.memberTzs as number | null })),
                   ...p.passCheckins.map(r => ({ key: r.id, day: r.day, what: 'Check-in on sponsored pass', where: r.gym, benefit: r.benefitName, sponsor: null, member: null }))]
                   .sort((a, b) => b.day.localeCompare(a.day)).map(r => (
-                    <tr key={r.key} className={ROW}>
-                      <td className="py-1.5 pr-3 whitespace-nowrap">{day(r.day)}</td><td className="py-1.5 pr-3">{r.what}</td><td className="py-1.5 pr-3">{r.where ?? ''}</td><td className="py-1.5 pr-3">{r.benefit ?? ''}</td>
-                      <td className="py-1.5 pr-3 text-right">{r.sponsor == null ? 'in pass fee' : cash(r.sponsor)}</td><td className="py-1.5 pr-3 text-right">{r.member ? cash(r.member) : ''}</td>
-                    </tr>
+                    <Tr key={r.key}>
+                      <Td className="whitespace-nowrap">{day(r.day)}</Td><Td>{r.what}</Td><Td>{r.where ?? ''}</Td><Td>{r.benefit ?? ''}</Td>
+                      <Td className="text-right">{r.sponsor == null ? 'in pass fee' : cash(r.sponsor)}</Td><Td className="text-right">{r.member ? cash(r.member) : ''}</Td>
+                    </Tr>
                   ))}
-              </tbody>
-            </table>
+              </TBody>
+            </Table>
           ))}
           {p.passes.length > 0 && section('Sponsored passes', (
             <ul className="space-y-1 text-sm">{p.passes.map(e => <li key={`${e.period}-${e.benefitName}`}>{e.period} · {e.passTier} pass · {words(e.status)} · you {cash(e.sponsorTzs)}{e.memberTzs ? ` · they ${cash(e.memberTzs)}` : ''}</li>)}</ul>
@@ -346,18 +339,18 @@ function Person({ token, orgId, beneficiaryId, query, onClose }: { token: string
             <ul className="grid gap-x-6 gap-y-1 text-sm sm:grid-cols-2">{p.otherGymVisits.map(v => <li key={v.id}>{day(v.day)} · {v.gym ?? 'Gym'}</li>)}</ul>
           ))}
           {section('Activities they recorded', p.activities.length === 0 ? none('None in this period.') : (
-            <table className="w-full text-sm">
-              <thead><tr className={HEAD}><Th>Date</Th><Th>Activity</Th><Th right>Minutes</Th><Th right>Distance</Th><Th right>Steps</Th><Th>Recorded by</Th></tr></thead>
-              <tbody>
+            <Table aria-label="Activities they recorded">
+              <THead><Tr><Th>Date</Th><Th>Activity</Th><Th className="!text-right">Minutes</Th><Th className="!text-right">Distance</Th><Th className="!text-right">Steps</Th><Th>Recorded by</Th></Tr></THead>
+              <TBody>
                 {p.activities.map(a => (
-                  <tr key={a.id} className={ROW}>
-                    <td className="py-1.5 pr-3 whitespace-nowrap">{day(a.day)}</td><td className="py-1.5 pr-3 capitalize">{words(a.type)}{a.gym ? ` · ${a.gym}` : ''}</td>
-                    <td className="py-1.5 pr-3 text-right">{a.durationMinutes ?? a.activeMinutes ?? ''}</td><td className="py-1.5 pr-3 text-right">{a.distanceKm ? `${a.distanceKm} km` : ''}</td>
-                    <td className="py-1.5 pr-3 text-right">{a.steps ? num(a.steps) : ''}</td><td className="py-1.5 pr-3">{a.source === 'device' ? 'Phone or watch' : a.source === 'manual' ? 'Entered by hand' : words(a.source)}</td>
-                  </tr>
+                  <Tr key={a.id}>
+                    <Td className="whitespace-nowrap">{day(a.day)}</Td><Td className="capitalize">{words(a.type)}{a.gym ? ` · ${a.gym}` : ''}</Td>
+                    <Td className="text-right">{a.durationMinutes ?? a.activeMinutes ?? ''}</Td><Td className="text-right">{a.distanceKm ? `${a.distanceKm} km` : ''}</Td>
+                    <Td className="text-right">{a.steps ? num(a.steps) : ''}</Td><Td>{a.source === 'device' ? 'Phone or watch' : a.source === 'manual' ? 'Entered by hand' : words(a.source)}</Td>
+                  </Tr>
                 ))}
-              </tbody>
-            </table>
+              </TBody>
+            </Table>
           ))}
           {p.totals.capped && <p className="text-xs text-[var(--color-fg-quaternary)]">Only the latest 300 of each list are shown. Use a shorter period or the reports for everything.</p>}
           <p className="text-xs text-[var(--color-fg-quaternary)]">Not shown: {p.notShown.join(', ')}.</p>
@@ -381,21 +374,19 @@ function Benefits({ token, orgId, query, programs, tick }: { token: string; orgI
         <CardHeader><span className="text-sm font-semibold">Programmes</span></CardHeader>
         <CardContent>
           {programs.length === 0 ? <p className="text-sm text-[var(--color-fg-quaternary)]">No programmes yet.</p> : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm" data-testid="insights-programs">
-                <thead><tr className={HEAD}><Th>Programme</Th><Th>Status</Th><Th right>Eligible</Th><Th right>Used a benefit</Th><Th right>Participation</Th><Th right>Visits</Th><Th right>Your spend</Th><Th right>Budget used</Th></tr></thead>
-                <tbody>
+              <Table aria-label="Programmes" data-testid="insights-programs">
+                <THead><Tr><Th>Programme</Th><Th>Status</Th><Th className="!text-right">Eligible</Th><Th className="!text-right">Used a benefit</Th><Th className="!text-right">Participation</Th><Th className="!text-right">Visits</Th><Th className="!text-right">Your spend</Th><Th className="!text-right">Budget used</Th></Tr></THead>
+                <TBody>
                   {programs.map(p => (
-                    <tr key={p.programId} className={ROW}>
-                      <td className="py-2 pr-3 font-medium">{p.name}</td><td className="py-2 pr-3 capitalize">{words(p.status)}</td><td className="py-2 pr-3 text-right">{num(p.eligible)}</td>
-                      <td className="py-2 pr-3 text-right">{num(p.activeBeneficiaries)}</td><td className="py-2 pr-3 text-right">{pct(p.participationPct)}</td><td className="py-2 pr-3 text-right">{num(p.uses + p.passCheckins)}</td>
-                      <td className="py-2 pr-3 text-right">{cash(p.sponsorTotalTzs)}</td>
-                      <td className="py-2 pr-3 text-right">{p.budget.budgetTzs == null ? 'No budget set' : `${pct(p.budget.usedPct)} of ${cash(p.budget.budgetTzs)}`}</td>
-                    </tr>
+                    <Tr key={p.programId}>
+                      <Td className="font-medium">{p.name}</Td><Td className="capitalize">{words(p.status)}</Td><Td className="text-right">{num(p.eligible)}</Td>
+                      <Td className="text-right">{num(p.activeBeneficiaries)}</Td><Td className="text-right">{pct(p.participationPct)}</Td><Td className="text-right">{num(p.uses + p.passCheckins)}</Td>
+                      <Td className="text-right">{cash(p.sponsorTotalTzs)}</Td>
+                      <Td className="text-right">{p.budget.budgetTzs == null ? 'No budget set' : `${pct(p.budget.usedPct)} of ${cash(p.budget.budgetTzs)}`}</Td>
+                    </Tr>
                   ))}
-                </tbody>
-              </table>
-            </div>
+                </TBody>
+              </Table>
           )}
           <p className="mt-2 text-xs text-[var(--color-fg-quaternary)]">Budget used counts pay-per-use spend over the programme’s whole life, not just this period.</p>
         </CardContent>
@@ -404,21 +395,19 @@ function Benefits({ token, orgId, query, programs, tick }: { token: string; orgI
         <CardHeader><span className="text-sm font-semibold">Benefits</span></CardHeader>
         <CardContent>
           {!rows ? !error && <Spinner className="h-6 w-6" /> : rows.length === 0 ? <p className="text-sm text-[var(--color-fg-quaternary)]">No benefits yet.</p> : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm" data-testid="insights-benefits">
-                <thead><tr className={HEAD}><Th>Benefit</Th><Th right>Eligible</Th><Th right>Used it</Th><Th right>Reach</Th><Th right>Uses</Th><Th right>Per user</Th><Th right>Your spend</Th><Th right>Members paid</Th><Th>Allowance now</Th></tr></thead>
-                <tbody>
+              <Table aria-label="Benefits" data-testid="insights-benefits">
+                <THead><Tr><Th>Benefit</Th><Th className="!text-right">Eligible</Th><Th className="!text-right">Used it</Th><Th className="!text-right">Reach</Th><Th className="!text-right">Uses</Th><Th className="!text-right">Per user</Th><Th className="!text-right">Your spend</Th><Th className="!text-right">Members paid</Th><Th>Allowance now</Th></Tr></THead>
+                <TBody>
                   {rows.map(b => (
-                    <tr key={b.benefitId} className={ROW}>
-                      <td className="py-2 pr-3"><div className="font-medium">{b.name}</div><div className="text-xs text-[var(--color-fg-quaternary)]">{b.programName} · {SERVICE[b.benefitType] ?? words(b.benefitType)}{b.status !== 'active' ? ` · ${words(b.status)}` : ''}</div></td>
-                      <td className="py-2 pr-3 text-right">{num(b.eligible)}</td><td className="py-2 pr-3 text-right">{num(b.users)}</td><td className="py-2 pr-3 text-right">{pct(b.reachPct)}</td>
-                      <td className="py-2 pr-3 text-right">{num(b.uses)}</td><td className="py-2 pr-3 text-right">{b.averageUsesPerUser ?? '—'}</td><td className="py-2 pr-3 text-right">{cash(b.sponsorTzs)}</td><td className="py-2 pr-3 text-right">{b.memberTzs ? cash(b.memberTzs) : ''}</td>
-                      <td className="py-2 pr-3 text-xs">{b.allowance ? `${pct(b.allowance.usedPct)} used · ${b.allowance.peopleAtLimit} at limit · ${b.allowance.peopleNearLimit} near it` : b.usageLimit ? 'Not running today' : 'No limit'}</td>
-                    </tr>
+                    <Tr key={b.benefitId}>
+                      <Td><div className="font-medium">{b.name}</div><div className="text-xs text-[var(--color-fg-quaternary)]">{b.programName} · {SERVICE[b.benefitType] ?? words(b.benefitType)}{b.status !== 'active' ? ` · ${words(b.status)}` : ''}</div></Td>
+                      <Td className="text-right">{num(b.eligible)}</Td><Td className="text-right">{num(b.users)}</Td><Td className="text-right">{pct(b.reachPct)}</Td>
+                      <Td className="text-right">{num(b.uses)}</Td><Td className="text-right">{b.averageUsesPerUser ?? '—'}</Td><Td className="text-right">{cash(b.sponsorTzs)}</Td><Td className="text-right">{b.memberTzs ? cash(b.memberTzs) : ''}</Td>
+                      <Td className="text-xs">{b.allowance ? `${pct(b.allowance.usedPct)} used · ${b.allowance.peopleAtLimit} at limit · ${b.allowance.peopleNearLimit} near it` : b.usageLimit ? 'Not running today' : 'No limit'}</Td>
+                    </Tr>
                   ))}
-                </tbody>
-              </table>
-            </div>
+                </TBody>
+              </Table>
           )}
           <p className="mt-2 text-xs text-[var(--color-fg-quaternary)]">Reach is the share of eligible people who used the benefit at all. Allowance is for the current day, week or month the limit runs over, whatever period is selected above.</p>
         </CardContent>
@@ -440,21 +429,19 @@ function Providers({ token, orgId, query, tick }: { token: string; orgId: string
       <CardContent className="py-4">
         {error && <Alert tone="error">{error}</Alert>}
         {!rows ? !error && <Spinner className="h-6 w-6" /> : rows.length === 0 ? <p className="text-sm text-[var(--color-fg-quaternary)]">No sponsored visits in this period.</p> : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm" data-testid="insights-providers">
-              <thead><tr className={HEAD}><Th>Gym or trainer</Th><Th>Location</Th><Th right>Visits</Th><Th right>People</Th><Th right>Came back</Th><Th right>Service value</Th><Th right>Sponsor paid</Th>{staff && <Th right>Not yet in settlement</Th>}</tr></thead>
-              <tbody>
+            <Table aria-label="Gyms & trainers" data-testid="insights-providers">
+              <THead><Tr><Th>Gym or trainer</Th><Th>Location</Th><Th className="!text-right">Visits</Th><Th className="!text-right">People</Th><Th className="!text-right">Came back</Th><Th className="!text-right">Service value</Th><Th className="!text-right">Sponsor paid</Th>{staff && <Th className="!text-right">Not yet in settlement</Th>}</Tr></THead>
+              <TBody>
                 {rows.map(r => (
-                  <tr key={`${r.providerType}:${r.providerId}`} className={ROW}>
-                    <td className="py-2 pr-3 font-medium">{r.name ?? r.providerId} <span className="text-xs font-normal text-[var(--color-fg-quaternary)]">{r.providerType}</span></td><td className="py-2 pr-3">{r.location ?? ''}</td>
-                    <td className="py-2 pr-3 text-right">{num(r.visits)}</td><td className="py-2 pr-3 text-right">{num(r.people)}</td><td className="py-2 pr-3 text-right">{num(r.repeatPeople)}</td>
-                    <td className="py-2 pr-3 text-right">{cash(r.serviceValueTzs)}</td><td className="py-2 pr-3 text-right">{cash(r.sponsorTzs)}</td>
-                    {staff && <td className="py-2 pr-3 text-right">{r.settlement ? `${num(r.settlement.notYetSettled)} of ${num(r.settlement.perUseVisits)}` : ''}</td>}
-                  </tr>
+                  <Tr key={`${r.providerType}:${r.providerId}`}>
+                    <Td className="font-medium">{r.name ?? r.providerId} <span className="text-xs font-normal text-[var(--color-fg-quaternary)]">{r.providerType}</span></Td><Td>{r.location ?? ''}</Td>
+                    <Td className="text-right">{num(r.visits)}</Td><Td className="text-right">{num(r.people)}</Td><Td className="text-right">{num(r.repeatPeople)}</Td>
+                    <Td className="text-right">{cash(r.serviceValueTzs)}</Td><Td className="text-right">{cash(r.sponsorTzs)}</Td>
+                    {staff && <Td className="text-right">{r.settlement ? `${num(r.settlement.notYetSettled)} of ${num(r.settlement.perUseVisits)}` : ''}</Td>}
+                  </Tr>
                 ))}
-              </tbody>
-            </table>
-          </div>
+              </TBody>
+            </Table>
         )}
         <p className="mt-2 text-xs text-[var(--color-fg-quaternary)]">
           Service value is the list price of pay-per-use visits; check-ins on a sponsored pass are covered by the pass fee.{staff ? ' Settlement progress is shown to FitFlex staff only; what a provider is paid is settled separately from what the organisation is billed.' : ''}
