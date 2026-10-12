@@ -178,6 +178,9 @@ export async function setupB2B(page_: Page, user: Json = ADMIN, extra: Array<[st
     ['POST', /^\/b2b\/organizations\/([^/]+)\/users$/, c => ({ organizationUser: { ...ORG_USERS[0], id: 'ou-new', userId: 'usr-new', role: c.body?.role, user: { displayName: 'New User', email: 'new@safari.test', userType: 'member' } } })],
     ['PUT', /^\/b2b\/organizations\/([^/]+)\/users\/([^/]+)$/, (c, m) => ({ organizationUser: { ...ORG_USERS[0], id: m[2], ...c.body } })],
     ['GET', /^\/b2b\/organizations\/([^/]+)\/beneficiaries$/, () => page(BENEFICIARIES)],
+    // Pending invitations and the programme lifecycle panel (added on main after these specs)
+    ['GET', /^\/b2b\/organizations\/([^/]+)\/beneficiary-invites$/, () => ({ items: [], invited: 0, emailConfigured: false, smsConfigured: false })],
+    ['GET', /^\/b2b\/organizations\/([^/]+)\/program-lifecycle$/, () => ({ today: '2026-10-12', items: [] })],
     ['POST', /^\/b2b\/organizations\/([^/]+)\/beneficiaries$/, c => ({ beneficiary: { ...BENEFICIARIES[0], id: 'ben-new', displayName: 'New Person', beneficiaryType: c.body?.beneficiaryType ?? 'member' } })],
     ['POST', /^\/b2b\/organizations\/([^/]+)\/beneficiaries\/([^/]+)\/status$/, (c, m) => ({ beneficiary: { ...BENEFICIARIES.find(b => b.id === m[2]), status: c.body?.status } })],
     // Programmes and benefits
