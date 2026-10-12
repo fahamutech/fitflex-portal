@@ -4,7 +4,7 @@ import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YA
 import { ArrowLeft, RefreshCw } from 'lucide-react';
 import { useApp } from '../../providers';
 import { api, B2BAnalyticsOverview, B2BDataQuality } from '@/lib/api';
-import { Alert, Badge, Button, Card, CardContent, CardHeader, PageHeader, Spinner } from '@/components/shared';
+import { Alert, Badge, Button, Card, CardContent, CardHeader, PageHeader, Spinner, Table, TBody, Td, Th, THead, Tr } from '@/components/shared';
 import { OrgInsights, PERIODS } from '@/components/b2b-insights';
 import { day } from '@/components/b2b-finance';
 import { money } from '@/lib/admin-utils';
@@ -12,8 +12,6 @@ import { money } from '@/lib/admin-utils';
 const BRAND = '#079455';
 const num = (v: number | null | undefined) => (v == null ? '—' : v.toLocaleString('en-US'));
 const shortDay = (d: string) => new Date(`${d}T00:00:00Z`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' });
-const HEAD = 'border-b border-[var(--color-border-secondary)] text-left text-xs text-[var(--color-fg-quaternary)]';
-const ROW = 'border-b border-[var(--color-border-secondary)]';
 const TONE: Record<string, 'danger' | 'warning' | 'gray'> = { high: 'danger', medium: 'warning', low: 'gray' };
 
 /**
@@ -106,17 +104,17 @@ export default function B2BAnalyticsPage() {
               <CardHeader><span className="text-sm font-semibold">Organisations by usage</span></CardHeader>
               <CardContent>
                 {data.topOrganizations.length === 0 ? <p className="text-sm text-[var(--color-fg-quaternary)]">No sponsored usage in this period.</p> : (
-                  <table className="w-full text-sm" data-testid="analytics-top-orgs">
-                    <thead><tr className={HEAD}><th className="py-2 pr-3">Organisation</th><th className="py-2 pr-3 text-right">Visits</th><th className="py-2 pr-3 text-right">People</th><th className="py-2 text-right">Sponsor share</th></tr></thead>
-                    <tbody>
+                  <Table aria-label="Organisations by usage" data-testid="analytics-top-orgs">
+                    <THead><Tr><Th>Organisation</Th><Th className="!text-right">Visits</Th><Th className="!text-right">People</Th><Th className="!text-right">Sponsor share</Th></Tr></THead>
+                    <TBody>
                       {data.topOrganizations.map(o => (
-                        <tr key={o.organizationId} className={ROW}>
-                          <td className="py-2 pr-3"><button className="text-left font-medium text-[var(--color-fg-brand)]" onClick={() => setOrg({ id: o.organizationId, name: o.name ?? o.organizationId })}>{o.name ?? o.organizationId}</button></td>
-                          <td className="py-2 pr-3 text-right">{num(o.uses + o.passCheckins)}</td><td className="py-2 pr-3 text-right">{num(o.activeBeneficiaries)}</td><td className="py-2 text-right">{money(o.sponsorTzs)}</td>
-                        </tr>
+                        <Tr key={o.organizationId}>
+                          <Td><Button variant="link" className="h-auto px-0 font-medium" onClick={() => setOrg({ id: o.organizationId, name: o.name ?? o.organizationId })}>{o.name ?? o.organizationId}</Button></Td>
+                          <Td className="text-right">{num(o.uses + o.passCheckins)}</Td><Td className="text-right">{num(o.activeBeneficiaries)}</Td><Td className="text-right">{money(o.sponsorTzs)}</Td>
+                        </Tr>
                       ))}
-                    </tbody>
-                  </table>
+                    </TBody>
+                  </Table>
                 )}
               </CardContent>
             </Card>
@@ -124,17 +122,17 @@ export default function B2BAnalyticsPage() {
               <CardHeader><span className="text-sm font-semibold">Gyms and trainers by sponsored usage</span></CardHeader>
               <CardContent>
                 {data.topProviders.length === 0 ? <p className="text-sm text-[var(--color-fg-quaternary)]">No sponsored usage in this period.</p> : (
-                  <table className="w-full text-sm" data-testid="analytics-top-providers">
-                    <thead><tr className={HEAD}><th className="py-2 pr-3">Provider</th><th className="py-2 pr-3 text-right">Uses</th><th className="py-2 pr-3 text-right">People</th><th className="py-2 pr-3 text-right">Organisations</th><th className="py-2 text-right">Service value</th></tr></thead>
-                    <tbody>
+                  <Table aria-label="Gyms and trainers by sponsored usage" data-testid="analytics-top-providers">
+                    <THead><Tr><Th>Provider</Th><Th className="!text-right">Uses</Th><Th className="!text-right">People</Th><Th className="!text-right">Organisations</Th><Th className="!text-right">Service value</Th></Tr></THead>
+                    <TBody>
                       {data.topProviders.map(p => (
-                        <tr key={`${p.providerType}:${p.providerId}`} className={ROW}>
-                          <td className="py-2 pr-3">{p.name ?? p.providerId} <span className="text-xs text-[var(--color-fg-quaternary)]">{p.providerType}</span></td>
-                          <td className="py-2 pr-3 text-right">{num(p.uses)}</td><td className="py-2 pr-3 text-right">{num(p.people)}</td><td className="py-2 pr-3 text-right">{num(p.organizations)}</td><td className="py-2 text-right">{money(p.grossTzs)}</td>
-                        </tr>
+                        <Tr key={`${p.providerType}:${p.providerId}`}>
+                          <Td>{p.name ?? p.providerId} <span className="text-xs text-[var(--color-fg-quaternary)]">{p.providerType}</span></Td>
+                          <Td className="text-right">{num(p.uses)}</Td><Td className="text-right">{num(p.people)}</Td><Td className="text-right">{num(p.organizations)}</Td><Td className="text-right">{money(p.grossTzs)}</Td>
+                        </Tr>
                       ))}
-                    </tbody>
-                  </table>
+                    </TBody>
+                  </Table>
                 )}
                 <p className="mt-2 text-xs text-[var(--color-fg-quaternary)]">Service value is the list price of what was used. What providers are owed and paid is on the settlement pages.</p>
               </CardContent>
@@ -150,19 +148,19 @@ export default function B2BAnalyticsPage() {
         </CardHeader>
         <CardContent>
           {!quality ? <p className="text-sm text-[var(--color-fg-quaternary)]">Your permissions don’t include the data checks, or they could not be run.</p> : (
-            <table className="w-full text-sm" data-testid="data-quality">
-              <thead><tr className={HEAD}><th className="py-2 pr-3">Check</th><th className="py-2 pr-3">Severity</th><th className="py-2 pr-3 text-right">Found</th><th className="py-2">Examples</th></tr></thead>
-              <tbody>
+            <Table aria-label="Records that need a second look" data-testid="data-quality">
+              <THead><Tr><Th>Check</Th><Th>Severity</Th><Th className="!text-right">Found</Th><Th>Examples</Th></Tr></THead>
+              <TBody>
                 {[...quality.checks].sort((a, b) => b.count - a.count).map(c => (
-                  <tr key={c.key} className={ROW}>
-                    <td className="py-2 pr-3">{c.title}</td>
-                    <td className="py-2 pr-3">{c.count > 0 ? <Badge tone={TONE[c.severity]}>{c.severity}</Badge> : <Badge tone="success">ok</Badge>}</td>
-                    <td className="py-2 pr-3 text-right">{num(c.count)}</td>
-                    <td className="py-2 font-mono text-xs text-[var(--color-fg-tertiary)]">{c.examples.join(', ')}</td>
-                  </tr>
+                  <Tr key={c.key}>
+                    <Td>{c.title}</Td>
+                    <Td>{c.count > 0 ? <Badge tone={TONE[c.severity]}>{c.severity}</Badge> : <Badge tone="success">ok</Badge>}</Td>
+                    <Td className="text-right">{num(c.count)}</Td>
+                    <Td className="font-mono text-xs !text-[var(--color-fg-tertiary)]">{c.examples.join(', ')}</Td>
+                  </Tr>
                 ))}
-              </tbody>
-            </table>
+              </TBody>
+            </Table>
           )}
           <p className="mt-2 text-xs text-[var(--color-fg-quaternary)]">These are reported, not repaired. Nothing here changes a record.</p>
         </CardContent>
