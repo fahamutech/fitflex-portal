@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 import { RefreshCw } from 'lucide-react';
 import { useApp } from '../providers';
 import { api, CheckIn } from '@/lib/api';
-import { Card, CardHeader, PageHeader, Badge, EmptyState, Button, Spinner } from '@/components/shared';
+import { Card, CardHeader, PageHeader, Badge, EmptyState, Button, Spinner, Table, TBody, Td, Th, THead, Tr } from '@/components/shared';
 
 function passTierTone(tier: string | null): 'brand' | 'warning' | 'gray' {
   if (!tier) return 'gray';
@@ -64,38 +64,36 @@ export default function CheckinsPage() {
             />
           </div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="ui-table">
-              <thead>
-                <tr>
-                  <th>{t('checkins.col.time')}</th>
-                  <th>{t('checkins.col.member')}</th>
-                  <th>{t('checkins.col.tier')}</th>
-                  <th>{t('checkins.col.visit')}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map(r => (
-                  <tr key={r.id}>
-                    <td className="tabular-nums whitespace-nowrap">
-                      {new Date(r.timestamp).toLocaleString()}
-                    </td>
-                    <td className="font-medium text-[var(--color-fg-primary)]">
-                      {r.memberPublicId ?? r.memberId}
-                    </td>
-                    <td>
-                      <Badge tone={passTierTone(r.passTier)}>
-                        {r.passTier ?? 'Direct'}
-                      </Badge>
-                    </td>
-                    <td className="tabular-nums">
-                      {r.visitNumberInCycle != null ? `#${r.visitNumberInCycle}` : '—'}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <Table aria-label={t('checkins.heading')} wrapperClassName="rounded-none border-0">
+            <THead>
+              <Tr>
+                <Th>{t('checkins.col.time')}</Th>
+                <Th>{t('checkins.col.member')}</Th>
+                <Th>{t('checkins.col.tier')}</Th>
+                <Th>{t('checkins.col.visit')}</Th>
+              </Tr>
+            </THead>
+            <TBody>
+              {rows.map(r => (
+                <Tr key={r.id}>
+                  <Td className="tabular-nums whitespace-nowrap">
+                    {new Date(r.timestamp).toLocaleString()}
+                  </Td>
+                  <Td className="font-medium !text-[var(--color-fg-primary)]">
+                    {r.memberPublicId ?? r.memberId}
+                  </Td>
+                  <Td>
+                    <Badge tone={passTierTone(r.passTier)}>
+                      {r.passTier ?? 'Direct'}
+                    </Badge>
+                  </Td>
+                  <Td className="tabular-nums">
+                    {r.visitNumberInCycle != null ? `#${r.visitNumberInCycle}` : '—'}
+                  </Td>
+                </Tr>
+              ))}
+            </TBody>
+          </Table>
         )}
       </Card>
     </div>
