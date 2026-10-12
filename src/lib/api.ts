@@ -415,6 +415,15 @@ export const api = {
     request<ChallengeParticipation>(`/${scope}/challenges/${encodeURIComponent(id)}/participants`, {}, token),
   challengeStandings: (token: string, scope: ChallengeApiScope, id: string) =>
     request<ChallengeStandings>(`/${scope}/challenges/${encodeURIComponent(id)}/leaderboard`, {}, token),
+  // ─── Exercise library (admin, 'exercises' scope) ───
+  adminExercises: (token: string) =>
+    request<{ exercises: Exercise[]; options: ExerciseOptions }>('/admin/exercises', {}, token),
+  createExercise: (token: string, body: ExerciseInput) =>
+    request<{ exercise: Exercise }>('/admin/exercises', { method: 'POST', body: JSON.stringify(body) }, token),
+  updateExercise: (token: string, id: string, body: Partial<ExerciseInput>) =>
+    request<{ exercise: Exercise }>(`/admin/exercises/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify(body) }, token),
+  resetExercise: (token: string, id: string) =>
+    request<{ exercise: Exercise }>(`/admin/exercises/${encodeURIComponent(id)}/reset`, { method: 'POST' }, token),
   // ─── Gym settlements (admin; reads need 'payments', each step its own scope) ───
   settlementRuns: (token: string, mode?: SettlementMode) =>
     request<SettlementRun[]>(`/admin/settlements/runs${qs({ mode })}`, {}, token),
@@ -2810,3 +2819,46 @@ export type RecoveryDetail = {
   };
   events: Array<{ kind: string; actor: string | null; detail: Record<string, unknown> | null; createdAt: string }>;
 };
+
+// ─── Exercise library ───
+export interface ExerciseTranslation { name?: string; description?: string; instructions?: string[] }
+export interface ExerciseInput {
+  name: string;
+  description?: string;
+  category: string;
+  targetAreas: string[];
+  secondaryAreas?: string[];
+  movementPattern?: string | null;
+  difficulty: string;
+  equipment: string[];
+  environment: string[];
+  suitableGoals: string[];
+  defaultSets: number;
+  /** Counted in reps, or timed in seconds — one or the other. */
+  defaultReps?: number | null;
+  defaultDuration?: number | null;
+  restSeconds: number;
+  tracksWeight?: boolean;
+  instructions: string[];
+  alternatives?: string[];
+  active?: boolean;
+  i18n?: { sw?: ExerciseTranslation };
+}
+export interface Exercise extends ExerciseInput {
+  id: string;
+  active: boolean;
+  alternatives: string[];
+  secondaryAreas: string[];
+  /** `builtin` ships with FitFlex, `edited` is a built-in FitFlex changed, `custom` was added here. */
+  source: 'builtin' | 'edited' | 'custom';
+  updatedAt?: string | null;
+}
+export interface ExerciseOptions {
+  categories: string[];
+  targetAreaGroups: { id: string; areas: string[] }[];
+  movementPatterns: string[];
+  difficulties: string[];
+  equipment: string[];
+  environments: string[];
+  goals: string[];
+}
