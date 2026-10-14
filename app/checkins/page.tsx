@@ -80,7 +80,13 @@ export default function CheckinsPage() {
                     {new Date(r.timestamp).toLocaleString()}
                   </Td>
                   <Td className="font-medium !text-[var(--color-fg-primary)]">
-                    {r.memberPublicId ?? r.memberId}
+                    {r.displayName || r.memberPublicId || r.memberId}
+                    {r.username && (
+                      <span className="ml-1 font-normal text-[var(--color-fg-tertiary)]">@{r.username}</span>
+                    )}
+                    {r.displayName && r.memberPublicId && (
+                      <span className="block text-xs font-normal text-[var(--color-fg-quaternary)]">{r.memberPublicId}</span>
+                    )}
                   </Td>
                   <Td>
                     <Badge tone={passTierTone(r.passTier)}>

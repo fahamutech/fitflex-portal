@@ -607,7 +607,7 @@ export const api = {
     request<{ group: SocialGroup; members: GroupMember[] }>(`${groupsBase(orgId)}/${encodeURIComponent(id)}/members/${encodeURIComponent(userId)}/${action}`, { method: 'POST' }, token),
   socialReports: (token: string, status: SocialReportStatus) =>
     request<{ reports: SocialReport[] }>(`/admin/social/reports?${new URLSearchParams({ status })}`, {}, token),
-  resolveSocialReport: (token: string, id: string, action: 'remove' | 'dismiss') =>
+  resolveSocialReport: (token: string, id: string, action: 'remove' | 'dismiss' | 'clear_username') =>
     request<{ resolved: boolean }>(`/admin/social/reports/${encodeURIComponent(id)}/resolve`, { method: 'POST', body: JSON.stringify({ action }) }, token),
   // ─── Gym and trainer reviews ───
   /** Admin: every review of one kind, newest first (max 200), optionally one status. */
@@ -1086,6 +1086,9 @@ export interface CheckIn {
   id: string;
   memberId: string;
   memberPublicId?: string;
+  /** The visitor's name (when the gym's server shows names) and username. */
+  displayName?: string | null;
+  username?: string | null;
   memberPhone: string | null;
   memberEmail?: string | null;
   timestamp: string;
@@ -1691,7 +1694,7 @@ export interface SocialReport {
   status: SocialReportStatus;
   createdAt: string;
   reporter: string | null;
-  target: { text?: string; author?: string | null; removed?: boolean; displayName?: string | null; name?: string; archived?: boolean; owner?: string | null; type?: string; title?: string | null } | null;
+  target: { text?: string; author?: string | null; authorUsername?: string | null; removed?: boolean; displayName?: string | null; username?: string | null; name?: string; archived?: boolean; owner?: string | null; type?: string; title?: string | null } | null;
 }
 export type RewardType = 'points' | 'discount' | 'gym_pass' | 'trainer_session' | 'vendor_voucher' | 'corporate_reward' | 'badge' | 'certificate' | 'other';
 export type RewardRule = 'finishers' | 'top' | 'team';

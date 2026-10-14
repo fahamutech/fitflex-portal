@@ -21,10 +21,10 @@ function describe(r: SocialReport) {
   const t = r.target;
   if (!t) return 'No longer exists';
   switch (r.targetType) {
-    case 'comment': return `“${t.text ?? ''}” by ${t.author ?? 'a member'}${t.removed ? ' (removed)' : ''}`;
+    case 'comment': return `“${t.text ?? ''}” by ${t.author ?? 'a member'}${t.authorUsername ? ` (@${t.authorUsername})` : ''}${t.removed ? ' (removed)' : ''}`;
     case 'group': return `Group “${t.name ?? ''}”${t.archived ? ' (closed)' : ''}`;
     case 'activity': return `${t.owner ?? 'A member'}'s ${t.type ?? 'activity'}${t.title ? ` “${t.title}”` : ''}`;
-    default: return `Member ${t.displayName ?? ''}`;
+    default: return `Member ${t.displayName ?? ''}${t.username ? ` (@${t.username})` : ''}`;
   }
 }
 
@@ -43,9 +43,10 @@ export default function AdminSocialPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { load(); }, [token, tab]);
 
-  const resolve = async (r: SocialReport, action: 'remove' | 'dismiss') => {
+  const resolve = async (r: SocialReport, action: 'remove' | 'dismiss' | 'clear_username') => {
     if (!token) return;
     if (action === 'remove' && !window.confirm(`${REMOVE_LABEL[r.targetType]}? This is logged.`)) return;
+    if (action === 'clear_username' && !window.confirm(`Clear @${r.target?.username}? The member keeps their name and can pick another username, but never this one. This is logged.`)) return;
     try { await api.resolveSocialReport(token, r.id, action); await load(); } catch { setError('Could not update that report.'); }
   };
 
@@ -83,6 +84,7 @@ export default function AdminSocialPage() {
                   {r.status === 'open' && (
                     <div className="flex gap-2">
                       {r.targetType !== 'user' && <Button size="sm" onClick={() => resolve(r, 'remove')}>{REMOVE_LABEL[r.targetType]}</Button>}
+                      {r.targetType === 'user' && r.target?.username && <Button size="sm" data-testid="clear-username" onClick={() => resolve(r, 'clear_username')}>Clear username</Button>}
                       <Button size="sm" variant="secondary" onClick={() => resolve(r, 'dismiss')}>Dismiss</Button>
                     </div>
                   )}
