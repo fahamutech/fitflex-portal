@@ -162,7 +162,7 @@ function SidebarLink({
       className={cn(
         'group flex items-center gap-3 rounded-[var(--radius-md)] px-3 py-2.5 text-sm font-medium transition-colors',
         active
-          ? 'bg-[var(--color-sidebar-active)] text-white'
+          ? 'bg-[var(--color-volt)] text-[var(--color-on-volt)] font-semibold'
           : 'text-[var(--color-sidebar-text)] hover:bg-[var(--color-sidebar-hover)] hover:text-white',
       )}
     >
