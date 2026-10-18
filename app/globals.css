@@ -93,6 +93,24 @@
   --color-accent-600: #ca8504;
   --color-accent-700: #854a0e;
 
+  /* ── V2 accents (FitFlex Design System V2) ──
+   Volt: the one primary highlight on dark surfaces (member Pulse theme) and
+   the active item in the dark sidebar. Dark text on it (15.4:1 with #020617);
+   never use it as text on light grounds (1.3:1 on white).
+   Fuel: nutrition/kcal and "needs attention soon" (expiring passes). Not an
+   error colour. fuel on white = 5.4:1; fuel on fuel-50 = 5.0:1. */
+  --color-volt:        #c8f04a;
+  --color-on-volt:     #020617;
+  --color-fuel:        #b8452c;
+  --color-fuel-50:     #fff4ee;
+  --color-fuel-200:    #fbd9cc;
+  --color-fuel-on-dark: #ff8a6b;
+
+  /* Calm (operator portals): warm canvas behind white cards.
+     fg-primary 16.3:1, fg-tertiary 7.1:1, fg-quaternary 4.6:1 on it. */
+  --color-calm-ground: #f7f5f0;
+  --color-calm-border: #ebe7de;
+
   /* ── Aliases (used in components) ── */
   --color-fg-primary:    var(--color-gray-900);
   --color-fg-secondary:  var(--color-gray-700);
@@ -102,7 +120,7 @@
   --color-fg-brand:      var(--color-brand-700);
 
   --color-bg-primary:    #ffffff;
-  --color-bg-secondary:  var(--color-gray-50);
+  --color-bg-secondary:  var(--color-calm-ground);
   --color-bg-tertiary:   var(--color-gray-100);
 
   --color-border-primary:   var(--color-gray-300);
