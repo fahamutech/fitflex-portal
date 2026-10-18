@@ -107,7 +107,11 @@
   --color-fuel-on-dark: #ff8a6b;
 
   /* Calm (operator portals): warm canvas behind white cards.
-     fg-primary 16.3:1, fg-tertiary 7.1:1, fg-quaternary 4.6:1 on it. */
+     fg-primary 16.3:1, fg-tertiary 7.1:1, fg-quaternary 4.6:1 on it.
+     Only the page canvas is Calm (see --color-bg-canvas); fills inside cards,
+     tables and dialogs stay on the cool gray ramp so the two never touch.
+     error-600 (4.4:1) and info-600 (4.2:1) are below AA on Calm: text that can
+     sit on the canvas uses error-700 (6.0:1) / info-700 (5.5:1). */
   --color-calm-ground: #f7f5f0;
   --color-calm-border: #ebe7de;
 
@@ -120,20 +124,25 @@
   --color-fg-brand:      var(--color-brand-700);
 
   --color-bg-primary:    #ffffff;
-  --color-bg-secondary:  var(--color-calm-ground);
+  --color-bg-secondary:  var(--color-gray-50);
   --color-bg-tertiary:   var(--color-gray-100);
+  /* Page canvas behind cards (body, shell main area, sign-in page) */
+  --color-bg-canvas:     var(--color-calm-ground);
 
   --color-border-primary:   var(--color-gray-300);
   --color-border-secondary: var(--color-gray-200);
   /* Form-control boundary: >= 3:1 on white (WCAG 1.4.11) */
   --color-border-input:     #858d9d;
+  /* Edges that sit directly on the Calm canvas (card outlines, page bars) */
+  --color-border-canvas:    var(--color-calm-border);
 
   /* ── Sidebar ── */
   --color-sidebar-bg:     var(--color-gray-900);
   --color-sidebar-hover:  var(--color-gray-800);
-  --color-sidebar-active: var(--color-gray-700);
+  /* Active item: Volt pill with dark text (15.4:1) */
+  --color-sidebar-active: var(--color-volt);
   --color-sidebar-text:   var(--color-gray-400);
-  --color-sidebar-text-active: #ffffff;
+  --color-sidebar-text-active: var(--color-on-volt);
 
   /* ── Radius (Untitled UI uses 6px / 8px / 12px / 16px pattern) ── */
   --radius-xs: 0.25rem;
@@ -160,7 +169,7 @@
 html, body { height: 100%; margin: 0; }
 
 body {
-  background: var(--color-bg-secondary);
+  background: var(--color-bg-canvas);
   color: var(--color-fg-primary);
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;

@@ -74,7 +74,7 @@ export function TrainerPassFields({
           ))}
         </div>
       )}
-      {error && <p className="text-xs text-[var(--color-error-600)]">{error}</p>}
+      {error && <p className="text-xs text-[var(--color-error-700)]">{error}</p>}
     </div>
   );
 }

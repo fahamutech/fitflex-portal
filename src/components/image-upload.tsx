@@ -215,7 +215,7 @@ export function ImageUpload({
       )}
 
       {uploadError && (
-        <p className="text-xs text-[var(--color-error-600)]">{uploadError}</p>
+        <p className="text-xs text-[var(--color-error-700)]">{uploadError}</p>
       )}
 
       <input
