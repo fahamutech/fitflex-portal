@@ -120,7 +120,7 @@
   --color-fg-brand:      var(--color-brand-700);
 
   --color-bg-primary:    #ffffff;
-  --color-bg-secondary:  var(--color-gray-50);
+  --color-bg-secondary:  var(--color-calm-ground);
   --color-bg-tertiary:   var(--color-gray-100);
 
   --color-border-primary:   var(--color-gray-300);
