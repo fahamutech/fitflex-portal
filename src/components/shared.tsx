@@ -57,7 +57,7 @@ export function Card({ className, children, ...rest }: HTMLAttributes<HTMLDivEle
     <div
       {...rest}
       className={cn(
-        'rounded-[var(--radius-xl)] border border-[var(--color-border-secondary)] bg-[var(--color-bg-primary)] shadow-[var(--shadow-sm)]',
+        'rounded-[var(--radius-xl)] border border-[var(--color-border-canvas)] bg-[var(--color-bg-primary)] shadow-[var(--shadow-sm)]',
         className,
       )}
     >
@@ -225,7 +225,7 @@ export function Field({
         {required && <span aria-hidden="true" className="text-[var(--color-error-600)]"> *</span>}
       </label>
       {control}
-      {error && <span id={errorId} className="text-xs text-[var(--color-error-600)]">{error}</span>}
+      {error && <span id={errorId} className="text-xs text-[var(--color-error-700)]">{error}</span>}
       {!error && hint && <span id={hintId} className="text-xs text-[var(--color-fg-quaternary)]">{hint}</span>}
     </div>
   );
@@ -363,7 +363,7 @@ export function Divider({ className }: { className?: string }) {
    ───────────────────────────────────────────── */
 export function EmptyState({ title, body, action, icon }: { title: ReactNode; body?: ReactNode; action?: ReactNode; /** Optional lucide icon node shown above the title. */ icon?: ReactNode }) {
   return (
-    <div className="flex flex-col items-center justify-center gap-3 rounded-[var(--radius-xl)] border border-dashed border-[var(--color-border-primary)] bg-[var(--color-bg-secondary)] px-6 py-12 text-center">
+    <div className="flex flex-col items-center justify-center gap-3 rounded-[var(--radius-xl)] border border-dashed border-[var(--color-border-primary)] bg-[var(--color-bg-primary)] px-6 py-12 text-center">
       {icon && (
         <div aria-hidden="true" className="flex h-11 w-11 items-center justify-center rounded-full bg-[var(--color-bg-tertiary)] text-[var(--color-fg-quaternary)] [&>svg]:h-5 [&>svg]:w-5">
           {icon}

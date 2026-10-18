@@ -162,7 +162,7 @@ function SidebarLink({
       className={cn(
         'group flex items-center gap-3 rounded-[var(--radius-md)] px-3 py-2.5 text-sm font-medium transition-colors',
         active
-          ? 'bg-[var(--color-sidebar-active)] text-white'
+          ? 'bg-[var(--color-sidebar-active)] text-[var(--color-sidebar-text-active)] font-semibold'
           : 'text-[var(--color-sidebar-text)] hover:bg-[var(--color-sidebar-hover)] hover:text-white',
       )}
     >
@@ -399,11 +399,11 @@ export function Shell({ children }: { children: ReactNode }) {
   if (!ready) {
     return (
       <div
-        className="min-h-screen bg-[var(--color-bg-secondary)] flex flex-col"
+        className="min-h-screen bg-[var(--color-bg-canvas)] flex flex-col"
         aria-busy="true"
         data-testid="shell-restoring-session"
       >
-        <header className="h-16 flex items-center justify-center border-b border-[var(--color-border-secondary)] bg-[var(--color-bg-primary)]">
+        <header className="h-16 flex items-center justify-center border-b border-[var(--color-border-canvas)] bg-[var(--color-bg-primary)]">
           <div className="flex items-center gap-2.5">
             <BrandLogo className="h-7 w-7 rounded-[var(--radius-md)]" />
             <span className="text-sm font-semibold text-[var(--color-fg-primary)]">FitFlex Af</span>
@@ -418,9 +418,9 @@ export function Shell({ children }: { children: ReactNode }) {
   /* Public / login layout — no sidebar */
   if (isLoginPage) {
     return (
-      <div className="min-h-screen bg-[var(--color-bg-secondary)] flex flex-col">
+      <div className="min-h-screen bg-[var(--color-bg-canvas)] flex flex-col">
         {/* Minimal top bar for login */}
-        <header className="h-16 flex items-center justify-between px-4 border-b border-[var(--color-border-secondary)] bg-[var(--color-bg-primary)]">
+        <header className="h-16 flex items-center justify-between px-4 border-b border-[var(--color-border-canvas)] bg-[var(--color-bg-primary)]">
           <div className="w-24" />
           <div className="flex items-center gap-2.5">
             <BrandLogo className="h-7 w-7 rounded-[var(--radius-md)]" />
@@ -434,7 +434,7 @@ export function Shell({ children }: { children: ReactNode }) {
   }
 
   return (
-    <div className="flex h-screen overflow-hidden bg-[var(--color-bg-secondary)] print:block print:h-auto print:overflow-visible print:bg-white">
+    <div className="flex h-screen overflow-hidden bg-[var(--color-bg-canvas)] print:block print:h-auto print:overflow-visible print:bg-white">
 
       {/* ── Desktop sidebar ── */}
       <aside className="hidden lg:flex lg:w-64 lg:flex-col lg:shrink-0 bg-[var(--color-sidebar-bg)] print:!hidden">
@@ -458,7 +458,7 @@ export function Shell({ children }: { children: ReactNode }) {
       <div className="flex flex-1 flex-col overflow-hidden print:block print:overflow-visible">
 
         {/* Mobile top bar */}
-        <header className="flex h-14 shrink-0 items-center justify-between gap-3 border-b border-[var(--color-border-secondary)] bg-[var(--color-bg-primary)] px-4 lg:hidden print:hidden">
+        <header className="flex h-14 shrink-0 items-center justify-between gap-3 border-b border-[var(--color-border-canvas)] bg-[var(--color-bg-primary)] px-4 lg:hidden print:hidden">
           <button
             ref={menuButtonRef}
             type="button"
