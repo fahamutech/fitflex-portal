@@ -1,0 +1,54 @@
+name: Portal Checks
+
+# Type-check and build on release-candidate, where agent work is merged and
+# tested before promotion. This workflow never deploys: deploy-hosting.yml is
+# the only one that deploys, and only for main.
+#
+# Playwright e2e is not run here: playwright.config.ts starts the backend from
+# a sibling ../fitflex-functions checkout, which this job does not have.
+on:
+  push:
+    branches: [release-candidate]
+  pull_request:
+    branches: [release-candidate]
+  workflow_dispatch:
+
+concurrency:
+  group: portal-checks-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Type-check and build
+    runs-on: ubuntu-latest
+
+    # Same public defaults as deploy-hosting.yml; nothing here is deployed.
+    env:
+      NEXT_PUBLIC_API_BASE: ${{ vars.NEXT_PUBLIC_API_BASE || 'https://fitflex-faas.bfast.smartstock.co.tz' }}
+      NEXT_PUBLIC_FIREBASE_API_KEY: ${{ vars.NEXT_PUBLIC_FIREBASE_API_KEY || 'AIzaSyCleDGLHf71NdmbFkXbJVzS9tOsmIMj7tA' }}
+      NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN: ${{ vars.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN || 'fitflex-af-pilot.firebaseapp.com' }}
+      NEXT_PUBLIC_FIREBASE_PROJECT_ID: ${{ vars.NEXT_PUBLIC_FIREBASE_PROJECT_ID || 'fitflex-af-pilot' }}
+      NEXT_PUBLIC_FIREBASE_APP_ID: ${{ vars.NEXT_PUBLIC_FIREBASE_APP_ID || '1:318978253903:web:49b58d5fda05603645f63a' }}
+      NEXT_PUBLIC_GOOGLE_CLIENT_ID: ${{ vars.NEXT_PUBLIC_GOOGLE_CLIENT_ID || '318978253903-u6du2v8thfbdbmortdh49k1g06uv91v7.apps.googleusercontent.com' }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type-check
+        run: npx tsc --noEmit
+
+      - name: Build
+        run: npm run build

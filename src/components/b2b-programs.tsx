@@ -7,7 +7,10 @@ import {
 } from '@/lib/api';
 import { Alert, Badge, Button, Card, CardContent, CardHeader, Checkbox, Field, Input, Select, Spinner } from '@/components/shared';
 import { B2BBilling } from '@/components/b2b-billing';
+import type { MessageKey } from '@/lib/i18n';
 import { money } from '@/lib/admin-utils';
+import { useApp } from '../../app/providers';
+import { PublicTier, UNLIMITED_VISITS, fillIn, sellableFrom, tierErrorKey } from '@/lib/pass-tiers';
 
 const ERRORS: Record<string, string> = {
   name_required: 'Enter a name.',
@@ -48,8 +51,11 @@ const ERRORS: Record<string, string> = {
   fixed_fee_needs_pass: 'Only a sponsored pass can have a fee of its own.',
   budget_still_exhausted: 'The budget is fully spent. Raise it (Edit) before resuming.',
 };
-const message = (err: unknown, fallback: string) =>
-  err instanceof ApiError ? ERRORS[(err.body as { error?: string })?.error ?? ''] ?? fallback : fallback;
+const message = (err: unknown, fallback: string, t: (k: MessageKey) => string) => {
+  const tierKey = tierErrorKey(err); // tier_not_available (409) and tier_not_configured: fitflex-functions#189
+  if (tierKey) return t(tierKey);
+  return err instanceof ApiError ? ERRORS[(err.body as { error?: string })?.error ?? ''] ?? fallback : fallback;
+};
 
 const TONE: Record<string, 'success' | 'warning' | 'gray' | 'danger' | 'brand'> = {
   active: 'success', pending: 'warning', draft: 'gray', paused: 'warning', expired: 'gray', cancelled: 'danger', inactive: 'gray',
@@ -58,7 +64,6 @@ const MOVE_LABEL: Record<string, string> = {
   pending: 'Submit for activation', draft: 'Back to draft', active: 'Activate', paused: 'Pause', cancelled: 'Cancel programme',
 };
 const GYM_TIERS = ['standard', 'midtier', 'premium', 'luxury_executive', 'online'];
-const PASS_TIERS = ['basic', 'pro', 'premium', 'executive'];
 const FLAT_FEE = 'sponsored_pass';
 const tzs = (n?: number | null) => (n == null ? '—' : money(n));
 const list = (s: string) => s.split(',').map(x => x.trim()).filter(Boolean);
@@ -87,7 +92,7 @@ function eligibilityText(p: B2BProgram) {
 const EMPTY_PROGRAM = { name: '', description: '', programType: 'wellness', startDate: '', endDate: '', budget: '', discount: '', scope: 'all', groups: [] as string[], ids: [] as string[], types: '' };
 const EMPTY_BENEFIT = {
   name: '', description: '', benefitType: 'gym_access', fundingType: 'full', sponsorAmount: '', sponsorPct: '', sponsorCap: '', copay: '',
-  usagePeriod: 'month', usageLimit: '', periodCap: '', startDate: '', endDate: '', terms: '', passTier: 'pro', fixedFee: '',
+  usagePeriod: 'month', usageLimit: '', periodCap: '', startDate: '', endDate: '', terms: '', passTier: '', fixedFee: '',
   providerScope: 'all', gymIds: '', gymTiers: [] as string[], trainerIds: '', vendorIds: '', productCategories: '', challengeIds: '', groups: '', types: '',
 };
 
@@ -96,7 +101,11 @@ const EMPTY_BENEFIT = {
  * eligible beneficiaries. Rules only: usage and payments come later.
  */
 export function B2BPrograms({ token, org, beneficiaries, onChanged }: { token: string; org: B2BOrganization; beneficiaries: B2BBeneficiary[]; onChanged?: () => void }) {
+  const { t } = useApp();
   const [ref, setRef] = useState<B2BProgramReference | null>(null);
+  // Pass tiers on sale today, from Settings (GET /subscription-tiers lists only sellable tiers, fitflex-functions#189).
+  const [tiers, setTiers] = useState<PublicTier[] | null>(null);
+  const [tiersFailed, setTiersFailed] = useState(false);
   const [programs, setPrograms] = useState<B2BProgram[] | null>(null);
   const [open, setOpen] = useState<{ program: B2BProgram; benefits: B2BBenefit[] } | null>(null);
   const [programForm, setProgramForm] = useState<typeof EMPTY_PROGRAM | null>(null);
@@ -115,13 +124,16 @@ export function B2BPrograms({ token, org, beneficiaries, onChanged }: { token: s
   };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { api.b2bProgramReference().then(setRef).catch(() => setRef(null)); }, []);
+  useEffect(() => {
+    api.subscriptionTiers().then(r => setTiers(sellableFrom(r))).catch(() => { setTiers([]); setTiersFailed(true); });
+  }, []);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { setOpen(null); setProgramForm(null); setBenefitForm(null); setPrograms(null); loadList(); }, [org.id]);
 
   const run = async (fn: () => Promise<void>, fallback: string) => {
     setBusy(true);
     setError(null);
-    try { await fn(); } catch (err) { setError(message(err, fallback)); } finally { setBusy(false); }
+    try { await fn(); } catch (err) { setError(message(err, fallback, t)); } finally { setBusy(false); }
   };
   const openProgram = (id: string) => run(async () => {
     setOpen(await api.b2bProgram(token, org.id, id));
@@ -185,12 +197,12 @@ export function B2BPrograms({ token, org, beneficiaries, onChanged }: { token: s
     sponsorAmount: b.sponsorAmountTzs?.toString() ?? '', sponsorPct: b.sponsorShareBps != null ? String(b.sponsorShareBps / 100) : '',
     sponsorCap: b.sponsorCapTzs?.toString() ?? '', copay: b.beneficiaryAmountTzs?.toString() ?? '',
     usagePeriod: b.usagePeriod, usageLimit: b.usageLimit?.toString() ?? '', periodCap: b.periodSponsorCapTzs?.toString() ?? '',
-    startDate: b.startDate ?? '', endDate: b.endDate ?? '', terms: b.terms ?? '', passTier: b.passTier ?? 'pro', fixedFee: b.fixedFeeTzs?.toString() ?? '',
+    startDate: b.startDate ?? '', endDate: b.endDate ?? '', terms: b.terms ?? '', passTier: b.passTier ?? '', fixedFee: b.fixedFeeTzs?.toString() ?? '',
     providerScope: b.providerRules.scope, gymIds: (b.providerRules.gymIds ?? []).join(', '), gymTiers: b.providerRules.gymTiers ?? [],
     trainerIds: (b.providerRules.trainerIds ?? []).join(', '), vendorIds: (b.providerRules.vendorIds ?? []).join(', '),
     productCategories: (b.providerRules.productCategories ?? []).join(', '), challengeIds: (b.providerRules.challengeIds ?? []).join(', '),
     groups: (b.eligibility?.groups ?? []).join(', '), types: (b.eligibility?.beneficiaryTypes ?? []).join(', '),
-  } : { ...EMPTY_BENEFIT });
+  } : { ...EMPTY_BENEFIT, passTier: tiers?.[0]?.key ?? '' });
 
   const saveBenefit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -307,9 +319,19 @@ export function B2BPrograms({ token, org, beneficiaries, onChanged }: { token: s
         </Select>
       </Field>
       {bf.benefitType === FLAT_FEE && (
-        <Field label="Pass tier">
+        <Field label="Pass tier" error={tiers && tiers.length === 0 ? t(tiersFailed ? 'tiers.loadFailed' : 'tiers.noneOnSale') : undefined}>
           <Select value={bf.passTier} onChange={e => setBenefitForm({ ...bf, passTier: e.target.value })} data-testid="benefit-pass-tier">
-            {PASS_TIERS.map(t => <option key={t} value={t}>{t}</option>)}
+            {!bf.passTier && <option value="">{t('tiers.choose')}</option>}
+            {/* A saved benefit's tier that is no longer on sale stays visible, marked, so it isn't silently swapped. */}
+            {bf.passTier && tiers && !tiers.some(x => x.key === bf.passTier) && (
+              <option value={bf.passTier}>{fillIn(t('tiers.optionNotOnSale'), { label: bf.passTier })}</option>
+            )}
+            {(tiers ?? []).map(x => (
+              <option key={x.key} value={x.key}>{fillIn(t('tiers.option'), {
+                label: x.label || x.key, price: money(x.monthlyPrice),
+                visits: x.visits === UNLIMITED_VISITS ? t('tiers.visitsUnlimited') : fillIn(t('tiers.visitsCount'), { n: x.visits }),
+              })}</option>
+            ))}
           </Select>
         </Field>
       )}

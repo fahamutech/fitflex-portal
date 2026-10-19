@@ -8,6 +8,8 @@ import {
 } from '@/lib/api';
 import { Alert, Badge, Button, Card, CardContent, CardHeader, Field, Input, PageHeader, Select, Spinner } from '@/components/shared';
 import { B2BPrograms } from '@/components/b2b-programs';
+import { tierErrorKey } from '@/lib/pass-tiers';
+import type { MessageKey } from '@/lib/i18n';
 
 const ERRORS: Record<string, string> = {
   invalid_organization_type: 'Choose an organisation type.',
@@ -28,8 +30,11 @@ const ERRORS: Record<string, string> = {
   organization_not_active: 'Activate the organisation first.',
   last_owner: 'The organisation must keep at least one owner.',
 };
-const message = (err: unknown, fallback: string) =>
-  err instanceof ApiError ? ERRORS[(err.body as { error?: string })?.error ?? ''] ?? fallback : fallback;
+const message = (err: unknown, fallback: string, t: (k: MessageKey) => string) => {
+  const tierKey = tierErrorKey(err); // tier_not_available (409): fitflex-functions#189
+  if (tierKey) return t(tierKey);
+  return err instanceof ApiError ? ERRORS[(err.body as { error?: string })?.error ?? ''] ?? fallback : fallback;
+};
 
 const TONE: Record<string, 'success' | 'warning' | 'gray' | 'danger'> = {
   active: 'success', pending: 'warning', suspended: 'danger', inactive: 'gray', removed: 'gray',
@@ -44,7 +49,7 @@ const EMPTY_ORG = { organizationType: 'insurer', legalName: '', tradingName: '',
  * staff, which show read-only.
  */
 export default function AdminB2BPage() {
-  const { token } = useApp();
+  const { token, t } = useApp();
   const [ref, setRef] = useState<B2BReference | null>(null);
   const [filter, setFilter] = useState({ type: '', status: '' });
   const [orgs, setOrgs] = useState<B2BOrganization[] | null>(null);
@@ -100,7 +105,7 @@ export default function AdminB2BPage() {
     try {
       await fn();
     } catch (err) {
-      setError(message(err, fallback));
+      setError(message(err, fallback, t));
     } finally {
       setBusy(false);
     }
