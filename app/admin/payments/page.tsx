@@ -274,7 +274,7 @@ export default function PaymentsPage() {
       >
         <div className="space-y-4">
           {refundError && <Alert tone="error">{refundError}</Alert>}
-          <Field label="Amount to refund (TZS)">
+          <Field label="Amount to refund (TSh)">
             <input className="ui-input" inputMode="numeric" value={refundFields.amount} onChange={e => setRefundFields({ ...refundFields, amount: e.target.value.replace(/[^0-9]/g, '') })} />
           </Field>
           <Field label="Why" hint="For example: charged twice on 1 October.">

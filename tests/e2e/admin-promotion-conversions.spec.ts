@@ -16,9 +16,9 @@ test('tiles show bookings and subscriptions with their values, and the conversio
   await open(page, { conversions: 'full' });
   await page.goto('/admin/promotion-analytics');
   await expect(page.getByTestId('pan-value-bookings')).toHaveText('4');
-  await expect(page.getByTestId('pan-sub-bookings')).toHaveText('TZS 200,000');
+  await expect(page.getByTestId('pan-sub-bookings')).toHaveText('TSh 200,000');
   await expect(page.getByTestId('pan-value-subscriptions')).toHaveText('2');
-  await expect(page.getByTestId('pan-sub-subscriptions')).toHaveText('TZS 90,000');
+  await expect(page.getByTestId('pan-sub-subscriptions')).toHaveText('TSh 90,000');
   await expect(page.getByTestId('pan-value-conversionRate')).toHaveText('7.3%');
   await expect(page.getByTestId('pan-tile-conversionRate')).toContainText('Conversion rate');
   await expect(page.getByTestId('pan-sub-conversionRate')).toHaveText('conversions per click');
@@ -29,9 +29,9 @@ test('the table has bookings, subscriptions, purchases and conversion rate colum
   await page.goto('/admin/promotion-analytics');
   const p1 = page.getByTestId('pan-row-p1');
   await expect(p1.getByTestId('pan-cell-bookings')).toContainText('4');
-  await expect(p1.getByTestId('pan-cell-bookings')).toContainText('TZS 200,000');
-  await expect(p1.getByTestId('pan-cell-subscriptions')).toContainText('TZS 90,000');
-  await expect(p1.getByTestId('pan-cell-purchases')).toContainText('TZS 30,000');
+  await expect(p1.getByTestId('pan-cell-bookings')).toContainText('TSh 200,000');
+  await expect(p1.getByTestId('pan-cell-subscriptions')).toContainText('TSh 90,000');
+  await expect(p1.getByTestId('pan-cell-purchases')).toContainText('TSh 30,000');
   await expect(p1.getByTestId('pan-cell-conversionRate')).toHaveText('7.3%');
   // Nothing happened for the other one: zeros without a value line, a dash for the rate.
   const p2 = page.getByTestId('pan-row-p2');
@@ -53,11 +53,11 @@ test('detail view breaks conversions down and adds placement columns', async ({ 
   await open(page, { conversions: 'full' });
   await page.goto('/admin/promotion-analytics?item=p1');
   await expect(page.getByTestId('pan-conv-count-bookings')).toHaveText('4');
-  await expect(page.getByTestId('pan-conv-value-bookings')).toHaveText('TZS 200,000');
+  await expect(page.getByTestId('pan-conv-value-bookings')).toHaveText('TSh 200,000');
   await expect(page.getByTestId('pan-conv-count-subscriptions')).toHaveText('2');
-  await expect(page.getByTestId('pan-conv-value-subscriptions')).toHaveText('TZS 90,000');
+  await expect(page.getByTestId('pan-conv-value-subscriptions')).toHaveText('TSh 90,000');
   await expect(page.getByTestId('pan-conv-count-purchases')).toHaveText('1');
-  await expect(page.getByTestId('pan-conv-value-purchases')).toHaveText('TZS 30,000');
+  await expect(page.getByTestId('pan-conv-value-purchases')).toHaveText('TSh 30,000');
   await expect(page.getByTestId('pan-value-conversionRate')).toHaveText('7.3%');
   const row = page.getByTestId('pan-placement-gym_discovery');
   await expect(row.getByTestId('pan-placement-bookings')).toContainText('4');
@@ -75,7 +75,7 @@ test('missing value fields count as zero and show no value line', async ({ page 
   await page.goto('/admin/promotion-analytics?item=p1');
   await expect(page.getByTestId('pan-conv-count-bookings')).toHaveText('4');
   await expect(page.getByTestId('pan-conv-value-bookings')).toHaveCount(0);
-  await expect(page.getByTestId('pan-conv-value-purchases')).toHaveText('TZS 30,000');
+  await expect(page.getByTestId('pan-conv-value-purchases')).toHaveText('TSh 30,000');
 });
 
 test('nothing overflows the page at phone width', async ({ page }) => {

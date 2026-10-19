@@ -11,6 +11,7 @@ import { REFUSAL_REASONS, RECOVERY_TONE, canDecideAt, recoveryErrorKey, whenText
 import { Alert, Badge, Button, Card, CardContent, Field, PageHeader, Spinner, Table, TBody, Td, Th, THead, Tr } from './shared';
 import { ConfirmDialog, Dialog, DialogFooter } from './dialog';
 import { fill } from './communication-shared';
+import { money } from '@/lib/admin-utils';
 
 type T = (key: MessageKey) => string;
 const QUESTIONS = ['homeGym', 'plan', 'lastCheckin', 'paymentRef', 'other'] as const;
@@ -171,7 +172,7 @@ export function RecoveryCase({ id, token, t, locale, onBack }: { id: string; tok
             <div>
               <h2 className="text-base font-semibold">{t('rec.payments')}</h2>
               {a.payments.length ? (
-                <ul className="mt-1 space-y-0.5">{a.payments.map((p, n) => <li key={n}>{p.reference} · {p.amountTzs.toLocaleString()} TZS · {p.status} · {when(p.at)}</li>)}</ul>
+                <ul className="mt-1 space-y-0.5">{a.payments.map((p, n) => <li key={n}>{p.reference} · {money(p.amountTzs)} · {p.status} · {when(p.at)}</li>)}</ul>
               ) : <p className="mt-1 text-[var(--color-fg-quaternary)]">{t('rec.none')}</p>}
             </div>
           </CardContent>

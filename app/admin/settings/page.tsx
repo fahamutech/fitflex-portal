@@ -4,7 +4,7 @@ import { RefreshCw, Save, Plus, Trash2, X } from 'lucide-react';
 import { useApp } from '../../providers';
 import { api, PlatformSettings, SubscriptionTierConfig, PayoutBandConfig } from '@/lib/api';
 import { Button, PageHeader, Alert, Spinner, Card, Field, Input, Select, Table, TBody, Td, Th, THead, Tr } from '@/components/shared';
-import { money } from '@/lib/admin-utils';
+import { money, currencyLabel } from '@/lib/admin-utils';
 import { ManualPaymentSettingsCard } from '@/components/manual-payment-settings';
 
 const EMPTY_TIER: SubscriptionTierConfig = { key: '', label: '', monthlyPrice: 0, visits: 0, gymAccess: 'standard' };
@@ -182,7 +182,7 @@ export default function SettingsPage() {
               <Tr>
                 <Th>Tier Key</Th>
                 <Th>Label</Th>
-                <Th className="!text-right">Monthly Price ({currency})</Th>
+                <Th className="!text-right">Monthly Price ({currencyLabel(currency)})</Th>
                 <Th className="!text-right">Visits / Month</Th>
                 <Th>Gym Access Level</Th>
                 <Th className="w-10"></Th>
@@ -198,7 +198,7 @@ export default function SettingsPage() {
                     <Input size="sm" aria-label="Label" value={t.label} onChange={e => updateTier(i, 'label', e.target.value)} />
                   </Td>
                   <Td>
-                    <Input size="sm" className="text-right font-mono tabular-nums" aria-label={`Monthly Price (${currency})`} type="number" value={t.monthlyPrice} onChange={e => updateTier(i, 'monthlyPrice', Number(e.target.value))} />
+                    <Input size="sm" className="text-right font-mono tabular-nums" aria-label={`Monthly Price (${currencyLabel(currency)})`} type="number" value={t.monthlyPrice} onChange={e => updateTier(i, 'monthlyPrice', Number(e.target.value))} />
                   </Td>
                   <Td>
                     <Input size="sm" className="text-right font-mono tabular-nums" aria-label="Visits / Month" type="number" value={t.visits} onChange={e => updateTier(i, 'visits', Number(e.target.value))} placeholder="-1 = unlimited" />

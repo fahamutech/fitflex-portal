@@ -270,7 +270,7 @@ function PassDialog({ busy, error, onClose, onSubmit }: { busy: boolean; error: 
             {PASS_TIER_KEYS.map(k => <option key={k} value={k}>{tierLabel(k)}</option>)}
           </select>
         </Field>
-        <Field label="Price (TZS)"><Input type="number" min={0} value={price} onChange={e => setPrice(e.target.value)} data-testid="config-pass-price" /></Field>
+        <Field label="Price (TSh)"><Input type="number" min={0} value={price} onChange={e => setPrice(e.target.value)} data-testid="config-pass-price" /></Field>
         <Field label="Visits per cycle"><Input type="number" min={0} value={visits} onChange={e => setVisits(e.target.value)} data-testid="config-pass-visits" /></Field>
         <Field label="Why (optional)"><Input value={reason} onChange={e => setReason(e.target.value)} /></Field>
       </div>
@@ -302,9 +302,9 @@ function RateCardDialog({ gyms, busy, error, onClose, onSubmit }: { gyms: Gym[];
           </select>
         </Field>
         <div className="grid gap-4 sm:grid-cols-3">
-          <Field label="Retail per day (TZS)"><Input type="number" min={0} value={rates.day} onChange={e => setRates({ ...rates, day: e.target.value })} data-testid="config-card-day" /></Field>
-          <Field label="Per week (TZS)"><Input type="number" min={0} value={rates.week} onChange={e => setRates({ ...rates, week: e.target.value })} /></Field>
-          <Field label="Per month (TZS)"><Input type="number" min={0} value={rates.month} onChange={e => setRates({ ...rates, month: e.target.value })} /></Field>
+          <Field label="Retail per day (TSh)"><Input type="number" min={0} value={rates.day} onChange={e => setRates({ ...rates, day: e.target.value })} data-testid="config-card-day" /></Field>
+          <Field label="Per week (TSh)"><Input type="number" min={0} value={rates.week} onChange={e => setRates({ ...rates, week: e.target.value })} /></Field>
+          <Field label="Per month (TSh)"><Input type="number" min={0} value={rates.month} onChange={e => setRates({ ...rates, month: e.target.value })} /></Field>
         </div>
         <Field label="Why (optional)"><Input value={reason} onChange={e => setReason(e.target.value)} /></Field>
       </div>
@@ -377,9 +377,9 @@ function RuleDialog({ gyms, busy, error, onClose, onSubmit }: {
               <Field label="Monthly discount (%)"><Input type="number" min={0} max={100} value={v.dMonth} onChange={set('dMonth')} /></Field>
             </div>
             <div className="grid gap-4 sm:grid-cols-3">
-              <Field label="Daily ceiling (TZS)"><Input type="number" min={0} value={v.cDay} onChange={set('cDay')} /></Field>
-              <Field label="Weekly ceiling (TZS)"><Input type="number" min={0} value={v.cWeek} onChange={set('cWeek')} /></Field>
-              <Field label="Monthly ceiling (TZS)"><Input type="number" min={0} value={v.cMonth} onChange={set('cMonth')} data-testid="config-rule-ceiling-month" /></Field>
+              <Field label="Daily ceiling (TSh)"><Input type="number" min={0} value={v.cDay} onChange={set('cDay')} /></Field>
+              <Field label="Weekly ceiling (TSh)"><Input type="number" min={0} value={v.cWeek} onChange={set('cWeek')} /></Field>
+              <Field label="Monthly ceiling (TSh)"><Input type="number" min={0} value={v.cMonth} onChange={set('cMonth')} data-testid="config-rule-ceiling-month" /></Field>
             </div>
           </>
         )}

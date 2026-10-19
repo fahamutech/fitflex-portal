@@ -20,13 +20,13 @@ const openOrg = async (page: Page) => {
 test('dashboard renders totals, collections and the organisations table', async ({ page }) => {
   await page.goto('/admin/b2b-billing');
   await expect(page.getByRole('heading', { name: 'B2B billing' })).toBeVisible();
-  await expect(page.getByTestId('billing-totals')).toContainText('TZS 175,000');
+  await expect(page.getByTestId('billing-totals')).toContainText('TSh 175,000');
   await expect(page.getByTestId('billing-aging')).toContainText('Not yet due');
   await expect(page.getByTestId('collections')).toContainText('1 payment notice to check');
   await expect(page.getByTestId('notices-to-check')).toContainText('SAFARI-REF-9');
   await expect(page.getByTestId('overdue-invoices')).toContainText('INV-2026-0002');
   await expect(page.getByTestId('on-hold')).toContainText('Held Holdings');
-  await expect(page.getByTestId('billed-vs-providers')).toContainText('TZS 150,000');
+  await expect(page.getByTestId('billed-vs-providers')).toContainText('TSh 150,000');
   await expect(page.getByTestId('billing-organizations')).toContainText('Safari Cover');
   // Controls: month picker and organisation chooser.
   await page.getByTestId('billing-period').fill('2026-09');
@@ -64,8 +64,8 @@ test.describe('collections', () => {
     await page.goto('/admin/b2b-billing');
     await page.getByTestId('confirm-ntc-1').click();
     const form = page.getByTestId('decide-notice');
-    await expect(form.getByLabel('Amount on the statement (TZS)', { exact: true })).toHaveValue('100000');
-    await form.getByLabel('Amount on the statement (TZS)', { exact: true }).fill('95000');
+    await expect(form.getByLabel('Amount on the statement (TSh)', { exact: true })).toHaveValue('100000');
+    await form.getByLabel('Amount on the statement (TSh)', { exact: true }).fill('95000');
     await form.getByLabel('Note (optional, internal)', { exact: true }).fill('Seen on the CRDB statement');
     await page.getByTestId('decide-submit').click();
     await expect.poll(() => mock.writes(/payment-notices\/ntc-1\/confirm$/).length).toBe(1);
@@ -105,7 +105,7 @@ test.describe('collections', () => {
 test.describe('one organisation', () => {
   test('invoices: prepare fee, issue a draft, correction notes, void, trace', async ({ page }) => {
     await openOrg(page);
-    await expect(page.getByTestId('billing-balances')).toContainText('TZS 150,000');
+    await expect(page.getByTestId('billing-balances')).toContainText('TSh 150,000');
     await expect(page.getByTestId('admin-invoices')).toContainText('INV-2026-0003');
     await expect(page.getByLabel('Platform fee for', { exact: true })).toBeVisible();
     await page.getByTestId('fee-prepare').click();
@@ -132,7 +132,7 @@ test.describe('one organisation', () => {
     await openOrg(page);
     await page.getByTestId('admin-invoice-inv-1').click();
     await expect(page.getByTestId('invoice-document')).toContainText('INV-2026-0001');
-    await page.getByLabel('Correction amount (TZS)', { exact: true }).fill('5000');
+    await page.getByLabel('Correction amount (TSh)', { exact: true }).fill('5000');
     await page.getByLabel('Why', { exact: true }).fill('Member left in September');
     await page.getByTestId('note-credit').click();
     await expect.poll(() => mock.writes(/invoices\/inv-1\/notes$/).length).toBe(1);
@@ -147,11 +147,11 @@ test.describe('one organisation', () => {
     await openOrg(page);
     await page.getByRole('button', { name: 'Payments', exact: true }).click();
     const form = page.getByTestId('payment-form');
-    for (const label of ['Amount (TZS)', 'How it was paid', 'Bank or mobile-money reference', 'Received on (blank = today)']) {
+    for (const label of ['Amount (TSh)', 'How it was paid', 'Bank or mobile-money reference', 'Received on (blank = today)']) {
       await expect(form.getByLabel(label, { exact: true })).toBeVisible();
     }
     await expect(page.getByTestId('payment-record')).toBeDisabled();
-    await form.getByLabel('Amount (TZS)', { exact: true }).fill('60000');
+    await form.getByLabel('Amount (TSh)', { exact: true }).fill('60000');
     await form.getByLabel('How it was paid', { exact: true }).selectOption('mobile_money');
     await form.getByLabel('Bank or mobile-money reference', { exact: true }).fill('MM-123');
     await page.getByTestId('payment-record').click();
@@ -160,7 +160,7 @@ test.describe('one organisation', () => {
     await expect(page.getByText(/RCT-0003 recorded\./)).toBeVisible();
 
     // Choose invoices: one amount per open invoice.
-    await form.getByLabel('Amount (TZS)', { exact: true }).fill('40000');
+    await form.getByLabel('Amount (TSh)', { exact: true }).fill('40000');
     await form.getByLabel('Bank or mobile-money reference', { exact: true }).fill('MM-124');
     await form.getByLabel('Received on (blank = today)', { exact: true }).fill('2026-10-05');
     await page.getByRole('button', { name: 'Choose invoices' }).click();
@@ -213,7 +213,7 @@ test.describe('one organisation', () => {
     // The billing contact is saved first: every save reloads the tab, which resets that form.
     const panel = page.getByTestId('agreement-panel');
     await expect(panel).toContainText('AGR-0001');
-    for (const label of ['Starts on', 'Contract reference (optional)', 'Days to pay advance invoices', 'Days to pay usage invoices', 'Platform fee a month, TZS incl. VAT (optional)', 'Usual VAT rate % (optional)']) {
+    for (const label of ['Starts on', 'Contract reference (optional)', 'Days to pay advance invoices', 'Days to pay usage invoices', 'Platform fee a month, TSh incl. VAT (optional)', 'Usual VAT rate % (optional)']) {
       await expect(panel.getByLabel(label, { exact: true })).toBeVisible();
     }
     await expect(page.getByTestId('agreement-create')).toBeDisabled();
@@ -221,7 +221,7 @@ test.describe('one organisation', () => {
     await panel.getByLabel('Contract reference (optional)', { exact: true }).fill('C-77');
     await panel.getByLabel('Days to pay advance invoices', { exact: true }).fill('7');
     await panel.getByLabel('Days to pay usage invoices', { exact: true }).fill('21');
-    await panel.getByLabel('Platform fee a month, TZS incl. VAT (optional)', { exact: true }).fill('75000');
+    await panel.getByLabel('Platform fee a month, TSh incl. VAT (optional)', { exact: true }).fill('75000');
     await panel.getByLabel('Usual VAT rate % (optional)', { exact: true }).fill('18');
     await page.getByTestId('agreement-create').click();
     await expect.poll(() => mock.writes(/organizations\/org-1\/agreements$/).length).toBe(1);

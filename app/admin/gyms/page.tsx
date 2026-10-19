@@ -534,13 +534,13 @@ export default function GymsPage() {
                 </Field>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                <Field label="Rate per day (TZS)" error={formErrors.ratePerDay}>
+                <Field label="Rate per day (TSh)" error={formErrors.ratePerDay}>
                   <Input type="number" value={draft.ratePerDay || ''} placeholder="0" onChange={e => { const v = e.target.value === '' ? 0 : Number(e.target.value); setDraft({ ...draft, ratePerDay: v, perVisitRate: v }); setFormErrors(prev => { const { ratePerDay, ...rest } = prev; return rest; }); }} />
                 </Field>
-                <Field label="Rate per week (TZS)" error={formErrors.ratePerWeek}>
+                <Field label="Rate per week (TSh)" error={formErrors.ratePerWeek}>
                   <Input type="number" value={draft.ratePerWeek || ''} placeholder="0" onChange={e => { setDraft({ ...draft, ratePerWeek: e.target.value === '' ? 0 : Number(e.target.value) }); setFormErrors(prev => { const { ratePerWeek, ...rest } = prev; return rest; }); }} />
                 </Field>
-                <Field label="Rate per month (TZS)" error={formErrors.ratePerMonth}>
+                <Field label="Rate per month (TSh)" error={formErrors.ratePerMonth}>
                   <Input type="number" value={draft.ratePerMonth || ''} placeholder="0" onChange={e => { setDraft({ ...draft, ratePerMonth: e.target.value === '' ? 0 : Number(e.target.value) }); setFormErrors(prev => { const { ratePerMonth, ...rest } = prev; return rest; }); }} />
                 </Field>
               </div>

@@ -9,7 +9,7 @@ import { PAYMENT_METHOD, day } from '@/components/b2b-finance';
 import { money } from '@/lib/admin-utils';
 
 const ERRORS: Record<string, string> = {
-  invalid_amount: 'Enter a whole amount in TZS, more than zero.',
+  invalid_amount: 'Enter a whole amount in TSh, more than zero.',
   payment_reference_required: 'Enter the bank or mobile-money reference.',
   payment_reference_in_use: 'That reference has already been used for a different amount.',
   paid_on_in_future: 'The payment date can’t be in the future.',
@@ -141,7 +141,7 @@ export function OrgPaying({ token, orgId, invoices, preselect, onChanged }: {
                   </Field>
                 )}
                 <div className="grid gap-3 sm:grid-cols-2">
-                  <Field label="Amount paid (TZS)"><Input inputMode="numeric" required value={f.amount} onChange={e => setF({ ...f, amount: e.target.value })} data-testid="notice-amount" /></Field>
+                  <Field label="Amount paid (TSh)"><Input inputMode="numeric" required value={f.amount} onChange={e => setF({ ...f, amount: e.target.value })} data-testid="notice-amount" /></Field>
                   <Field label="Date paid"><Input type="date" required max={todayEat()} value={f.paidOn} onChange={e => setF({ ...f, paidOn: e.target.value })} /></Field>
                   <Field label="How">
                     <Select value={f.method} onChange={e => setF({ ...f, method: e.target.value })}>
@@ -385,7 +385,7 @@ function DecideNotice({ token, notice, action, onClose, onDone }: { token: strin
         {error && <Alert tone="error">{error}</Alert>}
         {action === 'confirm' ? (
           <>
-            <Field label="Amount on the statement (TZS)" hint={`The organisation said ${money(notice.amountTzs)}. Record what actually arrived.`}>
+            <Field label="Amount on the statement (TSh)" hint={`The organisation said ${money(notice.amountTzs)}. Record what actually arrived.`}>
               <Input inputMode="numeric" required value={amount} onChange={e => setAmount(e.target.value)} data-testid="confirm-amount" />
             </Field>
             <Field label="Note (optional, internal)"><Input maxLength={1000} value={text} onChange={e => setText(e.target.value)} /></Field>
