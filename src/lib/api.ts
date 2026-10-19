@@ -1527,6 +1527,8 @@ export interface PaymentRequest {
    */
   verifiedByName?: string | null;
   changeRequestedByName?: string | null;
+  /** The admin who decided it (the row column; the list spreads the whole row). */
+  decidedBy?: string | null;
   decidedByName?: string | null;
 }
 

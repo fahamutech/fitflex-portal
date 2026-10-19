@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
-import { Camera, CameraOff, CheckCircle2, XCircle, Hash, User, Tag } from 'lucide-react';
+import { Camera, CameraOff, CheckCircle2, XCircle, Hash, User, Tag, Info } from 'lucide-react';
 import jsQR from 'jsqr';
 import { useApp } from '../providers';
 import { api, ApiError, CheckInResult, Gym } from '@/lib/api';
@@ -213,34 +213,39 @@ export default function ScanPage() {
         </Card>
       )}
 
-      {/* Result card */}
+      {/* Result card. A repeat same-day scan is information (blue), not a fresh check-in (green). */}
       {last && (
         <div
           ref={resultRef}
           role="status"
           data-testid="scan-result"
+          data-tone={!last.ok ? 'error' : last.idempotent ? 'info' : 'success'}
           className={`rounded-[var(--radius-xl)] border-2 p-5 ${
-            last.ok
-              ? 'border-[var(--color-success-300)] bg-[var(--color-success-50)]'
-              : 'border-[var(--color-error-300)]   bg-[var(--color-error-50)]'
+            !last.ok
+              ? 'border-[var(--color-error-300)]   bg-[var(--color-error-50)]'
+              : last.idempotent
+                ? 'border-[var(--color-info-300)] bg-[var(--color-info-50)]'
+                : 'border-[var(--color-success-300)] bg-[var(--color-success-50)]'
           }`}
         >
           <div className="flex items-start gap-4">
-            {last.ok
-              ? <CheckCircle2 className="mt-0.5 h-6 w-6 shrink-0 text-[var(--color-success-600)]" />
-              : <XCircle     className="mt-0.5 h-6 w-6 shrink-0 text-[var(--color-error-600)]" />}
+            {!last.ok
+              ? <XCircle      aria-hidden="true" className="mt-0.5 h-6 w-6 shrink-0 text-[var(--color-error-600)]" />
+              : last.idempotent
+                ? <Info         aria-hidden="true" className="mt-0.5 h-6 w-6 shrink-0 text-[var(--color-info-700)]" />
+                : <CheckCircle2 aria-hidden="true" className="mt-0.5 h-6 w-6 shrink-0 text-[var(--color-success-600)]" />}
             <div className="flex-1 space-y-2">
               <div className="flex items-center gap-2">
-                <Badge tone={last.ok ? 'success' : 'danger'} dot>
+                <Badge tone={!last.ok ? 'danger' : last.idempotent ? 'info' : 'success'} dot>
                   {/* A repeat scan at the same gym the same day returns the visit already recorded (idempotent). */}
                   {last.ok ? t(last.idempotent ? 'scan.already' : 'scan.success') : t('scan.fail')}
                 </Badge>
               </div>
               {last.ok && last.idempotent && (
-                <p data-testid="scan-already" className="text-sm text-[var(--color-success-800)]">{t('scan.alreadyBody')}</p>
+                <p data-testid="scan-already" className="text-sm text-[var(--color-info-800)]">{t('scan.alreadyBody')}</p>
               )}
               {last.ok && last.checkin && (
-                <div className="grid gap-1.5 text-sm text-[var(--color-success-800)]">
+                <div className={`grid gap-1.5 text-sm ${last.idempotent ? 'text-[var(--color-info-800)]' : 'text-[var(--color-success-800)]'}`}>
                   {!last.idempotent && (
                     <div className="flex items-center gap-1.5" data-testid="scan-visit-number">
                       <Hash aria-hidden="true" className="h-3.5 w-3.5 opacity-60" />

@@ -63,7 +63,9 @@ export function SubscriptionTiersEditor({ tiers, setTiers, currency, savedKeys =
         </Button>
       </div>
       <p className="text-xs text-[var(--color-fg-quaternary)]">{t('tiers.intro')}</p>
-      <Table aria-label={t('admin.settings.subscriptionTiers')}>
+      {/* Fits 1280px in Swahili too: tighter cell padding, headers may wrap, and the gyms-covered select is wide
+          enough for its longest option so none is cut. */}
+      <Table aria-label={t('admin.settings.subscriptionTiers')} className="ui-table-dense [&_th]:!whitespace-normal">
         <THead>
           <Tr>
             <Th>{t('tiers.col.key')}</Th>
@@ -86,7 +88,7 @@ export function SubscriptionTiersEditor({ tiers, setTiers, currency, savedKeys =
             return (
               <Tr key={i} data-testid={`tier-row-${i}`}>
                 <Td>
-                  <Input size="sm" className="font-mono min-w-[5.5rem]" aria-label={t('tiers.col.key')} aria-invalid={!!errs.key} value={row.key} onChange={e => update(i, { key: e.target.value })} />
+                  <Input size="sm" className="font-mono min-w-[5rem]" aria-label={t('tiers.col.key')} aria-invalid={!!errs.key} value={row.key} onChange={e => update(i, { key: e.target.value })} />
                   {err('key')}
                 </Td>
                 <Td>
@@ -119,7 +121,7 @@ export function SubscriptionTiersEditor({ tiers, setTiers, currency, savedKeys =
                   {err('visits')}
                 </Td>
                 <Td>
-                  <Select size="sm" className="min-w-[9.5rem]" aria-label={t('tiers.col.gymAccess')} aria-invalid={!!errs.gymAccess}
+                  <Select size="sm" className="min-w-[16rem]" aria-label={t('tiers.col.gymAccess')} aria-invalid={!!errs.gymAccess}
                     value={gymAccessValid(row.gymAccess) ? row.gymAccess : ''} onChange={e => update(i, { gymAccess: e.target.value })}
                     data-testid={`tier-${i}-gym-access`}>
                     {!gymAccessValid(row.gymAccess) && <option value="">{t('tiers.gymAccess.choose')}</option>}
