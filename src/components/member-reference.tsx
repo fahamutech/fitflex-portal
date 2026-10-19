@@ -14,11 +14,35 @@ export function approvesWithMemberReference(target: { payment: PaymentRequest; a
   return !!target && target.action === 'approved' && !!target.payment.memberReference;
 }
 
-/** Table cell: the member's transaction ID, or a dash. */
+/** Tanzanian numbers compared by their last 9 digits (+255 712…, 255712…, 0712… are the same). */
+function phoneKey(phone: string | null | undefined): string | null {
+  const digits = (phone || '').replace(/\D/g, '');
+  return digits.length >= 9 ? digits.slice(-9) : null;
+}
+
+/** True only when both numbers are known and are not the same number. Paying from another number is allowed. */
+export function payerPhoneDiffers(payment: PaymentRequest): boolean {
+  const paid = phoneKey(payment.payerPhone);
+  const registered = phoneKey(payment.member?.phone);
+  return !!paid && !!registered && paid !== registered;
+}
+
+/** Table cell: the member's transaction ID and the number they paid from, or a dash. */
 export function MemberReferenceCell({ payment }: { payment: PaymentRequest }) {
-  return payment.memberReference
-    ? <span className="text-xs font-mono font-semibold text-[var(--color-fg-primary)]" data-testid="member-reference">{payment.memberReference}</span>
-    : <span className="text-xs">—</span>;
+  const { t } = useApp();
+  if (!payment.memberReference && !payment.payerPhone) return <span className="text-xs">—</span>;
+  return (
+    <div className="space-y-0.5">
+      {payment.memberReference && (
+        <div className="text-xs font-mono font-semibold text-[var(--color-fg-primary)]" data-testid="member-reference">{payment.memberReference}</div>
+      )}
+      {payment.payerPhone && (
+        <div className="text-xs text-[var(--color-fg-tertiary)] whitespace-nowrap" data-testid="payer-phone">
+          {t('manualPay.payerPhone')}: <span className="font-mono">{payment.payerPhone}</span>
+        </div>
+      )}
+    </div>
+  );
 }
 
 /**
@@ -55,7 +79,22 @@ export function ApproveWithReferenceDialog({
         >
           <p className="text-xs font-medium text-[var(--color-brand-700)]">{t('manualPay.memberRef')}</p>
           <p className="mt-1 font-mono text-lg font-bold tracking-wide text-[var(--color-fg-primary)] select-all">{memberRef}</p>
+          {payment.payerPhone && (
+            <dl className="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-xs" data-testid="payer-phone-highlight">
+              <dt className="font-medium text-[var(--color-brand-700)]">{t('manualPay.payerPhone')}</dt>
+              <dd className="font-mono font-semibold text-[var(--color-fg-primary)] select-all">{payment.payerPhone}</dd>
+              {payment.member?.phone && (
+                <>
+                  <dt className="text-[var(--color-fg-tertiary)]">{t('manualPay.registeredPhone')}</dt>
+                  <dd className="font-mono text-[var(--color-fg-secondary)]" data-testid="registered-phone">{payment.member.phone}</dd>
+                </>
+              )}
+            </dl>
+          )}
         </div>
+        {payerPhoneDiffers(payment) && (
+          <p role="status" className="text-xs text-[var(--color-fg-tertiary)]" data-testid="payer-phone-differs">{t('manualPay.phoneDiffers')}</p>
+        )}
         <Field label={t('manualPay.referenceToRecord')} hint={t('manualPay.referenceHint')}>
           <Input className="font-mono" data-testid="approve-reference" value={reference} onChange={e => setReference(e.target.value)} />
         </Field>

@@ -1396,6 +1396,8 @@ export interface PaymentRequest {
   reference: string | null;
   /** Slice A3: the transaction ID the member typed (upper case); null when none. */
   memberReference?: string | null;
+  /** Slice A3: the number the member says they paid from (+255… E.164); null when none. */
+  payerPhone?: string | null;
   note?: string | null;
   /** The gym a gym-bound request pays for (trainer pass / gym plan). */
   gymId?: string | null;

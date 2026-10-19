@@ -140,9 +140,9 @@ test("payments: the member's transaction ID is shown and prefilled when approvin
         json: [
           {
             id: 'pay-manual', memberId: 'member-1', subscriptionId: 'sub-1', tier: 'pro', amountTzs: 60000,
-            status: 'pending', provider: 'admin_approved', reference: null, memberReference: 'QGH7XK2L9P', note: null,
+            status: 'pending', provider: 'admin_approved', reference: null, memberReference: 'QGH7XK2L9P', payerPhone: '+255754000111', note: null,
             requestedAt: '2026-10-19T08:00:00.000Z', decidedAt: null,
-            member: { displayName: 'Manual Payer' }, subscription: { type: 'platform_pass', tier: 'pro', status: 'payment_pending' },
+            member: { displayName: 'Manual Payer', phone: '+255712345678' }, subscription: { type: 'platform_pass', tier: 'pro', status: 'payment_pending' },
           },
           {
             id: 'pay-plain', memberId: 'member-2', subscriptionId: 'sub-2', tier: 'basic', amountTzs: 30000,
@@ -164,11 +164,15 @@ test("payments: the member's transaction ID is shown and prefilled when approvin
   await page.goto('/admin/payments');
   await expect(page.getByRole('columnheader', { name: "Member's transaction ID" })).toBeVisible();
   await expect(page.getByTestId('member-reference')).toHaveText('QGH7XK2L9P');
+  await expect(page.getByTestId('payer-phone')).toHaveText('Paid from: +255754000111');
 
   // The row with a member ID opens the transaction-ID dialog.
   await page.getByRole('row', { name: /Manual Payer/ }).getByTitle('Approve').click();
   const dialog = page.getByRole('dialog');
   await expect(dialog.getByTestId('member-reference-highlight')).toContainText('QGH7XK2L9P');
+  await expect(dialog.getByTestId('payer-phone-highlight')).toContainText('+255754000111');
+  await expect(dialog.getByTestId('registered-phone')).toHaveText('+255712345678');
+  await expect(dialog.getByTestId('payer-phone-differs')).toContainText('That is allowed');
   const ref = dialog.getByTestId('approve-reference');
   await expect(ref).toHaveValue('QGH7XK2L9P');
   await expect(dialog.getByTestId('approve-reference-differs')).toHaveCount(0);
@@ -186,5 +190,40 @@ test("payments: the member's transaction ID is shown and prefilled when approvin
   await page.getByRole('alertdialog').getByRole('button', { name: 'Approve' }).click();
   await expect.poll(() => posts.length).toBe(2);
   expect(posts[1]).toEqual({ id: 'pay-plain', body: { status: 'approved' } });
+  expect(runtimeErrors).toEqual([]);
+});
+
+test('payments: same paying number shows no warning, and a reused transaction ID (409) is explained', async ({ page }) => {
+  const runtimeErrors: Error[] = [];
+  page.on('pageerror', error => runtimeErrors.push(error));
+  await signInAsAdmin(page);
+
+  await page.route(`${API}/**`, async route => {
+    const req = route.request();
+    const url = new URL(req.url());
+    if (url.pathname === '/admin/payment-requests') {
+      return route.fulfill({
+        json: [{
+          id: 'pay-dup', memberId: 'member-1', subscriptionId: 'sub-1', tier: 'pro', amountTzs: 60000,
+          status: 'pending', provider: 'admin_approved', reference: null, memberReference: 'QGH7XK2L9P', payerPhone: '+255754000111', note: null,
+          requestedAt: '2026-10-19T08:00:00.000Z', decidedAt: null,
+          member: { displayName: 'Same Number', phone: '0754 000 111' }, subscription: { type: 'platform_pass', tier: 'pro', status: 'payment_pending' },
+        }],
+      });
+    }
+    if (url.pathname === '/admin/payment-requests/pay-dup' && req.method() === 'POST') {
+      return route.fulfill({ status: 409, json: { error: 'reference_already_used' } });
+    }
+    return route.fulfill({ json: [] });
+  });
+
+  await page.goto('/admin/payments');
+  await page.getByRole('row', { name: /Same Number/ }).getByTitle('Approve').click();
+  const dialog = page.getByRole('dialog');
+  await expect(dialog.getByTestId('registered-phone')).toHaveText('0754 000 111');
+  await expect(dialog.getByTestId('payer-phone-differs')).toHaveCount(0);
+  await dialog.getByTestId('approve-with-reference').click();
+  await expect(dialog).toHaveCount(0);
+  await expect(page.getByText('This transaction ID is already recorded on another pending or approved payment')).toBeVisible();
   expect(runtimeErrors).toEqual([]);
 });

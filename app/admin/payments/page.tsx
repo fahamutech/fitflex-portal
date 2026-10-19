@@ -95,7 +95,9 @@ export default function PaymentsPage() {
       setActionTarget(null);
       await load();
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Action failed');
+      const used = actionTarget.action === 'approved' && e instanceof ApiError && (e.body as { error?: string } | null)?.error === 'reference_already_used';
+      if (used) setActionTarget(null);
+      setError(used ? t('manualPay.err.referenceUsed') : e instanceof Error ? e.message : 'Action failed');
     } finally {
       setBusy(false);
     }
