@@ -64,7 +64,7 @@ interface CreateForm {
 const EMPTY_FORM: CreateForm = { email: '', password: '', displayName: '', aclPermissions: [] };
 
 export default function PortalUsersPage() {
-  const { token, user } = useApp();
+  const { token, user, t } = useApp();
   const [users, setUsers]           = useState<PortalUser[]>([]);
   const [loading, setLoading]       = useState(true);
   const [error, setError]           = useState<string | null>(null);
@@ -150,7 +150,7 @@ export default function PortalUsersPage() {
       setUsers(prev => [...prev, created]);
       setForm(EMPTY_FORM);
       setShowCreate(false);
-      flash(`Portal user ${created.email} created successfully.`);
+      flash(`Portal user ${created.email} created successfully. ${t('users.startPassword.hint')}`);
     } catch (err) {
       const body = err instanceof ApiError ? (err.body as any) : null;
       setError(body?.error === 'email_already_exists'
@@ -250,7 +250,7 @@ export default function PortalUsersPage() {
                     required
                   />
                 </Field>
-                <Field label="Temporary password" hint="User should change after first login">
+                <Field label={t('users.startPassword.label')} hint={t('users.startPassword.hint')}>
                   <input
                     type="password"
                     className="ui-input"
@@ -455,9 +455,14 @@ export default function PortalUsersPage() {
                         </Badge>
                       </Td>
                       <Td>
-                        <Badge tone={u.accountStatus === 'active' ? 'success' : 'danger'}>
-                          {u.accountStatus}
-                        </Badge>
+                        <div className="flex flex-wrap gap-1.5">
+                          <Badge tone={u.accountStatus === 'active' ? 'success' : 'danger'}>
+                            {u.accountStatus}
+                          </Badge>
+                          {u.passwordChangeRequired && (
+                            <Badge tone="warning">{t('users.mustChangePassword')}</Badge>
+                          )}
+                        </div>
                       </Td>
                       <Td>
                         {!u.portalUser ? (
