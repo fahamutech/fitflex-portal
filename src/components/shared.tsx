@@ -141,7 +141,7 @@ export function MetricCard({
 /* ─────────────────────────────────────────────
    Badge  —  Untitled UI badge pill
    ───────────────────────────────────────────── */
-type BadgeTone = 'default' | 'success' | 'danger' | 'warning' | 'brand' | 'gray';
+type BadgeTone = 'default' | 'success' | 'danger' | 'warning' | 'brand' | 'gray' | 'info';
 
 const badgeTones: Record<BadgeTone, string> = {
   default: 'bg-[var(--color-bg-tertiary)]   text-[var(--color-fg-tertiary)]   ring-[var(--color-border-secondary)]',
@@ -150,6 +150,7 @@ const badgeTones: Record<BadgeTone, string> = {
   success: 'bg-[var(--color-success-50)]    text-[var(--color-success-700)]   ring-[var(--color-success-200)]',
   danger:  'bg-[var(--color-error-50)]      text-[var(--color-error-700)]     ring-[var(--color-error-200)]',
   warning: 'bg-[var(--color-warning-50)]    text-[var(--color-warning-700)]   ring-[var(--color-warning-200)]',
+  info:    'bg-[var(--color-info-50)]       text-[var(--color-info-700)]      ring-[var(--color-info-200)]',
 };
 
 export function Badge({
@@ -168,6 +169,7 @@ export function Badge({
     success: 'bg-[var(--color-success-500)]',
     danger:  'bg-[var(--color-error-500)]',
     warning: 'bg-[var(--color-warning-500)]',
+    info:    'bg-[var(--color-info-500)]',
   };
   return (
     <span className={cn(

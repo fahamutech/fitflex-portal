@@ -219,12 +219,19 @@ export default function PaymentsPage() {
   const isMe = (id: string | null | undefined) => !!id && id === user.id;
   /** Another admin by name when the API sends one; never the raw id. */
   const otherAdmin = (name: string | null | undefined) => name?.trim() || t('money2.otherAdmin');
+  /** The same at the start of a line: only the fallback words are capitalised, never a name or email. */
+  const otherAdminLead = (name: string | null | undefined) => name?.trim() || cap(t('money2.otherAdmin'));
   const verifiedLine = (p: PaymentRequest) => (isMe(p.verifiedBy)
     ? fill(t('money2.verifiedByYou'), { time: whenText(p.verifiedAt, locale) })
     : fill(t('money2.verifiedBy'), { who: otherAdmin(p.verifiedByName), time: whenText(p.verifiedAt, locale) }));
   const changeLine = (p: PaymentRequest) => (isMe(p.changeRequestedBy)
     ? fill(t('money2.changeRequestedByYou'), { status: statusText(p.changeRequestedStatus), time: whenText(p.changeRequestedAt, locale) })
-    : cap(fill(t('money2.changeRequestedBy'), { who: otherAdmin(p.changeRequestedByName), status: statusText(p.changeRequestedStatus), time: whenText(p.changeRequestedAt, locale) })));
+    : fill(t('money2.changeRequestedBy'), { who: otherAdminLead(p.changeRequestedByName), status: statusText(p.changeRequestedStatus), time: whenText(p.changeRequestedAt, locale) }));
+  /** Who approved it (decidedBy is the approver; decidedByName from functions#206), styled like "Verified by". */
+  const approvedLine = (p: PaymentRequest) => (isMe(p.decidedBy)
+    ? fill(t('money2.approvedByYou'), { time: whenText(p.decidedAt, locale) })
+    : fill(t('money2.approvedBy'), { who: otherAdmin(p.decidedByName), time: whenText(p.decidedAt, locale) }));
+  const showApprovedBy = (p: PaymentRequest) => p.status === 'approved' && !p.changeRequestedBy && (!!p.decidedBy || !!p.decidedByName?.trim());
   const needsAmount = (p: PaymentRequest | null) => !!p?.orderId && p.changeRequestedStatus === 'approved';
   const isDecided = (p: PaymentRequest) => (DECIDED_STATUSES as string[]).includes(p.status);
   /** Why Approve is not offered to this admin on a two-admin payment (full sentence, for the tooltip), or null. */
@@ -304,6 +311,9 @@ export default function PaymentsPage() {
           ) : p.secondApproverRequired && p.verifiedBy ? (
             <div className="text-xs text-[var(--color-fg-tertiary)]" data-testid="payment-verified-by">{verifiedLine(p)}</div>
           ) : null}
+          {showApprovedBy(p) && (
+            <div className="text-xs text-[var(--color-fg-tertiary)]" data-testid="payment-approved-by">{approvedLine(p)}</div>
+          )}
           {/* Why Approve / Confirm change is not open to this admin: visible, not only a tooltip. */}
           {approveHint(p) && (
             <div id={hintId(p)} className="text-xs font-medium text-[var(--color-warning-700)]" data-testid="payment-approve-hint">{approveHint(p)}</div>
@@ -318,7 +328,7 @@ export default function PaymentsPage() {
   ];
   const iconBtn = 'w-9 px-0 justify-center';
 
-  const filterButton = (active: boolean) => `px-3 py-1 text-xs rounded-[var(--radius-full)] font-medium transition-colors ${
+  const filterButton = (active: boolean) => `hit-target px-3 py-1 text-xs rounded-[var(--radius-full)] font-medium transition-colors ${
     active ? 'bg-[var(--color-brand-50)] text-[var(--color-brand-700)]' : 'text-[var(--color-fg-tertiary)] hover:bg-[var(--color-bg-tertiary)]'
   }`;
 
@@ -341,7 +351,7 @@ export default function PaymentsPage() {
           <>
             <dt className="text-[var(--color-fg-tertiary)]">{t('payments.dialog.verifiedBy')}</dt>
             <dd className="text-[var(--color-fg-primary)]" data-testid="decision-verified-by">
-              {isMe(p.verifiedBy) ? cap(t('money2.you')) : otherAdmin(p.verifiedByName)} · {whenText(p.verifiedAt, locale)}
+              {isMe(p.verifiedBy) ? cap(t('money2.you')) : otherAdminLead(p.verifiedByName)} · {whenText(p.verifiedAt, locale)}
             </dd>
           </>
         )}
@@ -398,7 +408,7 @@ export default function PaymentsPage() {
               filterPlaceholder={t('payments.search')}
               emptyState={t('payments.empty')}
               extraFilters={
-                <div className="flex flex-wrap gap-1" role="group" aria-label={t('payments.filtersLabel')}>
+                <div className="flex flex-wrap gap-x-1 gap-y-5" role="group" aria-label={t('payments.filtersLabel')}>
                   {(['pending', 'approved', 'rejected', 'cancelled', 'all'] as const).map(f => (
                     <button key={f} type="button" aria-pressed={filter === f} onClick={() => setFilter(f)} className={filterButton(filter === f)}>
                       {f === 'all' ? t('payments.filter.all') : t(paymentStatusKey(f))}
@@ -430,7 +440,8 @@ export default function PaymentsPage() {
                         // A disabled button gets no hover in every browser: the wrapper carries the tooltip too;
                         // the reason is also visible text under the status (approveHint).
                         <span title={approveBlocked(payment)!} data-testid="payment-approve-blocked">
-                          <Button variant="ghost" size="sm" className={iconBtn} disabled aria-label={approveBlocked(payment)!} aria-describedby={hintId(payment)} title={approveBlocked(payment)!} data-testid="payment-approve">
+                          {/* Name is the action; the reason is the visible hint, read once via aria-describedby. */}
+                          <Button variant="ghost" size="sm" className={iconBtn} disabled aria-label={t('payments.action.approve')} aria-describedby={hintId(payment)} title={approveBlocked(payment)!} data-testid="payment-approve">
                             <CheckCircle2 aria-hidden="true" className="h-3.5 w-3.5 text-[var(--color-success-600)]" />
                           </Button>
                         </span>
