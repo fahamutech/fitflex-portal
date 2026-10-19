@@ -35,6 +35,8 @@ const said = (e: unknown, fallback: string) => {
 const PAY_DETAILS_ERRORS: Record<string, MessageKey> = {
   cannot_confirm_own_request: 'money2.err.cannot_confirm_own_request',
   no_pending_change: 'b2bPay.err.no_pending_change',
+  change_superseded: 'b2bPay.err.change_superseded',
+  change_id_required: 'b2bPay.err.change_id_required',
 };
 const payDetailsError = (e: unknown, t: (key: MessageKey) => string) => {
   const code = errorCode(e);
@@ -366,10 +368,12 @@ export function CollectionsPanel({ token, can, onOpenOrganization, onChanged }: 
 
       {deciding && <DecideNotice token={token} notice={deciding.notice} action={deciding.action} onClose={() => setDeciding(null)} onDone={async (m) => { setDeciding(null); setInfo(m); await changed(); }} />}
       {holding && <HoldDialog token={token} org={holding} onClose={() => setHolding(null)} onDone={async (m) => { setHolding(null); setInfo(m); await changed(); }} />}
-      {editing && <PaymentDetailsDialog token={token} current={details.instructions} pending={!!details.pendingChange} onClose={() => setEditing(false)} onDone={async () => { setEditing(false); setInfo(t('b2bPay.requested')); await load(); }} />}
+      {editing && <PaymentDetailsDialog token={token} current={details.instructions} pending={details.pendingChange} onClose={() => setEditing(false)} onDone={async () => { setEditing(false); setInfo(t('b2bPay.requested')); await load(); }} />}
       {reviewing && details.pendingChange && (
-        <DecidePaymentDetails token={token} action={reviewing} onClose={() => setReviewing(null)}
-          onDone={async (m) => { setReviewing(null); setInfo(m); await load(); }} />
+        <DecidePaymentDetails token={token} action={reviewing} changeId={details.pendingChange.changeId} onClose={() => setReviewing(null)}
+          onDone={async (m) => { setReviewing(null); setInfo(m); await load(); }}
+          // Replaced or withdrawn meanwhile: never retry; show what is waiting now and let the admin look again.
+          onStale={async (m) => { setReviewing(null); setInfo(null); await load(); setError(m); }} />
       )}
     </Card>
   );
@@ -517,7 +521,9 @@ function PendingPaymentDetails({ current, change, canDecide, userId, t, locale, 
 }
 
 /** Confirm (a different admin) or cancel (anyone allowed to approve) the waiting change. */
-function DecidePaymentDetails({ token, action, onClose, onDone }: { token: string; action: 'confirm' | 'cancel'; onClose: () => void; onDone: (message: string) => void }) {
+function DecidePaymentDetails({ token, action, changeId, onClose, onDone, onStale }: {
+  token: string; action: 'confirm' | 'cancel'; changeId: string; onClose: () => void; onDone: (message: string) => void; onStale: (message: string) => void;
+}) {
   const { t } = useApp();
   const [reason, setReason] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -527,12 +533,13 @@ function DecidePaymentDetails({ token, action, onClose, onDone }: { token: strin
     setBusy(true); setError(null);
     try {
       if (action === 'confirm') {
-        await api.confirmB2BPaymentInstructions(token);
+        await api.confirmB2BPaymentInstructions(token, changeId);
         return onDone(t('b2bPay.confirmed'));
       }
-      await api.cancelB2BPaymentInstructions(token, reason.trim() || undefined);
+      await api.cancelB2BPaymentInstructions(token, changeId, reason.trim() || undefined);
       onDone(t('b2bPay.cancelled'));
     } catch (err) {
+      if (['change_superseded', 'no_pending_change'].includes(errorCode(err))) return onStale(payDetailsError(err, t));
       setError(payDetailsError(err, t));
       setBusy(false);
     }
@@ -556,9 +563,15 @@ function DecidePaymentDetails({ token, action, onClose, onDone }: { token: strin
   );
 }
 
-function PaymentDetailsDialog({ token, current, pending, onClose, onDone }: { token: string; current: B2BPaymentInstructions; pending: boolean; onClose: () => void; onDone: () => void }) {
+function PaymentDetailsDialog({ token, current, pending, onClose, onDone }: {
+  token: string; current: B2BPaymentInstructions; pending: B2BPaymentInstructionsChange | null; onClose: () => void; onDone: () => void;
+}) {
   const { t } = useApp();
-  const [f, setF] = useState<Record<string, string>>(Object.fromEntries([...DETAIL_FIELDS.map(([k]) => k), 'notes'].map(k => [k, (current[k as keyof B2BPaymentInstructions] as string | null) ?? ''])));
+  // With a change waiting, start from that request (not the details in force), so nothing in it is lost
+  // without being seen, and make replacing it a deliberate choice.
+  const start = pending ? pending.instructions : current;
+  const [f, setF] = useState<Record<string, string>>(Object.fromEntries([...DETAIL_FIELDS.map(([k]) => k), 'notes'].map(k => [k, (start[k as keyof B2BPaymentInstructionsChange['instructions']] as string | null) ?? ''])));
+  const [replace, setReplace] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const go = async (e: React.FormEvent) => {
@@ -576,7 +589,14 @@ function PaymentDetailsDialog({ token, current, pending, onClose, onDone }: { to
     <Dialog open onClose={onClose} title="FitFlex payment details" description={`Shown to every organisation on its Billing page and in reminder emails. ${t('b2bPay.dialogApproval')}`} size="lg">
       <form className="space-y-3" onSubmit={go} data-testid="payment-details-form">
         {error && <Alert tone="error">{error}</Alert>}
-        {pending && <Alert tone="warning">{t('b2bPay.replacesPending')}</Alert>}
+        {pending && (
+          <Alert tone="warning">
+            <div className="space-y-2" data-testid="details-replaces-pending">
+              <p>{t('b2bPay.replacesPending')}</p>
+              <Checkbox checked={replace} onChange={e => setReplace(e.target.checked)} label={t('b2bPay.replaceAck')} data-testid="details-replace-ack" />
+            </div>
+          </Alert>
+        )}
         <div className="grid gap-3 sm:grid-cols-2">
           {DETAIL_FIELDS.map(([k, label]) => (
             <Field key={k} label={label}><Input value={f[k]} onChange={e => setF({ ...f, [k]: e.target.value })} data-testid={`details-${k}`} /></Field>
@@ -585,7 +605,7 @@ function PaymentDetailsDialog({ token, current, pending, onClose, onDone }: { to
         <Field label="Anything else organisations should know (optional)"><Textarea rows={2} maxLength={1000} value={f.notes} onChange={e => setF({ ...f, notes: e.target.value })} /></Field>
         <div className="flex justify-end gap-2 border-t border-[var(--color-border-secondary)] pt-3">
           <Button type="button" variant="secondary" onClick={onClose}>Cancel</Button>
-          <Button type="submit" disabled={busy} data-testid="details-save">{t('b2bPay.sendForApproval')}</Button>
+          <Button type="submit" disabled={busy || (!!pending && !replace)} data-testid="details-save">{t('b2bPay.sendForApproval')}</Button>
         </div>
       </form>
     </Dialog>

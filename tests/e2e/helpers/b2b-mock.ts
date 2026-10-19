@@ -211,17 +211,21 @@ export async function setupB2B(page_: Page, user: Json = ADMIN, extra: Array<[st
     ['GET', /^\/admin\/b2b\/collections$/, () => COLLECTIONS],
     ['GET', /^\/admin\/b2b\/payment-instructions$/, () => details()],
     ['PUT', /^\/admin\/b2b\/payment-instructions$/, c => {
-      pendingChange = { instructions: { ...instructions, ...c.body }, requestedBy: user.id, requestedAt: '2026-10-19T09:30:00.000Z' };
+      pendingChange = { changeId: `pic_${String(c.body?.bankName ?? 'x').replace(/\W/g, '').toLowerCase()}`, instructions: { ...instructions, ...c.body }, requestedBy: user.id, requestedAt: '2026-10-19T09:30:00.000Z' };
       return { status: 202, json: details() };
     }],
-    ['POST', /^\/admin\/b2b\/payment-instructions\/confirm$/, () => {
+    ['POST', /^\/admin\/b2b\/payment-instructions\/confirm$/, c => {
+      if (!c.body?.changeId) return { status: 400, json: { error: 'change_id_required' } };
       if (!pendingChange) return { status: 409, json: { error: 'no_pending_change' } };
+      if (pendingChange.changeId !== c.body.changeId) return { status: 409, json: { error: 'change_superseded', changeId: pendingChange.changeId } };
       if (pendingChange.requestedBy === user.id) return { status: 403, json: { error: 'cannot_confirm_own_request' } };
       instructions = { ...pendingChange.instructions }; pendingChange = null;
       return { status: 200, json: details() };
     }],
-    ['POST', /^\/admin\/b2b\/payment-instructions\/cancel$/, () => {
+    ['POST', /^\/admin\/b2b\/payment-instructions\/cancel$/, c => {
+      if (!c.body?.changeId) return { status: 400, json: { error: 'change_id_required' } };
       if (!pendingChange) return { status: 409, json: { error: 'no_pending_change' } };
+      if (pendingChange.changeId !== c.body.changeId) return { status: 409, json: { error: 'change_superseded', changeId: pendingChange.changeId } };
       pendingChange = null;
       return { status: 200, json: details() };
     }],
@@ -236,9 +240,9 @@ export async function setupB2B(page_: Page, user: Json = ADMIN, extra: Array<[st
     ['POST', /^\/admin\/b2b\/invoices\/([^/]+)\/notes$/, () => ({ note: { ...INVOICES[0], id: 'note-1', kind: 'credit_note', totalTzs: 5000 } })],
     ['GET', /^\/admin\/b2b\/invoices\/([^/]+)\/reconciliation$/, () => ({ invoice: INVOICES[0], lines: [], settlements: [], checks: { linesAddUp: true, linesTotalTzs: 100000, invoiceTotalTzs: 100000, usageMatchesLedger: true, reversedSinceInvoiced: [], amountPaidTzs: 0, outstandingTzs: 100000 } })],
     ['GET', /^\/admin\/b2b\/organizations\/([^/]+)\/statement$/, () => STATEMENT],
-    ['GET', /^\/admin\/b2b\/organizations\/([^/]+)\/agreements$/, () => ({ agreements: [{ id: 'agr-1', organizationId: 'org-1', reference: 'AGR-0001', contractReference: null, status: 'draft', effectiveFrom: '2026-11-01', effectiveTo: null, billingCycle: 'monthly', currency: 'TZS', prepaidTermsDays: 0, usageTermsDays: 14, platformFeeTzs: 50000, vatRateBps: 1800, notes: null, createdBy: 'admin-2', updatedBy: 'admin-2' }], inForce: null })],
+    ['GET', /^\/admin\/b2b\/organizations\/([^/]+)\/agreements$/, () => ({ agreements: [{ id: 'agr-1', organizationId: 'org-1', reference: 'AGR-0001', contractReference: null, status: 'draft', effectiveFrom: '2026-11-01', effectiveTo: null, billingCycle: 'monthly', currency: 'TZS', prepaidTermsDays: 0, usageTermsDays: 14, platformFeeTzs: 50000, vatRateBps: 1800, notes: null, createdBy: 'admin-2', updatedBy: 'admin-2', editors: ['admin-2'], updatedAt: '2026-10-18T08:00:00.000Z' }], inForce: null })],
     ['POST', /^\/admin\/b2b\/organizations\/([^/]+)\/agreements$/, () => ({ agreement: { id: 'agr-2', reference: 'AGR-0002' } })],
-    ['POST', /^\/admin\/b2b\/agreements\/([^/]+)\/activate$/, () => ({ agreement: { id: 'agr-1', status: 'active' } })],
+    ['POST', /^\/admin\/b2b\/agreements\/([^/]+)\/activate$/, c => (c.body?.version ? { agreement: { id: 'agr-1', status: 'active' } } : { status: 400, json: { error: 'version_required' } })],
     ['GET', /^\/admin\/b2b\/organizations\/([^/]+)\/billing-account$/, () => ({ account: { organizationId: 'org-1', contactName: 'Neema Finance', email: 'finance@safari.test', phone: '0712000111', taxIdentificationNumber: 'TIN-200', registrationNumber: null, currency: 'TZS', source: 'billing_account' } })],
     ['PUT', /^\/admin\/b2b\/organizations\/([^/]+)\/billing-account$/, c => ({ account: { organizationId: 'org-1', ...c.body } })],
     ['POST', /^\/admin\/b2b\/organizations\/([^/]+)\/invoices\/prepare-fee$/, () => ({ invoice: { ...INVOICES[2], totalTzs: 50000 }, added: 1 })],

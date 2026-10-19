@@ -731,8 +731,9 @@ export const api = {
     request<{ agreements: B2BAgreement[]; inForce: B2BAgreement | null }>(`/admin/b2b/organizations/${encodeURIComponent(orgId)}/agreements`, {}, token),
   createB2BAgreement: (token: string, orgId: string, body: B2BAgreementInput) =>
     request<{ agreement: B2BAgreement }>(`/admin/b2b/organizations/${encodeURIComponent(orgId)}/agreements`, { method: 'POST', body: JSON.stringify(body) }, token),
-  activateB2BAgreement: (token: string, id: string) =>
-    request<{ agreement: B2BAgreement }>(`/admin/b2b/agreements/${encodeURIComponent(id)}/activate`, { method: 'POST', body: '{}' }, token),
+  /** `version` is the agreement's `updatedAt` as the admin saw it: 409 agreement_changed if it has changed since. */
+  activateB2BAgreement: (token: string, id: string, version: string) =>
+    request<{ agreement: B2BAgreement }>(`/admin/b2b/agreements/${encodeURIComponent(id)}/activate`, { method: 'POST', body: JSON.stringify({ version }) }, token),
   endB2BAgreement: (token: string, id: string, effectiveTo?: string) =>
     request<{ agreement: B2BAgreement }>(`/admin/b2b/agreements/${encodeURIComponent(id)}/end`, { method: 'POST', body: JSON.stringify({ effectiveTo }) }, token),
   adminB2BBillingAccount: (token: string, orgId: string) =>
@@ -818,12 +819,15 @@ export const api = {
   /** Only REQUESTS the change (202): `instructions` stay the ones in force, the request is in `pendingChange`. */
   setB2BPaymentInstructions: (token: string, body: Partial<B2BPaymentInstructions>) =>
     request<B2BAdminPaymentInstructions>('/admin/b2b/payment-instructions', { method: 'PUT', body: JSON.stringify(body) }, token),
-  /** A different admin from the requester puts the waiting change in force. */
-  confirmB2BPaymentInstructions: (token: string) =>
-    request<B2BAdminPaymentInstructions>('/admin/b2b/payment-instructions/confirm', { method: 'POST', body: '{}' }, token),
-  /** Drops the waiting change: the requester withdraws it, or another admin declines it. */
-  cancelB2BPaymentInstructions: (token: string, reason?: string) =>
-    request<B2BAdminPaymentInstructions>('/admin/b2b/payment-instructions/cancel', { method: 'POST', body: JSON.stringify(reason ? { reason } : {}) }, token),
+  /**
+   * A different admin from the requester puts the waiting change in force. `changeId` is the change the
+   * admin is looking at: 409 change_superseded (with the current changeId) if another request replaced it.
+   */
+  confirmB2BPaymentInstructions: (token: string, changeId: string) =>
+    request<B2BAdminPaymentInstructions>('/admin/b2b/payment-instructions/confirm', { method: 'POST', body: JSON.stringify({ changeId }) }, token),
+  /** Drops the waiting change (the requester withdraws it, or another admin declines it); same `changeId` rule as confirm. */
+  cancelB2BPaymentInstructions: (token: string, changeId: string, reason?: string) =>
+    request<B2BAdminPaymentInstructions>('/admin/b2b/payment-instructions/cancel', { method: 'POST', body: JSON.stringify(reason ? { changeId, reason } : { changeId }) }, token),
   confirmB2BPaymentNotice: (token: string, noticeId: string, body: { amountTzs?: number; note?: string } = {}) =>
     request<{ notice: B2BPaymentNotice; payment?: B2BPayment; skipped?: Array<{ invoiceId: string; reason: string }> }>(
       `/admin/b2b/payment-notices/${encodeURIComponent(noticeId)}/confirm`, { method: 'POST', body: JSON.stringify(body) }, token),
@@ -2686,8 +2690,10 @@ export interface B2BAgreement {
   platformFeeTzs: number | null; vatRateBps: number | null; notes: string | null;
   /** The organisation's agreed fee per person per month for a sponsored pass, by tier. */
   passRates?: Record<string, number> | null;
-  /** Who drafted it and who last changed it: neither can activate it (a different admin has to). */
-  createdBy?: string | null; updatedBy?: string | null;
+  /** Who drafted it, who last changed it and everyone who ever edited it: none of them can activate it. */
+  createdBy?: string | null; updatedBy?: string | null; editors?: string[] | null;
+  /** Sent back as `version` when activating. */
+  updatedAt?: string | null;
 }
 export interface B2BAgreementInput {
   effectiveFrom: string; effectiveTo?: string | null; prepaidTermsDays?: number; usageTermsDays?: number;
@@ -2814,6 +2820,8 @@ export interface B2BPaymentInstructions {
 }
 /** A change to the payment details asked for by one admin, waiting for a different admin to confirm it. */
 export interface B2BPaymentInstructionsChange {
+  /** Names this request; confirm and cancel send it back. */
+  changeId: string;
   instructions: Pick<B2BPaymentInstructions, 'bankName' | 'accountName' | 'accountNumber' | 'branch' | 'swiftCode' | 'lipaNamba' | 'lipaNambaName' | 'notes'>;
   requestedBy: string; requestedAt: string;
 }
