@@ -43,6 +43,8 @@ import { cn } from '@/lib/cn';
 import { Avatar, Badge } from './shared';
 import { BrandLogo } from './brand-logo';
 import { LanguageToggle } from './language-toggle';
+import { PhotoPanel } from './photo-panel';
+import { PHOTO_HERO_UI } from '@/lib/flags';
 
 /* ── Nav definitions ─────────────────────────────────────── */
 type NavItem = {
@@ -409,6 +411,13 @@ export function Shell({ children }: { children: ReactNode }) {
             <span className="text-sm font-semibold text-[var(--color-fg-primary)]">FitFlex Af</span>
           </div>
         </header>
+        {/* Photo hero login (flag): hold the navy panel ground while the
+            session restores, so the page does not jump when it appears. */}
+        {PHOTO_HERO_UI && pathname === '/login' && (
+          <div className="flex flex-1 flex-col lg:flex-row">
+            <PhotoPanel data-testid="login-photo-panel-restoring" />
+          </div>
+        )}
       </div>
     );
   }
