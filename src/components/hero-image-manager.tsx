@@ -149,6 +149,7 @@ export function heroErrorText(t: T, e: unknown, ctx: HeroErrorContext): string {
   if (code === 'image_retired' && ctx === 'rollback') return t('heroImages.error.imageRetiredRollback');
   if (code === 'file_too_large' && body?.maxPixels) return t('heroImages.error.tooManyPixels');
   if (code === 'image_in_draft' && Array.isArray(body?.slotIds) && body!.slotIds.length) return fmt(t('heroImages.error.imageInDraftSlots'), { places: placesList(t, body!.slotIds) });
+  if (code === 'storage_service_unavailable' && body?.reason === 'upload_timeout') return t('heroImages.error.uploadTimeout');
   if (code === 'people_not_allowed' && (ctx === 'slot' || ctx === 'publish' || ctx === 'rollback')) return t('heroImages.error.peopleNotAllowedPhotos');
   if (code === 'too_many_images') return fmt(t('heroImages.error.tooManyImages'), { max: Number(body?.maxImages) || '' });
   const key = ERROR_KEYS[code];
@@ -1087,6 +1088,7 @@ function LibraryTab({ state, onUpload, onEdit, onRetire, onUnpublish }: {
                     <div className="flex flex-wrap gap-1.5">
                       <Badge tone={st.tone}>{t(st.key)}</Badge>
                       {live && <Badge tone="brand">{t('heroImages.live')}</Badge>}
+                      {!live && img.unpublishedInPublication != null && <Badge tone="gray">{t('heroImages.removedFromApp')}</Badge>}
                       {PEOPLE_KEY[img.people] && <Badge tone="gray">{t(PEOPLE_KEY[img.people])}</Badge>}
                       {brightFor(img) && <Badge tone="warning">{t('heroImages.bright')}</Badge>}
                     </div>

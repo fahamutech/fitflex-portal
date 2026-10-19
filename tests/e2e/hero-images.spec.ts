@@ -414,10 +414,14 @@ test.describe('App photos (flag on)', () => {
       [400, 'people_not_allowed', 'Some of these photos are marked as showing people, which isn\'t allowed for now. Edit them to “No people” or choose others.'],
       [409, 'image_not_live', "This photo isn't in the apps right now."],
       [500, 'image_save_failed', "The photo couldn't be saved. Try again."],
+      [503, 'storage_service_unavailable', 'Sending the photos to the apps took too long. Nothing went live. Try again.'],
       [418, 'teapot_mode', 'Something went wrong (teapot_mode).'],
     ];
+    let timeoutSeen = false;
     for (const [status, error, message] of cases) {
-      s.fail = { publish: { status, json: { error } } };
+      const timeout = error === 'storage_service_unavailable' && message.startsWith('Sending') && !timeoutSeen;
+      if (timeout) timeoutSeen = true;
+      s.fail = { publish: { status, json: timeout ? { error, reason: 'upload_timeout' } : { error } } };
       await dialog.getByTestId('hero-publish-confirm').click();
       await expect(dialog.getByTestId('hero-publish-error')).toHaveText(message);
       await expect(dialog.getByText("Couldn't publish. Nothing has changed in the apps.")).toBeVisible();
@@ -432,7 +436,7 @@ test.describe('App photos (flag on)', () => {
     await expect(confirm.getByText("Couldn't put this version back. Nothing has changed in the apps. This version uses a photo that was retired, so it can't be put back.")).toBeVisible();
     s.fail = { rollback: { status: 409, json: { error: 'image_unpublished', imageIds: ['hero_a'] } } };
     await confirm.getByRole('button', { name: 'Put back' }).click();
-    await expect(confirm.getByText("Couldn't put this version back. Nothing has changed in the apps. A photo in this version was removed from the apps after it, so this version can't be put back.")).toBeVisible();
+    await expect(confirm.getByText("Couldn't put this version back. Nothing has changed in the apps. A photo in this version was removed from the apps after it, so this version can't be put back. To show that photo again, choose it for its places and publish.")).toBeVisible();
   });
 
   test('library: status and live badges, Retire blocked while a place uses it, Remove from live (AC-N14)', async ({ page }) => {
@@ -455,6 +459,7 @@ test.describe('App photos (flag on)', () => {
     await expect(page.getByText('Photo removed from the apps.')).toBeVisible();
     expect(s.calls.find(c => c.path === '/admin/hero-images/hero_a/unpublish')).toBeTruthy();
     await expect(a.getByText('Live in the apps')).toHaveCount(0);
+    await expect(a.getByText('Removed from app')).toBeVisible();
 
     await a.getByTestId('hero-retire-hero_a').click();
     await page.getByRole('alertdialog', { name: 'Retire this photo?' }).getByRole('button', { name: 'Retire' }).click();

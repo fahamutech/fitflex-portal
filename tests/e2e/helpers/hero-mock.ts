@@ -175,7 +175,9 @@ export async function mockHeroApi(page: Page, s: HeroState, opts: { serverOff?: 
       const pub = { id: (s.nextPublicationId ??= 3), publishedBy: 'admin-1', publishedByName: 'Local Admin', publishedAt: '2026-10-19T11:00:00.000Z', note: null, rolledBackFrom: null, slots };
       s.nextPublicationId++;
       s.publications.unshift(pub);
-      return route.fulfill({ status: 201, json: { publication: pub, removedFromSlots } });
+      const img = s.images.find(i => i.id === id);
+      if (img) img.unpublishedInPublication = pub.id;
+      return route.fulfill({ status: 201, json: { publication: pub, removedFromSlots, rollbackBlockedBefore: pub.id } });
     }
     const one = path.match(/^\/admin\/hero-images\/([^/]+)$/);
     if (one && method === 'PATCH') {
