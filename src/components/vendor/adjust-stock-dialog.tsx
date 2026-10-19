@@ -19,7 +19,7 @@ const NOTE_MAX = 200;
  * retries, so a request that reached the server is never applied twice.
  */
 export function AdjustStockDialog({
-  product, initialVariant, open, onClose, onSaved, onGone,
+  product, initialVariant, open, onClose, onSaved, onGone, onStockKnown,
 }: {
   product: VendorProduct;
   initialVariant?: string | null;
@@ -29,6 +29,8 @@ export function AdjustStockDialog({
   onSaved: (stock: ProductStock) => void;
   /** The product (or its variants) changed under us: reload the list. */
   onGone: () => void;
+  /** The server told us the current stock of this product or variant (after a refused change). */
+  onStockKnown?: (variant: string | null, stock: number) => void;
 }) {
   const { token, t } = useApp();
   const vendor = useVendor();
@@ -107,11 +109,11 @@ export function AdjustStockDialog({
         // Maybe it never arrived: keep everything, retry with the same clientRef.
         setNetwork(true);
       } else if (code === 'stock_changed') {
-        if (typeof body?.currentStock === 'number') setCurrentOverride(body.currentStock);
+        if (typeof body?.currentStock === 'number') { setCurrentOverride(body.currentStock); onStockKnown?.(hasVariants ? variant : null, body.currentStock); }
         setStale(true); setQty(''); clientRef.current = newClientRef();
         setFocusQty(true);
       } else if (code === 'insufficient_stock') {
-        if (typeof body?.currentStock === 'number') setCurrentOverride(body.currentStock);
+        if (typeof body?.currentStock === 'number') { setCurrentOverride(body.currentStock); onStockKnown?.(hasVariants ? variant : null, body.currentStock); }
         clientRef.current = newClientRef();
       } else if (code === 'note_required') {
         setNoteError(t('vendor.stock.noteMissing'));

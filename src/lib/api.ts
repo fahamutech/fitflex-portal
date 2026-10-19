@@ -289,6 +289,9 @@ export const api = {
   myOrganizations: (token: string) =>
     request<{ organizations: Array<{ id: string; role: string }> }>('/b2b/me/organizations', {}, token, () => true),
 
+  /** Product categories with English and Swahili names (public). */
+  shopCategories: () => request<{ categories: Array<{ key: string; en: string; sw: string }> }>('/shop/categories'),
+
   // ─── Vendor portal (S2): the signed-in vendor or vendor staff ───
   vendorMe: (token: string) => request<VendorMe>('/vendor/me', {}, token),
   vendorProducts: (token: string) => request<VendorProduct[]>('/vendor/products', {}, token),
@@ -299,7 +302,7 @@ export const api = {
     request<StockMovementPage>(`/vendor/products/${encodeURIComponent(productId)}/stock-movements${qs(query)}`, {}, token),
   /** Always paged: newest first, `limit` 1–200; `nextCursor` null on the last page. */
   vendorOrders: (token: string, page: { limit?: number; cursor?: string | null } = {}) =>
-    request<{ orders: VendorOrder[]; nextCursor: string | null }>(`/vendor/orders${qs({ limit: page.limit ?? 50, cursor: page.cursor })}`, {}, token),
+    request<{ orders: VendorOrder[]; nextCursor: string | null; counts?: unknown }>(`/vendor/orders${qs({ limit: page.limit ?? 50, cursor: page.cursor })}`, {}, token),
   vendorOrder: (token: string, id: string) => request<VendorOrder>(`/vendor/orders/${encodeURIComponent(id)}`, {}, token),
   vendorOrderStatus: (token: string, id: string, body: { status: string; reason?: string }) =>
     request<VendorOrder>(`/vendor/orders/${encodeURIComponent(id)}/status`, { method: 'POST', body: JSON.stringify(body) }, token),
@@ -1682,7 +1685,7 @@ export interface StockMovement {
   note: string | null;
   actor: { id: string; name: string | null } | null;
   orderId?: string | null;
-  document: { type: string; id: string; number: string | null } | null;
+  document: { type: string; id: string; number: string | null; shortRef?: string | null } | null;
   createdAt: string;
 }
 

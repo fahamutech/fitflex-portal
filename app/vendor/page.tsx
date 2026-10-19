@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { Inbox } from 'lucide-react';
 import { api, type LowStockRow, type VendorOrder, type VendorPayments, type VendorStatementList } from '@/lib/api';
 import { money } from '@/lib/admin-utils';
-import { eatDateTime, fmt, isOpenOrder, payoutWhyKey, statusKey, statusTone } from '@/lib/vendor';
+import { countsOf, eatDateTime, fmt, isOpenOrder, itemsKey, payoutWhyKey, statusKey, statusTone, type OrderCounts } from '@/lib/vendor';
 import { Badge, Button, Card, CardContent, CardHeader, EmptyState, PageHeader, Skeleton } from '@/components/shared';
 import { useVendor } from '@/components/vendor-context';
 import { useApp } from '../providers';
@@ -49,7 +49,10 @@ export default function VendorDashboardPage() {
 
   const [payments, retryPayments] = useLoad<VendorPayments>(!!token && canPay, () => api.vendorPayments(token!));
   const [statements, retryStatements] = useLoad<VendorStatementList>(!!token && canPay, () => api.vendorStatements(token!));
-  const [orders, retryOrders] = useLoad<VendorOrder[]>(!!token && canOrders, async () => (await api.vendorOrders(token!, { limit: 50 })).orders);
+  const [orders, retryOrders] = useLoad<{ orders: VendorOrder[]; counts: OrderCounts | null }>(!!token && canOrders, async () => {
+    const page = await api.vendorOrders(token!, { limit: 50 });
+    return { orders: page.orders, counts: countsOf(page.counts) };
+  });
   const [low, retryLow] = useLoad<LowStockRow[]>(!!token && canLow, () => api.vendorLowStock(token!));
 
   const failed = (retry: () => void) => (
@@ -70,7 +73,9 @@ export default function VendorDashboardPage() {
     );
   }
 
-  const openOrders = orders.state === 'ready' ? orders.data.filter(isOpenOrder) : [];
+  const openOrders = orders.state === 'ready' ? orders.data.orders.filter(isOpenOrder) : [];
+  // The server's count covers every order; older servers: what the newest page holds.
+  const openCount = orders.state === 'ready' ? orders.data.counts?.open ?? openOrders.length : 0;
   const toAct = [...openOrders].sort((a, b) => Date.parse(a.createdAt ?? '') - Date.parse(b.createdAt ?? '')).slice(0, 5);
 
   return (
@@ -88,7 +93,7 @@ export default function VendorDashboardPage() {
         {canOrders && (
           <Tile label={t('vendor.dash.openOrders')} testId="dash-open-orders">
             {orders.state === 'loading' ? loading : orders.state === 'failed' ? failed(retryOrders) : (
-              <>{value(openOrders.length, 'dash-open-orders-value')}<Link href="/vendor/orders/?status=open" className={linkCls}>{t('vendor.dash.viewAll')}</Link></>
+              <>{value(openCount, 'dash-open-orders-value')}<Link href="/vendor/orders/?status=open" className={linkCls}>{t('vendor.dash.viewAll')}</Link></>
             )}
           </Tile>
         )}
@@ -134,7 +139,7 @@ export default function VendorDashboardPage() {
                       <Link href={`/vendor/orders/?id=${encodeURIComponent(o.id)}`} className="flex min-h-11 flex-wrap items-center justify-between gap-2 px-6 py-3 hover:bg-[var(--color-bg-secondary)]">
                         <span>
                           <span className="font-mono font-semibold">{o.shortRef}</span>
-                          <span className="block text-xs text-[var(--color-fg-tertiary)]">{eatDateTime(o.createdAt, locale)} · {fmt(t('vendor.orders.itemsCount'), { n: o.items.reduce((n, i) => n + i.qty, 0) })}</span>
+                          <span className="block text-xs text-[var(--color-fg-tertiary)]">{eatDateTime(o.createdAt, locale)} · {fmt(t(itemsKey(o.items.reduce((n, i) => n + i.qty, 0))), { n: o.items.reduce((n, i) => n + i.qty, 0) })}</span>
                         </span>
                         <Badge tone={statusTone(o.status)}>{t(statusKey(o.status))}</Badge>
                       </Link>

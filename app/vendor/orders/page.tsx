@@ -7,20 +7,19 @@ import { api, type VendorOrder } from '@/lib/api';
 import { money } from '@/lib/admin-utils';
 import type { MessageKey } from '@/lib/i18n';
 import {
-  canonicalStatus, eatDateTime, errorCode, fmt, isOpenOrder, isPaid, isRefusal, isTerminal,
-  markStatusKey, methodKey, paymentKey, statusKey, statusTone,
+  canonicalStatus, countsOf, eatDateTime, errorCode, fmt, inOrderTab, orderTab, isAwaitingPayment, isPaid, isRefundState, isRefusal, isTerminal,
+  itemsKey, markStatusKey, payLabel, paymentKey, statusKey, statusTone, type OrderCounts, type OrderTab,
 } from '@/lib/vendor';
 import { Alert, Badge, Button, Card, CardContent, CardHeader, EmptyState, ErrorState, Field, Input, PageHeader, Segmented, SkeletonCard, SkeletonTable, Spinner, Table, TBody, Td, Textarea, Th, THead, Tr, useToast } from '@/components/shared';
 import { Dialog, DialogFooter } from '@/components/dialog';
 import { useVendor } from '@/components/vendor-context';
 import { useApp } from '../../providers';
 
-type Tab = 'open' | 'delivered' | 'cancelled' | 'all';
+type Tab = OrderTab;
 const TABS: Tab[] = ['open', 'delivered', 'cancelled', 'all'];
-const inTab = (o: VendorOrder, tab: Tab) => tab === 'all' ? true
-  : tab === 'open' ? isOpenOrder(o)
-  : isPaid(o) && canonicalStatus(o.status) === tab;
 const REASON_MAX = 200;
+/** A row's tap target: at least 44px tall (DQA). */
+const refLink = 'inline-flex min-h-11 items-center font-mono font-semibold text-[var(--color-brand-700)] underline-offset-4 hover:underline';
 
 function deliveryLine(o: VendorOrder, t: (k: MessageKey) => string) {
   if (o.deliveryMethod === 'gym_pickup') {
@@ -31,6 +30,20 @@ function deliveryLine(o: VendorOrder, t: (k: MessageKey) => string) {
 function StatusBadge({ status }: { status: string }) {
   const { t } = useApp();
   return <Badge tone={statusTone(status)}>{t(statusKey(status))}</Badge>;
+}
+/** Where my part stands: waiting for payment, payment failed, or my own status (+ a refund under way or done). */
+function OrderBadge({ order }: { order: VendorOrder }) {
+  const { t } = useApp();
+  if (isAwaitingPayment(order)) return <Badge tone="gray">{t('vendor.orders.awaitingPayment')}</Badge>;
+  const tab = orderTab(order);
+  if (tab === null && order.paymentStatus === 'failed') return <Badge tone="gray">{t('vendor.orders.payment.failed')}</Badge>;
+  return (
+    <span className="inline-flex flex-wrap gap-1">
+      {/* Cancelled when the whole order (or a refund) says so, even if my part never moved. */}
+      <StatusBadge status={tab === 'cancelled' ? 'cancelled' : order.status} />
+      {isRefundState(order.paymentStatus) && <Badge tone="warning">{t(paymentKey(order.paymentStatus))}</Badge>}
+    </span>
+  );
 }
 const itemCount = (o: VendorOrder) => o.items.reduce((n, i) => n + Number(i.qty || 0), 0);
 
@@ -50,7 +63,9 @@ function OrdersInner() {
   const [failed, setFailed] = useState(false);
   const [moreBusy, setMoreBusy] = useState(false);
   const [moreFailed, setMoreFailed] = useState(false);
+  const [counts, setCounts] = useState<OrderCounts | null>(null);
   const lastOpened = useRef<string | null>(null);
+  const focusRowOnClose = useRef<string | null>(null);
 
   const setParams = (patch: Record<string, string | null>, push = false) => {
     const next = new URLSearchParams(params.toString());
@@ -65,7 +80,7 @@ function OrdersInner() {
     setFailed(false); setMoreFailed(false);
     try {
       const page = await api.vendorOrders(token, { limit: 50 });
-      setOrders(page.orders); setNextCursor(page.nextCursor ?? null);
+      setOrders(page.orders); setNextCursor(page.nextCursor ?? null); setCounts(countsOf(page.counts));
     } catch (err) {
       if (!vendor.handleError(err)) setFailed(true);
       setOrders(o => o ?? []);
@@ -94,29 +109,40 @@ function OrdersInner() {
   const updated = (order: VendorOrder) => {
     setOrders(current => (current ?? []).map(o => (o.id === order.id ? order : o)));
     vendor.refreshCounts();
+    // Server counts move with the order: ask for them again (one row is enough).
+    if (token) api.vendorOrders(token, { limit: 1 }).then(p => setCounts(countsOf(p.counts))).catch(() => {});
   };
   const open = (id: string) => { lastOpened.current = id; setParams({ id }, true); };
   const close = () => {
+    focusRowOnClose.current = lastOpened.current ?? openId;
     setParams({ id: null }, true);
-    const id = lastOpened.current ?? openId;
-    // Back to the row it came from (the table on wide screens, the card on phones).
-    setTimeout(() => {
-      const links = [document.getElementById(`order-link-${id}`), document.getElementById(`order-mlink-${id}`)];
-      links.find(el => el && el.offsetParent !== null)?.focus();
-    }, 50);
   };
+  // Back to the row it came from (the table on wide screens, the card on phones), once the list is shown again.
+  useEffect(() => {
+    const id = focusRowOnClose.current;
+    if (openId || !id || orders == null) return;
+    let tries = 0;
+    const tryFocus = () => {
+      const links = [document.getElementById(`order-link-${id}`), document.getElementById(`order-mlink-${id}`)];
+      const el = links.find(x => x && x.offsetParent !== null);
+      if (el) { el.focus(); focusRowOnClose.current = null; return; }
+      if (++tries < 20) requestAnimationFrame(tryFocus);
+    };
+    requestAnimationFrame(tryFocus);
+  }, [openId, orders]);
 
   const all = orders ?? [];
   const searched = all.filter(o => !q.trim() || o.shortRef.toLowerCase().includes(q.trim().toLowerCase().replace(/^#/, '')));
-  const count = (tb: Tab) => searched.filter(o => inTab(o, tb)).length;
-  const shown = searched.filter(o => inTab(o, tab));
+  // The server's counts cover every order (not only the loaded page); while searching, count what matches.
+  const count = (tb: Tab) => (counts && !q.trim() ? counts[tb] : searched.filter(o => inOrderTab(o, tb)).length);
+  const shown = searched.filter(o => inOrderTab(o, tab));
   const emptyKey: Record<Tab, MessageKey> = { open: 'vendor.orders.emptyOpen', delivered: 'vendor.orders.emptyDelivered', cancelled: 'vendor.orders.emptyCancelled', all: 'vendor.orders.emptyAll' };
 
   const list = (
     <div className="space-y-4">
       <PageHeader
         title={t('vendor.nav.orders')}
-        actions={<Button variant="secondary" size="sm" onClick={load}><RefreshCw aria-hidden="true" className="h-4 w-4" />{t('admin.action.refresh')}</Button>}
+        actions={<Button variant="secondary" size="sm" className="min-h-11" onClick={load}><RefreshCw aria-hidden="true" className="h-4 w-4" />{t('admin.action.refresh')}</Button>}
       />
       <div className="flex flex-col gap-3 md:flex-row md:items-center">
         <Segmented
@@ -156,16 +182,16 @@ function OrdersInner() {
                   <Tr key={o.id} className={`cursor-pointer hover:bg-[var(--color-bg-secondary)] ${o.id === openId ? 'bg-[var(--color-bg-secondary)]' : ''}`} onClick={() => open(o.id)} data-testid={`order-row-${o.id}`}>
                     <Td>
                       <Link id={`order-link-${o.id}`} href={`${pathname}?id=${encodeURIComponent(o.id)}`} onClick={e => { e.preventDefault(); e.stopPropagation(); open(o.id); }}
-                        className="font-mono font-semibold text-[var(--color-brand-700)] underline-offset-4 hover:underline">
+                        className={refLink}>
                         {o.shortRef}
                       </Link>
                     </Td>
                     <Td className="whitespace-nowrap">{eatDateTime(o.createdAt, locale)}</Td>
                     <Td>{o.buyer?.displayName || t('vendor.orders.buyerUnnamed')}</Td>
-                    <Td>{fmt(t('vendor.orders.itemsCount'), { n: itemCount(o) })}{o.items[0]?.name ? <span className="block text-xs text-[var(--color-fg-quaternary)]">{o.items[0].name}</span> : null}</Td>
+                    <Td>{fmt(t(itemsKey(itemCount(o))), { n: itemCount(o) })}{o.items[0]?.name ? <span className="block text-xs text-[var(--color-fg-quaternary)]">{o.items[0].name}</span> : null}</Td>
                     <Td className="whitespace-nowrap text-right tabular-nums">{money(o.totalTzs)}</Td>
                     <Td>{deliveryLine(o, t)}</Td>
-                    <Td>{isPaid(o) ? <StatusBadge status={o.status} /> : <Badge tone="gray">{t('vendor.orders.awaitingPayment')}</Badge>}</Td>
+                    <Td><OrderBadge order={o} /></Td>
                     <Td><ChevronRight aria-hidden="true" className="h-4 w-4 text-[var(--color-fg-quaternary)]" /></Td>
                   </Tr>
                 ))}
@@ -179,10 +205,10 @@ function OrdersInner() {
                   <Link id={`order-mlink-${o.id}`} href={`${pathname}?id=${encodeURIComponent(o.id)}`} onClick={e => { e.preventDefault(); open(o.id); }} className="block space-y-1 p-4" data-testid={`order-card-${o.id}`}>
                     <span className="flex items-center justify-between gap-2">
                       <span className="font-mono font-semibold">{o.shortRef}</span>
-                      {isPaid(o) ? <StatusBadge status={o.status} /> : <Badge tone="gray">{t('vendor.orders.awaitingPayment')}</Badge>}
+                      <OrderBadge order={o} />
                     </span>
                     <span className="block text-sm">{o.buyer?.displayName || t('vendor.orders.buyerUnnamed')}</span>
-                    <span className="block text-sm text-[var(--color-fg-tertiary)]">{fmt(t('vendor.orders.itemsCount'), { n: itemCount(o) })} · {money(o.totalTzs)}</span>
+                    <span className="block text-sm text-[var(--color-fg-tertiary)]">{fmt(t(itemsKey(itemCount(o))), { n: itemCount(o) })} · {money(o.totalTzs)}</span>
                     <span className="block text-sm text-[var(--color-fg-tertiary)]">{deliveryLine(o, t)}</span>
                     <span className="block text-xs text-[var(--color-fg-quaternary)]">{eatDateTime(o.createdAt, locale)}</span>
                   </Link>
@@ -218,7 +244,8 @@ function OrderDetail({ id, onBack, onUpdated }: { id: string; onBack: () => void
   const toast = useToast();
   const [order, setOrder] = useState<VendorOrder | null>(null);
   const [state, setState] = useState<'loading' | 'ready' | 'notFound' | 'error'>('loading');
-  const [moved, setMoved] = useState(false);
+  /** Why the order is shown again after a refused move (it was reloaded). */
+  const [notice, setNotice] = useState<MessageKey | null>(null);
   const [move, setMove] = useState<{ status: string; cancel: boolean } | null>(null);
   const [reason, setReason] = useState('');
   const [reasonError, setReasonError] = useState<string | null>(null);
@@ -239,7 +266,21 @@ function OrderDetail({ id, onBack, onUpdated }: { id: string; onBack: () => void
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token, id]);
-  useEffect(() => { setMoved(false); void load(); }, [load]);
+  useEffect(() => { setNotice(null); void load(); }, [load]);
+
+  // A refused move: say why, and reload the order so stale buttons disappear (the list row follows).
+  const MOVE_CONFLICTS: Record<string, MessageKey> = {
+    invalid_transition: 'vendor.orders.movedElsewhere',
+    order_status_final: 'vendor.orders.statusFinal',
+    status_is_final: 'vendor.orders.statusFinal',
+    order_not_paid: 'vendor.orders.notPaid',
+    order_cancelled: 'vendor.orders.cancelledAlready',
+    multi_vendor_cancel_requires_admin: 'vendor.orders.multiVendorCancel',
+  };
+  async function reloadAfterConflict() {
+    if (!token) return;
+    try { const fresh = await api.vendorOrder(token, id); setOrder(fresh); onUpdated(fresh); } catch { /* the notice still stands */ }
+  }
 
   async function confirmMove() {
     if (!token || !order || !move) return;
@@ -247,18 +288,22 @@ function OrderDetail({ id, onBack, onUpdated }: { id: string; onBack: () => void
     setBusy(true); setMoveError(null);
     try {
       const next = await api.vendorOrderStatus(token, order.id, { status: move.status, ...(reason.trim() ? { reason: reason.trim() } : {}) });
-      setOrder(next); onUpdated(next); setMoved(false);
+      setOrder(next); onUpdated(next); setNotice(null);
       toast.success(fmt(t('vendor.orders.moved'), { status: t(statusKey(next.status)) }));
       setMove(null);
     } catch (err) {
       const code = errorCode(err);
       if (!isRefusal(err)) { setMoveError(t('vendor.networkError')); return; }
       setMove(null);
-      if (code === 'invalid_transition' || code === 'status_is_final') {
-        setMoved(true);
-        void load(false);
-      } else if (code === 'order_not_found') {
+      const status = (err as { status?: number }).status;
+      if (code && MOVE_CONFLICTS[code]) {
+        setNotice(MOVE_CONFLICTS[code]);
+        void reloadAfterConflict();
+      } else if (code === 'order_not_found' || code === 'vendor_not_in_order') {
         setState('notFound');
+      } else if (status === 409) {
+        setNotice('vendor.orders.moveRefused');
+        void reloadAfterConflict();
       } else if (!vendor.handleError(err)) {
         if ((err as { status?: number }).status === 403) toast.error(t('vendor.noAccess'));
         else toast.error(t('vendor.saveFailed'));
@@ -286,7 +331,7 @@ function OrderDetail({ id, onBack, onUpdated }: { id: string; onBack: () => void
   const phone = o.buyer?.phone || null;
   const address = typeof o.deliveryAddress === 'string' ? o.deliveryAddress : o.deliveryAddress ? String(o.deliveryAddress) : null;
   const differs = canonicalStatus(o.orderStatus) !== canonicalStatus(o.status);
-  const methodLabel = methodKey(o.paymentMethod);
+  const methodLabel = payLabel(o.paymentMethod, t);
 
   return (
     <div className="space-y-4" data-testid="order-detail">
@@ -295,17 +340,19 @@ function OrderDetail({ id, onBack, onUpdated }: { id: string; onBack: () => void
         <CardContent className="space-y-2">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <h2 ref={headingRef} tabIndex={-1} className="text-lg font-semibold outline-none">{fmt(t('vendor.orders.ref'), { ref: o.shortRef })}</h2>
-            {paid ? <StatusBadge status={o.status} /> : <Badge tone="gray">{t('vendor.orders.awaitingPayment')}</Badge>}
+            <OrderBadge order={o} />
           </div>
           <p className="text-sm text-[var(--color-fg-tertiary)]">{eatDateTime(o.createdAt, locale)}</p>
           {differs && <p className="text-sm text-[var(--color-fg-tertiary)]">{fmt(t('vendor.orders.overall'), { status: t(statusKey(o.orderStatus)) })}</p>}
         </CardContent>
       </Card>
 
-      {moved && <Alert tone="warning">{t('vendor.orders.movedElsewhere')}</Alert>}
+      {notice && <Alert tone="warning">{t(notice)}</Alert>}
 
-      {!paid && o.status !== 'cancelled' && <Alert tone="info">{t('vendor.orders.awaitingPaymentHint')}</Alert>}
-      {paid && (o.nextStatuses.length > 0 || !isTerminal(o.status)) && (
+      {isAwaitingPayment(o) && <Alert tone="info">{t('vendor.orders.awaitingPaymentHint')}</Alert>}
+      {/* Moves only for an open order (paid, not delivered, not cancelled or refunded). */}
+      {orderTab(o) === 'open' && suspended && <Alert tone="error">{t('vendor.orders.suspendedNoMove')}</Alert>}
+      {orderTab(o) === 'open' && (o.nextStatuses.length > 0 || !isTerminal(o.status)) && (
         <Card>
           <CardHeader><h3 className="font-semibold">{t('vendor.orders.nextStep')}</h3></CardHeader>
           <CardContent className="flex flex-wrap gap-2">
@@ -355,7 +402,7 @@ function OrderDetail({ id, onBack, onUpdated }: { id: string; onBack: () => void
       <Card>
         <CardHeader><h3 className="font-semibold">{t('vendor.orders.payment')}</h3></CardHeader>
         <CardContent className="text-sm">
-          {t(paymentKey(o.paymentStatus))}{methodLabel ? ` · ${t(methodLabel)}` : ''}
+          {t(paymentKey(o.paymentStatus))}{methodLabel ? ` · ${methodLabel}` : ''}
         </CardContent>
       </Card>
 

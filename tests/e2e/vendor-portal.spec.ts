@@ -518,3 +518,163 @@ test.describe('admin products', () => {
     expect(calls.find(c => c.method === 'PUT')?.body).not.toHaveProperty('costTzs');
   });
 });
+
+// ── UAT fixes (S2 UAT, 2026-10-19) ──
+test.describe('UAT fixes', () => {
+  const cancelledRefunded = () => order({
+    id: 'ord_00000cc111', shortRef: 'CC111', status: 'cancelled', orderStatus: 'cancelled', nextStatuses: [], paymentStatus: 'refunded',
+    timeline: [{ status: 'pending', at: '2026-10-18T08:00:00Z' }, { status: 'cancelled', at: '2026-10-18T09:00:00Z', reason: 'Out of stock' }],
+    buyer: { customerId: 'cus_2', displayName: 'Baraka' },
+  });
+
+  test('D1: a cancelled, refunded order is under Cancelled with its refund shown, never "Waiting for payment"', async ({ page }) => {
+    await signedInAs(page, VENDOR);
+    await mockApi(page, vendorBase({
+      // Also: the whole order refunding while my part still says "accepted" puts it under Cancelled (server rule).
+      'GET /vendor/orders': { json: { orders: [order(), cancelledRefunded(), order({ id: 'ord_00000rp222', shortRef: 'RP222', status: 'accepted', paymentStatus: 'refund_pending', nextStatuses: [] })], nextCursor: null } },
+      'GET /vendor/orders/ord_00000cc111': { json: cancelledRefunded() },
+    }));
+    await page.goto('/vendor/orders/?status=cancelled');
+    await expect(page.getByTestId('order-row-ord_00000rp222').getByText('Refund in progress')).toBeVisible();
+    await expect(page.getByTestId('order-row-ord_0000ab12cd')).toHaveCount(0);
+    const row = page.getByTestId('order-row-ord_00000cc111');
+    await expect(row).toBeVisible();
+    await expect(row.getByText('Cancelled')).toBeVisible();
+    await expect(row.getByText('Refunded')).toBeVisible();
+    await expect(page.getByText('Waiting for payment')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Cancelled (2)' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Open (1)' })).toBeVisible();
+    await row.getByRole('link', { name: 'CC111' }).click();
+    const detail = page.getByTestId('order-detail');
+    await expect(detail.getByText('You can start once FitFlex confirms the payment.')).toHaveCount(0);
+    await expect(detail.getByText('Refunded').first()).toBeVisible();
+  });
+
+  test('D2: tab counts, dashboard open orders and the nav pill come from the server counts', async ({ page }) => {
+    await signedInAs(page, VENDOR);
+    await mockApi(page, vendorBase({
+      'GET /vendor/orders': { json: { orders: [order()], nextCursor: 'c1', counts: { open: 7, delivered: 40, cancelled: 3, all: 52, waitingAccept: 4 } } },
+    }));
+    await page.goto('/vendor/');
+    await expect(page.getByTestId('dash-open-orders-value')).toHaveText('7');
+    await expect(page.locator('aside').first().getByRole('link', { name: 'Orders, 4 waiting to be accepted' })).toBeVisible();
+    await page.goto('/vendor/orders/');
+    for (const label of ['Open (7)', 'Delivered (40)', 'Cancelled (3)', 'All (52)']) await expect(page.getByRole('button', { name: label })).toBeVisible();
+  });
+
+  test('D3: a business suspended mid-session keeps its area, with the banner and moves disabled', async ({ page }) => {
+    await signedInAs(page, VENDOR);
+    await mockApi(page, vendorBase({
+      'GET /vendor/orders/ord_0000ab12cd': { json: order() },
+      'POST /vendor/orders/ord_0000ab12cd/status': { status: 403, json: { error: 'account_suspended' } },
+    }));
+    await page.goto('/vendor/orders/?id=ord_0000ab12cd');
+    const detail = page.getByTestId('order-detail');
+    await detail.getByTestId('order-move-accepted').click();
+    await page.getByRole('dialog').getByTestId('order-move-confirm').click();
+    await expect(page.getByText('Your business account is suspended. Your products are not on sale. Contact FitFlex.')).toBeVisible();
+    await expect(page.getByTestId('vendor-suspended')).toHaveCount(0);
+    await expect(detail.getByTestId('order-move-accepted')).toBeDisabled();
+    await expect(detail.getByText("Your business account is suspended, so orders can't be moved.")).toBeVisible();
+  });
+
+  test('D3: a suspended business is told so at PIN sign-in', async ({ page }) => {
+    await mockApi(page, {
+      'GET /auth/options': { json: { pinLogin: true } },
+      'POST /auth/pin/login': { status: 403, json: { error: 'account_suspended' } },
+    });
+    await page.goto('/login');
+    await page.getByTestId('pin-method-btn').click();
+    await page.getByTestId('pin-identifier-input').fill('0712345678');
+    await page.getByTestId('pin-input').fill('1234');
+    await page.getByTestId('pin-submit').click();
+    await expect(page.getByText('This account or business is suspended. Contact FitFlex.')).toBeVisible();
+  });
+
+  test('D4: an unpaid-order refusal says why and the stale buttons go', async ({ page }) => {
+    await signedInAs(page, VENDOR);
+    let refused = false;
+    await mockApi(page, vendorBase({
+      'GET /vendor/orders/ord_0000ab12cd': () => ({ json: refused ? order({ paymentStatus: 'pending', nextStatuses: [] }) : order() }),
+      'POST /vendor/orders/ord_0000ab12cd/status': () => { refused = true; return { status: 409, json: { error: 'order_not_paid' } }; },
+    }));
+    await page.goto('/vendor/orders/?id=ord_0000ab12cd');
+    const detail = page.getByTestId('order-detail');
+    await detail.getByTestId('order-move-accepted').click();
+    await page.getByRole('dialog').getByTestId('order-move-confirm').click();
+    await expect(detail.getByText("This order is not paid yet, so it can't move. Here is where it stands now.")).toBeVisible();
+    await expect(detail.getByTestId('order-move-accepted')).toHaveCount(0);
+  });
+
+  test('D8: segmented tabs, nav items, Refresh, order links and sign-out are at least 44px tall', async ({ page }) => {
+    await signedInAs(page, VENDOR);
+    await mockApi(page, vendorBase());
+    await page.goto('/vendor/orders/');
+    const tall = async (locator: ReturnType<Page['locator']>) => expect((await locator.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44);
+    await tall(page.getByRole('button', { name: /^Open \(/ }));
+    await tall(page.locator('aside').first().getByRole('link', { name: 'Dashboard' }));
+    await tall(page.getByRole('button', { name: 'Refresh' }));
+    await tall(page.getByRole('link', { name: 'AB12CD' }).first());
+    await tall(page.locator('aside').first().getByRole('button', { name: 'Sign out' }));
+  });
+
+  test('D9: Back to orders returns focus to the row', async ({ page }) => {
+    await signedInAs(page, VENDOR);
+    await mockApi(page, vendorBase({ 'GET /vendor/orders/ord_0000ab12cd': { json: order() } }));
+    await page.goto('/vendor/orders/');
+    await page.getByRole('link', { name: 'AB12CD' }).first().click();
+    await page.getByTestId('order-back').click();
+    await expect(page.locator('#order-link-ord_0000ab12cd')).toBeFocused();
+  });
+
+  test('D10: Swahili category, item plural, payout week and provider, and readable history notes', async ({ page }) => {
+    await signedInAs(page, VENDOR, 'sw');
+    await mockApi(page, vendorBase({
+      'GET /shop/categories': { json: { categories: [{ key: 'supplements_nutrition', en: 'Supplements & nutrition', sw: 'Virutubisho na lishe' }] } },
+      'GET /vendor/orders': { json: { orders: [order({ items: [{ productId: 'prd_1', name: 'Whey Protein', variant: null, qty: 1, priceTzs: 85000, image: null }] })], nextCursor: null } },
+      'GET /vendor/statements': { json: { payoutReady: true, payoutBlockedBy: null, statements: [
+        { id: 'vs_1', periodStartDate: '2026-10-06', periodEndDate: '2026-10-12', status: 'paid', orderCount: 1, salesTzs: 1, commissionTzs: 0, finalNetTzs: 1, onHold: false, holdReason: null, paidAt: '2026-10-14T10:00:00Z', paymentReference: 'R', paidTo: { method: 'mobile_money', provider: 'mpesa', accountLast4: '0111' } },
+      ] } },
+      'GET /vendor/statements/vs_1': { json: { statement: { id: 'vs_1', periodStartDate: '2026-10-06', periodEndDate: '2026-10-12', status: 'paid', orderCount: 1, salesTzs: 1, commissionTzs: 0, finalNetTzs: 1, onHold: false, holdReason: null, paidAt: '2026-10-14T10:00:00Z', paymentReference: 'R', paidTo: { method: 'mobile_money', provider: 'mpesa', accountLast4: '0111' } }, lines: [] } },
+      'GET /vendor/products/prd_1/stock-movements': { json: { productId: 'prd_1', variant: null, openingStock: 0, closingStock: 10, nextCursor: null, rows: [
+        { id: 'mv_1', productId: 'prd_1', variant: null, reason: 'reserve', delta: -1, stockBefore: 10, stockAfter: 9, note: null, actor: null, document: { type: 'order', id: 'ord_0000ab12cd', number: null, shortRef: 'XY9999' }, createdAt: '2026-10-11T08:00:00Z' },
+        { id: 'mv_0', productId: 'prd_1', variant: null, reason: 'count', delta: 10, stockBefore: 0, stockAfter: 10, note: 'product_created', actor: null, document: null, createdAt: '2026-10-10T08:00:00Z' },
+      ] } },
+    }));
+    await page.goto('/vendor/products/');
+    await expect(page.getByTestId('product-row-prd_1').getByText('Virutubisho na lishe')).toBeVisible();
+    await expect(page.getByText('supplements_nutrition')).toHaveCount(0);
+    await page.goto('/vendor/orders/');
+    const itemsCell = page.getByTestId('order-row-ord_0000ab12cd').getByRole('cell').nth(3);
+    await expect(itemsCell).toContainText('Bidhaa 1');
+    await expect(itemsCell).not.toContainText('Bidhaa 1 items');
+    await page.goto('/vendor/payouts/');
+    const weekCell = page.getByTestId('vendor-payout-row-vs_1').getByRole('button');
+    await expect(weekCell).toHaveText(await page.evaluate(() => {
+      const f = (d: string) => new Date(`${d}T00:00:00Z`).toLocaleDateString('sw-TZ', { day: 'numeric', month: 'short', timeZone: 'UTC' });
+      return `${f('2026-10-06')} – ${f('2026-10-12')}`;
+    }));
+    await weekCell.click();
+    await expect(page.getByTestId('vendor-payout-detail').getByText('M-Pesa ····0111')).toBeVisible();
+    await page.goto('/vendor/products/history/?id=prd_1');
+    await expect(page.getByTestId('history-table').getByText('Stock ya kuanzia bidhaa ilipoongezwa')).toBeVisible();
+    await expect(page.getByText('product_created')).toHaveCount(0);
+    await expect(page.getByTestId('history-table').getByRole('link', { name: 'Oda XY9999' })).toBeVisible();
+  });
+
+  test('D11: after a stale count the row shows the stock the server reported', async ({ page }) => {
+    await signedInAs(page, VENDOR);
+    await mockApi(page, vendorBase({
+      'POST /vendor/products/prd_1/stock-adjustments': { status: 409, json: { error: 'stock_changed', currentStock: 7 } },
+    }));
+    await page.goto('/vendor/products/');
+    await page.getByRole('button', { name: 'Adjust stock for Whey Protein' }).click();
+    const dialog = page.getByRole('dialog');
+    await dialog.getByLabel('Counted').check();
+    await dialog.getByTestId('adjust-quantity').fill('9');
+    await dialog.getByTestId('adjust-save').click();
+    await expect(dialog.getByTestId('adjust-current')).toHaveText('7');
+    await page.keyboard.press('Escape');
+    await expect(page.getByTestId('product-row-prd_1').getByRole('cell').nth(2)).toContainText('7');
+  });
+});
