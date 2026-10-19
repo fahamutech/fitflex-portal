@@ -26,7 +26,7 @@ const REASON_MIN = 3;
 const REASON_MAX = 200;
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
 /** A row's tap target: at least 44px tall. */
-const refLink = 'inline-flex min-h-11 items-center font-mono font-semibold text-[var(--color-brand-700)] underline-offset-4 hover:underline';
+const refLink = 'inline-flex min-h-11 items-center whitespace-nowrap font-mono font-semibold text-[var(--color-brand-700)] underline-offset-4 hover:underline';
 
 function SaleBadges({ sale }: { sale: Pick<VendorSaleRow, 'status' | 'soldAt' | 'recordedAt' | 'lateRecorded' | 'hasOverride'> }) {
   const { t } = useApp();
@@ -49,15 +49,16 @@ function SummaryTile({ label, value, testId }: { label: string; value: ReactNode
   return (
     <Card className="min-w-0 p-4">
       <p className="text-sm font-medium text-[var(--color-fg-quaternary)] [overflow-wrap:anywhere]">{label}</p>
-      <p className="mt-1 text-xl font-semibold tracking-tight tabular-nums text-[var(--color-fg-primary)] [overflow-wrap:anywhere]" data-testid={testId}>{value}</p>
+      {/* Money stays on one line ("TSh 1,234"); the grid gives each tile room for it. */}
+      <p className="mt-1 whitespace-nowrap text-lg font-semibold tracking-tight tabular-nums text-[var(--color-fg-primary)]" data-testid={testId}>{value}</p>
     </Card>
   );
 }
-const TILE_GRID = 'grid gap-3 grid-cols-[repeat(auto-fill,minmax(10.5rem,1fr))]';
+const TILE_GRID = 'grid gap-3 grid-cols-[repeat(auto-fill,minmax(min(100%,12rem),1fr))]';
 
 /** The total, struck through when voided (the badge says "Voided" in words too). */
 function Total({ sale }: { sale: Pick<VendorSaleRow, 'status' | 'totalTzs'> }) {
-  return <span className={`tabular-nums ${sale.status === 'voided' ? 'line-through text-[var(--color-fg-quaternary)]' : ''}`}>{money(sale.totalTzs)}</span>;
+  return <span className={`whitespace-nowrap tabular-nums ${sale.status === 'voided' ? 'line-through text-[var(--color-fg-quaternary)]' : ''}`}>{money(sale.totalTzs)}</span>;
 }
 
 function SalesInner() {
@@ -179,7 +180,8 @@ function SalesInner() {
 
   const shown = sales ?? [];
   const list = (
-    <div className="space-y-4" data-testid="sales-list">
+    // A container: table or cards follow the list column's own width (narrow next to an open sale).
+    <div className="@container space-y-4" data-testid="sales-list">
       <div>
         <PageHeader
           title={t('vendor.nav.sales')}
@@ -245,7 +247,7 @@ function SalesInner() {
           : <EmptyState icon={<Receipt />} title={t('vendor.sales.empty')} />
       ) : (
         <>
-          <div className="hidden md:block">
+          <div className="hidden @4xl:block">
             <Table aria-label={t('vendor.nav.sales')} data-testid="vendor-sales-table">
               <THead>
                 <Tr>
@@ -279,13 +281,13 @@ function SalesInner() {
               </TBody>
             </Table>
           </div>
-          <ul className="space-y-3 md:hidden" aria-label={t('vendor.nav.sales')}>
+          <ul className="space-y-3 @4xl:hidden" aria-label={t('vendor.nav.sales')}>
             {shown.map(s => (
               <li key={s.id}>
                 <Card className="p-0">
                   <Link id={`sale-mlink-${s.id}`} href={`${pathname}?id=${encodeURIComponent(s.id)}`} onClick={e => { e.preventDefault(); open(s.id); }} className="block min-h-11 space-y-1 p-4" data-testid={`sale-card-${s.id}`}>
                     <span className="flex flex-wrap items-center justify-between gap-2">
-                      <span className="font-mono font-semibold">{s.number}</span>
+                      <span className="whitespace-nowrap font-mono font-semibold">{s.number}</span>
                       <SaleBadges sale={s} />
                     </span>
                     <span className="block font-semibold"><Total sale={s} /></span>
@@ -418,7 +420,7 @@ function SaleDetail({ id, onBack, onUpdated }: { id: string; onBack: () => void;
       <Card>
         <CardContent className="space-y-2">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <h2 ref={headingRef} tabIndex={-1} className="font-mono text-lg font-semibold outline-none" data-testid="sale-heading">{fmt(t('vendor.pos.receiptNo'), { number: s.number })}</h2>
+            <h2 ref={headingRef} tabIndex={-1} className="whitespace-nowrap font-mono text-lg font-semibold outline-none" data-testid="sale-heading">{fmt(t('vendor.pos.receiptNo'), { number: s.number })}</h2>
             <SaleBadges sale={{ ...s, hasOverride: s.lines.some(l => l.priceChanged) }} />
           </div>
           <p className="font-medium">{business}</p>
@@ -448,7 +450,7 @@ function SaleDetail({ id, onBack, onUpdated }: { id: string; onBack: () => void;
                     <span className="font-medium [overflow-wrap:anywhere]">{l.qty} × {l.nameSnapshot}{l.variant ? ` (${l.variant})` : ''}</span>
                     <span className="whitespace-nowrap tabular-nums">{money(l.qty * l.unitPriceTzs)}</span>
                   </div>
-                  {(l.qty > 1 || changed) && <p className="text-[var(--color-fg-tertiary)] tabular-nums">@ {money(l.unitPriceTzs)}</p>}
+                  {(l.qty > 1 || changed) && <p className="whitespace-nowrap text-[var(--color-fg-tertiary)] tabular-nums">@ {money(l.unitPriceTzs)}</p>}
                   {changed && (
                     <p className="text-[var(--color-fg-tertiary)]" data-testid={`sale-line-${i}-changed`}>
                       {l.priceChangedBy?.name
@@ -457,15 +459,15 @@ function SaleDetail({ id, onBack, onUpdated }: { id: string; onBack: () => void;
                     </p>
                   )}
                   {l.discountTzs > 0 && (
-                    <div className={`${row} text-[var(--color-fg-tertiary)]`}><span>{t('vendor.pos.lineDiscountShort')}</span><span className="tabular-nums">−{money(l.discountTzs)}</span></div>
+                    <div className={`${row} text-[var(--color-fg-tertiary)]`}><span>{t('vendor.pos.lineDiscountShort')}</span><span className="whitespace-nowrap tabular-nums">−{money(l.discountTzs)}</span></div>
                   )}
                 </li>
               );
             })}
           </ul>
           <dl className="space-y-1 border-t border-[var(--color-border-secondary)] px-6 py-3 text-sm">
-            <div className={row}><dt>{t('vendor.pos.subtotal')}</dt><dd className="tabular-nums">{money(s.subtotalTzs)}</dd></div>
-            {discounts > 0 && <div className={row}><dt>{t('vendor.pos.discounts')}</dt><dd className="tabular-nums" data-testid="sale-discounts">−{money(discounts)}</dd></div>}
+            <div className={row}><dt>{t('vendor.pos.subtotal')}</dt><dd className="whitespace-nowrap tabular-nums">{money(s.subtotalTzs)}</dd></div>
+            {discounts > 0 && <div className={row}><dt>{t('vendor.pos.discounts')}</dt><dd className="whitespace-nowrap tabular-nums" data-testid="sale-discounts">−{money(discounts)}</dd></div>}
             <div className={row}><dt className="font-semibold">{t('vendor.pos.total')}</dt><dd className="font-semibold" data-testid="sale-total"><Total sale={s} /></dd></div>
           </dl>
         </CardContent>
@@ -480,7 +482,7 @@ function SaleDetail({ id, onBack, onUpdated }: { id: string; onBack: () => void;
               <span className="whitespace-nowrap tabular-nums">{money(p.amountTzs)}</span>
             </div>
           ))}
-          {s.changeTzs > 0 && <div className={row}><span>{t('vendor.pos.change')}</span><span className="tabular-nums" data-testid="sale-change">{money(s.changeTzs)}</span></div>}
+          {s.changeTzs > 0 && <div className={row}><span>{t('vendor.pos.change')}</span><span className="whitespace-nowrap tabular-nums" data-testid="sale-change">{money(s.changeTzs)}</span></div>}
           <p className="pt-2 text-[var(--color-fg-tertiary)]">{fmt(t('vendor.pos.receiptFooter'), { business })}</p>
           <p className="text-xs text-[var(--color-fg-quaternary)]" data-testid="sale-not-fiscal">{t('vendor.pos.notFiscal')}</p>
         </CardContent>
