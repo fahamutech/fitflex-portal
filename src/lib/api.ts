@@ -956,6 +956,7 @@ export const api = {
   getSettings: (token: string) => request<PlatformSettings>('/admin/settings', {}, token),
   updateSettings: (token: string, data: Partial<PlatformSettings>) =>
     request<PlatformSettings>('/admin/settings', { method: 'PUT', body: JSON.stringify(data) }, token),
+  paymentOptions: (token: string) => request<PaymentOptions>('/payments/options', {}, token),
   getSpecialties: () => request<string[]>('/settings/specialties'),
   adminGetSpecialties: (token: string) => request<string[]>('/admin/settings/specialties', {}, token),
   adminSaveSpecialty: (token: string, name: string) =>
@@ -1236,7 +1237,30 @@ export interface PlatformSettings {
   paymentPeriodDays: number;
   payoutModel: 'commission' | 'discounted_rate';
   currency: string;
+  /** Slice A3: the Lipa Namba members pay manually; null when not saved. */
+  manualPayment?: ManualPaymentSettings | null;
   updatedAt: string;
+}
+
+/** Slice A3 (PUT /admin/settings `manualPayment`; null clears it). */
+export interface ManualPaymentSettings {
+  lipaNamba: string;
+  accountName: string;
+  network?: string | null;
+  instructions?: { en: string | null; sw: string | null } | null;
+}
+
+/** GET /payments/options. `manual` is present only while MANUAL_PAY_INSTRUCTIONS is on. */
+export interface PaymentOptions {
+  manual?: {
+    enabled: boolean;
+    lipaNamba: string | null;
+    accountName: string | null;
+    network: string | null;
+    instructions: { en: string | null; sw: string | null } | null;
+    referenceRequired: boolean;
+  };
+  [key: string]: unknown;
 }
 
 export interface PeriodMemberDetail {
@@ -1404,6 +1428,10 @@ export interface PaymentRequest {
   status: string;
   provider: string;
   reference: string | null;
+  /** Slice A3: the transaction ID the member typed (upper case); null when none. */
+  memberReference?: string | null;
+  /** Slice A3: the number the member says they paid from (+255… E.164); null when none. */
+  payerPhone?: string | null;
   note?: string | null;
   /** The gym a gym-bound request pays for (trainer pass / gym plan). */
   gymId?: string | null;
@@ -1420,10 +1448,6 @@ export interface PaymentRequest {
     renewsAt?: string;
     expiresAt?: string | null;
   } | null;
-  /** Manual payments (functions#188): the transaction ID the member typed, kept apart from `reference`. */
-  memberReference?: string | null;
-  /** The number the member paid from, when the server sends it (functions#188). */
-  payerPhone?: string | null;
   /** Columns (null unless used): who checked the money arrived, and a pending change request. */
   verifiedBy?: string | null;
   verifiedAt?: string | null;

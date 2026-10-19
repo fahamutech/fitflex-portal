@@ -6,6 +6,7 @@ import { api, ApiError, PaymentRequest, PaymentStatusValue } from '@/lib/api';
 import { Badge, Button, PageHeader, Alert, Spinner, Card, Field, Select } from '@/components/shared';
 import { DataTable, ColumnDef } from '@/components/data-table';
 import { Dialog, DialogFooter, ConfirmDialog } from '@/components/dialog';
+import { ApproveWithReferenceDialog, MemberReferenceCell, approvesWithMemberReference } from '@/components/member-reference';
 import { money, statusTone, statusLabel, formatDateTime } from '@/lib/admin-utils';
 import { fill } from '@/components/communication-shared';
 import {
@@ -100,15 +101,18 @@ export default function PaymentsPage() {
     .filter(p => filter === 'all' || p.status === filter)
     .filter(p => kind === 'all' || isTrainerPass(p));
 
-  async function handleAction() {
+  /** `reference`: from the member transaction-ID dialog (slice A3); recorded with the approval. */
+  async function handleAction(reference?: string) {
     if (!token || !actionTarget) return;
     setBusy(true);
     try {
-      await api.updatePayment(token, actionTarget.payment.id, { status: actionTarget.action });
+      await api.updatePayment(token, actionTarget.payment.id, { status: actionTarget.action, ...(reference ? { reference } : {}) });
       setActionTarget(null);
       await load();
     } catch (e) {
-      const key = flagOnErrorKey(e, !!actionTarget.payment.secondApproverRequired);
+      // A3: a transaction ID already on another pending/approved payment has its own message; else A1's flag-on errors.
+      const used = actionTarget.action === 'approved' && errorCode(e) === 'reference_already_used';
+      const key = used ? 'manualPay.err.referenceUsed' as const : flagOnErrorKey(e, !!actionTarget.payment.secondApproverRequired);
       if (key) setActionTarget(null);
       setError(key ? t(key) : e instanceof Error ? e.message : 'Action failed');
     } finally {
@@ -254,6 +258,7 @@ export default function PaymentsPage() {
       ),
     },
     { key: 'reference', header: 'Reference', cell: (p) => <span className="text-xs">{p.reference || '—'}</span> },
+    { key: 'memberReference', header: t('manualPay.memberRef'), cell: (p) => <MemberReferenceCell payment={p} /> },
     { key: 'note', header: 'Note', cell: (p) => <span className="text-xs max-w-[200px] truncate block">{upgradeNoteText(p) ?? (p.note || '—')}</span> },
   ];
 
@@ -390,14 +395,21 @@ export default function PaymentsPage() {
       )}
 
       <ConfirmDialog
-        open={!!actionTarget}
+        open={!!actionTarget && !approvesWithMemberReference(actionTarget)}
         onClose={() => setActionTarget(null)}
-        onConfirm={handleAction}
+        onConfirm={() => handleAction()}
         title={actionTarget ? `${actionTarget.action.charAt(0).toUpperCase() + actionTarget.action.slice(1)} payment` : ''}
         description={`Set payment for ${actionTarget?.payment.member?.displayName || actionTarget?.payment.memberId} (${money(actionTarget?.payment.amountTzs)}${actionTarget && (isTrainerPass(actionTarget.payment) || upgradeOf(actionTarget.payment)) ? ` — ${paymentTierLabel(actionTarget.payment).toLowerCase()}${actionTarget.payment.gym ? ` at ${actionTarget.payment.gym.name}` : ''}` : ''}) to "${actionTarget?.action}"?${actionTarget?.action === 'approved' && isTrainerPass(actionTarget.payment) ? ' The pass period starts now.' : ''}${actionTarget?.action === 'approved' && upgradeOf(actionTarget.payment) ? ' The plan is upgraded now and keeps its end date.' : ''}`}
         confirmLabel={actionTarget?.action === 'approved' ? 'Approve' : actionTarget?.action === 'rejected' ? 'Reject' : 'Cancel payment'}
         tone={actionTarget?.action === 'approved' ? 'primary' : 'danger'}
         busy={busy}
+      />
+
+      <ApproveWithReferenceDialog
+        payment={approvesWithMemberReference(actionTarget) ? actionTarget!.payment : null}
+        busy={busy}
+        onClose={() => setActionTarget(null)}
+        onConfirm={(reference) => handleAction(reference)}
       />
 
       <Dialog
