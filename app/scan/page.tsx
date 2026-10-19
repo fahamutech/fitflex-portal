@@ -3,8 +3,8 @@ import { useEffect, useRef, useState } from 'react';
 import { Camera, CameraOff, CheckCircle2, XCircle, Hash, User, Tag } from 'lucide-react';
 import jsQR from 'jsqr';
 import { useApp } from '../providers';
-import { api, ApiError, CheckInResult } from '@/lib/api';
-import { Button, Card, CardHeader, CardContent, Badge, PageHeader, Alert, Input, Field } from '@/components/shared';
+import { api, ApiError, CheckInResult, Gym } from '@/lib/api';
+import { Button, Card, CardHeader, CardContent, Badge, PageHeader, Alert, Input, Field, Select } from '@/components/shared';
 import { MessageKey } from '@/lib/i18n';
 
 const FAILURE_KEYS: Record<string, MessageKey> = {
@@ -29,6 +29,18 @@ const FAILURE_KEYS: Record<string, MessageKey> = {
 /** What went wrong with the last scan, apart from a backend refusal code. */
 type ScanProblem = 'network' | 'camera' | null;
 
+/** Per-browser memory of the gym a multi-gym operator scans for (per signed-in user). */
+const gymKey = (userId?: string) => `fitflex.scan.gymId.${userId ?? 'anon'}`;
+function readStoredGym(userId?: string): string | null {
+  try { return localStorage.getItem(gymKey(userId)); } catch { return null; }
+}
+function writeStoredGym(userId: string | undefined, gymId: string | null) {
+  try {
+    if (gymId) localStorage.setItem(gymKey(userId), gymId);
+    else localStorage.removeItem(gymKey(userId));
+  } catch { /* storage blocked: the choice just isn't remembered */ }
+}
+
 /** The refusal code: check-in rules use `failure`, access checks use `error`. */
 function refusalCode(body: unknown): string | null {
   const b = body as { failure?: unknown; error?: unknown } | null;
@@ -37,12 +49,48 @@ function refusalCode(body: unknown): string | null {
 }
 
 export default function ScanPage() {
-  const { token, t } = useApp();
+  const { token, user, t } = useApp();
   const videoRef  = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [streaming, setStreaming] = useState(false);
   const [last, setLast]     = useState<CheckInResult | null>(null);
   const [problem, setProblem] = useState<ScanProblem>(null);
+  // The operator's gyms (null while loading). With more than one, or if the
+  // backend says gym_required, a gym must be chosen before scanning.
+  const [gyms, setGyms] = useState<Gym[] | null>(null);
+  const [gymsFailed, setGymsFailed] = useState(false);
+  const [gymRequired, setGymRequired] = useState(false);
+  const [gymId, setGymId] = useState('');
+  const userId = user?.id;
+
+  useEffect(() => {
+    if (!token) return;
+    let live = true;
+    api.ownerGyms(token)
+      .then(list => {
+        if (!live) return;
+        const rows = Array.isArray(list) ? list : [];
+        setGyms(rows);
+        const stored = readStoredGym(userId);
+        if (stored && rows.some(g => g.id === stored)) setGymId(stored);
+        else if (stored) writeStoredGym(userId, null); // no longer one of theirs
+      })
+      .catch(() => { if (live) { setGyms([]); setGymsFailed(true); } });
+    return () => { live = false; };
+  }, [token, userId]);
+
+  const showPicker = !!gyms && gyms.length > 0 && (gyms.length > 1 || gymRequired);
+  const gymsLoading = gyms === null;
+  const canScan = !gymsLoading && (!showPicker || !!gymId);
+  // The camera loop reads these through a ref, so it always sees the latest choice.
+  const scanGym = useRef({ canScan, gymId: showPicker ? gymId : '' });
+  scanGym.current = { canScan, gymId: showPicker ? gymId : '' };
+
+  function chooseGym(id: string) {
+    setGymId(id);
+    writeStoredGym(userId, id || null);
+    if (last && !last.ok && last.failure === 'gym_required') setLast(null);
+  }
   const [manual, setManual] = useState('');
   const inFlight = useRef(false);
 
@@ -86,10 +134,10 @@ export default function ScanPage() {
   }
 
   async function submit(qrToken: string) {
-    if (!token) return;
+    if (!token || !scanGym.current.canScan) return;
     inFlight.current = true;
     try {
-      const r = await api.checkIn(token, qrToken);
+      const r = await api.checkIn(token, qrToken, scanGym.current.gymId || undefined);
       setProblem(null);
       if (r?.ok) {
         setLast(r);
@@ -101,7 +149,9 @@ export default function ScanPage() {
       if (e instanceof ApiError) {
         // Any answer from the backend is a refusal; never guess "QR expired".
         setProblem(null);
-        setLast({ ok: false, failure: refusalCode(e.body) ?? `http_${e.status}` });
+        const code = refusalCode(e.body) ?? `http_${e.status}`;
+        if (code === 'gym_required') { setGymRequired(true); setGymId(''); stopCamera(); }
+        setLast({ ok: false, failure: code });
       } else {
         setLast(null);
         setProblem('network');
@@ -122,6 +172,26 @@ export default function ScanPage() {
         description="Point the camera at the member's QR code to record a check-in."
       />
 
+      {gymsFailed && <Alert tone="error">{t('scan.gym.loadFailed')}</Alert>}
+
+      {/* Gym choice for operators who work at more than one gym */}
+      {showPicker && (
+        <Card>
+          <CardContent>
+            <Field label={t('scan.gym.label')} hint={t('scan.gym.hint')} required>
+              <Select
+                data-testid="scan-gym-select"
+                value={gymId}
+                onChange={e => chooseGym(e.target.value)}
+              >
+                <option value="">{t('scan.gym.placeholder')}</option>
+                {gyms!.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
+              </Select>
+            </Field>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Camera card */}
       <Card>
         <CardHeader>
@@ -133,7 +203,7 @@ export default function ScanPage() {
                 {t('scan.stop')}
               </Button>
             ) : (
-              <Button size="sm" onClick={startCamera} data-testid="start-scan">
+              <Button size="sm" onClick={startCamera} data-testid="start-scan" disabled={!canScan}>
                 <Camera className="h-4 w-4" />
                 {t('scan.start')}
               </Button>
@@ -183,7 +253,7 @@ export default function ScanPage() {
               <Button
                 data-testid="manual-submit"
                 onClick={() => manual && submit(manual)}
-                disabled={!manual}
+                disabled={!manual || !canScan}
               >
                 Submit
               </Button>

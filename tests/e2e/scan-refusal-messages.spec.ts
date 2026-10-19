@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Page, type Request } from '@playwright/test';
 
 const API = process.env.FITFLEX_API_URL || 'http://localhost:3000';
 
@@ -91,4 +91,76 @@ test('refusal messages are shown in Swahili', async ({ page }) => {
   await openScanner(page, { status: 403, body: { error: 'not_your_gym' } }, 'sw');
   await expect(page.getByTestId('scan-failure-message'))
     .toHaveText('Huna ruhusa ya kuwaingiza wanachama katika gym hii');
+});
+
+// ── Gym choice for operators who work at more than one gym ──
+
+const GYM_A = { id: 'gym-a', name: 'Iron Paradise Mikocheni' };
+const GYM_B = { id: 'gym-b', name: 'Iron Paradise Masaki' };
+
+async function scannerWithGyms(page: Page, gyms: unknown[], checkin: { status: number; body: unknown }, stored?: string) {
+  const posts: Record<string, unknown>[] = [];
+  await page.addInitScript((s) => {
+    localStorage.setItem('token', 'operator-e2e-token');
+    localStorage.setItem('user', JSON.stringify({ id: 'operator-1', userType: 'gym_operator', email: 'operator@example.com' }));
+    localStorage.setItem('locale', 'en');
+    if (s) localStorage.setItem('fitflex.scan.gymId.operator-1', s);
+  }, stored ?? '');
+  await page.route(`${API}/**`, async route => {
+    const req: Request = route.request();
+    const url = new URL(req.url());
+    if (url.pathname === '/owner/gyms') return route.fulfill({ json: gyms });
+    if (url.pathname === '/operator/checkins' && req.method() === 'POST') {
+      posts.push(req.postDataJSON());
+      return route.fulfill({ status: checkin.status, json: checkin.body });
+    }
+    return route.fulfill({ json: [] });
+  });
+  await page.goto('/scan');
+  return posts;
+}
+
+const OK = { status: 200, body: { ok: true, checkin: { id: 'c1', memberId: 'm1', memberPublicId: 'm1', passTier: 'pro', visitNumberInCycle: 1 } } };
+
+test('multi-gym operator must pick a gym; gymId is sent and remembered', async ({ page }) => {
+  const posts = await scannerWithGyms(page, [GYM_A, GYM_B], OK);
+  const select = page.getByTestId('scan-gym-select');
+  await expect(select).toBeVisible();
+  await expect(page.getByText('Gym you are checking members in at')).toBeVisible();
+  await page.getByTestId('manual-token').fill('usr_test.123.sig');
+  await expect(page.getByTestId('manual-submit')).toBeDisabled();
+  await expect(page.getByTestId('start-scan')).toBeDisabled();
+
+  await select.selectOption('gym-b');
+  await page.getByTestId('manual-submit').click();
+  await expect(page.getByTestId('scan-result')).toContainText('Check-in successful');
+  expect(posts).toEqual([{ qrToken: 'usr_test.123.sig', gymId: 'gym-b' }]);
+
+  await page.reload();
+  await expect(page.getByTestId('scan-gym-select')).toHaveValue('gym-b');
+  await expect(page.getByTestId('start-scan')).toBeEnabled();
+});
+
+test('a remembered gym that is no longer theirs is not used', async ({ page }) => {
+  await scannerWithGyms(page, [GYM_A, GYM_B], OK, 'gym-gone');
+  await expect(page.getByTestId('scan-gym-select')).toHaveValue('');
+  await expect(page.getByTestId('start-scan')).toBeDisabled();
+});
+
+test('single-gym operator sees no picker and sends no gymId', async ({ page }) => {
+  const posts = await scannerWithGyms(page, [GYM_A], OK);
+  await page.getByTestId('manual-token').fill('usr_test.123.sig');
+  await page.getByTestId('manual-submit').click();
+  await expect(page.getByTestId('scan-result')).toContainText('Check-in successful');
+  await expect(page.getByTestId('scan-gym-select')).toHaveCount(0);
+  expect(posts).toEqual([{ qrToken: 'usr_test.123.sig' }]);
+});
+
+test('gym_required from the backend shows the picker and asks to choose a gym', async ({ page }) => {
+  await scannerWithGyms(page, [GYM_A], { status: 400, body: { ok: false, failure: 'gym_required' } });
+  await page.getByTestId('manual-token').fill('usr_test.123.sig');
+  await page.getByTestId('manual-submit').click();
+  await expect(page.getByTestId('scan-failure-message')).toHaveText('Choose the gym for this check-in above, then scan again');
+  await expect(page.getByTestId('scan-gym-select')).toBeVisible();
+  await expect(page.getByTestId('manual-submit')).toBeDisabled();
 });

@@ -306,10 +306,11 @@ export const api = {
     return request<DashboardResponse>(`/operator/dashboard${s ? '?' + s : ''}`, {}, token);
   },
   recentCheckIns: (token: string) => request<CheckIn[]>('/operator/checkins', {}, token),
-  checkIn: (token: string, qrToken: string) =>
+  /** `gymId` is needed when the operator works at more than one gym (else `gym_required`). */
+  checkIn: (token: string, qrToken: string, gymId?: string) =>
     // An expired member QR comes back as 401 { failure: 'invalid_or_expired_qr' };
     // that is the member's QR, not the operator's session, so stay signed in.
-    request<CheckInResult>('/operator/checkins', { method: 'POST', body: JSON.stringify({ qrToken }) }, token,
+    request<CheckInResult>('/operator/checkins', { method: 'POST', body: JSON.stringify(gymId ? { qrToken, gymId } : { qrToken }) }, token,
       body => typeof (body as { failure?: unknown } | null)?.failure === 'string'),
   /** Slimmed list — no `images`/`thumbnails` arrays, only a single `thumbnail` field. */
   adminGyms: (token: string) => request<Gym[]>('/admin/gyms', {}, token),
