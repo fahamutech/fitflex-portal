@@ -89,7 +89,13 @@ export interface GymInvitationInput {
   paidAmount?: number;
 }
 
-async function request<T>(path: string, opts: RequestInit = {}, token?: string): Promise<T> {
+async function request<T>(
+  path: string,
+  opts: RequestInit = {},
+  token?: string,
+  /** Return true when a 401 body is a business refusal, not a dead session (no sign-out). */
+  isRefusal401?: (body: unknown) => boolean,
+): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
     ...opts,
     headers: {
@@ -101,7 +107,7 @@ async function request<T>(path: string, opts: RequestInit = {}, token?: string):
   });
   const body = res.status === 204 ? null : await res.json().catch(() => null);
   if (!res.ok) {
-    if (res.status === 401 && _onUnauthorized) {
+    if (res.status === 401 && _onUnauthorized && !isRefusal401?.(body)) {
       _onUnauthorized();
     }
     throw new ApiError(res.status, body);
@@ -301,7 +307,10 @@ export const api = {
   },
   recentCheckIns: (token: string) => request<CheckIn[]>('/operator/checkins', {}, token),
   checkIn: (token: string, qrToken: string) =>
-    request<CheckInResult>('/operator/checkins', { method: 'POST', body: JSON.stringify({ qrToken }) }, token),
+    // An expired member QR comes back as 401 { failure: 'invalid_or_expired_qr' };
+    // that is the member's QR, not the operator's session, so stay signed in.
+    request<CheckInResult>('/operator/checkins', { method: 'POST', body: JSON.stringify({ qrToken }) }, token,
+      body => typeof (body as { failure?: unknown } | null)?.failure === 'string'),
   /** Slimmed list — no `images`/`thumbnails` arrays, only a single `thumbnail` field. */
   adminGyms: (token: string) => request<Gym[]>('/admin/gyms', {}, token),
   // ── Communications: a gym's messages to its direct members (scope 'owner')
@@ -1100,6 +1109,8 @@ export interface CheckIn {
 export interface CheckInResult {
   ok: boolean;
   failure?: string;
+  /** Some refusals (not_your_gym, operator_not_assigned_to_gym, member_not_found) use `error`. */
+  error?: string;
   checkin?: CheckIn;
   visitNumberInCycle?: number;
 }

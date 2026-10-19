@@ -14,7 +14,27 @@ const FAILURE_KEYS: Record<string, MessageKey> = {
   gym_closed:            'scan.fail.gym_closed',
   basic_daily_limit:     'scan.fail.basic_daily_limit',
   invalid_or_expired_qr: 'scan.fail.invalid_or_expired_qr',
+  wrong_gym:             'scan.fail.wrong_gym',
+  member_not_found:      'scan.fail.member_not_found',
+  gym_not_found:         'scan.fail.gym_not_found',
+  gym_not_verified:      'scan.fail.gym_not_verified',
+  gym_required:          'scan.fail.gym_required',
+  not_your_gym:          'scan.fail.not_your_gym',
+  operator_not_assigned_to_gym: 'scan.fail.operator_not_assigned_to_gym',
+  invalid_gym_qr:        'scan.fail.invalid_gym_qr',
+  active_subscription_required: 'scan.fail.active_subscription_required',
+  tier_not_configured:   'scan.fail.tier_not_configured',
 };
+
+/** What went wrong with the last scan, apart from a backend refusal code. */
+type ScanProblem = 'network' | 'camera' | null;
+
+/** The refusal code: check-in rules use `failure`, access checks use `error`. */
+function refusalCode(body: unknown): string | null {
+  const b = body as { failure?: unknown; error?: unknown } | null;
+  const code = b?.failure ?? b?.error;
+  return typeof code === 'string' && code ? code : null;
+}
 
 export default function ScanPage() {
   const { token, t } = useApp();
@@ -22,6 +42,7 @@ export default function ScanPage() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [streaming, setStreaming] = useState(false);
   const [last, setLast]     = useState<CheckInResult | null>(null);
+  const [problem, setProblem] = useState<ScanProblem>(null);
   const [manual, setManual] = useState('');
   const inFlight = useRef(false);
 
@@ -37,7 +58,8 @@ export default function ScanPage() {
         tick();
       }
     } catch {
-      setLast({ ok: false, failure: 'invalid_or_expired_qr' });
+      setLast(null);
+      setProblem('camera');
     }
   }
 
@@ -68,19 +90,30 @@ export default function ScanPage() {
     inFlight.current = true;
     try {
       const r = await api.checkIn(token, qrToken);
-      setLast(r);
-      if (r.ok) stopCamera();
+      setProblem(null);
+      if (r?.ok) {
+        setLast(r);
+        stopCamera();
+      } else {
+        setLast({ ok: false, failure: refusalCode(r) ?? 'unknown' });
+      }
     } catch (e) {
-      if (e instanceof ApiError && (e.body as CheckInResult)?.failure) setLast(e.body as CheckInResult);
-      else setLast({ ok: false, failure: 'invalid_or_expired_qr' });
+      if (e instanceof ApiError) {
+        // Any answer from the backend is a refusal; never guess "QR expired".
+        setProblem(null);
+        setLast({ ok: false, failure: refusalCode(e.body) ?? `http_${e.status}` });
+      } else {
+        setLast(null);
+        setProblem('network');
+      }
     } finally {
       setTimeout(() => { inFlight.current = false; }, 2500);
     }
   }
 
-  const failureMsg = last?.failure
-    ? (FAILURE_KEYS[last.failure] ? t(FAILURE_KEYS[last.failure]) : last.failure)
-    : '';
+  const failureCode  = last && !last.ok ? (last.failure ?? 'unknown') : null;
+  const knownFailure = failureCode ? FAILURE_KEYS[failureCode] : undefined;
+  const failureMsg   = failureCode ? t(knownFailure ?? 'scan.fail.unknown') : '';
 
   return (
     <div className="space-y-6">
@@ -196,16 +229,25 @@ export default function ScanPage() {
                 </div>
               )}
               {!last.ok && failureMsg && (
-                <p className="text-sm text-[var(--color-error-700)]">{failureMsg}</p>
+                <p data-testid="scan-failure-message" className="text-sm text-[var(--color-error-700)]">{failureMsg}</p>
+              )}
+              {!last.ok && failureCode && !knownFailure && (
+                <p data-testid="scan-failure-code" className="font-mono text-xs text-[var(--color-error-600)]">
+                  {t('scan.fail.code')}: {failureCode}
+                </p>
               )}
             </div>
           </div>
         </div>
       )}
 
-      {/* Inline error from camera failure */}
-      {last && !last.ok && !last.failure && (
-        <Alert tone="error">Camera or network error — try manual entry.</Alert>
+      {/* Camera or network problem — distinct from a backend refusal */}
+      {problem && (
+        <div data-testid="scan-problem">
+          <Alert tone="error">
+            {t(problem === 'network' ? 'scan.fail.network' : 'scan.fail.camera')}
+          </Alert>
+        </div>
       )}
     </div>
   );
