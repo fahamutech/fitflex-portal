@@ -2146,6 +2146,7 @@ export const messages = {
     "products.recompute.runId": "Run ID: {id}",
     "products.recompute.error": "Ratings and sales could not be recomputed. Try again.",
     "products.recompute.forbidden": "Only FitFlex admins can recompute ratings and sales.",
+    "products.recompute.inProgress": "A recompute is already running. Try again in a minute.",
     // Journey-audit Phase A design-QA fixes
     "payments.title": "Payments",
     "payments.summary": "{total} payment requests, {pending} pending.",
@@ -4432,6 +4433,8 @@ export const messages = {
     "products.recompute.runId": "Namba ya utekelezaji: {id}",
     "products.recompute.error": "Alama na mauzo hazikuweza kuhesabiwa upya. Jaribu tena.",
     "products.recompute.forbidden": "Ni wasimamizi wa FitFlex tu wanaoweza kuhesabu upya alama na mauzo.",
+    // Needs native review.
+    "products.recompute.inProgress": "Hesabu upya nyingine inaendelea tayari. Jaribu tena baada ya dakika moja.",
     // Journey-audit Phase A design-QA fixes
     "payments.title": "Malipo",
     "payments.summary": "Maombi ya malipo {total}, {pending} yanasubiri.",

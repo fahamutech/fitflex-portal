@@ -160,6 +160,30 @@ test('errors: a failed dry run, a 403 and a failed apply are shown as alerts', a
   await expect(dialog.getByText(/Changes applied on/)).toHaveCount(0);
 });
 
+test('409 recompute_in_progress: apply shows the already-running message and can be retried', async ({ page }) => {
+  await signedIn(page);
+  let busy = true;
+  const calls = await mockApi(page, base({
+    [RECOMPUTE]: (req) => {
+      const apply = (req.postDataJSON() as { apply?: boolean }).apply;
+      if (!apply) return { json: dryRun };
+      return busy ? { status: 409, json: { error: 'recompute_in_progress' } } : { json: applied };
+    },
+  }));
+  await page.goto('/admin/products');
+  await page.getByRole('button', { name: 'Recompute ratings & sales' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Recompute ratings & sales' });
+  await dialog.getByRole('button', { name: 'Apply changes' }).click();
+  await expect(dialog.getByRole('alert').filter({ hasText: 'A recompute is already running. Try again in a minute.' })).toBeVisible();
+  await expect(dialog.getByText(/Changes applied on/)).toHaveCount(0);
+
+  busy = false;
+  await dialog.getByRole('button', { name: 'Apply changes' }).click();
+  await expect(dialog.getByText('Run ID: psr_0001')).toBeVisible();
+  await expect(dialog.getByText('A recompute is already running. Try again in a minute.')).toHaveCount(0);
+  expect(recomputeCalls(calls)).toEqual([{ apply: false }, { apply: true }, { apply: true }]);
+});
+
 test('Swahili: action, columns and counts', async ({ page }) => {
   await signedIn(page, 'sw');
   await mockApi(page, base({ [RECOMPUTE]: { json: dryRun } }));

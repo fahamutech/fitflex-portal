@@ -1770,9 +1770,12 @@ export interface AdminProductDraft {
   homepagePriority?: number;
 }
 
-/** A product's stored marketplace stats, as POST /admin/shop/product-stats/recompute reports them. */
-export interface ProductStats { rating: number | null; reviewCount: number; soldCount: number }
-/** POST /admin/shop/product-stats/recompute: a dry run (apply false) or the applied run. Admins only (403 otherwise). */
+/** A product's stored marketplace stats, as POST /admin/shop/product-stats/recompute reports them (rating to 2 decimals). */
+export interface ProductStats { rating: number; reviewCount: number; soldCount: number }
+/**
+ * POST /admin/shop/product-stats/recompute (functions#220): a dry run (apply false) or the applied run.
+ * Errors: 403 non-admin; 409 recompute_in_progress (another apply running); 400 invalid_apply / invalid_product_ids / too_many_product_ids.
+ */
 export interface ProductStatsRecompute {
   dryRun: boolean;
   checked: number;

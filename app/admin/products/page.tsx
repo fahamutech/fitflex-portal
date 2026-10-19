@@ -169,8 +169,11 @@ export default function ProductsPage() {
     }
   }
 
-  const recomputeError = (cause: unknown) =>
-    t(cause instanceof ApiError && cause.status === 403 ? 'products.recompute.forbidden' : 'products.recompute.error');
+  const recomputeError = (cause: unknown) => {
+    if (cause instanceof ApiError && cause.status === 403) return t('products.recompute.forbidden');
+    if (cause instanceof ApiError && cause.status === 409 && (cause.body as { error?: string } | null)?.error === 'recompute_in_progress') return t('products.recompute.inProgress');
+    return t('products.recompute.error');
+  };
 
   /** Dry run first (apply false): nothing is written until the admin applies from the review. */
   async function previewRecompute() {
