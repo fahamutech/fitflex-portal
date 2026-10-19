@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { ArrowLeft, History, SlidersHorizontal } from 'lucide-react';
 import { api, type LowStockRow, type StockMovement, type StockMovementPage, type VendorProduct } from '@/lib/api';
 import type { MessageKey } from '@/lib/i18n';
-import { addDays, eatDateTime, eatToday, errorCode, fmt, lowKey, PRODUCTS_QS_KEY, shortRefOf, variantsOf } from '@/lib/vendor';
+import { addDays, eatDateTime, eatToday, errorCode, fmt, lowKey, PRODUCTS_QS_KEY, shortRefOf, systemNoteKey, variantsOf } from '@/lib/vendor';
 import { Alert, Badge, Button, Card, CardContent, EmptyState, ErrorState, Field, Input, PageHeader, Segmented, Select, SkeletonCard, SkeletonTable, Spinner, Table, TBody, Td, Th, THead, Tr } from '@/components/shared';
 import { AdjustStockDialog } from '@/components/vendor/adjust-stock-dialog';
 import { useVendor } from '@/components/vendor-context';
@@ -105,12 +105,13 @@ function HistoryInner() {
     ? <span className="font-semibold tabular-nums text-[var(--color-success-700)]" aria-label={fmt(t('vendor.stock.deltaIn'), { n: d })}>+{d}</span>
     : <span className="font-semibold tabular-nums text-[var(--color-fg-primary)]" aria-label={fmt(t('vendor.stock.deltaOut'), { n: Math.abs(d) })}>−{Math.abs(d)}</span>);
   const actor = (r: StockMovement) => (r.actor ? fmt(t('vendor.stock.by'), { name: r.actor.name || '—' }) : t('vendor.stock.bySystem'));
-  const note = (r: StockMovement) => (r.note === 'product_form' ? t('vendor.stock.fromProductForm') : r.note);
+  // Notes the server writes itself are codes: show them as words; a person's own note as written.
+  const note = (r: StockMovement) => { const key = systemNoteKey(r.note); return key ? t(key) : r.note; };
   const orderRef = (r: StockMovement) => {
     if (r.document?.type !== 'order') return null;
-    const label = fmt(t('vendor.stock.order'), { ref: r.document.number || shortRefOf(r.document.id) });
+    const label = fmt(t('vendor.stock.order'), { ref: r.document.shortRef || r.document.number || shortRefOf(r.document.id) });
     return canOrders
-      ? <Link href={`/vendor/orders/?id=${encodeURIComponent(r.document.id)}`} className="font-medium text-[var(--color-brand-700)] underline-offset-4 hover:underline">{label}</Link>
+      ? <Link href={`/vendor/orders/?id=${encodeURIComponent(r.document.id)}`} className="inline-flex min-h-11 items-center font-medium text-[var(--color-brand-700)] underline-offset-4 hover:underline">{label}</Link>
       : <span>{label}</span>;
   };
 
@@ -245,6 +246,11 @@ function HistoryInner() {
             if (token) api.vendorLowStock(token).then(r => setLow(Array.isArray(r) ? r : [])).catch(() => {});
           }}
           onGone={loadProduct}
+          onStockKnown={(v, stock) => setProduct(p => {
+            if (!p) return p;
+            if (!v) return { ...p, stock };
+            return { ...p, variants: variantsOf(p).map(x => (x.name === v ? { ...x, stock } : x)) };
+          })}
         />
       )}
     </div>

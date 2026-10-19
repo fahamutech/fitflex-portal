@@ -36,12 +36,49 @@ export function statusTone(status: string | null | undefined): BadgeTone {
 }
 export const isTerminal = (status: string | null | undefined) => ['delivered', 'cancelled'].includes(canonicalStatus(status));
 export const isPaid = (order: Pick<VendorOrder, 'paymentStatus'>) => order.paymentStatus === 'paid';
-/** Open = paid, and my part is neither delivered nor cancelled. */
-export const isOpenOrder = (order: VendorOrder) => isPaid(order) && !isTerminal(order.status);
+/** Money going back to the buyer (shown next to the status). */
+export const isRefundState = (paymentStatus: string | null) => paymentStatus === 'refund_pending' || paymentStatus === 'refunded';
+
+/**
+ * Which tab an order sits in; the same rules as the server's orderTab() (functions
+ * src/shared/vendor-order-view.mjs), first match wins:
+ * cancelled = my part cancelled, or the whole order cancelled, or a refund pending/done (an expired unpaid order too);
+ * delivered = my part delivered; open = paid and neither; unpaid and not cancelled → only in "all" (null).
+ */
+export type OrderTab = 'open' | 'delivered' | 'cancelled' | 'all';
+export function orderTab(order: Pick<VendorOrder, 'status' | 'orderStatus' | 'paymentStatus'>): 'open' | 'delivered' | 'cancelled' | null {
+  if (canonicalStatus(order.status) === 'cancelled' || canonicalStatus(order.orderStatus) === 'cancelled' || isRefundState(order.paymentStatus)) return 'cancelled';
+  if (canonicalStatus(order.status) === 'delivered') return 'delivered';
+  if (order.paymentStatus === 'paid') return 'open';
+  return null;
+}
+export const inOrderTab = (order: VendorOrder, tab: OrderTab) => tab === 'all' || orderTab(order) === tab;
+/** Open = paid, and neither delivered nor cancelled (see orderTab). */
+export const isOpenOrder = (order: VendorOrder) => orderTab(order) === 'open';
+/** Still waiting for the buyer's payment: in no tab but "all". */
+export const isAwaitingPayment = (order: Pick<VendorOrder, 'status' | 'orderStatus' | 'paymentStatus'>) =>
+  orderTab(order) === null && (order.paymentStatus === 'pending' || order.paymentStatus == null);
+
+/** Server-side counts of my orders (GET /vendor/orders when paged); absent on older servers. */
+export type OrderCounts = { open: number; delivered: number; cancelled: number; all: number; waitingAccept: number };
+export function countsOf(value: unknown): OrderCounts | null {
+  const c = value as Partial<OrderCounts> | null | undefined;
+  const ok = (n: unknown) => typeof n === 'number' && Number.isFinite(n) && n >= 0;
+  return c && ok(c.open) && ok(c.delivered) && ok(c.cancelled) && ok(c.all) && ok(c.waitingAccept) ? (c as OrderCounts) : null;
+}
+
+/** "1 item" / "3 items". */
+export const itemsKey = (n: number) => (n === 1 ? 'vendor.orders.itemsCountOne' : 'vendor.orders.itemsCount') as MessageKey;
 export const paymentKey = (status: string | null) =>
   (['paid', 'pending', 'refund_pending', 'refunded', 'failed'].includes(status ?? '') ? `vendor.orders.payment.${status}` : 'vendor.orders.payment.unknown') as MessageKey;
 export const methodKey = (method: string | null) =>
   (['mpesa', 'airtel_money', 'mixx', 'card', 'bank'].includes(method ?? '') ? `vendor.orders.method.${method}` : null) as MessageKey | null;
+/** A payment method or provider code as people say it ("mpesa" → M-Pesa); unknown values are shown as given. */
+export function payLabel(code: string | null | undefined, t: (k: MessageKey) => string) {
+  if (!code) return '';
+  const key = methodKey(code.toLowerCase().replace(/[\s-]+/g, '_').replace(/^m_?pesa$/, 'mpesa').replace(/^airtel$/, 'airtel_money'));
+  return key ? t(key) : code;
+}
 
 /** Q-8: no human order number yet; both apps show the last 6 characters, uppercase. */
 export const shortRefOf = (id: string | null | undefined) => String(id ?? '').slice(-6).toUpperCase();
@@ -65,11 +102,37 @@ export function eatDay(iso: string | null | undefined, locale: Locale) {
   if (Number.isNaN(date.getTime())) return '—';
   return date.toLocaleDateString(intlLocale(locale), { day: 'numeric', month: 'short', year: 'numeric', timeZone: EAT });
 }
+/** "6 Oct" / "6 Okt" for a calendar day "YYYY-MM-DD", in the chosen language. */
+export function dayMonth(day: string | null | undefined, locale: Locale) {
+  if (!day) return '—';
+  const [y, m, d] = day.slice(0, 10).split('-').map(Number);
+  if (!y || !m || !d) return '—';
+  return new Date(Date.UTC(y, m - 1, d)).toLocaleDateString(intlLocale(locale), { day: 'numeric', month: 'short', timeZone: 'UTC' });
+}
+
 /** Today's EAT calendar day, "YYYY-MM-DD". */
 export const eatToday = (now = new Date()) => new Date(now.getTime() + 3 * 3_600_000).toISOString().slice(0, 10);
 export const addDays = (day: string, n: number) => new Date(Date.parse(`${day}T00:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10);
 
 // ── Products ──
+/** Stock-history notes the server writes itself (codes) → i18n key; anything else is the person's own note. */
+const SYSTEM_NOTES: Record<string, MessageKey> = {
+  product_form: 'vendor.stock.fromProductForm',
+  product_created: 'vendor.stock.note.productCreated',
+  variants_tracked: 'vendor.stock.note.variantsTracked',
+};
+export const systemNoteKey = (note: string | null | undefined): MessageKey | null => (note && SYSTEM_NOTES[note]) || null;
+
+/** A category key ("supplements_nutrition") in the chosen language, from GET /shop/categories; else made readable. */
+export type Category = { key: string; en: string; sw: string };
+export function categoryLabel(key: string | null | undefined, categories: Category[], locale: Locale) {
+  if (!key) return '';
+  const hit = categories.find(c => c.key === key);
+  if (hit) return locale === 'sw' ? hit.sw || hit.en : hit.en;
+  const readable = key.replace(/_/g, ' ');
+  return readable.charAt(0).toUpperCase() + readable.slice(1);
+}
+
 /** The product's variants as objects (older rows may hold other shapes; they are ignored). */
 export function variantsOf(product: { variants?: unknown }): ProductVariant[] {
   const raw = product.variants as unknown;

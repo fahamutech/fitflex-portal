@@ -6,7 +6,7 @@ import { ChevronDown, ChevronRight, History, PackageOpen, RefreshCw, SlidersHori
 import { api, type LowStockRow, type ProductStock, type VendorProduct } from '@/lib/api';
 import { money } from '@/lib/admin-utils';
 import type { MessageKey } from '@/lib/i18n';
-import { fmt, lowKey, PRODUCTS_QS_KEY, tracksVariantStock, variantsOf } from '@/lib/vendor';
+import { categoryLabel, fmt, lowKey, PRODUCTS_QS_KEY, tracksVariantStock, variantsOf, type Category } from '@/lib/vendor';
 import { Badge, Button, Card, EmptyState, ErrorState, Input, PageHeader, Segmented, Select, SkeletonCard, SkeletonTable, Table, TBody, Td, Th, THead, Tr } from '@/components/shared';
 import { AdjustStockDialog } from '@/components/vendor/adjust-stock-dialog';
 import { useVendor } from '@/components/vendor-context';
@@ -25,7 +25,7 @@ const matchesStatus = (p: VendorProduct, s: StatusFilter) =>
   s === 'all' ? true : s === 'pending' || s === 'rejected' ? p.approvalStatus === s : p.status === s && p.approvalStatus !== 'pending' && p.approvalStatus !== 'rejected';
 
 function ProductsInner() {
-  const { token, t } = useApp();
+  const { token, t, locale } = useApp();
   const vendor = useVendor();
   const router = useRouter();
   const pathname = usePathname();
@@ -38,6 +38,8 @@ function ProductsInner() {
   const [low, setLow] = useState<LowStockRow[]>([]);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [adjust, setAdjust] = useState<{ product: VendorProduct; variant: string | null } | null>(null);
+  const [categories, setCategories] = useState<Category[]>([]);
+  useEffect(() => { api.shopCategories().then(r => setCategories(Array.isArray(r?.categories) ? r.categories : [])).catch(() => setCategories([])); }, []);
 
   const filter = ledger && params.get('filter') === 'low' ? 'low' : 'all';
   const q = params.get('q') ?? '';
@@ -78,6 +80,17 @@ function ProductsInner() {
     (filter !== 'low' || isLow(p))
     && matchesStatus(p, status)
     && (!q.trim() || p.name.toLowerCase().includes(q.trim().toLowerCase())));
+
+  /** A refused change told us the real stock: show it on the row (the variant's, or the product's). */
+  function applyKnownStock(productId: string, variant: string | null, stock: number) {
+    setRows(current => (current ?? []).map(p => {
+      if (p.id !== productId) return p;
+      if (!variant) return { ...p, stock };
+      const vs = variantsOf(p).map(v => (v.name === variant ? { ...v, stock } : v));
+      const total = vs.every(v => typeof v.stock === 'number') ? vs.reduce((n, v) => n + Number(v.stock), 0) : p.stock;
+      return { ...p, stock: total, variants: vs };
+    }));
+  }
 
   function applyStock(stock: ProductStock) {
     setRows(current => (current ?? []).map(p => p.id !== stock.id ? p : {
@@ -166,7 +179,7 @@ function ProductsInner() {
                           <div className="min-w-0">
                             <p className="font-medium text-[var(--color-fg-primary)] [overflow-wrap:anywhere]">{p.name}</p>
                             <p className="text-xs text-[var(--color-fg-quaternary)]">
-                              {[p.category, vs.length ? fmt(t('vendor.products.variantsCount'), { n: vs.length }) : null].filter(Boolean).join(' · ')}
+                              {[categoryLabel(p.category, categories, locale), vs.length ? fmt(t('vendor.products.variantsCount'), { n: vs.length }) : null].filter(Boolean).join(' · ')}
                             </p>
                           </div>
                         </div>
@@ -246,7 +259,7 @@ function ProductsInner() {
       <PageHeader
         title={t('vendor.nav.products')}
         description={t('vendor.products.description')}
-        actions={<Button variant="secondary" size="sm" onClick={load}><RefreshCw aria-hidden="true" className="h-4 w-4" />{t('admin.action.refresh')}</Button>}
+        actions={<Button variant="secondary" size="sm" className="min-h-11" onClick={load}><RefreshCw aria-hidden="true" className="h-4 w-4" />{t('admin.action.refresh')}</Button>}
       />
       <p className="-mt-3 text-sm text-[var(--color-fg-tertiary)]">{t('vendor.products.editInApp')}</p>
 
@@ -288,6 +301,7 @@ function ProductsInner() {
           onClose={() => setAdjust(null)}
           onSaved={applyStock}
           onGone={load}
+          onStockKnown={(variant, stock) => applyKnownStock(adjust.product.id, variant, stock)}
         />
       )}
     </div>

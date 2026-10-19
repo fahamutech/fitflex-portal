@@ -1,7 +1,7 @@
 'use client';
 import { createContext, ReactNode, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { api, VENDOR_USER_TYPES, type VendorMe } from '@/lib/api';
-import { errorCode, isOpenOrder } from '@/lib/vendor';
+import { countsOf, errorCode, isOpenOrder } from '@/lib/vendor';
 import { useToast } from './ui/toast';
 import { useApp } from '../../app/providers';
 
@@ -64,12 +64,17 @@ export function VendorProvider({ children }: { children: ReactNode }) {
       setStatus(next?.tools?.portal === true ? 'ready' : 'off');
     } catch (err) {
       const code = errorCode(err);
+      // Suspended while signed in: keep the area, show the banner (§2.4).
+      if (code === 'account_suspended' && user?.userType === 'vendor' && statusRef.current === 'ready') {
+        setMe(current => (current ? { ...current, accountStatus: 'suspended' } : current));
+        return;
+      }
       const closed = closedFor(code);
       if (closed) { setStatus(closed); return; }
       // Fail closed on the first answer (404 feature_disabled, 403, network); later, only a switched-off portal closes it.
       if (statusRef.current !== 'ready' || code === 'feature_disabled') setStatus('off');
     }
-  }, [token, isVendor, closedFor]);
+  }, [token, isVendor, closedFor, user?.userType]);
 
   useEffect(() => {
     setMe(null); setLowCount(null); setWaitingCount(null);
@@ -87,24 +92,33 @@ export function VendorProvider({ children }: { children: ReactNode }) {
     } else setLowCount(null);
     if (me.permissions.includes('orders')) {
       api.vendorOrders(token, { limit: 50 })
-        .then(r => setWaitingCount(r.orders.filter(o => isOpenOrder(o) && o.status === 'pending').length))
+        // The server's count covers every order; older servers: count the newest page.
+        .then(r => setWaitingCount(countsOf(r.counts)?.waitingAccept ?? r.orders.filter(o => isOpenOrder(o) && o.status === 'pending').length))
         .catch(() => setWaitingCount(null));
     } else setWaitingCount(null);
   }, [token, status, me]);
   useEffect(() => { refreshCounts(); }, [refreshCounts]);
 
+  // Several requests can be refused at once: say "no access" once, not once per request.
+  const lastNoAccess = useRef(0);
   const handleError = useCallback((err: unknown) => {
     const code = errorCode(err);
+    // A business suspended while signed in keeps its area with the suspended banner (§2.4); moves are disabled.
+    if ((code === 'account_suspended' || code === 'vendor_suspended') && user?.userType === 'vendor' && statusRef.current === 'ready') {
+      setMe(current => (current ? { ...current, accountStatus: 'suspended' } : current));
+      return true;
+    }
     const closed = closedFor(code);
     if (closed) { setStatus(closed); return true; }
     if (code && (FORBIDDEN.has(code) || code.startsWith('not_your_'))) {
-      toast.error(t('vendor.noAccess'));
+      if (Date.now() - lastNoAccess.current > 4000) toast.error(t('vendor.noAccess'));
+      lastNoAccess.current = Date.now();
       void refresh();
       return true;
     }
     if (code === 'feature_disabled') { void refresh(); return true; }
     return false;
-  }, [closedFor, refresh, t, toast]);
+  }, [closedFor, refresh, t, toast, user?.userType]);
 
   const value = useMemo(() => ({ status, me, lowCount, waitingCount, can, refresh, refreshCounts, handleError }),
     [status, me, lowCount, waitingCount, can, refresh, refreshCounts, handleError]);
