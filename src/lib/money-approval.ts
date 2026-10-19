@@ -7,14 +7,15 @@ import type { Locale, MessageKey } from './i18n';
 export const PAYMENT_STATUSES: PaymentStatusValue[] = ['pending', 'approved', 'rejected', 'cancelled'];
 export const DECIDED_STATUSES: PaymentStatusValue[] = ['approved', 'rejected', 'cancelled'];
 
-export const PAYMENT_STAGE_TONE: Record<PaymentApprovalStage, 'warning' | 'brand' | 'danger'> = {
+// Every stage is still work to do, so none is green (green reads as done).
+export const PAYMENT_STAGE_TONE: Record<PaymentApprovalStage, 'warning' | 'danger'> = {
   awaiting_verification: 'warning',
-  awaiting_second_approval: 'brand',
+  awaiting_second_approval: 'warning',
   change_requested: 'danger',
 };
-export const REFUND_STAGE_TONE: Record<RefundApprovalStage, 'warning' | 'brand'> = {
+export const REFUND_STAGE_TONE: Record<RefundApprovalStage, 'warning'> = {
   awaiting_approval: 'warning',
-  awaiting_payment: 'brand',
+  awaiting_payment: 'warning',
 };
 
 export const paymentStageKey = (s: PaymentApprovalStage) => `money2.stage.${s}` as MessageKey;

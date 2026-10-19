@@ -162,7 +162,9 @@ test("payments: the member's transaction ID is shown and prefilled when approvin
   });
 
   await page.goto('/admin/payments');
-  await expect(page.getByRole('columnheader', { name: "Member's transaction ID" })).toBeVisible();
+  // One Transaction ID column: the member's ID shows there until a reference is recorded.
+  await expect(page.getByRole('columnheader', { name: 'Transaction ID' })).toBeVisible();
+  await expect(page.getByRole('columnheader', { name: "Member's transaction ID" })).toHaveCount(0);
   await expect(page.getByTestId('member-reference')).toHaveText('QGH7XK2L9P');
   await expect(page.getByTestId('payer-phone')).toHaveText('Paid from: +255754000111');
 

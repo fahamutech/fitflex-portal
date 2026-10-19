@@ -1177,6 +1177,8 @@ export interface CheckInResult {
   error?: string;
   checkin?: CheckIn;
   visitNumberInCycle?: number;
+  /** True when the member already checked in at this gym today: the existing visit is returned, no new one is used. */
+  idempotent?: boolean;
 }
 
 export interface Gym {
@@ -1458,6 +1460,10 @@ export interface Refund {
   approveNotBy?: string | null;
   /** The admin who may not mark it paid (approved it). */
   payNotBy?: string | null;
+  /** Display names (functions#206; null for members, policy or unknown; absent on older servers). */
+  requestedByName?: string | null;
+  decidedByName?: string | null;
+  paidByName?: string | null;
 }
 
 /** A1 second approver: where a payment or refund stands (flag MONEY_SECOND_APPROVER on only). */
@@ -1515,6 +1521,13 @@ export interface PaymentRequest {
   approveNotBy?: string | null;
   /** The admin who may not confirm the requested change (requested it). */
   confirmChangeNotBy?: string | null;
+  /**
+   * Display names of the admins above (functions#206; null for members, policy or unknown; absent on older servers).
+   * Without a name the portal says "another admin", never the raw id.
+   */
+  verifiedByName?: string | null;
+  changeRequestedByName?: string | null;
+  decidedByName?: string | null;
 }
 
 export interface MemberProfile {

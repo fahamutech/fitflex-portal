@@ -6,8 +6,8 @@ import { api, ApiError, Refund, RefundStatus } from '@/lib/api';
 import { Badge, Button, PageHeader, Alert, Spinner, Card, Field } from '@/components/shared';
 import { DataTable, ColumnDef } from '@/components/data-table';
 import { Dialog, DialogFooter } from '@/components/dialog';
-import { money, formatDateTime } from '@/lib/admin-utils';
-import { REFUND_STAGE_TONE, flagOnErrorKey, refundStageKey } from '@/lib/money-approval';
+import { money } from '@/lib/admin-utils';
+import { REFUND_STAGE_TONE, flagOnErrorKey, refundStageKey, whenText } from '@/lib/money-approval';
 
 type Filter = RefundStatus | 'all';
 type Action = { refund: Refund; kind: 'approve' | 'reject' | 'paid' };
@@ -40,7 +40,7 @@ const errorText = (e: unknown, fallback: string) => {
 };
 
 export default function RefundsPage() {
-  const { token, user, t } = useApp();
+  const { token, user, t, locale } = useApp();
   const [refunds, setRefunds] = useState<Refund[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -106,6 +106,25 @@ export default function RefundsPage() {
   const payBlocked = (r: Refund) => (r.secondApproverRequired && r.payNotBy && r.payNotBy === user.id
     ? t(r.decidedBy === 'policy' ? 'money2.refundPayBlockedStarted' : 'money2.refundPayBlockedOwn') : null);
 
+  const isMe = (id: string | null | undefined) => !!id && id === user.id;
+  const otherAdmin = (name: string | null | undefined) => name?.trim() || t('money2.otherAdmin');
+  /**
+   * Two-admin approval on: why this admin can't act (visible, not only a tooltip), or else who
+   * raised / approved it. One line, so nothing is said twice.
+   */
+  const auditLine = (r: Refund): string | null => {
+    if (!r.secondApproverRequired) return null;
+    if (r.status === 'requested') {
+      if (approveBlocked(r)) return approveBlocked(r);
+      if (r.requestedRole === 'admin' && r.requestedBy) return isMe(r.requestedBy) ? t('refunds.raisedByYou') : t('refunds.raisedBy').replace('{who}', otherAdmin(r.requestedByName));
+    }
+    if (r.status === 'approved') {
+      if (payBlocked(r)) return payBlocked(r);
+      if (r.decidedBy && r.decidedBy !== 'policy') return isMe(r.decidedBy) ? t('refunds.approvedByYou') : t('refunds.approvedBy').replace('{who}', otherAdmin(r.decidedByName));
+    }
+    return null;
+  };
+
   const shown = refunds.filter(r => filter === 'all' || r.status === filter);
   const count = (s: RefundStatus) => refunds.filter(r => r.status === s).length;
   const toPay = refunds.filter(r => r.status === 'approved').reduce((sum, r) => sum + r.amountTzs, 0);
@@ -131,16 +150,27 @@ export default function RefundsPage() {
       ),
     },
     { key: 'amountTzs', header: 'Amount', sortable: true, align: 'right', cell: (r) => <span className="font-medium tabular-nums">{money(r.amountTzs)}</span> },
-    { key: 'createdAt', header: 'Raised', sortable: true, cell: (r) => <span className="whitespace-nowrap text-xs tabular-nums">{formatDateTime(r.createdAt)}</span> },
+    { key: 'createdAt', header: 'Raised', sortable: true, cell: (r) => <span className="whitespace-nowrap text-xs tabular-nums">{whenText(r.createdAt, locale)}</span> },
     {
       key: 'status', header: 'Status', sortable: true,
       cell: (r) => (
         // One badge per row: with two-admin approval on, the stage says what the status says, more precisely.
-        r.secondApproverRequired && r.approvalStage ? (
-          <span data-testid="refund-stage"><Badge tone={REFUND_STAGE_TONE[r.approvalStage]}>{t(refundStageKey(r.approvalStage))}</Badge></span>
-        ) : (
-          <span data-testid="refund-status"><Badge tone={STATUS[r.status].tone}>{STATUS[r.status].label}</Badge></span>
-        )
+        <div className="space-y-1 max-w-[14rem]">
+          {r.secondApproverRequired && r.approvalStage ? (
+            <span data-testid="refund-stage"><Badge tone={REFUND_STAGE_TONE[r.approvalStage] ?? 'warning'}>{t(refundStageKey(r.approvalStage))}</Badge></span>
+          ) : (
+            <span data-testid="refund-status"><Badge tone={STATUS[r.status].tone}>{STATUS[r.status].label}</Badge></span>
+          )}
+          {auditLine(r) && (
+            <div
+              id={`refund-hint-${r.id}`}
+              className={`text-xs ${approveBlocked(r) || payBlocked(r) ? 'font-medium text-[var(--color-warning-700)]' : 'text-[var(--color-fg-tertiary)]'}`}
+              data-testid="refund-audit"
+            >
+              {auditLine(r)}
+            </div>
+          )}
+        </div>
       ),
     },
     {
@@ -205,23 +235,23 @@ export default function RefundsPage() {
                       {approveBlocked(refund) ? (
                         // A disabled button gets no hover in every browser: the wrapper carries the tooltip too.
                         <span title={approveBlocked(refund)!} data-testid="refund-approve-blocked">
-                          <Button variant="ghost" size="sm" disabled title={approveBlocked(refund)!} aria-label={approveBlocked(refund)!} data-testid="refund-approve">
+                          <Button variant="ghost" size="sm" disabled title={approveBlocked(refund)!} aria-label={approveBlocked(refund)!} aria-describedby={`refund-hint-${refund.id}`} data-testid="refund-approve">
                             <CheckCircle2 className="h-3.5 w-3.5 text-[var(--color-success-600)]" />
                           </Button>
                         </span>
                       ) : (
-                        <Button variant="ghost" size="sm" onClick={() => open(refund, 'approve')} title="Approve" data-testid="refund-approve">
+                        <Button variant="ghost" size="sm" onClick={() => open(refund, 'approve')} title={t('payments.action.approve')} aria-label={t('payments.action.approve')} data-testid="refund-approve">
                           <CheckCircle2 className="h-3.5 w-3.5 text-[var(--color-success-600)]" />
                         </Button>
                       )}
-                      <Button variant="ghost" size="sm" onClick={() => open(refund, 'reject')} title="Reject" data-testid="refund-reject">
+                      <Button variant="ghost" size="sm" onClick={() => open(refund, 'reject')} title={t('payments.action.reject')} aria-label={t('payments.action.reject')} data-testid="refund-reject">
                         <XCircle className="h-3.5 w-3.5 text-[var(--color-error-600)]" />
                       </Button>
                     </>
                   )}
                   {refund.status === 'approved' && (payBlocked(refund) ? (
                     <span title={payBlocked(refund)!} data-testid="refund-paid-blocked">
-                      <Button variant="ghost" size="sm" disabled title={payBlocked(refund)!} data-testid="refund-paid">
+                      <Button variant="ghost" size="sm" disabled title={payBlocked(refund)!} aria-describedby={`refund-hint-${refund.id}`} data-testid="refund-paid">
                         <Banknote className="h-3.5 w-3.5" /> Mark paid
                       </Button>
                     </span>
