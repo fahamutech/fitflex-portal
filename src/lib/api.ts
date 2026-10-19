@@ -930,6 +930,9 @@ export const api = {
     variants?: Array<{ name: string; costTzs?: number | null; reorderLevel?: number | null }>;
   }) =>
     request<ShopProduct>(`/admin/products/${id}/listing`, { method: 'PUT', body: JSON.stringify(listing) }, token),
+  /** Works rating/reviewCount/soldCount out again from real reviews and orders; writes only with apply true. */
+  recomputeProductStats: (token: string, body: { apply?: boolean; productIds?: string[] } = {}) =>
+    request<ProductStatsRecompute>('/admin/shop/product-stats/recompute', { method: 'POST', body: JSON.stringify(body) }, token),
   adminVendors: (token: string) => request<VendorSummary[]>('/admin/vendors', {}, token),
   updateAdminVendor: (token: string, id: string, patch: Partial<Pick<VendorSummary, 'approvalStatus' | 'accountStatus' | 'approvalNote' | 'commissionPct'>>) =>
     request<VendorSummary>(`/admin/vendors/${id}`, { method: 'PUT', body: JSON.stringify(patch) }, token),
@@ -1853,6 +1856,21 @@ export interface AdminProductDraft {
   approvalStatus?: 'pending' | 'approved' | 'rejected';
   homepageVisible?: boolean;
   homepagePriority?: number;
+}
+
+/** A product's stored marketplace stats, as POST /admin/shop/product-stats/recompute reports them (rating to 2 decimals). */
+export interface ProductStats { rating: number; reviewCount: number; soldCount: number }
+/**
+ * POST /admin/shop/product-stats/recompute (functions#220): a dry run (apply false) or the applied run.
+ * Errors: 403 non-admin; 409 recompute_in_progress (another apply running); 400 invalid_apply / invalid_product_ids / too_many_product_ids.
+ */
+export interface ProductStatsRecompute {
+  dryRun: boolean;
+  checked: number;
+  changed: Array<{ productId: string; name: string; vendorId: string; before: ProductStats; after: ProductStats }>;
+  unchanged: number;
+  appliedAt?: string;
+  runId?: string;
 }
 
 export interface VendorSummary {

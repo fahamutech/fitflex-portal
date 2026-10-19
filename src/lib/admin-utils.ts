@@ -17,6 +17,12 @@ export function money(value: number | null | undefined, currency = 'TZS') {
   return currency === '' ? ` ${amount}` : `${currencyLabel(currency)} ${amount}`;
 }
 
+/** "1,234" or "4.67" (up to `maxDecimals` places); '—' for no value. Counts and ratings, not money. */
+export function formatNumber(value: number | null | undefined, maxDecimals = 0) {
+  if (value == null || Number.isNaN(Number(value))) return '—';
+  return new Intl.NumberFormat('en-US', { maximumFractionDigits: maxDecimals }).format(Number(value));
+}
+
 export function formatDateTime(value: string | null | undefined) {
   if (!value) return '—';
   const date = new Date(value);
