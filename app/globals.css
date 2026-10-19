@@ -371,6 +371,8 @@ body {
   --hero-eyebrow-size: 11px;
   --hero-eyebrow-tracking: 0.18em;
   --hero-fade: 250ms;
+  --hero-crosshair-light: #ffffff;                /* focal-point ring: white + slate outline shows on any photo */
+  --hero-crosshair-dark: var(--hero-scrim);
 }
 
 /* Login layout with the photo panel: band on top below 1024, columns from 1024. */
@@ -496,4 +498,127 @@ body {
 }
 @media (prefers-reduced-data: reduce) and (max-width: 1023px) {
   .photo-panel { display: none; }
+}
+
+/* ── App photos admin (design spec photo-hero-screens §36.5) ──
+   HeroPreview draws a photo at a fixed CSS size with the same scrim tokens as
+   the app (FFPhotoHero compact / band, footer band) and the portal panel, so
+   an admin sees the real contrast. --hero-preview-stop is set from the
+   measured top of the text block minus 24px (spec §5.2 implementation rule). */
+.hero-preview {
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+  flex: none;
+  background: var(--hero-placeholder);
+  color: var(--hero-text);
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  --hero-preview-scale: 1;
+  --hero-preview-stop: 50%;
+}
+.hero-preview__img {
+  position: absolute;
+  inset: 0;
+  z-index: -2;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.hero-preview__scrim { position: absolute; inset: 0; z-index: -1; }
+.hero-preview--vertical .hero-preview__scrim {
+  background: linear-gradient(
+    to bottom,
+    rgb(var(--hero-scrim-rgb) / var(--hero-scrim-top)) 0,
+    rgb(var(--hero-scrim-rgb) / var(--hero-scrim-text)) var(--hero-preview-stop),
+    rgb(var(--hero-scrim-rgb) / var(--hero-scrim-text)) 100%
+  );
+}
+.hero-preview--uniform .hero-preview__scrim { background: rgb(var(--hero-scrim-rgb) / var(--hero-scrim-text)); }
+.hero-preview--horizontal .hero-preview__scrim {
+  background:
+    linear-gradient(
+      to top,
+      rgb(var(--hero-scrim-rgb) / var(--hero-scrim-panel-bottom)) 0%,
+      rgb(var(--hero-scrim-rgb) / 0) 30%
+    ),
+    linear-gradient(
+      to right,
+      rgb(var(--hero-scrim-rgb) / var(--hero-scrim-panel-lead)) 0%,
+      rgb(var(--hero-scrim-rgb) / var(--hero-scrim-text)) 50%,
+      rgb(var(--hero-scrim-rgb) / var(--hero-scrim-panel-tail)) 100%
+    );
+}
+.hero-preview--phone { width: 390px; height: 300px; padding: 20px; }
+.hero-preview--band { width: 342px; height: 180px; padding: 16px 20px; border-radius: var(--hero-sheet-radius); }
+.hero-preview--footer { width: 342px; height: 160px; padding: 16px 20px; border-radius: var(--hero-sheet-radius); justify-content: center; align-items: center; text-align: center; }
+.hero-preview--desktop { width: 960px; height: 320px; padding: 40px 48px; border-radius: var(--hero-sheet-radius); }
+.hero-preview--panel { width: 704px; height: 800px; padding: 64px; }
+.hero-preview--horizontal .hero-preview__content { max-width: 50%; }
+.hero-preview__eyebrow {
+  margin: 0 0 8px;
+  font-family: var(--hero-eyebrow-font);
+  font-size: calc(var(--hero-eyebrow-size) * var(--hero-preview-scale));
+  font-weight: 500;
+  letter-spacing: var(--hero-eyebrow-tracking);
+  text-transform: uppercase;
+  color: var(--hero-text);
+}
+.hero-preview__headline {
+  margin: 0;
+  font-weight: 900;
+  letter-spacing: var(--hero-display-tracking);
+  font-size: calc(var(--hero-display-size) * var(--hero-preview-scale));
+  line-height: calc(var(--hero-display-line) * var(--hero-preview-scale));
+  color: var(--hero-text);
+}
+.hero-preview--band .hero-preview__headline {
+  font-size: calc(var(--hero-display-size-small) * var(--hero-preview-scale));
+  line-height: calc(var(--hero-display-line-small) * var(--hero-preview-scale));
+}
+.hero-preview--horizontal .hero-preview__headline {
+  font-size: calc(var(--hero-display-size-wide) * var(--hero-preview-scale));
+  line-height: calc(var(--hero-display-line-wide) * var(--hero-preview-scale));
+}
+.hero-preview__accent { color: var(--hero-accent-light); }
+.hero-preview__footer-mark { font-weight: 800; font-size: calc(20px * var(--hero-preview-scale)); color: var(--hero-text); }
+.hero-preview__footer-line { margin: 6px 0 0; font-size: calc(15px * var(--hero-preview-scale)); color: var(--hero-text-body); }
+
+/* Focal-point picker: one Tab stop; the ring is white with a slate outline (spec §36.5). */
+.focal-picker {
+  position: relative;
+  display: block;
+  width: 100%;
+  max-width: 640px;
+  overflow: hidden;
+  border-radius: var(--radius-lg);
+  background: var(--hero-placeholder);
+  cursor: crosshair;
+  touch-action: none;
+  user-select: none;
+}
+.focal-picker:focus-visible { outline: 2px solid var(--color-brand-600); outline-offset: 2px; }
+.focal-picker__img { display: block; width: 100%; height: auto; pointer-events: none; }
+.focal-picker__mark {
+  position: absolute;
+  width: 28px;
+  height: 28px;
+  margin: -14px 0 0 -14px;
+  border-radius: 9999px;
+  border: 2px solid var(--hero-crosshair-light);
+  box-shadow: 0 0 0 2px var(--hero-crosshair-dark), inset 0 0 0 2px var(--hero-crosshair-dark);
+  pointer-events: none;
+}
+.focal-picker__mark::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 6px;
+  height: 6px;
+  margin: -3px 0 0 -3px;
+  border-radius: 9999px;
+  background: var(--hero-crosshair-light);
+  box-shadow: 0 0 0 2px var(--hero-crosshair-dark);
 }

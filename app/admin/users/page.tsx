@@ -7,8 +7,9 @@ import { useApp } from '../../providers';
 import { api, PortalUser, ApiError } from '@/lib/api';
 import { Button, PageHeader, Alert, Spinner, Card, Badge, Field, Table, TBody, Td, Th, THead, Tr } from '@/components/shared';
 import { ConfirmDialog } from '@/components/dialog';
+import { HERO_IMAGES_ADMIN } from '@/lib/flags';
 
-const ACL_SCOPES = [
+const ALL_ACL_SCOPES = [
   { key: 'gyms',      label: 'Gyms' },
   { key: 'owners',    label: 'Owners' },
   { key: 'trainers',  label: 'Trainers' },
@@ -41,9 +42,13 @@ const ACL_SCOPES = [
   { key: 'promotions_approve', label: 'Promotions: approve and activate' },
   { key: 'campaigns', label: 'Campaigns and placement limits' },
   { key: 'promotion_analytics', label: 'Promotion analytics' },
+  // App photos (spec photo-hero-screens §36). Offered only in builds with NEXT_PUBLIC_HERO_IMAGES_ADMIN=true;
+  // its label is translated (admin.nav.heroImages) where it is drawn.
+  { key: 'brand_media', label: 'App photos' },
 ] as const;
 
-type AclScope = typeof ACL_SCOPES[number]['key'];
+type AclScope = typeof ALL_ACL_SCOPES[number]['key'];
+const ACL_SCOPES = ALL_ACL_SCOPES.filter(s => s.key !== 'brand_media' || HERO_IMAGES_ADMIN);
 
 const ROLE_PRESETS = [
   { key: 'custom',      label: 'Custom',      scopes: [] as AclScope[] },
@@ -64,7 +69,8 @@ interface CreateForm {
 const EMPTY_FORM: CreateForm = { email: '', password: '', displayName: '', aclPermissions: [] };
 
 export default function PortalUsersPage() {
-  const { token, user } = useApp();
+  const { token, user, t } = useApp();
+  const scopeLabel = (s: typeof ALL_ACL_SCOPES[number]) => (s.key === 'brand_media' ? t('admin.nav.heroImages') : s.label);
   const [users, setUsers]           = useState<PortalUser[]>([]);
   const [loading, setLoading]       = useState(true);
   const [error, setError]           = useState<string | null>(null);
@@ -305,7 +311,7 @@ export default function PortalUsersPage() {
                         {form.aclPermissions.includes(s.key)
                           ? <ShieldCheck className="h-3 w-3" />
                           : <ShieldOff className="h-3 w-3" />}
-                        {s.label}
+                        {scopeLabel(s)}
                       </button>
                     ))}
                   </div>
@@ -373,7 +379,7 @@ export default function PortalUsersPage() {
                     {editPerms.includes(s.key)
                       ? <ShieldCheck className="h-3 w-3" />
                       : <ShieldOff className="h-3 w-3" />}
-                    {s.label}
+                    {scopeLabel(s)}
                   </button>
                 ))}
               </div>

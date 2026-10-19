@@ -36,7 +36,7 @@ import {
   Star,
   HandCoins,
   SlidersHorizontal,
-  Undo2, Receipt, KeyRound, ShieldAlert
+  Undo2, Receipt, KeyRound, ShieldAlert, Images
 } from 'lucide-react';
 import { useApp } from '../../app/providers';
 import { cn } from '@/lib/cn';
@@ -48,7 +48,7 @@ import { useVendor } from './vendor-context';
 import { BrandLogo } from './brand-logo';
 import { LanguageToggle } from './language-toggle';
 import { PhotoPanel } from './photo-panel';
-import { PHOTO_HERO_UI } from '@/lib/flags';
+import { HERO_IMAGES_ADMIN, PHOTO_HERO_UI } from '@/lib/flags';
 
 /* ── Nav definitions ─────────────────────────────────────── */
 type NavItem = {
@@ -150,6 +150,8 @@ const ADMIN_NAV: NavItem[] = [
   { href: '/admin/challenges',    labelKey: 'admin.nav.challenges',     icon: Trophy,          groupKey: 'nav.group.platform', aclScope: 'challenges' },
   { href: '/admin/rewards',       labelKey: 'admin.nav.rewards',        icon: Gift,            groupKey: 'nav.group.platform', aclScope: 'rewards' },
   { href: '/admin/exercises',     labelKey: 'admin.nav.exercises',      icon: Dumbbell,        groupKey: 'nav.group.platform', aclScope: 'exercises' },
+  // App photos (spec photo-hero-screens §36): only in builds with NEXT_PUBLIC_HERO_IMAGES_ADMIN=true.
+  ...(HERO_IMAGES_ADMIN ? [{ href: '/admin/hero-images', labelKey: 'admin.nav.heroImages', icon: Images, groupKey: 'nav.group.platform', aclScope: 'brand_media' }] : []),
   { href: '/admin/social',        labelKey: 'admin.nav.social',         icon: Flag,            groupKey: 'nav.group.platform', aclScope: 'social' },
   { href: '/admin/reviews',       labelKey: 'admin.nav.reviews',        icon: Star,            groupKey: 'nav.group.platform', aclScope: 'social' },
   { href: '/admin/communications', labelKey: 'admin.nav.communications', icon: Megaphone,     groupKey: 'nav.group.platform', aclScope: 'communications' },

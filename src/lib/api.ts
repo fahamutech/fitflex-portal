@@ -1077,6 +1077,86 @@ export const api = {
   },
   publicPasses: () => request<any[]>('/passes'),
 
+  // ─── App photos (admin, 'brand_media' scope; every route 404 feature_disabled while HERO_IMAGES_CMS is off) ───
+  adminHeroImages: (token: string) => request<HeroImagesState>('/admin/hero-images', {}, token),
+  /**
+   * Uploads the ORIGINAL photo file (no browser resize or re-encode; the server cleans it and makes
+   * the app sizes). Uses XHR for upload progress; `signal` aborts it.
+   */
+  uploadHeroImage: (
+    token: string,
+    file: File,
+    fields: HeroImageUploadFields,
+    opts: { onProgress?: (fraction: number) => void; signal?: AbortSignal } = {},
+  ): Promise<{ image: HeroImage }> => new Promise((resolve, reject) => {
+    const form = new FormData();
+    // Text fields first, the file last, so the server has every field before it reads the file.
+    form.append('source', fields.source);
+    form.append('photographer', fields.photographer);
+    form.append('licence', fields.licence);
+    if (fields.licenceRef) form.append('licenceRef', fields.licenceRef);
+    form.append('people', fields.people);
+    if (fields.consentRef) form.append('consentRef', fields.consentRef);
+    form.append('rightsConfirmed', fields.rightsConfirmed ? 'true' : 'false');
+    form.append('noFacesConfirmed', fields.noFacesConfirmed ? 'true' : 'false');
+    form.append('file', file, file.name);
+
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', `${BASE}/admin/hero-images`);
+    xhr.setRequestHeader('authorization', `Bearer ${token}`);
+    xhr.setRequestHeader('x-fitflex-client', IDENTITY_V2_CLIENT);
+    xhr.upload.onprogress = (e) => { if (e.lengthComputable) opts.onProgress?.(e.loaded / e.total); };
+    xhr.onload = () => {
+      let body: unknown = null;
+      try { body = xhr.responseText ? JSON.parse(xhr.responseText) : null; } catch { body = null; }
+      if (xhr.status >= 200 && xhr.status < 300) return resolve(body as { image: HeroImage });
+      if (xhr.status === 401 && _onUnauthorized) _onUnauthorized();
+      reject(new ApiError(xhr.status, body));
+    };
+    xhr.onerror = () => reject(new TypeError('network_error'));
+    xhr.onabort = () => reject(new DOMException('aborted', 'AbortError'));
+    if (opts.signal) {
+      if (opts.signal.aborted) { xhr.abort(); return; }
+      opts.signal.addEventListener('abort', () => xhr.abort(), { once: true });
+    }
+    xhr.send(form);
+  }),
+  /** A private (cleaned) photo, fetched with the session token: drafts have no public address. */
+  heroImagePreview: async (token: string, id: string, width?: HeroPreviewWidth, signal?: AbortSignal): Promise<Blob> => {
+    const res = await fetch(`${BASE}/admin/hero-images/${encodeURIComponent(id)}/preview${qs({ w: width })}`, {
+      headers: { authorization: `Bearer ${token}`, 'x-fitflex-client': IDENTITY_V2_CLIENT },
+      cache: 'no-store',
+      signal,
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      if (res.status === 401 && _onUnauthorized) _onUnauthorized();
+      throw new ApiError(res.status, body);
+    }
+    return res.blob();
+  },
+  updateHeroImage: (token: string, id: string, body: HeroImagePatch) =>
+    request<{ image: HeroImage; inLiveSnapshot?: boolean }>(
+      `/admin/hero-images/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(body) }, token),
+  /** Fast takedown: re-publishes the live snapshot without this photo. Drafts are untouched (the next publish brings it back). */
+  unpublishHeroImage: (token: string, id: string, note?: string) =>
+    request<{ publication: HeroPublication; removedFromSlots: string[] }>(`/admin/hero-images/${encodeURIComponent(id)}/unpublish`, { method: 'POST', body: JSON.stringify(note ? { note } : {}) }, token),
+  /** Sets a slot's DRAFT photos in order ([] = the app's built-in photo). Nothing changes in the apps until publish. */
+  setHeroSlot: (token: string, slotId: string, imageIds: string[]) =>
+    request<{ slot: { id: string; draft: string[] } }>(
+      `/admin/hero-slots/${encodeURIComponent(slotId)}`, { method: 'PUT', body: JSON.stringify({ imageIds }) }, token),
+  publishHeroSlots: (token: string, note?: string) =>
+    request<{ publication: HeroPublication }>('/admin/hero-slots/publish', { method: 'POST', body: JSON.stringify(note ? { note } : {}) }, token),
+  rollbackHeroSlots: (token: string, publicationId: number) =>
+    request<{ publication: HeroPublication }>('/admin/hero-slots/rollback', { method: 'POST', body: JSON.stringify({ publicationId }) }, token),
+  /** Public, no sign-in: the published app photos. An empty `slots` means "use the built-in photos". */
+  appHeroImages: async (signal?: AbortSignal): Promise<HeroManifest> => {
+    // No custom headers: a plain GET needs no CORS preflight and stays cacheable.
+    const res = await fetch(`${BASE}/app/hero-images`, { signal });
+    if (!res.ok) throw new ApiError(res.status, await res.json().catch(() => null));
+    return res.json() as Promise<HeroManifest>;
+  },
+
   /**
    * Uploads a single file (image) to the Zebra storage service via the
    * backend's multipart proxy (`POST /storage`). Returns the persisted URL
@@ -1099,6 +1179,135 @@ export const api = {
     return { ...body, url: `${BASE}${body.url}`, thumbnailUrl: `${BASE}${body.thumbnailUrl}` } as UploadedFile;
   },
 };
+
+// ─── App photos (design spec photo-hero-screens §36–§37; backend functions#216) ───
+export type HeroPeople = 'none' | 'hands_backs' | 'unclear_faces';
+export type HeroImageStatus = 'draft' | 'published' | 'retired';
+export type HeroPreviewWidth = 240 | 480 | 960;
+export type HeroLuminance = { mean: number; maxPatch: number };
+
+export interface HeroImage {
+  id: string;
+  sourceId: string;
+  status: HeroImageStatus;
+  width: number;
+  height: number;
+  /** Each -1..1 (Flutter Alignment). */
+  focal: { x: number; y: number };
+  focalX: number;
+  focalY: number;
+  variants: Record<string, unknown> | null;
+  /** Not a scalar: per text zone. Use `brightWarning` for the badge. */
+  textZoneLuminance: { vertical: HeroLuminance; horizontal: HeroLuminance } | null;
+  /** vertical = phone layouts (bottom 55%), horizontal = the desktop panel (left 50%). */
+  brightWarning: { vertical: boolean; horizontal: boolean };
+  source: string;
+  photographer: string;
+  licence: string;
+  licenceRef: string | null;
+  people: HeroPeople;
+  consentRef: string | null;
+  rightsConfirmedBy: string;
+  rightsConfirmedByName: string | null;
+  rightsConfirmedAt: string;
+  noFacesConfirmedBy: string;
+  noFacesConfirmedByName: string | null;
+  noFacesConfirmedAt: string;
+  createdBy: string;
+  createdByName: string | null;
+  createdAt: string;
+  updatedAt: string;
+  /** Root-relative and authenticated: fetch with the token, never put it in an <img>. */
+  previewUrl: string;
+  /** Public copies exist on storage (a failed publish can make them without the photo ever going live). */
+  hasPublicFiles?: boolean;
+  /** In the current live snapshot (GET /admin/hero-images only; null elsewhere). `status: 'published'` = has been live. */
+  live?: boolean | null;
+}
+
+export interface HeroSlot {
+  id: string;
+  area: string;
+  surface: 'mobile' | 'portal';
+  variant: 'full' | 'compact' | 'band' | 'panel' | string;
+  aspectHint: number;
+  maxImages: number;
+  /** Image ids, in order. */
+  draft: string[];
+  published: string[];
+  brightWarning: boolean;
+}
+
+export interface HeroPublication {
+  id: number;
+  publishedBy: string;
+  publishedByName?: string | null;
+  publishedAt: string;
+  note: string | null;
+  rolledBackFrom: number | null;
+  /** slotId → image ids. */
+  slots: Record<string, string[]>;
+}
+
+export interface HeroImagesState {
+  areas: string[];
+  images: HeroImage[];
+  slots: HeroSlot[];
+  /** The last 20, newest first. */
+  publications: HeroPublication[];
+}
+
+export interface HeroImageUploadFields {
+  source: string;
+  photographer: string;
+  licence: string;
+  licenceRef?: string;
+  people: HeroPeople;
+  consentRef?: string;
+  rightsConfirmed: boolean;
+  noFacesConfirmed: boolean;
+}
+
+export type HeroImagePatch = Partial<{
+  focal: { x: number; y: number };
+  source: string;
+  photographer: string;
+  licence: string;
+  licenceRef: string | null;
+  people: HeroPeople;
+  consentRef: string | null;
+  status: 'retired';
+  /** Required again whenever source, photographer, licence, licenceRef, people or consentRef change. */
+  rightsConfirmed: boolean;
+  noFacesConfirmed: boolean;
+}>;
+
+export interface HeroManifestEntry {
+  id: string;
+  sourceId: string;
+  url: string;
+  url1x: string;
+  urlWide: string;
+  urlAvif: string | null;
+  width: number;
+  height: number;
+  bytes: number;
+  focal: { x: number; y: number };
+}
+export interface HeroManifest {
+  version: number;
+  publishedAt?: string;
+  slots: Record<string, HeroManifestEntry[]>;
+}
+
+/**
+ * A published app photo's address. The server sends root-relative `/storage/<cid>/<file>`; anything
+ * else (absolute, protocol-relative, other paths) is refused so the portal only ever loads FitFlex's files.
+ */
+export function heroAssetUrl(path: string | null | undefined): string | null {
+  if (typeof path !== 'string' || !/^\/storage\/[A-Za-z0-9._~%-]+\/[A-Za-z0-9._~%-]+$/.test(path)) return null;
+  return `${BASE}${path}`;
+}
 
 export interface UploadedFile {
   cid: string | null;
