@@ -6,10 +6,11 @@
 
 import { useEffect, useState } from 'react';
 import { CommsResults } from '@/lib/api';
+import { money } from '@/lib/admin-utils';
 import { Alert, Button, Card, Spinner, Table, TBody, Td, Th, THead, Tr } from './shared';
 import { T, errorText, fill, when } from './communication-shared';
 
-const tzs = (n: number) => `TZS ${Math.round(n).toLocaleString('en-US')}`;
+const tzs = (n: number) => money(Math.round(n));
 const pct = (n: number | null | undefined, of: number) => (n == null || !of ? '' : ` · ${Math.round((n * 100) / of)}%`);
 
 export function ResultsView({ t, r, conversions = true }: { t: T; r: CommsResults; conversions?: boolean }) {

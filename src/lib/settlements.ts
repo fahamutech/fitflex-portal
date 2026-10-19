@@ -1,5 +1,5 @@
 // Labels and small helpers for the gym settlement screens.
-import type { BadgeTone } from '@/lib/admin-utils';
+import { money, type BadgeTone } from '@/lib/admin-utils';
 import type { GymSettlement, GymSettlementStatus, SettlementAdjustment } from '@/lib/api';
 
 export const STATEMENT_STATUS: Record<GymSettlementStatus, { label: string; tone: BadgeTone }> = {
@@ -82,7 +82,7 @@ const ERRORS: Record<string, string> = {
   nothing_to_pay: 'There is nothing to pay on this statement.',
   payment_reference_required: 'Enter the payment reference.',
   shadow_statement: 'Shadow statements are for checking only and cannot be changed.',
-  amount_must_be_whole_nonzero_tzs: 'Enter a whole amount in TZS that is not zero.',
+  amount_must_be_whole_nonzero_tzs: 'Enter a whole amount in TSh that is not zero.',
   clawback_must_be_negative: 'A clawback takes money back, so the amount must be negative.',
   forbidden: 'You don’t have permission to do that.',
   acl_forbidden: 'You don’t have permission to do that.',
@@ -109,8 +109,8 @@ export const shortDay = (date: string | null | undefined) => {
   return new Date(Date.UTC(y, m - 1, d)).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' });
 };
 
-/** Signed TZS: "−TZS 3,500" for money taken off. */
-export const signed = (value: number) => `${value < 0 ? '−' : ''}TZS ${new Intl.NumberFormat('en-US').format(Math.abs(value || 0))}`;
+/** Signed amount: "−TSh 3,500" for money taken off. */
+export const signed = (value: number) => `${value < 0 ? '−' : ''}${money(Math.abs(value || 0))}`;
 
 /** The month before this one, as "YYYY-MM" — the one that is usually settled. */
 export function lastMonth(now = new Date()) {
@@ -151,14 +151,14 @@ const CONFIG_ERRORS: Record<string, string> = {
   rule_missing: 'This gym’s tier has no active discount or ceiling rule for that date. Activate the rule first.',
   special_contract_reserved: 'Special contracts can’t be activated yet.',
   tier_key_required: 'Choose a pass.',
-  price_must_be_whole_tzs: 'Enter the price as a whole amount in TZS.',
+  price_must_be_whole_tzs: 'Enter the price as a whole amount in TSh.',
   allowance_must_be_whole_number: 'Enter the number of visits as a whole number.',
-  retail_must_be_whole_tzs: 'Enter all three retail rates as whole amounts in TZS.',
+  retail_must_be_whole_tzs: 'Enter all three retail rates as whole amounts in TSh.',
   gym_not_found: 'Choose a gym.',
   invalid_scope: 'Choose what the rule applies to.',
   scope_id_mismatch: 'Choose what the rule applies to.',
   rule_has_no_values: 'Fill in at least one value.',
-  invalid_rule_value: 'Percentages must be between 0 and 100, amounts whole TZS.',
+  invalid_rule_value: 'Percentages must be between 0 and 100, amounts whole TSh.',
   network_rule_scope: 'The network share can only be set for all gyms or for a pass.',
   reimbursement_rule_scope: 'Discounts and ceilings can’t be set per pass.',
 };

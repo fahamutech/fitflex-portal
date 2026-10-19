@@ -62,7 +62,7 @@ test('owner invites a member, staff and a trainer without setting a PIN', async 
   expect(created).toHaveLength(0);
 
   await memberForm.getByLabel('Member: Plan').selectOption('W');
-  await memberForm.getByLabel('Member: Paid at the desk (TZS)').fill('15000');
+  await memberForm.getByLabel('Member: Paid at the desk (TSh)').fill('15000');
   await memberForm.getByRole('button', { name: 'Send invitation' }).click();
   await expect(memberForm.getByText('Invitation sent.')).toBeVisible();
   await expect(memberForm.getByLabel('Invitation link')).toHaveValue(/\/invitations\?token=tok%201$/);
@@ -118,7 +118,7 @@ test('invitations sent: new link, cancel, and a paid one that lapsed', async ({ 
   await page.goto('/owner/manage');
   const sent = page.getByTestId('invitations-sent');
   await expect(sent.getByText('+255712345678 · Member')).toBeVisible();
-  await expect(sent.getByText('Paid TZS 50,000 but never accepted. Send it again or record a refund.')).toBeVisible();
+  await expect(sent.getByText('Paid TSh 50,000 but never accepted. Send it again or record a refund.')).toBeVisible();
   const done = page.getByTestId('invitation-inv_done');
   await expect(done.getByText('Accepted')).toBeVisible();
   await expect(done.getByRole('button')).toHaveCount(0);

@@ -20,7 +20,7 @@ const ERRORS: Record<string, string> = {
   cannot_issue_own_note: 'You drafted this note, so someone else has to issue it.',
   payment_reference_in_use: 'That reference is already recorded as a payment of a different amount. Apply that payment instead.',
   payment_reference_required: 'Enter the bank or mobile-money reference.',
-  invalid_amount: 'Enter a whole amount in TZS, more than zero.',
+  invalid_amount: 'Enter a whole amount in TSh, more than zero.',
   exceeds_outstanding: 'That is more than is still owed on the invoice.',
   exceeds_unallocated: 'That is more than is left on the payment.',
   invoice_not_open: 'That invoice is already paid, or isn’t issued yet.',
@@ -34,8 +34,8 @@ const ERRORS: Record<string, string> = {
   agreement_in_force: 'An agreement in force can’t be edited. End it and activate a new one.',
   invalid_effective_from: 'Enter the start date.',
   invalid_payment_terms: 'Payment terms are a number of days between 0 and 365.',
-  invalid_platform_fee: 'Enter the monthly fee in whole TZS.',
-  invalid_pass_rates: 'Enter each pass rate in whole TZS, more than zero.',
+  invalid_platform_fee: 'Enter the monthly fee in whole TSh.',
+  invalid_pass_rates: 'Enter each pass rate in whole TSh, more than zero.',
   invalid_email: 'That email address doesn’t look right.',
   organization_not_active: 'The organisation is not active.',
   acl_forbidden: 'Your permissions don’t include this.',
@@ -291,7 +291,7 @@ function OrganizationBilling({ token, org, can, userId, onBack }: { token: strin
                 )}
                 {!isNote && ['issued', 'partially_paid', 'paid'].includes(inv.status) && inv.totalTzs > 0 && (
                   <div className="flex flex-wrap items-end gap-2">
-                    <Field label="Correction amount (TZS)"><Input className="!w-40" inputMode="numeric" value={amount} onChange={e => setAmount(e.target.value)} data-testid="note-amount" /></Field>
+                    <Field label="Correction amount (TSh)"><Input className="!w-40" inputMode="numeric" value={amount} onChange={e => setAmount(e.target.value)} data-testid="note-amount" /></Field>
                     <Field label="Why"><Input className="!w-72" value={text} onChange={e => setText(e.target.value)} data-testid="note-reason" /></Field>
                     {(['credit', 'debit'] as const).map(type => (
                       <Button key={type} size="sm" variant="secondary" disabled={busy || !can.bill || !(whole(amount) > 0) || !text.trim()} data-testid={`note-${type}`}
@@ -396,7 +396,7 @@ function OrganizationBilling({ token, org, can, userId, onBack }: { token: strin
                 <CardContent className="space-y-3 py-4" data-testid="payment-form">
                   <div className="text-sm font-semibold">Record a payment</div>
                   <div className="grid gap-3 sm:grid-cols-4">
-                    <Field label="Amount (TZS)"><Input inputMode="numeric" value={payment.amount} onChange={e => setPayment({ ...payment, amount: e.target.value })} data-testid="payment-amount" /></Field>
+                    <Field label="Amount (TSh)"><Input inputMode="numeric" value={payment.amount} onChange={e => setPayment({ ...payment, amount: e.target.value })} data-testid="payment-amount" /></Field>
                     <Field label="How it was paid">
                       <Select value={payment.method} onChange={e => setPayment({ ...payment, method: e.target.value })} data-testid="payment-method">
                         {Object.entries(PAYMENT_METHOD).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
@@ -523,11 +523,11 @@ function OrganizationBilling({ token, org, can, userId, onBack }: { token: strin
                     <Field label="Contract reference (optional)"><Input value={draft.contractReference} onChange={e => setDraft({ ...draft, contractReference: e.target.value })} /></Field>
                     <Field label="Days to pay advance invoices"><Input inputMode="numeric" value={draft.prepaidTermsDays} onChange={e => setDraft({ ...draft, prepaidTermsDays: e.target.value })} /></Field>
                     <Field label="Days to pay usage invoices"><Input inputMode="numeric" value={draft.usageTermsDays} onChange={e => setDraft({ ...draft, usageTermsDays: e.target.value })} /></Field>
-                    <Field label="Platform fee a month, TZS incl. VAT (optional)"><Input inputMode="numeric" value={draft.platformFee} onChange={e => setDraft({ ...draft, platformFee: e.target.value })} data-testid="agreement-fee" /></Field>
+                    <Field label="Platform fee a month, TSh incl. VAT (optional)"><Input inputMode="numeric" value={draft.platformFee} onChange={e => setDraft({ ...draft, platformFee: e.target.value })} data-testid="agreement-fee" /></Field>
                     <Field label="Usual VAT rate % (optional)" hint="Offered when an invoice is issued."><Input inputMode="decimal" value={draft.vatPct} onChange={e => setDraft({ ...draft, vatPct: e.target.value })} /></Field>
                   </div>
                   <div className="space-y-2">
-                    <div className="text-xs text-[var(--color-fg-tertiary)]">Sponsored pass rate per person per month, TZS (optional). A tier left empty uses the pass price less the programme's discount; a fee set on a benefit comes first.</div>
+                    <div className="text-xs text-[var(--color-fg-tertiary)]">Sponsored pass rate per person per month, TSh (optional). A tier left empty uses the pass price less the programme's discount; a fee set on a benefit comes first.</div>
                     <div className="grid gap-3 sm:grid-cols-4">
                       {Object.keys(draft.rates).map(tier => (
                         <Field key={tier} label={tier[0].toUpperCase() + tier.slice(1)}><input className="ui-input" inputMode="numeric" value={draft.rates[tier]} onChange={e => setDraft({ ...draft, rates: { ...draft.rates, [tier]: e.target.value } })} data-testid={`agreement-rate-${tier}`} /></Field>
