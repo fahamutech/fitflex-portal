@@ -227,3 +227,45 @@ test('payments: same paying number shows no warning, and a reused transaction ID
   await expect(page.getByText('This transaction ID is already recorded on another pending or approved payment')).toBeVisible();
   expect(runtimeErrors).toEqual([]);
 });
+
+test('payments, two admins on (A1 + A3): a verified row is approved with the verified reference, which stays locked', async ({ page }) => {
+  const runtimeErrors: Error[] = [];
+  page.on('pageerror', error => runtimeErrors.push(error));
+  await signInAsAdmin(page);
+  const posts: { id: string; body: unknown }[] = [];
+
+  await page.route(`${API}/**`, async route => {
+    const req = route.request();
+    const url = new URL(req.url());
+    if (url.pathname === '/admin/payment-requests') {
+      return route.fulfill({
+        json: [{
+          id: 'pay-verified', memberId: 'member-1', subscriptionId: 'sub-1', tier: 'pro', amountTzs: 60000,
+          status: 'pending', provider: 'admin_approved', reference: 'QGH7XK2L9P', memberReference: 'QGH7XK2L9P', payerPhone: '+255754000111', note: null,
+          requestedAt: '2026-10-19T08:00:00.000Z', decidedAt: null,
+          secondApproverRequired: true, approvalStage: 'awaiting_approval', verifiedBy: 'admin-2', verifiedAt: '2026-10-19T08:30:00.000Z',
+          approveNotBy: 'admin-2', confirmChangeNotBy: null,
+          member: { displayName: 'Verified Payer', phone: '0754 000 111' }, subscription: { type: 'platform_pass', tier: 'pro', status: 'payment_pending' },
+        }],
+      });
+    }
+    if (url.pathname === '/admin/payment-requests/pay-verified' && req.method() === 'POST') {
+      posts.push({ id: 'pay-verified', body: req.postDataJSON() });
+      return route.fulfill({ json: { id: 'pay-verified', status: 'approved' } });
+    }
+    return route.fulfill({ json: [] });
+  });
+
+  await page.goto('/admin/payments');
+  await page.getByRole('row', { name: /Verified Payer/ }).getByTitle('Approve').click();
+  const dialog = page.getByRole('dialog');
+  await expect(dialog.getByTestId('member-reference-highlight')).toContainText('QGH7XK2L9P');
+  const ref = dialog.getByTestId('approve-reference');
+  await expect(ref).toHaveValue('QGH7XK2L9P');
+  await expect(ref).toBeDisabled();
+  await expect(dialog.getByText('The transaction ID is locked once a payment is verified or decided.')).toBeVisible();
+  await dialog.getByTestId('approve-with-reference').click();
+  await expect(dialog).toHaveCount(0);
+  expect(posts).toEqual([{ id: 'pay-verified', body: { status: 'approved', reference: 'QGH7XK2L9P' } }]);
+  expect(runtimeErrors).toEqual([]);
+});

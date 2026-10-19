@@ -62,6 +62,8 @@ export function ApproveWithReferenceDialog({
   useEffect(() => { setReference(payment ? (payment.reference || payment.memberReference || '') : ''); }, [payment]);
   if (!payment) return null;
   const memberRef = payment.memberReference || '';
+  // A1 (MONEY_SECOND_APPROVER): a verified payment is approved with the reference it was verified with.
+  const locked = !!payment.secondApproverRequired && !!payment.verifiedBy;
   const differs = reference.trim().toUpperCase() !== memberRef.toUpperCase();
   return (
     <Dialog
@@ -95,8 +97,8 @@ export function ApproveWithReferenceDialog({
         {payerPhoneDiffers(payment) && (
           <p role="status" className="text-xs text-[var(--color-fg-tertiary)]" data-testid="payer-phone-differs">{t('manualPay.phoneDiffers')}</p>
         )}
-        <Field label={t('manualPay.referenceToRecord')} hint={t('manualPay.referenceHint')}>
-          <Input className="font-mono" data-testid="approve-reference" value={reference} onChange={e => setReference(e.target.value)} />
+        <Field label={t('manualPay.referenceToRecord')} hint={locked ? t('money2.referenceLocked') : t('manualPay.referenceHint')}>
+          <Input className="font-mono" data-testid="approve-reference" value={reference} disabled={locked} onChange={e => setReference(e.target.value)} />
         </Field>
         {differs && (
           <p role="status" className="text-xs font-medium text-[var(--color-warning-700)]" data-testid="approve-reference-differs">
