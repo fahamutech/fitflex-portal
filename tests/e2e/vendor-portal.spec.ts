@@ -678,3 +678,81 @@ test.describe('UAT fixes', () => {
     await expect(page.getByTestId('product-row-prd_1').getByRole('cell').nth(2)).toContainText('7');
   });
 });
+
+// ── UAT re-check leftovers ──
+test.describe('UAT re-check', () => {
+  test('(2) a refused count that reveals low stock shows the Low stock badge', async ({ page }) => {
+    await signedInAs(page, VENDOR);
+    await mockApi(page, vendorBase({
+      'POST /vendor/products/prd_1/stock-adjustments': { status: 409, json: { error: 'stock_changed', currentStock: 3 } },
+    }));
+    await page.goto('/vendor/products/');
+    const row = page.getByTestId('product-row-prd_1');
+    await expect(row.getByText('Low stock')).toHaveCount(0);
+    await page.getByRole('button', { name: 'Adjust stock for Whey Protein' }).click();
+    const dialog = page.getByRole('dialog');
+    await dialog.getByLabel('Counted').check();
+    await dialog.getByTestId('adjust-quantity').fill('9');
+    await dialog.getByTestId('adjust-save').click();
+    await expect(dialog.getByTestId('adjust-current')).toHaveText('3');
+    await page.keyboard.press('Escape');
+    await expect(row.getByText('Low stock')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Low stock (2)' })).toBeVisible();
+  });
+
+  test('(3) a cancelled, refunded order shows no "you receive" and no 7-day contact line', async ({ page }) => {
+    await signedInAs(page, VENDOR);
+    const cancelled = order({ status: 'cancelled', orderStatus: 'cancelled', nextStatuses: [], paymentStatus: 'refunded', buyer: { customerId: 'cus_9', displayName: 'Asha M.' } });
+    await mockApi(page, vendorBase({ 'GET /vendor/orders/ord_0000ab12cd': { json: cancelled } }));
+    await page.goto('/vendor/orders/?id=ord_0000ab12cd');
+    const detail = page.getByTestId('order-detail');
+    await expect(detail.getByTestId('order-subtotal')).toBeVisible();
+    await expect(detail.getByTestId('order-you-receive')).toHaveCount(0);
+    await expect(detail.getByText('FitFlex commission')).toHaveCount(0);
+    await expect(detail.getByTestId('order-contact-hidden')).toHaveCount(0);
+  });
+
+  test('(3) a delivered order past its window still explains the hidden contact', async ({ page }) => {
+    await signedInAs(page, VENDOR);
+    const delivered = order({ status: 'delivered', orderStatus: 'delivered', nextStatuses: [], buyer: { customerId: 'cus_9', displayName: 'Asha M.' } });
+    await mockApi(page, vendorBase({ 'GET /vendor/orders/ord_0000ab12cd': { json: delivered } }));
+    await page.goto('/vendor/orders/?id=ord_0000ab12cd');
+    await expect(page.getByTestId('order-contact-hidden')).toBeVisible();
+    await expect(page.getByTestId('order-you-receive')).toBeVisible();
+  });
+
+  test('(4) Adjust stock, History and the language select are at least 44px at desktop width', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await signedInAs(page, VENDOR);
+    await mockApi(page, vendorBase());
+    await page.goto('/vendor/products/');
+    const tall = async (locator: ReturnType<Page['locator']>) => expect((await locator.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44);
+    await tall(page.getByRole('button', { name: 'Adjust stock for Whey Protein' }));
+    await tall(page.getByRole('link', { name: 'Stock history for Whey Protein' }));
+    await tall(page.locator('aside').first().getByTestId('locale-select'));
+  });
+
+  test('(6) Back from a deep-linked order focuses the orders heading', async ({ page }) => {
+    await signedInAs(page, VENDOR);
+    await mockApi(page, vendorBase({ 'GET /vendor/orders/ord_elsewhere': { json: order({ id: 'ord_elsewhere', shortRef: 'ELSEWH' }) } }));
+    await page.goto('/vendor/orders/?id=ord_elsewhere');
+    await page.getByTestId('order-back').click();
+    await expect(page.getByRole('heading', { name: 'Orders', level: 1 })).toBeFocused();
+  });
+
+  test('409 order_cancelled says so and reloads the order', async ({ page }) => {
+    await signedInAs(page, VENDOR);
+    let cancelledMeanwhile = false;
+    await mockApi(page, vendorBase({
+      'GET /vendor/orders/ord_0000ab12cd': () => ({ json: cancelledMeanwhile ? order({ status: 'cancelled', orderStatus: 'cancelled', nextStatuses: [], paymentStatus: 'refund_pending' }) : order() }),
+      'POST /vendor/orders/ord_0000ab12cd/status': () => { cancelledMeanwhile = true; return { status: 409, json: { error: 'order_cancelled' } }; },
+    }));
+    await page.goto('/vendor/orders/?id=ord_0000ab12cd');
+    const detail = page.getByTestId('order-detail');
+    await detail.getByTestId('order-move-accepted').click();
+    await page.getByRole('dialog').getByTestId('order-move-confirm').click();
+    await expect(detail.getByText('This order has been cancelled. Here is where it stands now.')).toBeVisible();
+    await expect(detail.getByTestId('order-move-accepted')).toHaveCount(0);
+    await expect(detail.getByTestId('order-cancel')).toHaveCount(0);
+  });
+});

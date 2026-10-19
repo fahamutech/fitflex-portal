@@ -126,7 +126,11 @@ function OrdersInner() {
       const links = [document.getElementById(`order-link-${id}`), document.getElementById(`order-mlink-${id}`)];
       const el = links.find(x => x && x.offsetParent !== null);
       if (el) { el.focus(); focusRowOnClose.current = null; return; }
-      if (++tries < 20) requestAnimationFrame(tryFocus);
+      if (++tries < 20) { requestAnimationFrame(tryFocus); return; }
+      // The order was opened from a link, not from this list (or its row is not loaded): the list's heading.
+      const heading = document.querySelector<HTMLElement>('[data-testid="orders-list"] h1');
+      if (heading) { heading.tabIndex = -1; heading.focus(); }
+      focusRowOnClose.current = null;
     };
     requestAnimationFrame(tryFocus);
   }, [openId, orders]);
@@ -139,7 +143,7 @@ function OrdersInner() {
   const emptyKey: Record<Tab, MessageKey> = { open: 'vendor.orders.emptyOpen', delivered: 'vendor.orders.emptyDelivered', cancelled: 'vendor.orders.emptyCancelled', all: 'vendor.orders.emptyAll' };
 
   const list = (
-    <div className="space-y-4">
+    <div className="space-y-4" data-testid="orders-list">
       <PageHeader
         title={t('vendor.nav.orders')}
         actions={<Button variant="secondary" size="sm" className="min-h-11" onClick={load}><RefreshCw aria-hidden="true" className="h-4 w-4" />{t('admin.action.refresh')}</Button>}
@@ -325,7 +329,8 @@ function OrderDetail({ id, onBack, onUpdated }: { id: string; onBack: () => void
   const o = order;
   const paid = isPaid(o);
   const suspended = vendor.me?.accountStatus === 'suspended';
-  const showMoney = o.items.some(i => 'commissionTzs' in i);
+  // Commission and "you receive" mean nothing on a cancelled or refunded order.
+  const showMoney = o.items.some(i => 'commissionTzs' in i) && orderTab(o) !== 'cancelled';
   const sum = (key: 'commissionTzs' | 'vendorPayoutTzs') => o.items.reduce((n, i) => n + Number(i[key] ?? 0), 0);
   const contactOn = vendor.me?.tools.buyerContact === true;
   const phone = o.buyer?.phone || null;
@@ -431,7 +436,8 @@ function OrderDetail({ id, onBack, onUpdated }: { id: string; onBack: () => void
           {(phone || address) && o.buyer?.contactVisibleUntil && (
             <p className="text-xs text-[var(--color-fg-tertiary)]">{fmt(t('vendor.orders.contactUntil'), { date: eatDateTime(o.buyer.contactVisibleUntil, locale) })}</p>
           )}
-          {contactOn && !phone && !address && isTerminal(o.status) && (
+          {/* Only a delivered order hides contact after 7 days; a cancelled one never had the window. */}
+          {contactOn && !phone && !address && orderTab(o) === 'delivered' && (
             <p className="text-xs text-[var(--color-fg-tertiary)]" data-testid="order-contact-hidden">{t('vendor.orders.contactHidden')}</p>
           )}
           {o.note && (

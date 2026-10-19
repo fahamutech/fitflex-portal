@@ -90,6 +90,18 @@ function ProductsInner() {
       const total = vs.every(v => typeof v.stock === 'number') ? vs.reduce((n, v) => n + Number(v.stock), 0) : p.stock;
       return { ...p, stock: total, variants: vs };
     }));
+    // The Low stock badge follows the new number: low when at or below the reorder level (a variant
+    // without its own level uses the product's, as on the server).
+    const product = (rows ?? []).find(p => p.id === productId);
+    if (!product) return;
+    const v = variant ? variantsOf(product).find(x => x.name === variant) : null;
+    const reorder = variant ? (v?.effectiveReorderLevel ?? v?.reorderLevel ?? product.reorderLevel ?? null) : (product.reorderLevel ?? null);
+    setLow(current => {
+      const rest = current.filter(r => !(r.productId === productId && (r.variant ?? null) === (variant ?? null)));
+      return reorder != null && stock <= reorder
+        ? [...rest, { productId, name: product.name, variant: variant ?? null, stock, reorderLevel: reorder }]
+        : rest;
+    });
   }
 
   function applyStock(stock: ProductStock) {
@@ -115,12 +127,12 @@ function ProductsInner() {
   const dash = (v: number | null | undefined, asMoney = false) => (v == null ? '—' : asMoney ? money(v) : String(v));
   const historyHref = (p: VendorProduct, variant?: string | null) =>
     `/vendor/products/history/?id=${encodeURIComponent(p.id)}${variant ? `&variant=${encodeURIComponent(variant)}` : ''}`;
-  const linkBtn = 'inline-flex min-h-11 md:min-h-9 items-center justify-center gap-1.5 rounded-[var(--radius-lg)] px-3.5 text-sm font-semibold text-[var(--color-fg-secondary)] hover:bg-[var(--color-bg-tertiary)] hover:text-[var(--color-fg-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand-500)]';
+  const linkBtn = 'inline-flex min-h-11 items-center justify-center gap-1.5 rounded-[var(--radius-lg)] px-3.5 text-sm font-semibold text-[var(--color-fg-secondary)] hover:bg-[var(--color-bg-tertiary)] hover:text-[var(--color-fg-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand-500)]';
   const toggle = (id: string) => setExpanded(s => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
 
   const actions = (p: VendorProduct, variant: string | null = null) => ledger ? (
     <div className="flex flex-wrap gap-2">
-      <Button variant="secondary" size="sm" className="max-md:flex-1 max-md:min-h-11" aria-label={fmt(t('vendor.stock.adjustFor'), { name: variant ? `${p.name} · ${variant}` : p.name })}
+      <Button variant="secondary" size="sm" className="min-h-11 max-md:flex-1" aria-label={fmt(t('vendor.stock.adjustFor'), { name: variant ? `${p.name} · ${variant}` : p.name })}
         onClick={() => setAdjust({ product: p, variant })} data-testid={`adjust-${p.id}${variant ? `-${variant}` : ''}`}>
         <SlidersHorizontal aria-hidden="true" className="h-4 w-4" />{t('vendor.stock.adjust')}
       </Button>
