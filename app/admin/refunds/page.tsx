@@ -7,6 +7,7 @@ import { Badge, Button, PageHeader, Alert, Spinner, Card, Field } from '@/compon
 import { DataTable, ColumnDef } from '@/components/data-table';
 import { Dialog, DialogFooter } from '@/components/dialog';
 import { money, formatDateTime } from '@/lib/admin-utils';
+import { REFUND_STAGE_TONE, flagOnErrorKey, refundStageKey } from '@/lib/money-approval';
 
 type Filter = RefundStatus | 'all';
 type Action = { refund: Refund; kind: 'approve' | 'reject' | 'paid' };
@@ -39,7 +40,7 @@ const errorText = (e: unknown, fallback: string) => {
 };
 
 export default function RefundsPage() {
-  const { token, user } = useApp();
+  const { token, user, t } = useApp();
   const [refunds, setRefunds] = useState<Refund[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -89,13 +90,21 @@ export default function RefundsPage() {
       setAction(null);
       await load();
     } catch (e) {
-      setActionError(errorText(e, 'That did not save. Try again.'));
+      // Two-admin refusals (flag on only) have their own text; everything else keeps today's.
+      const key = flagOnErrorKey(e);
+      setActionError(key ? t(key) : errorText(e, 'That did not save. Try again.'));
     } finally {
       setBusy(false);
     }
   }
 
   if (!token || user?.userType !== 'admin') return null;
+
+  // MONEY_SECOND_APPROVER on: the admin who raised a refund doesn't approve it; the approver doesn't pay it.
+  const approveBlocked = (r: Refund) => (r.secondApproverRequired && r.approveNotBy && r.approveNotBy === user.id ? t('money2.refundApproveBlockedOwn') : null);
+  // payNotBy is the approver, or (policy-approved refunds) the admin who started it.
+  const payBlocked = (r: Refund) => (r.secondApproverRequired && r.payNotBy && r.payNotBy === user.id
+    ? t(r.decidedBy === 'policy' ? 'money2.refundPayBlockedStarted' : 'money2.refundPayBlockedOwn') : null);
 
   const shown = refunds.filter(r => filter === 'all' || r.status === filter);
   const count = (s: RefundStatus) => refunds.filter(r => r.status === s).length;
@@ -123,7 +132,17 @@ export default function RefundsPage() {
     },
     { key: 'amountTzs', header: 'Amount', sortable: true, align: 'right', cell: (r) => <span className="font-medium tabular-nums">{money(r.amountTzs)}</span> },
     { key: 'createdAt', header: 'Raised', sortable: true, cell: (r) => <span className="whitespace-nowrap text-xs tabular-nums">{formatDateTime(r.createdAt)}</span> },
-    { key: 'status', header: 'Status', sortable: true, cell: (r) => <Badge tone={STATUS[r.status].tone}>{STATUS[r.status].label}</Badge> },
+    {
+      key: 'status', header: 'Status', sortable: true,
+      cell: (r) => (
+        // One badge per row: with two-admin approval on, the stage says what the status says, more precisely.
+        r.secondApproverRequired && r.approvalStage ? (
+          <span data-testid="refund-stage"><Badge tone={REFUND_STAGE_TONE[r.approvalStage]}>{t(refundStageKey(r.approvalStage))}</Badge></span>
+        ) : (
+          <span data-testid="refund-status"><Badge tone={STATUS[r.status].tone}>{STATUS[r.status].label}</Badge></span>
+        )
+      ),
+    },
     {
       key: 'paymentReference', header: 'Reference',
       cell: (r) => (
@@ -183,19 +202,34 @@ export default function RefundsPage() {
                 <>
                   {refund.status === 'requested' && (
                     <>
-                      <Button variant="ghost" size="sm" onClick={() => open(refund, 'approve')} title="Approve" data-testid="refund-approve">
-                        <CheckCircle2 className="h-3.5 w-3.5 text-[var(--color-success-600)]" />
-                      </Button>
+                      {approveBlocked(refund) ? (
+                        // A disabled button gets no hover in every browser: the wrapper carries the tooltip too.
+                        <span title={approveBlocked(refund)!} data-testid="refund-approve-blocked">
+                          <Button variant="ghost" size="sm" disabled title={approveBlocked(refund)!} aria-label={approveBlocked(refund)!} data-testid="refund-approve">
+                            <CheckCircle2 className="h-3.5 w-3.5 text-[var(--color-success-600)]" />
+                          </Button>
+                        </span>
+                      ) : (
+                        <Button variant="ghost" size="sm" onClick={() => open(refund, 'approve')} title="Approve" data-testid="refund-approve">
+                          <CheckCircle2 className="h-3.5 w-3.5 text-[var(--color-success-600)]" />
+                        </Button>
+                      )}
                       <Button variant="ghost" size="sm" onClick={() => open(refund, 'reject')} title="Reject" data-testid="refund-reject">
                         <XCircle className="h-3.5 w-3.5 text-[var(--color-error-600)]" />
                       </Button>
                     </>
                   )}
-                  {refund.status === 'approved' && (
+                  {refund.status === 'approved' && (payBlocked(refund) ? (
+                    <span title={payBlocked(refund)!} data-testid="refund-paid-blocked">
+                      <Button variant="ghost" size="sm" disabled title={payBlocked(refund)!} data-testid="refund-paid">
+                        <Banknote className="h-3.5 w-3.5" /> Mark paid
+                      </Button>
+                    </span>
+                  ) : (
                     <Button variant="ghost" size="sm" onClick={() => open(refund, 'paid')} data-testid="refund-paid">
                       <Banknote className="h-3.5 w-3.5" /> Mark paid
                     </Button>
-                  )}
+                  ))}
                 </>
               )}
             />
