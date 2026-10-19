@@ -138,7 +138,7 @@ export default function PaymentsPage() {
       const raised = await api.raiseRefund(token, { paymentRequestId: refundTarget.id, amountTzs: Number(refundFields.amount), note: refundFields.note.trim() || undefined });
       setRefundTarget(null);
       // With two-admin approval on, an admin-raised refund waits for a different admin to approve it.
-      setNotice(raised?.refund?.status === 'requested' ? t('money2.notice.refundNeedsApproval') : 'Refund raised. Record the payment under Refunds once you have sent it.');
+      setNotice(raised?.refund?.status === 'requested' ? t('money2.notice.refundNeedsApproval') : t('money2.notice.refundRaised'));
     } catch (e) {
       const code = e instanceof ApiError ? (e.body as { error?: string } | null)?.error : undefined;
       setRefundError(code === 'refund_already_requested' ? 'This payment already has a refund. See Refunds.'
@@ -315,7 +315,7 @@ export default function PaymentsPage() {
                   {payment.status === 'pending' && payment.secondApproverRequired && !payment.verifiedBy && (
                     <Button
                       variant="ghost" size="sm" data-testid="payment-verify"
-                      onClick={() => { setVerifyTarget(payment); setDialogError(null); setNotice(null); setVerifyFields({ reference: payment.reference || '', note: '' }); }}
+                      onClick={() => { setVerifyTarget(payment); setDialogError(null); setNotice(null); setVerifyFields({ reference: payment.reference || payment.memberReference || '', note: '' }); }}
                     >
                       <ShieldCheck className="h-3.5 w-3.5" /> {t('money2.verify')}
                     </Button>
@@ -447,6 +447,26 @@ export default function PaymentsPage() {
       >
         <div className="space-y-4">
           <p className="text-sm text-[var(--color-fg-secondary)]">{t('money2.verifyBody')}</p>
+          {verifyTarget && (verifyTarget.memberReference || verifyTarget.payerPhone) && (
+            // What the member says they paid with: match it against the till statement.
+            <div className="rounded-[var(--radius-lg)] border border-[var(--color-info-200)] bg-[var(--color-info-50)] px-4 py-3 text-sm text-[var(--color-info-800)]" data-testid="verify-member-details">
+              <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
+                {verifyTarget.memberReference && (
+                  <>
+                    <dt>{t('money2.memberRef')}</dt>
+                    <dd className="font-mono font-semibold" data-testid="verify-member-reference">{verifyTarget.memberReference}</dd>
+                  </>
+                )}
+                {verifyTarget.payerPhone && (
+                  <>
+                    <dt>{t('money2.payerPhone')}</dt>
+                    <dd className="font-mono font-semibold" data-testid="verify-payer-phone">{verifyTarget.payerPhone}</dd>
+                  </>
+                )}
+              </dl>
+              <p className="mt-2 text-xs">{t('money2.matchStatement')}</p>
+            </div>
+          )}
           {dialogError && <Alert tone="error">{dialogError}</Alert>}
           <Field label={t('money2.reference')} hint={t('money2.referenceHint')}>
             <input className="ui-input" data-testid="verify-reference" value={verifyFields.reference} onChange={e => setVerifyFields({ ...verifyFields, reference: e.target.value })} />

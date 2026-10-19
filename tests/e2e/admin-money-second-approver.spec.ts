@@ -83,6 +83,7 @@ test.describe('Payments: second approver', () => {
         return {
           json: [{
             ...basePayment, id: 'pay-1', status: 'pending', reference: null, decidedAt: null,
+            memberReference: 'MPESA123', payerPhone: '+255700000001',
             verifiedBy: verified ? 'admin-1' : null, verifiedAt: verified ? '2026-10-19T09:00:00.000Z' : null,
             secondApproverRequired: true,
             approvalStage: verified ? 'awaiting_second_approval' : 'awaiting_verification',
@@ -104,7 +105,10 @@ test.describe('Payments: second approver', () => {
     await expect(page.getByTestId('payment-approve-blocked')).toHaveAttribute('title', 'Verify this payment first. A different admin then approves it.');
 
     await page.getByTestId('payment-verify').click();
-    await page.getByTestId('verify-reference').fill('MPESA123');
+    // The member's transaction ID and number are shown to match against the till, and prefill the field.
+    await expect(page.getByTestId('verify-member-reference')).toHaveText('MPESA123');
+    await expect(page.getByTestId('verify-payer-phone')).toHaveText('+255700000001');
+    await expect(page.getByTestId('verify-reference')).toHaveValue('MPESA123');
     await page.getByTestId('verify-note').fill('Seen on statement');
     await page.getByTestId('verify-submit').click();
     await expect.poll(() => calls.find(c => c.path.endsWith('/verify'))?.body).toEqual({ reference: 'MPESA123', note: 'Seen on statement' });
@@ -118,6 +122,35 @@ test.describe('Payments: second approver', () => {
     await expect(page.getByTestId('payment-approve-blocked')).toHaveAttribute('title', 'You verified this payment. A different admin must approve it.');
     expect(calls.some(c => c.path === '/admin/payment-requests/pay-1')).toBe(false);
     expect(errors).toEqual([]);
+  });
+
+  test('Verify dialog in Swahili uses one word for the transaction ID; no member details, no box', async ({ page }) => {
+    await signIn(page, 'admin-1', 'sw');
+    await mockApi(page, ({ method, path }) => {
+      if (method === 'GET' && path === '/admin/payment-requests') {
+        return {
+          json: [
+            { ...basePayment, id: 'pay-1', status: 'pending', reference: null, decidedAt: null, memberReference: 'QX12AB34',
+              secondApproverRequired: true, approvalStage: 'awaiting_verification', approveNotBy: null },
+            { ...basePayment, id: 'pay-2', status: 'pending', reference: 'BANK-9', decidedAt: null, member: { displayName: 'Baraka Member' },
+              secondApproverRequired: true, approvalStage: 'awaiting_verification', approveNotBy: null },
+          ],
+        };
+      }
+      return null;
+    });
+    await page.goto('/admin/payments');
+    await page.getByTestId('payment-verify').first().click();
+    const dialog = page.getByRole('dialog');
+    await expect(dialog.getByText('Namba ya muamala ya mwanachama')).toBeVisible();
+    await expect(dialog.getByText('Namba ya muamala ya kuhifadhi')).toBeVisible();
+    await expect(dialog.getByText(/Kumbukumbu/)).toHaveCount(0);
+    await expect(page.getByTestId('verify-payer-phone')).toHaveCount(0);
+    await page.getByRole('button', { name: 'Funga', exact: true }).last().click();
+    // A recorded reference wins over the member's; no member details means no box.
+    await page.getByTestId('payment-verify').nth(1).click();
+    await expect(page.getByTestId('verify-reference')).toHaveValue('BANK-9');
+    await expect(page.getByTestId('verify-member-details')).toHaveCount(0);
   });
 
   test('admin 2 approves a payment admin 1 verified', async ({ page }) => {

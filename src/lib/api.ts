@@ -1408,6 +1408,10 @@ export interface PaymentRequest {
     renewsAt?: string;
     expiresAt?: string | null;
   } | null;
+  /** Manual payments (functions#188): the transaction ID the member typed, kept apart from `reference`. */
+  memberReference?: string | null;
+  /** The number the member paid from, when the server sends it (functions#188). */
+  payerPhone?: string | null;
   /** Columns (null unless used): who checked the money arrived, and a pending change request. */
   verifiedBy?: string | null;
   verifiedAt?: string | null;
