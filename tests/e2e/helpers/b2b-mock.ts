@@ -64,6 +64,13 @@ export const BENEFIT = {
   sponsorCapTzs: null, beneficiaryAmountTzs: null, usageLimit: 8, usagePeriod: 'month', periodSponsorCapTzs: null, eligibility: null, providerRules: { scope: 'all' },
   startDate: null, endDate: null, terms: null, passTier: null, status: 'draft', validity: { startDate: '2026-10-01', endDate: '2026-12-31' }, fundingSummary: 'Sponsor pays in full',
 };
+/** GET /subscription-tiers: only sellable tiers are listed (fitflex-functions#189). Live seed values. */
+export const SELLABLE_TIERS = [
+  { key: 'basic', label: 'Basic', monthlyPrice: 30000, visits: 12, gymAccess: 'standard' },
+  { key: 'pro', label: 'Pro', monthlyPrice: 60000, visits: 30, gymAccess: 'midtier' },
+  { key: 'premium', label: 'Premium', monthlyPrice: 100000, visits: 30, gymAccess: 'premium' },
+  { key: 'executive', label: 'Executive', monthlyPrice: 200000, visits: 30, gymAccess: 'luxury_executive' },
+];
 export const AGING = { current: 100000, days1to30: 50000, days31to60: 0, days61to90: 0, over90: 0 };
 export const BALANCES = { outstandingTzs: 150000, overdueTzs: 50000, seatBillsTzs: 0, creditTzs: 0, balanceTzs: 150000, unallocatedPaymentsTzs: 0, unappliedCreditNotesTzs: 0, aging: AGING, asOf: '2026-10-10' };
 export const INVOICES = [
@@ -166,6 +173,8 @@ export async function setupB2B(page_: Page, user: Json = ADMIN, extra: Array<[st
     // B2B reference
     ['GET', /^\/b2b\/reference$/, () => REF],
     ['GET', /^\/b2b\/programs\/reference$/, () => PROGRAM_REF],
+    // Pass tiers on sale (public)
+    ['GET', /^\/subscription-tiers$/, () => SELLABLE_TIERS as unknown as Json],
     // Admin: organisations
     ['GET', /^\/admin\/b2b\/organizations$/, () => page([ORG, ORG_PENDING, ORG_COMPANY])],
     ['POST', /^\/admin\/b2b\/organizations$/, c => ({ organization: { ...ORG, id: 'org-new', status: 'pending', legalName: c.body?.legalName, organizationType: c.body?.organizationType } })],

@@ -4,6 +4,8 @@ import { api, ApiError, B2BPassEntitlement, B2BProgram, B2BSponsorInvoice, B2BSp
 import { Alert, Badge, Button, Spinner } from '@/components/shared';
 import { money } from '@/lib/admin-utils';
 import { useApp } from '../../app/providers';
+import { tierErrorKey } from '@/lib/pass-tiers';
+import type { MessageKey } from '@/lib/i18n';
 
 const ERRORS: Record<string, string> = {
   period_not_open: 'Flat fees can only be prepared for this month or next month.',
@@ -20,8 +22,11 @@ const ERRORS: Record<string, string> = {
   invoice_has_payments: 'Money is already applied to this invoice. Reverse the payment first, or correct it with a note under B2B billing.',
   period_seat_billed: 'This company already has a seat bill for that month, so it isn’t invoiced again here.',
 };
-const message = (err: unknown, fallback: string) =>
-  err instanceof ApiError ? ERRORS[(err.body as { error?: string })?.error ?? ''] ?? fallback : fallback;
+const message = (err: unknown, fallback: string, t: (k: MessageKey) => string) => {
+  const tierKey = tierErrorKey(err); // tier_not_available (409): fitflex-functions#189
+  if (tierKey) return t(tierKey);
+  return err instanceof ApiError ? ERRORS[(err.body as { error?: string })?.error ?? ''] ?? fallback : fallback;
+};
 
 const TONE: Record<string, 'success' | 'warning' | 'gray' | 'danger'> = {
   draft: 'gray', issued: 'warning', partially_paid: 'warning', paid: 'success', void: 'danger',
@@ -53,7 +58,7 @@ function months() {
  */
 export function B2BBilling({ token, program, hasPass }: { token: string; program: B2BProgram; hasPass: boolean }) {
   const { last, current, next } = months();
-  const { user } = useApp();
+  const { user, t } = useApp();
   const [invoices, setInvoices] = useState<B2BSponsorInvoice[] | null>(null);
   const [covered, setCovered] = useState<{ counts: Record<string, number>; entitlements: B2BPassEntitlement[] } | null>(null);
   const [open, setOpen] = useState<{ invoice: B2BSponsorInvoice; lines: B2BSponsorInvoiceLine[] } | null>(null);
@@ -85,7 +90,7 @@ export function B2BBilling({ token, program, hasPass }: { token: string; program
       if (said) setNotice(said);
       await load();
     } catch (err) {
-      setError(message(err, fallback));
+      setError(message(err, fallback, t));
     } finally {
       setBusy(false);
     }
