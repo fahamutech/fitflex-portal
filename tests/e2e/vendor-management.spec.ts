@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test';
 
 const API = process.env.FITFLEX_API_URL || 'http://localhost:3000';
 
-test('admin manages vendor verification and creates a vendor-owned product', async ({ page }) => {
+test('admin is sent to KYC review to verify a vendor and creates a vendor-owned product', async ({ page }) => {
   let vendorPatch: Record<string, unknown> | null = null;
   let createdProduct: Record<string, unknown> | null = null;
   const vendor = {
@@ -34,8 +34,13 @@ test('admin manages vendor verification and creates a vendor-owned product', asy
 
   await page.goto('/admin/vendors');
   await expect(page.getByText('Asha Fitness Store')).toBeVisible();
-  await page.getByTitle('Verify').click();
-  await expect.poll(() => vendorPatch).toMatchObject({ verified: true });
+  // Vendors are verified through their KYC case (5c47f60): the row links to Partner verification
+  // instead of offering a one-click Verify, and nothing is written to the vendor from here.
+  const kycLink = page.getByTitle('Review in Partner verification');
+  await expect(kycLink).toBeVisible();
+  await expect(kycLink).toHaveAttribute('href', /^\/admin\/kyc\/?$/);
+  await expect(page.getByTitle('Verify')).toHaveCount(0);
+  expect(vendorPatch).toBeNull();
 
   await page.goto('/admin/products');
   await page.getByRole('button', { name: 'Create product' }).click();
