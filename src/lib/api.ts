@@ -306,6 +306,12 @@ export const api = {
   vendorOrder: (token: string, id: string) => request<VendorOrder>(`/vendor/orders/${encodeURIComponent(id)}`, {}, token),
   vendorOrderStatus: (token: string, id: string, body: { status: string; reason?: string }) =>
     request<VendorOrder>(`/vendor/orders/${encodeURIComponent(id)}/status`, { method: 'POST', body: JSON.stringify(body) }, token),
+  // Walk-in (counter) sales, S3: read, detail, void. Recording happens in the app (no POS in the portal).
+  vendorSales: (token: string, query: VendorSalesQuery = {}) =>
+    request<VendorSalePage>(`/vendor/sales${qs({ ...query, limit: query.limit ?? 50 })}`, {}, token),
+  vendorSale: (token: string, id: string) => request<{ sale: VendorSale }>(`/vendor/sales/${encodeURIComponent(id)}`, {}, token),
+  vendorVoidSale: (token: string, id: string, reason: string) =>
+    request<{ sale: VendorSale }>(`/vendor/sales/${encodeURIComponent(id)}/void`, { method: 'POST', body: JSON.stringify({ reason }) }, token),
   vendorPayments: (token: string) => request<VendorPayments>('/vendor/payments', {}, token),
   vendorStatements: (token: string) => request<VendorStatementList>('/vendor/statements', {}, token),
   vendorStatement: (token: string, id: string) =>
@@ -1732,6 +1738,84 @@ export interface VendorOrder {
   pickupGym: { id: string; name: string | null } | null;
   buyer: { customerId: string | null; displayName: string | null; phone?: string | null; contactVisibleUntil?: string | null };
   deliveryAddress?: string | null;
+}
+
+/** GET /vendor/sales query. from/to are EAT days (YYYY-MM-DD, inclusive, on soldAt). */
+export interface VendorSalesQuery {
+  from?: string;
+  to?: string;
+  status?: 'completed' | 'voided' | 'all';
+  createdBy?: 'me';
+  limit?: number;
+  cursor?: string | null;
+}
+export type VendorSalePerson = { id: string; name: string | null } | null;
+/** A row of GET /vendor/sales. */
+export interface VendorSaleRow {
+  id: string;
+  number: string;
+  soldAt: string;
+  recordedAt: string;
+  status: 'completed' | 'voided';
+  totalTzs: number;
+  itemCount: number;
+  methods: string[];
+  createdBy: VendorSalePerson;
+  /** Security follow-up on #214 (optional until it lands): a line price was changed by the seller. */
+  hasOverride?: boolean;
+  /** Optional: sale + line discounts. */
+  discountTzs?: number;
+  /** Optional: the server's own "reached FitFlex late" mark (else the portal compares soldAt and recordedAt). */
+  lateRecorded?: boolean;
+}
+/** Completed sales over the whole from/to/createdBy range (not the page, not the status filter); cash net of change. */
+export interface VendorSaleSummary {
+  count: number;
+  totalTzs: number;
+  voidedCount: number;
+  byMethod: Array<{ method: string; amountTzs: number }>;
+  /** Optional (security follow-up on #214): discounts given, sales with a changed price, sales recorded late. */
+  discountTzs?: number;
+  overrideCount?: number;
+  lateCount?: number;
+}
+export interface VendorSalePage { sales: VendorSaleRow[]; nextCursor: string | null; summary?: VendorSaleSummary | null }
+/** A walk-in sale (GET /vendor/sales/:id, POST …/void). Never carries cost. */
+export interface VendorSale {
+  id: string;
+  number: string;
+  status: 'completed' | 'voided';
+  kind: string;
+  soldAt: string;
+  recordedAt: string;
+  /** Σ qty × unitPriceTzs, before discounts. */
+  subtotalTzs: number;
+  /** Σ line discounts. */
+  lineDiscountTzs: number;
+  /** Whole-sale discount, after line discounts. */
+  discountTzs: number;
+  totalTzs: number;
+  paidTzs: number;
+  changeTzs: number;
+  note: string | null;
+  createdBy: VendorSalePerson;
+  voidedBy: VendorSalePerson;
+  voidedAt: string | null;
+  voidReason: string | null;
+  /** Optional (security follow-up on #214). */
+  lateRecorded?: boolean;
+  lines: Array<{
+    nameSnapshot: string;
+    variant: string | null;
+    qty: number;
+    listPriceTzs: number;
+    unitPriceTzs: number;
+    priceChanged: boolean;
+    priceChangedBy: VendorSalePerson;
+    discountTzs: number;
+    lineTotalTzs: number;
+  }>;
+  payments: Array<{ method: string; amountTzs: number; reference: string | null }>;
 }
 
 export interface VendorPayments { todaySalesTzs: number; pendingSettlementTzs: number; [figure: string]: unknown }

@@ -40,9 +40,9 @@ import {
 } from 'lucide-react';
 import { useApp } from '../../app/providers';
 import { cn } from '@/lib/cn';
-import { VENDOR_USER_TYPES } from '@/lib/api';
+import { VENDOR_USER_TYPES, type VendorTools } from '@/lib/api';
 import type { MessageKey } from '@/lib/i18n';
-import { fmt, VENDOR_AREAS } from '@/lib/vendor';
+import { fmt, VENDOR_AREAS, vendorAreaOpen } from '@/lib/vendor';
 import { Alert, Avatar, Badge, Button, Card, CardContent, SkeletonCard, useToast } from './shared';
 import { useVendor } from './vendor-context';
 import { BrandLogo } from './brand-logo';
@@ -108,10 +108,10 @@ const OPERATOR_NAV: NavItem[] = [
 ];
 
 // A business that sells on FitFlex (vendor portal, S2): each item needs its permission.
-function vendorNav(permissions: string[], lowCount: number | null, waitingCount: number | null): NavItem[] {
-  const icons: Record<string, React.ElementType> = { '/vendor': LayoutDashboard, '/vendor/products': ShoppingBag, '/vendor/orders': ClipboardList, '/vendor/payouts': HandCoins };
-  const labels: Record<string, string> = { '/vendor': 'vendor.nav.dashboard', '/vendor/products': 'vendor.nav.products', '/vendor/orders': 'vendor.nav.orders', '/vendor/payouts': 'vendor.nav.payouts' };
-  return VENDOR_AREAS.filter(a => !a.permission || permissions.includes(a.permission)).map(a => ({
+function vendorNav(permissions: string[], tools: VendorTools | null | undefined, lowCount: number | null, waitingCount: number | null): NavItem[] {
+  const icons: Record<string, React.ElementType> = { '/vendor': LayoutDashboard, '/vendor/products': ShoppingBag, '/vendor/orders': ClipboardList, '/vendor/sales': Receipt, '/vendor/payouts': HandCoins };
+  const labels: Record<string, string> = { '/vendor': 'vendor.nav.dashboard', '/vendor/products': 'vendor.nav.products', '/vendor/orders': 'vendor.nav.orders', '/vendor/sales': 'vendor.nav.sales', '/vendor/payouts': 'vendor.nav.payouts' };
+  return VENDOR_AREAS.filter(a => vendorAreaOpen(a, permissions, tools)).map(a => ({
     href: a.href, labelKey: labels[a.href], icon: icons[a.href],
     ...(a.href === '/vendor/products' && lowCount ? { count: { n: lowCount, labelKey: 'vendor.nav.productsLow' as MessageKey, tone: 'warning' as const } } : {}),
     ...(a.href === '/vendor/orders' && waitingCount ? { count: { n: waitingCount, labelKey: 'vendor.nav.ordersWaiting' as MessageKey, tone: 'fuel' as const } } : {}),
@@ -417,7 +417,7 @@ export function Shell({ children }: { children: ReactNode }) {
   // Build the visible nav — portal staff only see items their ACL permits.
   // Overview (/admin) is always visible to all admin users.
   const visibleNav = isVendor
-    ? (vendor.status === 'ready' ? vendorNav(vendor.me?.permissions ?? [], vendor.lowCount, vendor.waitingCount) : [])
+    ? (vendor.status === 'ready' ? vendorNav(vendor.me?.permissions ?? [], vendor.me?.tools, vendor.lowCount, vendor.waitingCount) : [])
     : isAdminUser
     ? ADMIN_NAV.filter(item => {
         if (!item.aclScope) return true;             // no scope = super-admin only (overview)
@@ -434,7 +434,8 @@ export function Shell({ children }: { children: ReactNode }) {
   const vendorPermissionMissing = (() => {
     if (!isVendor || vendor.status !== 'ready') return false;
     const area = [...VENDOR_AREAS].reverse().find(a => path === a.href || path.startsWith(`${a.href}/`));
-    return !!area?.permission && !vendor.can(area.permission);
+    // Its permission and, where it has one, its tool (S3 sales: walkInSales) — both fail closed.
+    return !!area && !vendorAreaOpen(area, vendor.me?.permissions ?? [], vendor.me?.tools);
   })();
   const redirectTo = ((): string | null => {
     if (!ready) return null;
