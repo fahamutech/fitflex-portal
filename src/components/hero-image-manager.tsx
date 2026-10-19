@@ -117,6 +117,7 @@ const ERROR_KEYS: Record<string, MessageKey> = {
   image_in_draft: 'heroImages.error.imageInDraft',
   image_not_live: 'heroImages.error.imageNotLive',
   image_save_failed: 'heroImages.error.imageSaveFailed',
+  image_unpublished: 'heroImages.error.imageUnpublished',
   invalid_note: 'heroImages.error.invalidNote',
   drafts_changed: 'heroImages.error.draftsChanged',
   variant_over_budget: 'heroImages.error.variantOverBudget',
@@ -148,6 +149,7 @@ export function heroErrorText(t: T, e: unknown, ctx: HeroErrorContext): string {
   if (code === 'image_retired' && ctx === 'rollback') return t('heroImages.error.imageRetiredRollback');
   if (code === 'file_too_large' && body?.maxPixels) return t('heroImages.error.tooManyPixels');
   if (code === 'image_in_draft' && Array.isArray(body?.slotIds) && body!.slotIds.length) return fmt(t('heroImages.error.imageInDraftSlots'), { places: placesList(t, body!.slotIds) });
+  if (code === 'people_not_allowed' && (ctx === 'slot' || ctx === 'publish' || ctx === 'rollback')) return t('heroImages.error.peopleNotAllowedPhotos');
   if (code === 'too_many_images') return fmt(t('heroImages.error.tooManyImages'), { max: Number(body?.maxImages) || '' });
   const key = ERROR_KEYS[code];
   return key ? t(key) : fmt(t('heroImages.error.unknown'), { code });

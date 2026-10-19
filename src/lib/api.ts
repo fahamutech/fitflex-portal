@@ -1140,7 +1140,7 @@ export const api = {
       `/admin/hero-images/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(body) }, token),
   /** Fast takedown: re-publishes the live snapshot without this photo. Drafts are untouched (the next publish brings it back). */
   unpublishHeroImage: (token: string, id: string, note?: string) =>
-    request<{ publication: HeroPublication; removedFromSlots: string[] }>(`/admin/hero-images/${encodeURIComponent(id)}/unpublish`, { method: 'POST', body: JSON.stringify(note ? { note } : {}) }, token),
+    request<{ publication: HeroPublication; removedFromSlots: string[]; rollbackBlockedBefore?: number }>(`/admin/hero-images/${encodeURIComponent(id)}/unpublish`, { method: 'POST', body: JSON.stringify(note ? { note } : {}) }, token),
   /** Sets a slot's DRAFT photos in order ([] = the app's built-in photo). Nothing changes in the apps until publish. */
   setHeroSlot: (token: string, slotId: string, imageIds: string[]) =>
     request<{ slot: { id: string; draft: string[] } }>(
@@ -1223,6 +1223,8 @@ export interface HeroImage {
   hasPublicFiles?: boolean;
   /** In the current live snapshot (GET /admin/hero-images only; null elsewhere). `status: 'published'` = has been live. */
   live?: boolean | null;
+  /** Publication id of this photo's latest unpublish; older snapshots holding it can't be put back. */
+  unpublishedInPublication?: number | null;
 }
 
 export interface HeroSlot {
