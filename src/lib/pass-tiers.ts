@@ -8,6 +8,9 @@
 //   sellable   = configured and monthlyPrice a whole number > 0
 //   PUT /admin/settings refuses any row that isn't sellable:
 //     400 { error: 'invalid_subscription_tier', tier, field, reason?, allowed?, hint? }
+//   and (functions#206) an empty list or one with nothing on sale:
+//     400 { error: 'invalid_subscription_tier', tier: null, field: 'subscriptionTiers', reason: 'empty' | 'none_on_sale' }
+//   and a held tier removed, renamed or switched off: 409 { error: 'tier_in_use', tier, holders }
 import { ApiError, SubscriptionTierConfig } from './api';
 import type { MessageKey } from './i18n';
 
@@ -52,11 +55,11 @@ export function tierErrors(t: SubscriptionTierConfig, all: SubscriptionTierConfi
   return out;
 }
 
-/** The status badge a tier shows in Settings. */
-export function tierStatus(t: SubscriptionTierConfig): { key: MessageKey; tone: 'success' | 'warning' | 'danger' } {
-  if (!tierConfigured(t)) return { key: 'tiers.status.notConfigured', tone: 'danger' };
-  if (!priceValid(t.monthlyPrice)) return { key: 'tiers.status.offSale', tone: 'warning' };
-  return { key: 'tiers.status.onSale', tone: 'success' };
+/** The status a tier shows in Settings: a short badge, and (when not on sale) what that means for holders. */
+export function tierStatus(t: SubscriptionTierConfig): { key: MessageKey; hint: MessageKey | null; tone: 'success' | 'warning' | 'danger' } {
+  if (!tierConfigured(t)) return { key: 'tiers.status.notConfiguredShort', hint: 'tiers.status.notConfiguredHint', tone: 'danger' };
+  if (!priceValid(t.monthlyPrice)) return { key: 'tiers.status.offSaleShort', hint: 'tiers.status.offSaleHint', tone: 'warning' };
+  return { key: 'tiers.status.onSale', hint: null, tone: 'success' };
 }
 
 /** A tier from GET /subscription-tiers (only sellable tiers are listed, PR #189). */
@@ -100,8 +103,22 @@ export function settingsTierError(err: unknown): { tier: string | null; field: s
   const body = err.body as { error?: string; tier?: string | null; field?: string; reason?: string } | null;
   if (body?.error !== 'invalid_subscription_tier') return null;
   const field = body.field ?? 'subscriptionTiers';
-  const key = field === 'key' && body.reason === 'duplicate' ? 'tiers.err.duplicateKey' : SAVE_FIELD_KEYS[field] ?? 'tiers.err.list';
+  // functions#206: an empty list, or one with nothing on sale, is refused as a whole.
+  const noneOnSale = field === 'subscriptionTiers' && (body.reason === 'empty' || body.reason === 'none_on_sale');
+  const key = noneOnSale ? 'tiers.err.noneOnSale'
+    : field === 'key' && body.reason === 'duplicate' ? 'tiers.err.duplicateKey' : SAVE_FIELD_KEYS[field] ?? 'tiers.err.list';
   return { tier: body.tier ?? null, field, key };
+}
+
+/**
+ * functions#206: removing, renaming or switching off a tier that passes or accounts still hold is
+ * refused as a whole (409 { error: 'tier_in_use', tier, holders }); nothing is saved. Null otherwise.
+ */
+export function tierInUse(err: unknown): { tier: string; holders: number | null } | null {
+  if (!(err instanceof ApiError)) return null;
+  const body = err.body as { error?: string; tier?: string; holders?: number } | null;
+  if (body?.error !== 'tier_in_use') return null;
+  return { tier: typeof body.tier === 'string' ? body.tier : '', holders: typeof body.holders === 'number' ? body.holders : null };
 }
 
 /** Replaces {name} placeholders in a translated string. */

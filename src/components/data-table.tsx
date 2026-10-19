@@ -19,6 +19,11 @@ type SortDir = 'asc' | 'desc' | null;
 
 const PAGE_SIZES = [10, 25, 50];
 
+// Pinned actions column: opaque so scrolled cells pass underneath, with a divider on its left edge.
+const STICKY_BASE = 'sticky right-0 z-[1] shadow-[inset_1px_0_0_var(--color-border-secondary)]';
+const STICKY_HEAD = `${STICKY_BASE} bg-[var(--color-gray-50)]`;
+const STICKY_CELL = `${STICKY_BASE} bg-[var(--color-bg-primary)]`;
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function DataTable<T extends Record<string, any>>({
   columns,
@@ -31,6 +36,8 @@ export function DataTable<T extends Record<string, any>>({
   extraFilters,
   onRowClick,
   label,
+  stickyActions = false,
+  dense = false,
 }: {
   columns: ColumnDef<T>[];
   data: T[];
@@ -43,6 +50,10 @@ export function DataTable<T extends Record<string, any>>({
   onRowClick?: (row: T) => void;
   /** Names the table's scroll region for assistive tech (what the table lists). */
   label?: string;
+  /** Keeps the actions column pinned to the right edge, so it stays visible when the table scrolls sideways. */
+  stickyActions?: boolean;
+  /** Tighter cell padding, for wide admin tables that must fit a laptop screen. */
+  dense?: boolean;
 }) {
   const { t } = useApp();
   const tableId = useId();
@@ -129,7 +140,7 @@ export function DataTable<T extends Record<string, any>>({
         tabIndex={0}
         className="overflow-x-auto rounded-[var(--radius-xl)] border border-[var(--color-border-secondary)]"
       >
-        <table className="ui-table min-w-full">
+        <table className={cn('ui-table min-w-full', dense && 'ui-table-dense')}>
           <thead>
             <tr>
               {columns.map(col => (
@@ -162,7 +173,7 @@ export function DataTable<T extends Record<string, any>>({
                 </th>
               ))}
               {hasActions && (
-                <th scope="col" className="text-right w-px whitespace-nowrap">{t('common.actions')}</th>
+                <th scope="col" className={cn('text-right w-px whitespace-nowrap', stickyActions && STICKY_HEAD)}>{t('common.actions')}</th>
               )}
             </tr>
           </thead>
@@ -195,8 +206,8 @@ export function DataTable<T extends Record<string, any>>({
                     </td>
                   ))}
                   {hasActions && (
-                    <td className="text-right">
-                      <div className="flex items-center justify-end gap-2">
+                    <td className={cn('text-right', stickyActions && STICKY_CELL)}>
+                      <div className={cn('flex items-center justify-end', dense ? 'gap-0.5' : 'gap-2')}>
                         {actions!(row)}
                       </div>
                     </td>

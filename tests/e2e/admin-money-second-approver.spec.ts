@@ -170,7 +170,7 @@ test.describe('Payments: second approver', () => {
       return null;
     });
     await page.goto('/admin/payments');
-    await expect(page.getByTestId('payment-verified-by')).toContainText('another admin (admin-1)');
+    await expect(page.getByTestId('payment-verified-by')).toContainText('another admin');
     await expect(page.getByTestId('payment-approve')).toBeEnabled();
     await page.getByTestId('payment-approve').click();
     await page.getByRole('button', { name: 'Approve', exact: true }).last().click();
@@ -230,7 +230,7 @@ test.describe('Payments: second approver', () => {
     await expect.poll(() => oneCalls.find(c => c.path.endsWith('/change-request'))?.body).toEqual({ status: 'rejected', reason: 'Money never arrived' });
     await expect(one.getByTestId('payment-stage')).toHaveText('Change requested');
     await expect(one.getByTestId('payment-status')).toHaveText('Approved'); // the status still adds something here
-    await expect(one.getByTestId('payment-change-requested-by')).toContainText('you asked to change this to Rejected');
+    await expect(one.getByTestId('payment-change-requested-by')).toContainText('You asked to change this to Rejected');
     await expect(one.getByTestId('payment-confirm-change')).toBeDisabled();
     await expect(one.getByTestId('payment-confirm-change-blocked')).toHaveAttribute('title', 'You asked for this change. A different admin must confirm it.');
     await expect(one.getByTestId('payment-request-change')).toHaveCount(0);
@@ -262,7 +262,7 @@ test.describe('Payments: second approver', () => {
     });
     await two.goto('/admin/payments');
     await two.getByRole('button', { name: 'All', exact: true }).click();
-    await expect(two.getByTestId('payment-change-requested-by')).toContainText('another admin (admin-1)');
+    await expect(two.getByTestId('payment-change-requested-by')).toContainText('Another admin asked to change this to Rejected');
     await expect(two.getByTestId('payment-confirm-change')).toBeEnabled();
     await two.getByTestId('payment-confirm-change').click();
     await expect(two.getByText(/Change this payment from Approved to Rejected/)).toBeVisible();
@@ -329,7 +329,7 @@ test.describe('Payments: second approver', () => {
       return null;
     });
     await page.goto('/admin/payments');
-    await page.getByRole('button', { name: 'Approved', exact: true }).click();
+    await page.getByRole('button', { name: 'Imeidhinishwa', exact: true }).click(); // filters are translated too
     await expect(page.getByTestId('payment-stage')).toHaveText('Mabadiliko yameombwa');
     await page.getByTestId('payment-confirm-change').click();
     await page.getByTestId('confirm-change-submit').click();

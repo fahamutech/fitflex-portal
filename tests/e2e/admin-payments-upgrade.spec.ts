@@ -39,7 +39,9 @@ test('a pass upgrade is labelled as an upgrade with the plan it keeps', async ({
 
   await page.goto('/admin/payments');
 
-  await expect(page.getByText('UPGRADE · BASIC → PRO')).toBeVisible();
+  // One badge for the kind, the tier step under it (design QA: the long badge wrapped into a blob).
+  await expect(page.getByText('UPGRADE', { exact: true })).toBeVisible();
+  await expect(page.getByText('BASIC → PRO', { exact: true })).toBeVisible();
   await expect(page.getByText(/Pays the difference; plan stays until/)).toBeVisible();
   await expect(page.getByText('upgrade:sub_old:basic')).toHaveCount(0);
 
