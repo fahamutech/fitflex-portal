@@ -69,7 +69,7 @@ export function Dialog({
   title: ReactNode;
   description?: ReactNode;
   children: ReactNode;
-  size?: 'sm' | 'md' | 'lg' | 'xl';
+  size?: 'sm' | 'md' | 'lg' | 'xl' | 'full';
 }) {
   const panelRef = useRef<HTMLDivElement>(null);
   const titleId = useId();
@@ -79,7 +79,7 @@ export function Dialog({
 
   if (!open) return null;
 
-  const widths = { sm: 'max-w-sm', md: 'max-w-lg', lg: 'max-w-2xl', xl: 'max-w-4xl' };
+  const widths = { sm: 'max-w-sm', md: 'max-w-lg', lg: 'max-w-2xl', xl: 'max-w-4xl', full: 'max-w-[min(1400px,100%)]' };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
