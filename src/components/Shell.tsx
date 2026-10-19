@@ -338,7 +338,7 @@ function SidebarContent({
             aria-label={t('common.language')}
             value={locale}
             onChange={e => setLocale(e.target.value as 'en' | 'sw')}
-            className="flex-1 bg-transparent text-xs text-[var(--color-gray-400)] border-none outline-none cursor-pointer"
+            className="min-h-11 flex-1 bg-transparent text-xs text-[var(--color-gray-400)] border-none outline-none cursor-pointer"
           >
             <option value="en">English</option>
             <option value="sw">Kiswahili</option>
