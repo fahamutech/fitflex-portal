@@ -2486,11 +2486,11 @@ export const messages = {
     'admin.settings.addTier': 'Ongeza kiwango',
     'admin.settings.addBand': 'Ongeza daraja',
     // Slice A3: malipo kwa Lipa Namba + namba ya muamala ya mwanachama.
-    // DRAFT Swahili: needs native review.
+    // DRAFT Swahili: needs native review (incl. "taarifa ya Lipa Namba" for the till statement).
     'manualPay.title': 'Malipo kwa Lipa Namba',
-    'manualPay.intro': 'Wanachama wanaolipa kwa mtandao wa simu hutuma pesa kwenye Lipa Namba hii, kisha huandika namba ya muamala waliyotumiwa na mtandao. Admin hulinganisha kila namba na taarifa ya till kabla ya kuidhinisha.',
+    'manualPay.intro': 'Wanachama wanaolipa kwa mtandao wa simu hutuma pesa kwenye Lipa Namba hii, kisha huandika namba ya muamala waliyotumiwa na mtandao. Admin hulinganisha kila namba na taarifa ya Lipa Namba kabla ya kuidhinisha.',
     'manualPay.lipaNamba': 'Lipa Namba',
-    'manualPay.lipaNambaHint': 'Tarakimu 4 hadi 20. Nafasi na vistari huondolewa.',
+    'manualPay.lipaNambaHint': 'Tarakimu 4 hadi 20. Mapengo na vistari huondolewa.',
     'manualPay.accountName': 'Jina la akaunti',
     'manualPay.accountNameHint': 'Jina ambalo wanachama wataona wanapolipa, kwa mfano jina la biashara lililosajiliwa.',
     'manualPay.network': 'Mtandao',
@@ -2521,9 +2521,9 @@ export const messages = {
     'manualPay.err.saveFailed': 'Taarifa za malipo hazikuhifadhiwa. Jaribu tena.',
     'manualPay.memberRef': 'Namba ya muamala ya mwanachama',
     'manualPay.approveTitle': 'Idhinisha malipo',
-    'manualPay.approveBody': 'Mwanachama anasema amelipa {amount} na ametoa namba hii ya muamala. Itafute kwenye taarifa ya till na uhakiki kiasi kabla ya kuidhinisha.',
-    'manualPay.referenceToRecord': 'Kumbukumbu ya kuhifadhi',
-    'manualPay.referenceHint': 'Imejazwa kutoka namba ya muamala ya mwanachama. Ibadilishe tu kama taarifa ya till inaonyesha namba tofauti.',
+    'manualPay.approveBody': 'Mwanachama anasema amelipa {amount} na ametoa namba hii ya muamala. Itafute kwenye taarifa ya Lipa Namba na uhakiki kiasi kabla ya kuidhinisha.',
+    'manualPay.referenceToRecord': 'Namba ya muamala ya kuhifadhi',
+    'manualPay.referenceHint': 'Imejazwa kutoka namba ya muamala ya mwanachama. Ibadilishe tu kama taarifa ya Lipa Namba inaonyesha namba tofauti.',
     'manualPay.referenceDiffers': 'Hii ni tofauti na namba ya muamala ya mwanachama.',
     'admin.distributions.periodBased': 'Mgao kwa kipindi',
     'admin.distributions.period': 'Kipindi',
