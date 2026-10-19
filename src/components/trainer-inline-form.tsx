@@ -104,7 +104,7 @@ export function TrainerInlineForm({
           placeholder="e.g. Yoga, Weight Training, Cardio"
         />
       </Field>
-      <Field label="Per session rate (TZS)" error={errors.hourlyRateTzs}>
+      <Field label="Per session rate (TSh)" error={errors.hourlyRateTzs}>
         <input
           className="ui-input"
           type="number"

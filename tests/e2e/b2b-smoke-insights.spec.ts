@@ -17,7 +17,7 @@ test.describe('organisation insights', () => {
     await expect(page.getByTestId('insights-kpis')).toContainText('42');
     await expect(page.getByTestId('insights-top-providers')).toContainText('Zanzibar Iron');
     await expect(page.getByTestId('insights-engagement')).toContainText('Workouts recorded');
-    await expect(page.getByTestId('insights-billing-kpis')).toContainText('TZS 175,000');
+    await expect(page.getByTestId('insights-billing-kpis')).toContainText('TSh 175,000');
     for (const label of ['Period', 'Programme', 'Group']) await expect(page.getByTestId('insights-filters').getByLabel(label, { exact: true })).toBeVisible();
     for (const tab of ['Overview', 'People', 'Programmes & benefits', 'Gyms & trainers', 'Billing', 'Reports']) {
       await expect(page.getByRole('button', { name: tab, exact: true })).toBeVisible();
@@ -109,7 +109,7 @@ test.describe('FitFlex staff overview', () => {
     await page.goto('/admin/b2b-analytics');
     await expect(page.getByRole('heading', { name: 'B2B insights' })).toBeVisible();
     await expect(page.getByTestId('analytics-kpis')).toContainText('Organisations');
-    await expect(page.getByTestId('analytics-kpis')).toContainText('TZS 480,000');
+    await expect(page.getByTestId('analytics-kpis')).toContainText('TSh 480,000');
     await expect(page.getByTestId('analytics-top-orgs')).toContainText('Safari Cover');
     await expect(page.getByTestId('analytics-top-providers')).toContainText('Zanzibar Iron');
     await expect(page.getByTestId('data-quality')).toContainText('Beneficiaries not linked to an account');

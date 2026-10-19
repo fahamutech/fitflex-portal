@@ -74,5 +74,5 @@ test('admin drafts a gym rule, cannot activate their own draft, and activates a 
   await expect(page.getByTestId('config-activate-rule-new')).toBeDisabled();
 
   await page.getByRole('button', { name: 'Passes' }).click();
-  await expect(page.getByTestId('config-row-ptv-pro-1')).toContainText('TZS 150,000');
+  await expect(page.getByTestId('config-row-ptv-pro-1')).toContainText('TSh 150,000');
 });

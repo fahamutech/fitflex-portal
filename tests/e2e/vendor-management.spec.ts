@@ -41,7 +41,7 @@ test('admin manages vendor verification and creates a vendor-owned product', asy
   await page.getByRole('button', { name: 'Create product' }).click();
   await page.getByLabel('Vendor').selectOption('vendor-1');
   await page.getByLabel('Product name').fill('Competition Kettlebell');
-  await page.getByLabel('Price (TZS)').fill('65000');
+  await page.getByLabel('Price (TSh)').fill('65000');
   await page.getByLabel('Stock').fill('4');
   await page.getByRole('button', { name: 'Create product', exact: true }).last().click();
 

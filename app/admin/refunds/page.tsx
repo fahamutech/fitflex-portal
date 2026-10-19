@@ -224,7 +224,7 @@ export default function RefundsPage() {
           )}
           {action?.kind === 'approve' && (
             <>
-              <Field label="Amount to refund (TZS)" hint={`Up to ${money(action.refund.amountTzs)}.`}>
+              <Field label="Amount to refund (TSh)" hint={`Up to ${money(action.refund.amountTzs)}.`}>
                 <input className="ui-input" inputMode="numeric" value={fields.amount} onChange={e => setFields({ ...fields, amount: e.target.value.replace(/[^0-9]/g, '') })} />
               </Field>
               {action.refund.kind === 'subscription' && (

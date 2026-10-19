@@ -8,7 +8,7 @@ import { DataTable, ColumnDef } from '@/components/data-table';
 import { Dialog, DialogFooter, ConfirmDialog } from '@/components/dialog';
 import { ImageUpload } from '@/components/image-upload';
 import { SearchableSelect, SelectOption } from '@/components/searchable-select';
-import { statusTone, statusLabel, money, trainerNames } from '@/lib/admin-utils';
+import { statusTone, statusLabel, money, currencyLabel, trainerNames } from '@/lib/admin-utils';
 import { GymCreateForm, GymDraft, BLANK_GYM_DRAFT, validateGymDraft } from '@/components/gym-create-form';
 import { OwnerInlineForm, OwnerFormDraft, BLANK_OWNER_DRAFT, validateOwnerDraft } from '@/components/owner-inline-form';
 import { SOCIAL_PLATFORMS, cleanSocialLinks } from '@/lib/social-handles';
@@ -431,7 +431,7 @@ export default function TrainersPage() {
           <div className="flex gap-3">
             <Field label="Currency" error={undefined}>
               <Select value={sessionCurrency} onChange={e => setSessionCurrency(e.target.value as 'TZS' | 'USD')}>
-                <option value="TZS">TZS</option>
+                <option value="TZS">{currencyLabel('TZS')}</option>
                 <option value="USD">USD</option>
               </Select>
             </Field>

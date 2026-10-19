@@ -1,7 +1,20 @@
 export type BadgeTone = 'default' | 'success' | 'danger' | 'warning' | 'brand' | 'gray';
 
+/**
+ * Display label for a currency. ISO codes stay in data, APIs and exports;
+ * Tanzanian shillings are shown as "TSh" in English and Swahili (D-8,
+ * glossary "Currency label (display)"). Deliberately not Intl currencyDisplay,
+ * which renders TZS differently per locale.
+ */
+export function currencyLabel(code: string | null | undefined = 'TZS') {
+  if (!code || code.toUpperCase() === 'TZS') return 'TSh';
+  return code;
+}
+
+/** "TSh 279,000". Pass an ISO code (default TZS); pass '' for the number only. */
 export function money(value: number | null | undefined, currency = 'TZS') {
-  return `${currency} ${new Intl.NumberFormat('en-US').format(Number(value || 0))}`;
+  const amount = new Intl.NumberFormat('en-US').format(Number(value || 0));
+  return currency === '' ? ` ${amount}` : `${currencyLabel(currency)} ${amount}`;
 }
 
 export function formatDateTime(value: string | null | undefined) {

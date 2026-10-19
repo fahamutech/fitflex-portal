@@ -7,6 +7,7 @@ import {
 } from '@/lib/api';
 import { Alert, Badge, Button, Card, CardContent, CardHeader, Checkbox, Field, Input, Select, Spinner } from '@/components/shared';
 import { B2BBilling } from '@/components/b2b-billing';
+import { money } from '@/lib/admin-utils';
 
 const ERRORS: Record<string, string> = {
   name_required: 'Enter a name.',
@@ -25,11 +26,11 @@ const ERRORS: Record<string, string> = {
   benefit_outside_program: 'Benefit dates must sit inside the programme dates.',
   no_active_benefits: 'Activate at least one benefit first.',
   invalid_transition: 'That status change isn’t allowed now.',
-  invalid_sponsor_amount: 'Enter the sponsor amount in whole TZS.',
+  invalid_sponsor_amount: 'Enter the sponsor amount in whole TSh.',
   member_share_needs_pass: 'A per-use benefit is fully sponsored. To split the cost with the member, add a sponsored pass instead: the member unlocks it by paying their share.',
   invalid_sponsor_share: 'The sponsor share must be between 0% and 100%.',
-  invalid_sponsor_cap: 'Enter the cap in whole TZS.',
-  invalid_beneficiary_amount: 'Enter the copay in whole TZS.',
+  invalid_sponsor_cap: 'Enter the cap in whole TSh.',
+  invalid_beneficiary_amount: 'Enter the copay in whole TSh.',
   invalid_usage_limit: 'The usage limit must be a whole number above zero.',
   unlimited_has_no_limits: 'Unlimited benefits have no count or money limit.',
   no_sponsor_money_to_cap: 'A benefit with no money involved can’t have a money cap.',
@@ -43,7 +44,7 @@ const ERRORS: Record<string, string> = {
   invalid_pass_tier: 'Choose the pass tier this benefit gives.',
   pass_needs_funding: 'A sponsored pass needs someone to pay for it.',
   invalid_discount: 'The discount must be between 0% and 99.99%.',
-  invalid_fixed_fee: 'Enter the fee in whole TZS, more than zero and no more than the pass price.',
+  invalid_fixed_fee: 'Enter the fee in whole TSh, more than zero and no more than the pass price.',
   fixed_fee_needs_pass: 'Only a sponsored pass can have a fee of its own.',
   budget_still_exhausted: 'The budget is fully spent. Raise it (Edit) before resuming.',
 };
@@ -59,12 +60,12 @@ const MOVE_LABEL: Record<string, string> = {
 const GYM_TIERS = ['standard', 'midtier', 'premium', 'luxury_executive', 'online'];
 const PASS_TIERS = ['basic', 'pro', 'premium', 'executive'];
 const FLAT_FEE = 'sponsored_pass';
-const tzs = (n?: number | null) => (n == null ? '—' : `TZS ${n.toLocaleString('en-US')}`);
+const tzs = (n?: number | null) => (n == null ? '—' : money(n));
 const list = (s: string) => s.split(',').map(x => x.trim()).filter(Boolean);
 const intOrNull = (s: string) => (s.trim() === '' ? null : Number(s));
 
 function usageText(b: B2BBenefit) {
-  if (b.benefitType === FLAT_FEE) return `Flat monthly fee for a ${b.passTier ?? ''} pass${b.fixedFeeTzs ? ` (TZS ${b.fixedFeeTzs.toLocaleString('en-US')} a person)` : ''}; visits follow the pass`;
+  if (b.benefitType === FLAT_FEE) return `Flat monthly fee for a ${b.passTier ?? ''} pass${b.fixedFeeTzs ? ` (${money(b.fixedFeeTzs)} a person)` : ''}; visits follow the pass`;
   if (b.usagePeriod === 'unlimited') return 'Unlimited';
   const per = b.usagePeriod === 'program' ? 'for the programme' : `per ${b.usagePeriod}`;
   const parts = [b.usageLimit != null ? `${b.usageLimit} uses ${per}` : null,
@@ -247,7 +248,7 @@ export function B2BPrograms({ token, org, beneficiaries, onChanged }: { token: s
       </Field>
       <Field label="Starts"><Input type="date" required disabled={!!live} value={programForm.startDate} onChange={e => setProgramForm({ ...programForm, startDate: e.target.value })} data-testid="program-start" /></Field>
       <Field label="Ends (optional)"><Input type="date" value={programForm.endDate} onChange={e => setProgramForm({ ...programForm, endDate: e.target.value })} data-testid="program-end" /></Field>
-      <Field label="Sponsor budget, TZS (optional)"><Input inputMode="numeric" value={programForm.budget} onChange={e => setProgramForm({ ...programForm, budget: e.target.value })} /></Field>
+      <Field label="Sponsor budget, TSh (optional)"><Input inputMode="numeric" value={programForm.budget} onChange={e => setProgramForm({ ...programForm, budget: e.target.value })} /></Field>
       <Field label="Discount on pass prices, % (optional)"><Input inputMode="decimal" value={programForm.discount} onChange={e => setProgramForm({ ...programForm, discount: e.target.value })} placeholder="0" data-testid="program-discount" /></Field>
       <Field label="Who is eligible">
         <Select disabled={!!live} value={programForm.scope} onChange={e => setProgramForm({ ...programForm, scope: e.target.value })} data-testid="program-scope">
@@ -313,18 +314,18 @@ export function B2BPrograms({ token, org, beneficiaries, onChanged }: { token: s
         </Field>
       )}
       {bf.benefitType === FLAT_FEE && (
-        <Field label="Fee per person per month, TZS (optional)" hint="Leave empty to use the organisation's agreed rate, or the pass price less the programme's discount. Applies to months not yet invoiced.">
+        <Field label="Fee per person per month, TSh (optional)" hint="Leave empty to use the organisation's agreed rate, or the pass price less the programme's discount. Applies to months not yet invoiced.">
           <Input inputMode="numeric" value={bf.fixedFee} onChange={e => setBenefitForm({ ...bf, fixedFee: e.target.value })} data-testid="benefit-fixed-fee" />
         </Field>
       )}
-      {bf.fundingType === 'sponsor_fixed' && <Field label={bf.benefitType === FLAT_FEE ? 'Sponsor pays per person per month (TZS)' : 'Sponsor pays per use (TZS)'}><Input inputMode="numeric" value={bf.sponsorAmount} onChange={e => setBenefitForm({ ...bf, sponsorAmount: e.target.value })} data-testid="benefit-sponsor-amount" /></Field>}
+      {bf.fundingType === 'sponsor_fixed' && <Field label={bf.benefitType === FLAT_FEE ? 'Sponsor pays per person per month (TSh)' : 'Sponsor pays per use (TSh)'}><Input inputMode="numeric" value={bf.sponsorAmount} onChange={e => setBenefitForm({ ...bf, sponsorAmount: e.target.value })} data-testid="benefit-sponsor-amount" /></Field>}
       {bf.fundingType === 'sponsor_percentage' && (
         <>
           <Field label="Sponsor share (%)"><Input inputMode="decimal" value={bf.sponsorPct} onChange={e => setBenefitForm({ ...bf, sponsorPct: e.target.value })} data-testid="benefit-sponsor-pct" /></Field>
-          {bf.benefitType !== FLAT_FEE && <Field label="Sponsor max per use, TZS (optional)"><Input inputMode="numeric" value={bf.sponsorCap} onChange={e => setBenefitForm({ ...bf, sponsorCap: e.target.value })} /></Field>}
+          {bf.benefitType !== FLAT_FEE && <Field label="Sponsor max per use, TSh (optional)"><Input inputMode="numeric" value={bf.sponsorCap} onChange={e => setBenefitForm({ ...bf, sponsorCap: e.target.value })} /></Field>}
         </>
       )}
-      {bf.fundingType === 'beneficiary_fixed' && <Field label={bf.benefitType === FLAT_FEE ? 'Member pays per month to unlock (TZS)' : 'Beneficiary copay per use (TZS)'}><Input inputMode="numeric" value={bf.copay} onChange={e => setBenefitForm({ ...bf, copay: e.target.value })} /></Field>}
+      {bf.fundingType === 'beneficiary_fixed' && <Field label={bf.benefitType === FLAT_FEE ? 'Member pays per month to unlock (TSh)' : 'Beneficiary copay per use (TSh)'}><Input inputMode="numeric" value={bf.copay} onChange={e => setBenefitForm({ ...bf, copay: e.target.value })} /></Field>}
       {bf.benefitType !== FLAT_FEE && (
         <Field label="Usage period">
           <Select value={bf.usagePeriod} onChange={e => setBenefitForm({ ...bf, usagePeriod: e.target.value })} data-testid="benefit-period">
@@ -335,7 +336,7 @@ export function B2BPrograms({ token, org, beneficiaries, onChanged }: { token: s
       {bf.benefitType !== FLAT_FEE && bf.usagePeriod !== 'unlimited' && (
         <>
           <Field label="Uses per period (blank = no count limit)"><Input inputMode="numeric" value={bf.usageLimit} onChange={e => setBenefitForm({ ...bf, usageLimit: e.target.value })} data-testid="benefit-limit" /></Field>
-          {bf.fundingType !== 'none' && <Field label="Sponsor money per period, TZS (optional)"><Input inputMode="numeric" value={bf.periodCap} onChange={e => setBenefitForm({ ...bf, periodCap: e.target.value })} /></Field>}
+          {bf.fundingType !== 'none' && <Field label="Sponsor money per period, TSh (optional)"><Input inputMode="numeric" value={bf.periodCap} onChange={e => setBenefitForm({ ...bf, periodCap: e.target.value })} /></Field>}
         </>
       )}
       <Field label="Valid from (blank = programme start)"><Input type="date" value={bf.startDate} onChange={e => setBenefitForm({ ...bf, startDate: e.target.value })} /></Field>

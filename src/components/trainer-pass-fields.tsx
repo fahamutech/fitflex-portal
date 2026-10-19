@@ -3,9 +3,9 @@ import { Field } from '@/components/shared';
 import type { TrainerPassConfig, TrainerPassPeriod } from '@/lib/api';
 
 const PERIODS: { id: TrainerPassPeriod; label: string }[] = [
-  { id: 'daily', label: 'Daily pass (TZS)' },
-  { id: 'weekly', label: 'Weekly pass (TZS)' },
-  { id: 'monthly', label: 'Monthly pass (TZS)' },
+  { id: 'daily', label: 'Daily pass (TSh)' },
+  { id: 'weekly', label: 'Weekly pass (TSh)' },
+  { id: 'monthly', label: 'Monthly pass (TSh)' },
 ];
 
 /** Options from the saved config, reading the older single-fee shape too. */

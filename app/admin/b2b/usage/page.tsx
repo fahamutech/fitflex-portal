@@ -5,13 +5,14 @@ import { ArrowLeft, RefreshCw, Undo2 } from 'lucide-react';
 import { useApp } from '../../../providers';
 import { api, ApiError, B2BConsumption, B2BConsumptionFilters, B2BOrganization, B2BUsageMoney } from '@/lib/api';
 import { Alert, Badge, Button, Card, CardContent, CardHeader, Field, PageHeader, Spinner } from '@/components/shared';
+import { money } from '@/lib/admin-utils';
 
 const TONE: Record<string, 'success' | 'warning' | 'gray' | 'danger'> = {
   approved: 'success', pending: 'warning', rejected: 'danger', reversed: 'gray', cancelled: 'gray',
 };
 const SERVICE: Record<string, string> = { gym_access: 'Gym visit', trainer_session: 'Trainer session' };
 const SOURCE: Record<string, string> = { gym_checkin: 'Check-in', trainer_booking: 'Trainer booking' };
-const tzs = (n?: number | null) => (n == null ? '—' : `TZS ${n.toLocaleString('en-US')}`);
+const tzs = (n?: number | null) => (n == null ? '—' : money(n));
 const when = (iso: string) => new Date(iso).toLocaleString('en-GB', { timeZone: 'Africa/Dar_es_Salaam', dateStyle: 'medium', timeStyle: 'short' });
 const EMPTY: B2BConsumptionFilters = { organizationId: '', status: '', serviceType: '', userId: '', providerId: '', from: '', to: '' };
 

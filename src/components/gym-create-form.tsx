@@ -114,7 +114,7 @@ export function GymCreateForm({ token, draft, onChange, errors, onClearError, ex
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <Field label="Rate per day (TZS)" error={errors.ratePerDay}>
+        <Field label="Rate per day (TSh)" error={errors.ratePerDay}>
           <Input
             type="number"
             value={draft.ratePerDay || ''}
@@ -122,7 +122,7 @@ export function GymCreateForm({ token, draft, onChange, errors, onClearError, ex
             onChange={e => set('ratePerDay', e.target.value === '' ? 0 : Number(e.target.value))}
           />
         </Field>
-        <Field label="Rate per week (TZS)" error={errors.ratePerWeek}>
+        <Field label="Rate per week (TSh)" error={errors.ratePerWeek}>
           <Input
             type="number"
             value={draft.ratePerWeek || ''}
@@ -130,7 +130,7 @@ export function GymCreateForm({ token, draft, onChange, errors, onClearError, ex
             onChange={e => set('ratePerWeek', e.target.value === '' ? 0 : Number(e.target.value))}
           />
         </Field>
-        <Field label="Rate per month (TZS)" error={errors.ratePerMonth}>
+        <Field label="Rate per month (TSh)" error={errors.ratePerMonth}>
           <Input
             type="number"
             value={draft.ratePerMonth || ''}
