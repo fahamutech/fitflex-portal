@@ -308,6 +308,8 @@ export async function expectNoHorizontalScroll(page: Page, knownMainOverflow = 0
     };
   });
   expect(over.doc, 'document scrolls horizontally').toBeLessThanOrEqual(1);
-  // 8px of slack for font differences between machines.
-  expect(over.main, 'main scrolls horizontally').toBeLessThanOrEqual(knownMainOverflow + 8);
+  // Slack for font differences between machines: the known amounts were measured on macOS, and
+  // Linux (CI) fonts set the same tables up to ~14px wider.
+  const slack = process.platform === 'linux' ? 16 : 8;
+  expect(over.main, 'main scrolls horizontally').toBeLessThanOrEqual(knownMainOverflow + slack);
 }
