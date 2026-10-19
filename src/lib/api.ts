@@ -89,7 +89,13 @@ export interface GymInvitationInput {
   paidAmount?: number;
 }
 
-async function request<T>(path: string, opts: RequestInit = {}, token?: string): Promise<T> {
+async function request<T>(
+  path: string,
+  opts: RequestInit = {},
+  token?: string,
+  /** Return true when a 401 body is a business refusal, not a dead session (no sign-out). */
+  isRefusal401?: (body: unknown) => boolean,
+): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
     ...opts,
     headers: {
@@ -101,7 +107,7 @@ async function request<T>(path: string, opts: RequestInit = {}, token?: string):
   });
   const body = res.status === 204 ? null : await res.json().catch(() => null);
   if (!res.ok) {
-    if (res.status === 401 && _onUnauthorized) {
+    if (res.status === 401 && _onUnauthorized && !isRefusal401?.(body)) {
       _onUnauthorized();
     }
     throw new ApiError(res.status, body);
@@ -300,8 +306,12 @@ export const api = {
     return request<DashboardResponse>(`/operator/dashboard${s ? '?' + s : ''}`, {}, token);
   },
   recentCheckIns: (token: string) => request<CheckIn[]>('/operator/checkins', {}, token),
-  checkIn: (token: string, qrToken: string) =>
-    request<CheckInResult>('/operator/checkins', { method: 'POST', body: JSON.stringify({ qrToken }) }, token),
+  /** `gymId` is needed when the operator works at more than one gym (else `gym_required`). */
+  checkIn: (token: string, qrToken: string, gymId?: string) =>
+    // An expired member QR comes back as 401 { failure: 'invalid_or_expired_qr' };
+    // that is the member's QR, not the operator's session, so stay signed in.
+    request<CheckInResult>('/operator/checkins', { method: 'POST', body: JSON.stringify(gymId ? { qrToken, gymId } : { qrToken }) }, token,
+      body => typeof (body as { failure?: unknown } | null)?.failure === 'string'),
   /** Slimmed list — no `images`/`thumbnails` arrays, only a single `thumbnail` field. */
   adminGyms: (token: string) => request<Gym[]>('/admin/gyms', {}, token),
   // ── Communications: a gym's messages to its direct members (scope 'owner')
@@ -895,6 +905,16 @@ export const api = {
     }, token),
   updatePayment: (token: string, id: string, patch: Pick<Partial<PaymentRequest>, 'status' | 'reference' | 'note'>) =>
     request<PaymentRequest>(`/admin/payment-requests/${id}`, { method: 'POST', body: JSON.stringify(patch) }, token),
+  // A1 second approver (MONEY_SECOND_APPROVER; 404 feature_disabled while off).
+  verifyPayment: (token: string, id: string, body: { reference?: string; note?: string }) =>
+    request<PaymentRequest>(`/admin/payment-requests/${encodeURIComponent(id)}/verify`, { method: 'POST', body: JSON.stringify(body) }, token),
+  requestPaymentChange: (token: string, id: string, body: { status: PaymentStatusValue; reason: string }) =>
+    request<PaymentRequest>(`/admin/payment-requests/${encodeURIComponent(id)}/change-request`, { method: 'POST', body: JSON.stringify(body) }, token),
+  /** amountTzs (the amount actually received) is required when a shop-order payment becomes approved. */
+  confirmPaymentChange: (token: string, id: string, body: { amountTzs?: number } = {}) =>
+    request<PaymentRequest>(`/admin/payment-requests/${encodeURIComponent(id)}/change-request/confirm`, { method: 'POST', body: JSON.stringify(body) }, token),
+  cancelPaymentChange: (token: string, id: string, body: { reason?: string }) =>
+    request<PaymentRequest>(`/admin/payment-requests/${encodeURIComponent(id)}/change-request/cancel`, { method: 'POST', body: JSON.stringify(body) }, token),
   members: (token: string) => request<MemberSummary[]>('/admin/members', {}, token),
   saveMember: (token: string, member: Partial<MemberSummary>) =>
     request<MemberSummary>('/admin/members', { method: 'POST', body: JSON.stringify(member) }, token),
@@ -936,6 +956,7 @@ export const api = {
   getSettings: (token: string) => request<PlatformSettings>('/admin/settings', {}, token),
   updateSettings: (token: string, data: Partial<PlatformSettings>) =>
     request<PlatformSettings>('/admin/settings', { method: 'PUT', body: JSON.stringify(data) }, token),
+  paymentOptions: (token: string) => request<PaymentOptions>('/payments/options', {}, token),
   getSpecialties: () => request<string[]>('/settings/specialties'),
   /** Public: the FitFlex Pass tiers on sale today (fitflex-functions#189 lists only sellable tiers). */
   subscriptionTiers: () => request<unknown>('/subscription-tiers'),
@@ -1102,6 +1123,8 @@ export interface CheckIn {
 export interface CheckInResult {
   ok: boolean;
   failure?: string;
+  /** Some refusals (not_your_gym, operator_not_assigned_to_gym, member_not_found) use `error`. */
+  error?: string;
   checkin?: CheckIn;
   visitNumberInCycle?: number;
 }
@@ -1217,7 +1240,30 @@ export interface PlatformSettings {
   paymentPeriodDays: number;
   payoutModel: 'commission' | 'discounted_rate';
   currency: string;
+  /** Slice A3: the Lipa Namba members pay manually; null when not saved. */
+  manualPayment?: ManualPaymentSettings | null;
   updatedAt: string;
+}
+
+/** Slice A3 (PUT /admin/settings `manualPayment`; null clears it). */
+export interface ManualPaymentSettings {
+  lipaNamba: string;
+  accountName: string;
+  network?: string | null;
+  instructions?: { en: string | null; sw: string | null } | null;
+}
+
+/** GET /payments/options. `manual` is present only while MANUAL_PAY_INSTRUCTIONS is on. */
+export interface PaymentOptions {
+  manual?: {
+    enabled: boolean;
+    lipaNamba: string | null;
+    accountName: string | null;
+    network: string | null;
+    instructions: { en: string | null; sw: string | null } | null;
+    referenceRequired: boolean;
+  };
+  [key: string]: unknown;
 }
 
 export interface PeriodMemberDetail {
@@ -1355,7 +1401,19 @@ export interface Refund {
   paidTo: string | null;
   createdAt: string;
   member?: { id: string; displayName: string | null; phone: string | null; email: string | null } | null;
+  /** MONEY_SECOND_APPROVER on only (absent while it is off). */
+  secondApproverRequired?: boolean;
+  approvalStage?: RefundApprovalStage | null;
+  /** The admin who may not approve it (raised it). */
+  approveNotBy?: string | null;
+  /** The admin who may not mark it paid (approved it). */
+  payNotBy?: string | null;
 }
+
+/** A1 second approver: where a payment or refund stands (flag MONEY_SECOND_APPROVER on only). */
+export type PaymentApprovalStage = 'awaiting_verification' | 'awaiting_second_approval' | 'change_requested';
+export type RefundApprovalStage = 'awaiting_approval' | 'awaiting_payment';
+export type PaymentStatusValue = 'pending' | 'approved' | 'rejected' | 'cancelled';
 
 export interface PaymentRequest {
   id: string;
@@ -1373,6 +1431,10 @@ export interface PaymentRequest {
   status: string;
   provider: string;
   reference: string | null;
+  /** Slice A3: the transaction ID the member typed (upper case); null when none. */
+  memberReference?: string | null;
+  /** Slice A3: the number the member says they paid from (+255… E.164); null when none. */
+  payerPhone?: string | null;
   note?: string | null;
   /** The gym a gym-bound request pays for (trainer pass / gym plan). */
   gymId?: string | null;
@@ -1389,6 +1451,20 @@ export interface PaymentRequest {
     renewsAt?: string;
     expiresAt?: string | null;
   } | null;
+  /** Columns (null unless used): who checked the money arrived, and a pending change request. */
+  verifiedBy?: string | null;
+  verifiedAt?: string | null;
+  changeRequestedStatus?: PaymentStatusValue | null;
+  changeRequestedBy?: string | null;
+  changeRequestedAt?: string | null;
+  changeRequestReason?: string | null;
+  /** MONEY_SECOND_APPROVER on only (absent while it is off). */
+  secondApproverRequired?: boolean;
+  approvalStage?: PaymentApprovalStage | null;
+  /** The admin who may not approve it (verified it). */
+  approveNotBy?: string | null;
+  /** The admin who may not confirm the requested change (requested it). */
+  confirmChangeNotBy?: string | null;
 }
 
 export interface MemberProfile {

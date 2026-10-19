@@ -7,6 +7,7 @@ import { SubscriptionTiersEditor, tiersSavable } from '@/components/subscription
 import { fillIn, settingsTierError } from '@/lib/pass-tiers';
 import { Button, PageHeader, Alert, Spinner, Card, Field, Input, Select, Table, TBody, Td, Th, THead, Tr } from '@/components/shared';
 import { money, currencyLabel } from '@/lib/admin-utils';
+import { ManualPaymentSettingsCard } from '@/components/manual-payment-settings';
 
 const EMPTY_BAND: PayoutBandConfig = { key: '', label: '', minVisits: 0, maxVisits: 0, payoutTiming: 'weekly', commissionPct: 10 };
 const TIMING_OPTIONS: PayoutBandConfig['payoutTiming'][] = ['daily', 'weekly', 'biweekly', 'monthly'];
@@ -241,6 +242,9 @@ export default function SettingsPage() {
           )}
         </div>
       </Card>
+
+      {/* Manual payment (Lipa Namba), slice A3: saved on its own, not by "Save all". */}
+      <ManualPaymentSettingsCard initial={settings?.manualPayment} />
 
       {/* Trainer Specialties */}
       <Card>

@@ -211,7 +211,7 @@ test('scan: tier_not_configured is explained', async ({ page }) => {
   await page.goto('/scan');
   await page.getByTestId('manual-token').fill('usr_1.abc.sig');
   await page.getByTestId('manual-submit').click();
-  await expect(page.getByTestId('scan-result')).toContainText('This pass’s plan isn’t set up — ask the member to contact FitFlex');
+  await expect(page.getByTestId('scan-result')).toContainText("Member's pass type is not set up"); // scanner wording from portal#93 (A5)
 });
 
 // Keep the seed in the mock aligned with what the backend sells today.
