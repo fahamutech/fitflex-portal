@@ -1,12 +1,12 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { ChevronDown, ChevronRight, Plus, RefreshCw, Save } from 'lucide-react';
+import { Calculator, ChevronDown, ChevronRight, Plus, RefreshCw, Save } from 'lucide-react';
 import { useApp } from '../../providers';
-import { api, AdminProductDraft, ApiError, ShopProduct, VendorSummary } from '@/lib/api';
-import { money } from '@/lib/admin-utils';
+import { api, AdminProductDraft, ApiError, ProductStats, ProductStatsRecompute, ShopProduct, VendorSummary } from '@/lib/api';
+import { formatDateTime, formatNumber, money } from '@/lib/admin-utils';
 import { variantsOf } from '@/lib/vendor';
-import { Alert, Badge, Button, Card, Checkbox, Field, Input, PageHeader, Select, Spinner, Textarea } from '@/components/shared';
+import { Alert, Badge, Button, Card, Checkbox, Field, Input, PageHeader, Select, Spinner, Table, TBody, Td, Textarea, Th, THead, Tr } from '@/components/shared';
 import { Dialog, DialogFooter } from '@/components/dialog';
 
 /** Cost and reorder level as typed: '' clears (sent as null). */
@@ -25,6 +25,12 @@ function draftOf(p: ShopProduct): PrivateDraft {
     variants: Object.fromEntries(variantsOf(p).map(v => [v.name, { cost: asText(v.costTzs), reorder: asText(v.reorderLevel) }])),
   };
 }
+
+/** Ratings to two places, counts whole. */
+const statText = (key: keyof ProductStats, v: number | null | undefined) => formatNumber(v, key === 'rating' ? 2 : 0);
+
+/** One-off stats recompute: the dry run being reviewed, then the applied result. */
+type Recompute = { preview: ProductStatsRecompute; result: ProductStatsRecompute | null; applying: boolean; error: string | null };
 
 const EMPTY_PRODUCT: AdminProductDraft = {
   vendorId: '', name: '', description: '', category: '', brand: '',
@@ -45,6 +51,8 @@ export default function ProductsPage() {
   const [privates, setPrivates] = useState<Record<string, PrivateDraft>>({});
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [openVariants, setOpenVariants] = useState<Set<string>>(new Set());
+  const [checkingStats, setCheckingStats] = useState(false);
+  const [recompute, setRecompute] = useState<Recompute | null>(null);
   const vendorName = (id: string) => {
     const v = vendors.find(x => x.id === id);
     return v?.vendorProfile?.businessName || v?.displayName || id;
@@ -161,6 +169,38 @@ export default function ProductsPage() {
     }
   }
 
+  const recomputeError = (cause: unknown) =>
+    t(cause instanceof ApiError && cause.status === 403 ? 'products.recompute.forbidden' : 'products.recompute.error');
+
+  /** Dry run first (apply false): nothing is written until the admin applies from the review. */
+  async function previewRecompute() {
+    if (!token) return;
+    setCheckingStats(true);
+    setSuccess(null);
+    try {
+      const preview = await api.recomputeProductStats(token, { apply: false });
+      setRecompute({ preview, result: null, applying: false, error: null });
+      setError(null);
+    } catch (cause) {
+      setError(recomputeError(cause));
+    } finally {
+      setCheckingStats(false);
+    }
+  }
+
+  async function applyRecompute() {
+    if (!token || !recompute || recompute.applying) return;
+    setRecompute({ ...recompute, applying: true, error: null });
+    try {
+      const result = await api.recomputeProductStats(token, { apply: true });
+      setRecompute(cur => cur && { ...cur, result, applying: false });
+    } catch (cause) {
+      setRecompute(cur => cur && { ...cur, applying: false, error: recomputeError(cause) });
+    }
+  }
+
+  const closeRecompute = () => { if (!recompute?.applying) setRecompute(null); };
+
   if (!token || user?.userType !== 'admin') return null;
 
   return (
@@ -172,6 +212,10 @@ export default function ProductsPage() {
           <Button variant="secondary" size="sm" onClick={load} disabled={loading}>
             <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
             {t('admin.action.refresh')}
+          </Button>
+          <Button variant="secondary" size="sm" onClick={previewRecompute} loading={checkingStats}>
+            {!checkingStats && <Calculator aria-hidden="true" className="h-4 w-4" />}
+            {checkingStats ? t('products.recompute.checking') : t('products.recompute.action')}
           </Button>
           <Button variant="primary" size="sm" onClick={() => setCreateOpen(true)}>
             <Plus className="h-4 w-4" />{t('products.create')}
@@ -287,6 +331,86 @@ export default function ProductsPage() {
           ))}
         </div>
       )}
+
+      {recompute && (() => {
+        const shown = recompute.result ?? recompute.preview;
+        const counts: Array<[string, number]> = [
+          [t('products.recompute.checked'), shown.checked],
+          [t(recompute.result ? 'products.recompute.changed' : 'products.recompute.willChange'), shown.changed.length],
+          [t('products.recompute.unchanged'), shown.unchanged],
+        ];
+        const cols: Array<[keyof ProductStats, string]> = [
+          ['rating', t('products.recompute.colRating')],
+          ['reviewCount', t('products.recompute.colReviews')],
+          ['soldCount', t('products.recompute.colSold')],
+        ];
+        return (
+          <Dialog open onClose={closeRecompute} size="xl" title={t('products.recompute.title')} description={t('products.recompute.explain')}>
+            <div className="space-y-4" data-testid="product-stats-recompute">
+              <dl className="grid grid-cols-3 gap-3">
+                {counts.map(([label, n]) => (
+                  <div key={label} className="rounded-[var(--radius-lg)] border border-[var(--color-border-secondary)] px-4 py-3">
+                    <dt className="text-xs text-[var(--color-fg-tertiary)]">{label}</dt>
+                    <dd className="mt-1 text-lg font-semibold text-[var(--color-fg-primary)]">{formatNumber(n)}</dd>
+                  </div>
+                ))}
+              </dl>
+              {recompute.result && (
+                <Alert tone="success">
+                  {t('products.recompute.applied').replace('{when}', formatDateTime(recompute.result.appliedAt))}
+                  {recompute.result.runId && <span className="block text-xs font-normal">{t('products.recompute.runId').replace('{id}', recompute.result.runId)}</span>}
+                </Alert>
+              )}
+              {recompute.error && <Alert tone="error">{recompute.error}</Alert>}
+              {shown.changed.length === 0 ? (
+                <p className="py-6 text-center text-sm text-[var(--color-fg-tertiary)]">{t('products.recompute.empty')}</p>
+              ) : (
+                <Table aria-label={t('products.recompute.tableLabel')}>
+                  <THead>
+                    <Tr>
+                      <Th>{t('products.recompute.colProduct')}</Th>
+                      {cols.map(([key, label]) => <Th key={key}>{label}</Th>)}
+                    </Tr>
+                  </THead>
+                  <TBody>
+                    {shown.changed.map(row => (
+                      <Tr key={row.productId} data-testid={`recompute-row-${row.productId}`}>
+                        <Td>
+                          <div className="font-medium text-[var(--color-fg-primary)]">{row.name}</div>
+                          <div className="text-xs text-[var(--color-fg-tertiary)]">{t('products.vendor')}: {vendorName(row.vendorId)}</div>
+                        </Td>
+                        {cols.map(([key]) => {
+                          const before = statText(key, row.before?.[key]), after = statText(key, row.after?.[key]);
+                          const same = before === after;
+                          return (
+                            <Td key={key} aria-label={t('vendor.products.wasNow').replace('{old}', before).replace('{new}', after)}>
+                              <span className={same ? 'text-[var(--color-fg-tertiary)]' : 'text-[var(--color-fg-quaternary)] line-through'}>{before}</span>
+                              {!same && <> <span aria-hidden="true">→</span> <span className="font-semibold text-[var(--color-fg-primary)]">{after}</span></>}
+                            </Td>
+                          );
+                        })}
+                      </Tr>
+                    ))}
+                  </TBody>
+                </Table>
+              )}
+              {!recompute.result && shown.changed.length > 0 && (
+                <p className="text-sm text-[var(--color-fg-secondary)]">{t('products.recompute.applyWarning')}</p>
+              )}
+            </div>
+            <DialogFooter>
+              {recompute.result || shown.changed.length === 0 ? (
+                <Button variant="secondary" onClick={closeRecompute}>{t('common.close')}</Button>
+              ) : (
+                <>
+                  <Button variant="secondary" onClick={closeRecompute} disabled={recompute.applying}>{t('admin.action.cancel')}</Button>
+                  <Button variant="destructive" onClick={applyRecompute} loading={recompute.applying}>{t('products.recompute.apply')}</Button>
+                </>
+              )}
+            </DialogFooter>
+          </Dialog>
+        );
+      })()}
 
       <Dialog
         open={createOpen}
