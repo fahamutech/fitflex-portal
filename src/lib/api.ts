@@ -257,6 +257,10 @@ export const api = {
         if (role.requestedRole === 'vendor_staff' && code === 'account_suspended') {
           throw new ApiError((err as ApiError).status, { error: 'vendor_staff_inactive' });
         }
+        // A business account that FitFlex suspended: say it is the business.
+        if (role.requestedRole === 'vendor' && code === 'account_suspended') {
+          throw new ApiError((err as ApiError).status, { error: 'vendor_account_suspended' });
+        }
         if (!code || !NO_SUCH_PROFILE.has(code)) throw err;
         refused = err;
       }
@@ -280,6 +284,10 @@ export const api = {
   /** A wrong PIN is a 401 refusal, not a dead session: never signs anyone out. */
   pinLogin: (body: { phone?: string; email?: string; pin: string }) =>
     request<PinLoginResult>('/auth/pin/login', { method: 'POST', body: JSON.stringify(body) }, undefined, () => true),
+
+  /** The B2B organisations this session's person belongs to, with their role in each. */
+  myOrganizations: (token: string) =>
+    request<{ organizations: Array<{ id: string; role: string }> }>('/b2b/me/organizations', {}, token, () => true),
 
   // ─── Vendor portal (S2): the signed-in vendor or vendor staff ───
   vendorMe: (token: string) => request<VendorMe>('/vendor/me', {}, token),

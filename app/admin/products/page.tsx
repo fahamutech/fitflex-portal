@@ -96,15 +96,24 @@ export default function ProductsPage() {
       const cost = parseWhole(d.cost), reorder = parseWhole(d.reorder);
       if (cost === 'invalid') errors[`${product.id}:costTzs`] = t('products.invalidNumber');
       if (reorder === 'invalid') errors[`${product.id}:reorderLevel`] = t('products.invalidNumber');
-      const variants = variantsOf(product).map(v => {
+      // Only what the admin changed against the loaded values: untouched private fields are never sent.
+      const variants: Array<{ name: string; costTzs?: number | null; reorderLevel?: number | null }> = [];
+      for (const v of variantsOf(product)) {
         const vd = d.variants[v.name] ?? { cost: asText(v.costTzs), reorder: asText(v.reorderLevel) };
         const vc = parseWhole(vd.cost), vr = parseWhole(vd.reorder);
         if (vc === 'invalid') errors[`${product.id}:${v.name}:costTzs`] = t('products.invalidNumber');
         if (vr === 'invalid') errors[`${product.id}:${v.name}:reorderLevel`] = t('products.invalidNumber');
-        return { name: v.name, costTzs: vc === 'invalid' ? null : vc, reorderLevel: vr === 'invalid' ? null : vr };
-      });
+        const change: { name: string; costTzs?: number | null; reorderLevel?: number | null } = { name: v.name };
+        if (vc !== 'invalid' && vc !== (v.costTzs ?? null)) change.costTzs = vc;
+        if (vr !== 'invalid' && vr !== (v.reorderLevel ?? null)) change.reorderLevel = vr;
+        if ('costTzs' in change || 'reorderLevel' in change) variants.push(change);
+      }
       if (Object.keys(errors).length) { setFieldErrors(cur => ({ ...cur, ...errors })); return; }
-      privateBody = { costTzs: cost, reorderLevel: reorder, ...(variants.length ? { variants } : {}) };
+      privateBody = {
+        ...(cost !== 'invalid' && cost !== (product.costTzs ?? null) ? { costTzs: cost } : {}),
+        ...(reorder !== 'invalid' && reorder !== (product.reorderLevel ?? null) ? { reorderLevel: reorder } : {}),
+        ...(variants.length ? { variants } : {}),
+      };
     }
     setSavingId(product.id);
     setSuccess(null);

@@ -69,6 +69,15 @@ const vendorBase = (extra: Routes = {}): Routes => ({
 });
 
 test.describe('sign-in', () => {
+  // `next dev` compiles a route on first visit and drops a soft navigation that arrives meanwhile;
+  // compile /vendor/ once so the sign-in tests check the app's landing, not the dev compiler.
+  test.beforeAll(async ({ browser }) => {
+    const warm = await browser.newPage();
+    await warm.route(/^https?:\/\/(?!localhost[:/])/, route => route.abort());
+    await warm.route(`${API}/**`, route => route.fulfill({ status: 404, json: { error: 'not_found' } }));
+    await warm.goto('/vendor/');
+    await warm.close();
+  });
   test('the PIN method shows only when the server offers it; a 3-digit PIN sends nothing', async ({ page }) => {
     const calls = await mockApi(page, { 'GET /auth/options': { json: { pinLogin: false } } });
     await page.goto('/login');
@@ -98,10 +107,7 @@ test.describe('sign-in', () => {
     await page.getByTestId('pin-identifier-input').fill('0712345678');
     await page.getByTestId('pin-input').fill('1234');
     await page.getByTestId('pin-submit').click();
-    // The session is stored; the portal then opens on /vendor/. (In `next dev` the soft navigation away
-    // from /login does not complete under Playwright on clean RC either, so the landing is checked by opening the portal.)
     await expect.poll(() => page.evaluate(() => localStorage.getItem('token'))).toBe('vendor-token');
-    await page.goto('/');
     await expect(page).toHaveURL(/\/vendor\/$/, { timeout: 20_000 });
     expect(calls.find(c => c.path === '/auth/pin/login')?.body).toEqual({ phone: '0712345678', pin: '1234' });
     await expect(page.getByTestId('vendor-business-name').first()).toHaveText('Dar Fitness Gear');
@@ -125,7 +131,6 @@ test.describe('sign-in', () => {
     await expect.poll(() => page.evaluate(() => localStorage.getItem('token'))).toBe('vendor-token');
     expect(calls.find(c => c.path === '/auth/pin/login')?.body).toEqual({ email: 'rehema@example.com', pin: '1234' });
     expect(calls.find(c => c.path === '/auth/switch-persona')?.body).toEqual({ personaId: 'usr_vendor' });
-    await page.goto('/');
     await expect(page).toHaveURL(/\/vendor\/$/, { timeout: 20_000 });
   });
 
@@ -153,6 +158,55 @@ test.describe('sign-in', () => {
   });
 });
 
+test.describe('sign-in messages and companies', () => {
+  async function pinSignIn(page: Page) {
+    await page.goto('/login');
+    await page.getByTestId('pin-method-btn').click();
+    await page.getByTestId('pin-identifier-input').fill('0712345678');
+    await page.getByTestId('pin-input').fill('1234');
+    await page.getByTestId('pin-submit').click();
+  }
+
+  test('no profile, and a suspended business, each get a clear message and no session', async ({ page }) => {
+    let tries = 0;
+    await mockApi(page, {
+      'GET /auth/options': { json: { pinLogin: true } },
+      'POST /auth/pin/login': () => (++tries === 1
+        ? { status: 409, json: { error: 'no_profile' } }
+        : { status: 403, json: { error: 'account_suspended' } }),
+    });
+    await pinSignIn(page);
+    await expect(page.getByText('No business or portal access is linked to this number or email.')).toBeVisible();
+    await page.getByTestId('pin-input').fill('1234');
+    await page.getByTestId('pin-submit').click();
+    await expect(page.getByText('This account or business is suspended. Contact FitFlex.')).toBeVisible();
+    expect(await page.evaluate(() => localStorage.getItem('token'))).toBeNull();
+  });
+
+  test('a member who looks after a company opens the company area', async ({ page }) => {
+    const calls = await mockApi(page, {
+      'GET /auth/options': { json: { pinLogin: true } },
+      'POST /auth/pin/login': { json: { token: 'member-token', user: { id: 'usr_m', userType: 'member' }, personas: [{ id: 'usr_m', userType: 'member', accountStatus: 'active' }] } },
+      'GET /b2b/me/organizations': { json: { organizations: [{ id: 'org_1', role: 'finance' }] } },
+    });
+    await pinSignIn(page);
+    await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem('user') || 'null'))).toMatchObject({ organizationUser: true, organizationRoles: ['finance'] });
+    expect(calls.find(c => c.path === '/b2b/me/organizations')).toBeTruthy();
+    expect(calls.find(c => c.path === '/auth/switch-persona')).toBeFalsy();
+  });
+
+  test('a member with no portal role and no company is refused and nothing is stored', async ({ page }) => {
+    await mockApi(page, {
+      'GET /auth/options': { json: { pinLogin: true } },
+      'POST /auth/pin/login': { json: { token: 'member-token', user: { id: 'usr_m', userType: 'member' }, personas: [] } },
+      'GET /b2b/me/organizations': { json: { organizations: [] } },
+    });
+    await pinSignIn(page);
+    await expect(page.getByText('No business or portal access is linked to this number or email.')).toBeVisible();
+    expect(await page.evaluate(() => localStorage.getItem('token'))).toBeNull();
+  });
+});
+
 test.describe('gating and routing', () => {
   test('portal switched off: only the "not open yet" card, no nav, even on a deep link', async ({ page }) => {
     await signedInAs(page, VENDOR);
@@ -175,15 +229,18 @@ test.describe('gating and routing', () => {
 
   test('staff with only `orders` see Dashboard and Orders; /vendor/products/ sends them back', async ({ page }) => {
     await signedInAs(page, STAFF);
-    await mockApi(page, vendorBase({ 'GET /vendor/me': { json: me({ userType: 'vendor_staff', vendorRole: 'orders_manager', permissions: ['orders'], tools: tools({ canSeeCost: false }) }) } }));
+    const calls = await mockApi(page, vendorBase({ 'GET /vendor/me': { json: me({ userType: 'vendor_staff', vendorRole: 'orders_manager', permissions: ['orders'], tools: tools({ canSeeCost: false }) }) } }));
     await page.goto('/vendor/');
     const nav = page.locator('aside').first().getByRole('navigation');
     await expect(nav.getByRole('link')).toHaveText([/Dashboard/, /Orders/]);
     await expect(page.getByTestId('dash-open-orders')).toBeVisible();
     await expect(page.getByTestId('dash-sales')).toHaveCount(0);
+    const before = calls.length;
     await page.goto('/vendor/products/');
     await expect(page).toHaveURL(/\/vendor\/$/);
     await expect(page.getByText("You don't have access to that.")).toBeVisible();
+    // The products page was held back by the role check: it never asked for products.
+    expect(calls.slice(before).filter(c => c.path === '/vendor/products')).toEqual([]);
   });
 
   test('a vendor on /dashboard goes to /vendor/; a gym owner on /vendor goes home', async ({ page, browser }) => {
@@ -194,9 +251,11 @@ test.describe('gating and routing', () => {
 
     const owner = await browser.newPage();
     await signedInAs(owner, { id: 'usr_owner', userType: 'gym_operator', gymId: 'gym_1' });
-    await mockApi(owner, {});
+    const ownerCalls = await mockApi(owner, {});
     await owner.goto('/vendor/');
     await expect(owner).toHaveURL(/\/dashboard/);
+    // The vendor page never rendered for them, so none of its requests went out.
+    expect(ownerCalls.filter(c => c.path.startsWith('/vendor/'))).toEqual([]);
     await owner.close();
   });
 
@@ -422,9 +481,26 @@ test.describe('admin products', () => {
     await page.getByRole('button', { name: 'Variants' }).click();
     await page.getByLabel('Cost price (TSh): Whey Protein · Vanilla').fill('50000');
     await page.getByRole('button', { name: /Save/ }).first().click();
-    await expect.poll(() => calls.find(c => c.method === 'PUT')?.body).toMatchObject({
-      costTzs: 55000, reorderLevel: null, variants: [{ name: 'Vanilla', costTzs: 50000, reorderLevel: 2 }],
+    await expect.poll(() => calls.find(c => c.method === 'PUT')?.body).toBeTruthy();
+    const body = calls.find(c => c.method === 'PUT')?.body as Record<string, unknown>;
+    // Only what changed: cost set, reorder level cleared, and the variant's cost (its reorder level untouched).
+    expect(body).toMatchObject({ costTzs: 55000, reorderLevel: null, variants: [{ name: 'Vanilla', costTzs: 50000 }] });
+    expect((body.variants as Array<Record<string, unknown>>)[0]).not.toHaveProperty('reorderLevel');
+  });
+
+  test('saving the listing without touching cost or reorder sends no private fields', async ({ page }) => {
+    await signedInAs(page, adminUser);
+    const calls = await mockApi(page, {
+      'GET /admin/products': { json: [product({ variants: [{ name: 'Vanilla', stock: 4, costTzs: null, reorderLevel: 2 }], homepageVisible: true, homepagePriority: 0 })] },
+      'GET /admin/vendors': { json: vendors },
+      'PUT /admin/products/prd_1/listing': { json: product() },
     });
+    await page.goto('/admin/products');
+    await expect(page.getByTestId('product-private-prd_1')).toBeVisible();
+    await page.getByRole('button', { name: /Save/ }).first().click();
+    await expect.poll(() => calls.find(c => c.method === 'PUT')?.body).toBeTruthy();
+    const body = calls.find(c => c.method === 'PUT')?.body as Record<string, unknown>;
+    expect(Object.keys(body).sort()).toEqual(['approvalStatus', 'homepagePriority', 'homepageVisible']);
   });
 
   test('with the ledger off (no private keys) the page has no cost fields', async ({ page }) => {

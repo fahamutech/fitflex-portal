@@ -66,13 +66,20 @@ export default function LoginPage() {
       const personas: PersonaSummary[] = Array.isArray(res.personas) ? res.personas : [];
       const usable = personas.filter(p => !p.portalOnly && p.accountStatus !== 'suspended' && p.approvalStatus !== 'rejected');
       const target = PIN_SWITCH_ORDER.map(type => usable.find(p => p.userType === type)).find(Boolean);
-      if (!target) {
-        const staffOff = personas.some(p => p.userType === 'vendor_staff' && p.accountStatus === 'suspended');
-        setError(staffOff ? t('login.vendorStaffDisabled') : t('login.adminRequired'));
+      if (target) {
+        const switched = await api.switchPersona(res.token, target.id);
+        handleSuccess(switched.token, switched.user);
         return;
       }
-      const switched = await api.switchPersona(res.token, target.id);
-      handleSuccess(switched.token, switched.user);
+      // No portal persona: someone who looks after a company (B2B organisation) opens its area, as with Google/email.
+      const organizations = await api.myOrganizations(res.token).then(r => r?.organizations ?? []).catch(() => []);
+      if (organizations.length) {
+        handleSuccess(res.token, { ...res.user, organizationUser: true, organizationRoles: [...new Set(organizations.map(o => o.role))] });
+        return;
+      }
+      // Nothing usable: say why, and store nothing.
+      const off = (type: string) => personas.some(p => p.userType === type && p.accountStatus === 'suspended');
+      setError(off('vendor') ? t('login.suspendedBusiness') : off('vendor_staff') ? t('login.vendorStaffDisabled') : t('login.pinNoAccess'));
     } catch (err) {
       const code = err instanceof ApiError ? (err.body as { error?: string } | null)?.error : undefined;
       const status = err instanceof ApiError ? err.status : 0;
@@ -87,7 +94,11 @@ export default function LoginPage() {
         setError(t('login.pinLocked'));
       } else if (code === 'vendor_staff_inactive') {
         setError(t('login.vendorStaffDisabled'));
-      } else if (code === 'account_suspended' || code === 'person_not_active') {
+      } else if (code === 'no_profile') {
+        setError(t('login.pinNoAccess'));
+      } else if (code === 'account_suspended') {
+        setError(t('login.suspendedBusiness'));
+      } else if (code === 'person_not_active') {
         setError(t('login.suspended'));
       } else if (status === 404 || code === 'pin_not_configured') {
         // Switched off on the server: hide the method and send them back to the other options.
@@ -109,6 +120,8 @@ export default function LoginPage() {
         return t('login.adminRequired');
       if (body?.error === 'vendor_staff_inactive')
         return t('login.vendorStaffDisabled');
+      if (body?.error === 'vendor_account_suspended')
+        return t('login.suspendedBusiness');
       if (body?.error === 'account_suspended')
         return t('login.suspended');
       return t('login.error');

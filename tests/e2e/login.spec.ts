@@ -19,6 +19,8 @@ test('login renders cleanly on iPhone 15 Pro Max and opens email form', async ({
     }
   });
 
+  // Nothing here may reach a real service (live API, Firebase, Google).
+  await page.route(/^https?:\/\/(?!localhost[:/])/, route => route.abort());
   // The page asks which sign-in methods the server offers (business PIN sign-in, S2).
   await page.route(`${API}/auth/options`, route => route.fulfill({ json: { pinLogin: false } }));
   await page.goto('/login');

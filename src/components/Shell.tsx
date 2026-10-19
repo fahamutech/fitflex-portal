@@ -426,54 +426,59 @@ export function Shell({ children }: { children: ReactNode }) {
     : isHr ? HR_NAV
     : OPERATOR_NAV.filter(item => !item.aclScope || user?.userType !== 'gym_staff' || hasPermission(item.aclScope));
 
-  useEffect(() => {
-    if (!ready) return;
-    if (!token && pathname !== '/login' && pathname !== '/') router.replace('/login');
+  // Where this person must go instead of the current page, or null when they may see it. One decision
+  // drives both the redirect and the render: a page's content (and its requests) waits until it passes.
+  const path = pathname.replace(/\/$/, '') || '/';
+  const vendorPermissionMissing = (() => {
+    if (!isVendor || vendor.status !== 'ready') return false;
+    const area = [...VENDOR_AREAS].reverse().find(a => path === a.href || path.startsWith(`${a.href}/`));
+    return !!area?.permission && !vendor.can(area.permission);
+  })();
+  const redirectTo = ((): string | null => {
+    if (!ready) return null;
+    if (!token) return path !== '/login' && path !== '/' ? '/login' : null;
 
     // A business (vendor or vendor staff) only ever sees /vendor; nobody else does.
-    const inVendorArea = pathname === '/vendor' || pathname.startsWith('/vendor/');
-    if (token && isVendor && !inVendorArea) { router.replace('/vendor/'); return; }
-    if (token && !isVendor && inVendorArea) { router.replace(homeFor(user)); return; }
+    const inVendorArea = path === '/vendor' || path.startsWith('/vendor/');
+    if (isVendor) return !inVendorArea || vendorPermissionMissing ? '/vendor/' : null;
+    if (inVendorArea) return homeFor(user);
 
     // Someone signed in for an organisation's billing only ever sees /org; nobody else does.
-    if (token && isOrgUser && !pathname.startsWith('/org')) { router.replace(orgNav(user?.organizationRoles)[0].href); return; }
-    if (token && !isOrgUser && pathname.startsWith('/org')) { router.replace(user?.userType === 'admin' ? '/admin' : user?.userType === 'corporate_hr' ? '/hr' : '/dashboard'); return; }
+    if (isOrgUser && !path.startsWith('/org')) return orgNav(user?.organizationRoles)[0].href;
+    if (!isOrgUser && path.startsWith('/org')) return user?.userType === 'admin' ? '/admin' : user?.userType === 'corporate_hr' ? '/hr' : '/dashboard';
 
     // Company HR only ever sees /hr; nobody else does.
-    if (token && user?.userType === 'corporate_hr' && !pathname.startsWith('/hr')) { router.replace('/hr'); return; }
-    if (token && user?.userType !== 'corporate_hr' && pathname.startsWith('/hr')) router.replace(user?.userType === 'admin' ? '/admin' : '/dashboard');
+    if (user?.userType === 'corporate_hr' && !path.startsWith('/hr')) return '/hr';
+    if (user?.userType !== 'corporate_hr' && path.startsWith('/hr')) return user?.userType === 'admin' ? '/admin' : '/dashboard';
 
     // Block non-admin users from admin routes
-    if (token && user?.userType !== 'admin' && pathname.startsWith('/admin')) router.replace(user?.userType === 'corporate_hr' ? '/hr' : '/dashboard');
+    if (user?.userType !== 'admin' && path.startsWith('/admin')) return '/dashboard';
 
     // All admin users (including portal staff) go to /admin, not operator pages
-    if (token && user?.userType === 'admin' && ['/dashboard', '/scan', '/checkins'].includes(pathname)) router.replace('/admin');
+    if (user?.userType === 'admin' && ['/dashboard', '/scan', '/checkins'].includes(path)) return '/admin';
 
-    // Portal staff: redirect away from pages outside their ACL
-    if (token && isPortalStaff && pathname.startsWith('/admin')) {
-      const matchedItem = ADMIN_NAV.find(item =>
-        ROOTS.has(item.href) ? pathname.replace(/\/$/, '') === item.href : pathname.startsWith(item.href)
-      );
+    // Portal staff: away from pages outside their ACL, to the first permitted page (or the overview)
+    if (isPortalStaff && path.startsWith('/admin')) {
+      const matchedItem = ADMIN_NAV.find(item => (ROOTS.has(item.href) ? path === item.href : path.startsWith(item.href)));
       if (matchedItem?.aclScope && !scopesOf(matchedItem).some(hasPermission)) {
-        // Redirect to the first permitted page, or just /admin overview
         const firstAllowed = ADMIN_NAV.find(i => !i.aclScope || scopesOf(i).some(hasPermission));
-        router.replace(firstAllowed?.href ?? '/admin');
+        const to = firstAllowed?.href ?? '/admin';
+        return to === path ? null : to;
       }
     }
-  }, [ready, token, user, isPortalStaff, isOrgUser, isVendor, pathname, router, hasPermission]);
+    return null;
+  })();
 
   // Vendor pages need their permission: without it, back to the dashboard with a note (once per visit).
   const bouncedFrom = useRef<string | null>(null);
   useEffect(() => {
-    if (!isVendor || vendor.status !== 'ready') return;
-    const path = pathname.replace(/\/$/, '');
-    const area = [...VENDOR_AREAS].reverse().find(a => path === a.href || path.startsWith(`${a.href}/`));
-    if (area?.permission && !vendor.can(area.permission)) {
-      if (bouncedFrom.current !== path) toast.error(t('vendor.noAccess'));
+    if (!redirectTo) { if (!vendorPermissionMissing) bouncedFrom.current = null; return; }
+    if (vendorPermissionMissing && bouncedFrom.current !== path) {
+      toast.error(t('vendor.noAccess'));
       bouncedFrom.current = path;
-      router.replace('/vendor/');
-    } else bouncedFrom.current = null;
-  }, [isVendor, vendor, pathname, router, toast, t]);
+    }
+    router.replace(redirectTo);
+  }, [redirectTo, vendorPermissionMissing, path, router, toast, t]);
 
   /* Close mobile drawer on route change */
   useEffect(() => { setMobileOpen(false); }, [pathname]);
@@ -509,7 +514,7 @@ export function Shell({ children }: { children: ReactNode }) {
     );
   }
 
-  const isLoginPage = pathname === '/login' || !token;
+  const isLoginPage = path === '/login' || !token;
 
   /* Public / login layout — no sidebar */
   if (isLoginPage) {
@@ -524,7 +529,7 @@ export function Shell({ children }: { children: ReactNode }) {
           </div>
           <LanguageToggle className="justify-self-end" />
         </header>
-        <main className="flex-1">{children}</main>
+        <main className="flex-1">{redirectTo ? <div aria-busy="true" data-testid="shell-redirecting" /> : children}</main>
       </div>
     );
   }
@@ -622,7 +627,9 @@ export function Shell({ children }: { children: ReactNode }) {
 
         {/* Page content */}
         <main id="main-content" className="flex-1 overflow-y-auto px-4 py-6 sm:px-6 lg:px-8 print:overflow-visible print:p-0">
-          {vendorLoading ? (
+          {redirectTo ? (
+            <div className="space-y-4" aria-busy="true" data-testid="shell-redirecting"><SkeletonCard /></div>
+          ) : vendorLoading ? (
             <div className="space-y-4" aria-busy="true" data-testid="vendor-loading">
               <SkeletonCard /><SkeletonCard /><SkeletonCard />
             </div>
