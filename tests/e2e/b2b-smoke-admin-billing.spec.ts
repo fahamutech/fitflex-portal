@@ -3,7 +3,7 @@
 // invoices, payments, statement and agreement. Mock-driven, asserting rendering, labelled controls and
 // the exact requests the forms send.
 import { expect, Page, test } from '@playwright/test';
-import { ADMIN, B2BMock, expectNoHorizontalScroll, setupB2B } from './helpers/b2b-mock';
+import { ADMIN, B2BMock, PAYMENT_INSTRUCTIONS, expectNoHorizontalScroll, setupB2B } from './helpers/b2b-mock';
 
 let mock: B2BMock;
 test.beforeEach(async ({ page }) => {
@@ -57,7 +57,53 @@ test.describe('collections', () => {
       bankName: 'NMB Bank', accountName: 'FitFlex Africa Ltd', accountNumber: '0150123456', branch: 'Mlimani', swiftCode: 'CORUTZTZ',
       lipaNamba: '123456', lipaNambaName: 'FitFlex', notes: 'Quote the invoice number',
     });
-    await expect(page.getByText('Payment details saved.')).toBeVisible();
+    // Saving only requests the change: a different admin has to confirm it.
+    await expect(page.getByText('Change sent for approval.', { exact: false })).toBeVisible();
+    const pending = page.getByTestId('payment-details-pending');
+    await expect(pending).toContainText('Change waiting for approval');
+    await expect(pending).toContainText('Asked for by you');
+    await expect(pending.getByTestId('pending-bankName')).toHaveText('NMB Bank');
+    await expect(pending).toContainText('CRDB Bank'); // the current details, side by side
+    await expect(page.getByTestId('payment-details-confirm')).toBeDisabled();
+    await expect(page.getByTestId('payment-details-own')).toContainText('A different admin must confirm it.');
+    // The requester can withdraw it.
+    await page.getByTestId('payment-details-cancel').click();
+    await page.getByTestId('payment-details-cancel-reason').fill('Wrong branch');
+    await page.getByTestId('payment-details-decide-submit').click();
+    await expect.poll(() => mock.writes(/payment-instructions\/cancel$/).length).toBe(1);
+    expect(mock.writes(/payment-instructions\/cancel$/)[0].body).toEqual({ reason: 'Wrong branch' });
+    await expect(page.getByText('Change request cancelled.', { exact: false })).toBeVisible();
+    await expect(page.getByTestId('payment-details-pending')).toHaveCount(0);
+  });
+
+  test('a different admin confirms a waiting payment-details change', async ({ page }) => {
+    mock.on('GET', /^\/admin\/b2b\/payment-instructions$/, () => ({
+      instructions: PAYMENT_INSTRUCTIONS, configured: true,
+      pendingChange: { instructions: { ...PAYMENT_INSTRUCTIONS, bankName: 'NMB Bank' }, requestedBy: 'admin-2', requestedAt: '2026-10-19T09:30:00.000Z' },
+    }));
+    mock.on('POST', /^\/admin\/b2b\/payment-instructions\/confirm$/, () => ({ status: 200, json: { instructions: { ...PAYMENT_INSTRUCTIONS, bankName: 'NMB Bank' }, configured: true, pendingChange: null } }));
+    await page.goto('/admin/b2b-billing');
+    const pending = page.getByTestId('payment-details-pending');
+    await expect(pending).toContainText('another admin (admin-2)');
+    await expect(page.getByTestId('payment-details-own')).toHaveCount(0);
+    await page.getByTestId('payment-details-confirm').click();
+    await page.getByTestId('payment-details-decide-submit').click();
+    await expect.poll(() => mock.writes(/payment-instructions\/confirm$/).length).toBe(1);
+    expect(mock.writes(/payment-instructions\/confirm$/)[0].body).toEqual({});
+    await expect(page.getByText('The new payment details are in force.', { exact: false })).toBeVisible();
+  });
+
+  test('confirming your own payment-details change is refused with a clear message', async ({ page }) => {
+    // The server is the guard: even if the button were reached, 403 cannot_confirm_own_request is explained.
+    mock.on('GET', /^\/admin\/b2b\/payment-instructions$/, () => ({
+      instructions: PAYMENT_INSTRUCTIONS, configured: true,
+      pendingChange: { instructions: { ...PAYMENT_INSTRUCTIONS, bankName: 'NMB Bank' }, requestedBy: 'admin-2', requestedAt: '2026-10-19T09:30:00.000Z' },
+    }));
+    mock.on('POST', /^\/admin\/b2b\/payment-instructions\/confirm$/, () => ({ status: 403, json: { error: 'cannot_confirm_own_request' } }));
+    await page.goto('/admin/b2b-billing');
+    await page.getByTestId('payment-details-confirm').click();
+    await page.getByTestId('payment-details-decide-submit').click();
+    await expect(page.getByTestId('payment-details-decide')).toContainText('You asked for this change. A different admin must confirm it.');
   });
 
   test('confirm a payment notice with the amount seen on the statement', async ({ page }) => {
@@ -231,6 +277,14 @@ test.describe('one organisation', () => {
     });
     await page.getByTestId('agreement-activate-agr-1').click();
     await expect.poll(() => mock.writes(/agreements\/agr-1\/activate$/).length).toBe(1);
+  });
+
+  test('the admin who drafted or last changed an agreement cannot activate it', async ({ page }) => {
+    mock.on('GET', /^\/admin\/b2b\/organizations\/([^/]+)\/agreements$/, () => ({ agreements: [{ id: 'agr-1', organizationId: 'org-1', reference: 'AGR-0001', contractReference: null, status: 'draft', effectiveFrom: '2026-11-01', effectiveTo: null, billingCycle: 'monthly', currency: 'TZS', prepaidTermsDays: 0, usageTermsDays: 14, platformFeeTzs: 50000, vatRateBps: 1800, notes: null, createdBy: 'admin-2', updatedBy: ADMIN.id }], inForce: null }));
+    await openOrg(page);
+    await page.getByRole('button', { name: 'Agreement and account' }).click();
+    await expect(page.getByTestId('agreement-activate-agr-1')).toBeDisabled();
+    await expect(page.getByTestId('agreement-activate-own')).toContainText('a different admin has to put it in force');
   });
 });
 

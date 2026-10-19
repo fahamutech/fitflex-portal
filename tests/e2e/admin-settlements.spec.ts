@@ -40,6 +40,8 @@ async function setup(page: Page, user: Json, state: { statement: Json; adjustmen
       if (path.endsWith('/void-request')) state.statement = { ...state.statement, voidRequestedBy: user.id, voidRequestedAt: '2026-11-02T09:00:00.000Z', voidRequestReason: body?.reason };
       if (path.endsWith('/void-request/cancel')) state.statement = { ...state.statement, voidRequestedBy: null, voidRequestedAt: null, voidRequestReason: null };
       if (path.endsWith('/void')) state.statement = { ...state.statement, status: 'voided', voidReason: state.statement.voidRequestReason, voidedAt: '2026-11-03T09:00:00.000Z' };
+      if (path.endsWith('/pay') && String(body?.receiptUrl ?? '').includes('refused')) return route.fulfill({ status: 400, json: { error: 'invalid_receipt_url' } });
+      if (path.endsWith('/pay')) state.statement = { ...state.statement, status: 'paid', paidAt: '2026-11-05T09:00:00.000Z', receiptUrl: body?.receiptUrl ?? null };
       if (path.endsWith('/payable')) return  route.fulfill({ status: 409, json: { error: 'not_payable', reason: 'payout_account_not_verified' } });
       if (path.endsWith('/adjustments')) {
         state.adjustments.push({ id: 'adj-1', gymSettlementId: 'st-1', status: 'proposed', createdBy: user.id, ...body });
@@ -182,4 +184,34 @@ test('a second admin confirms a requested void, or cancels the request', async (
   await page.getByTestId('settlement-back').click();
   await page.getByTestId('settlement-tab-voided').click();
   await expect(page.getByTestId('settlement-table')).toContainText('Mikocheni Fitness');
+});
+
+test('recording a payment only takes an https:// receipt link', async ({ page }) => {
+  const state = { statement: statement({ status: 'payable', submittedBy: 'admin-1' }), adjustments: [] as Json[], calls: [] as Array<{ path: string; body: Json | null }> };
+  await setup(page, { id: 'admin-2', userType: 'admin', email: 'second@example.com' }, state);
+
+  await page.goto('/admin/settlements?statement=st-1');
+  await page.getByTestId('settlement-pay').click();
+  await page.getByTestId('settlement-pay-reference').fill('MPESA QX12AB34');
+  // Still typing the scheme: no error yet, but nothing can be sent.
+  await page.getByTestId('settlement-pay-receipt').fill('https:/');
+  await expect(page.getByText('The receipt link must be a full https:// address', { exact: false })).toHaveCount(0);
+  await expect(page.getByTestId('settlement-pay-submit')).toBeDisabled();
+  for (const bad of ['http://receipts.example.com/r/1', 'https://user:secret@receipts.example.com/r/1', `https://receipts.example.com/${'a'.repeat(1000)}`]) {
+    await page.getByTestId('settlement-pay-receipt').fill(bad);
+    await expect(page.getByText('The receipt link must be a full https:// address', { exact: false })).toBeVisible();
+    await expect(page.getByTestId('settlement-pay-submit')).toBeDisabled();
+  }
+  // The server's refusal is explained too.
+  await page.getByTestId('settlement-pay-receipt').fill('https://receipts.example.com/refused');
+  await page.getByTestId('settlement-pay-submit').click();
+  await expect(page.getByText('The receipt link must be a full https:// address', { exact: false })).toBeVisible();
+  expect(state.calls.filter(c => c.path.endsWith('/pay'))).toHaveLength(1);
+
+  await page.getByTestId('settlement-pay').click();
+  await page.getByTestId('settlement-pay-reference').fill('MPESA QX12AB34');
+  await page.getByTestId('settlement-pay-receipt').fill('https://receipts.example.com/r/1');
+  await page.getByTestId('settlement-pay-submit').click();
+  await expect(page.getByText('Payment recorded.')).toBeVisible();
+  expect(state.calls.at(-1)).toMatchObject({ path: '/admin/settlements/statements/st-1/pay', body: { paymentReference: 'MPESA QX12AB34', receiptUrl: 'https://receipts.example.com/r/1' } });
 });

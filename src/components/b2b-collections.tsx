@@ -1,12 +1,16 @@
 'use client';
 import { useEffect, useState } from 'react';
+import { useApp } from '../../app/providers';
 import {
-  api, ApiError, B2BCollectionsQueue, B2BOrgPaying, B2BPaymentInstructions, B2BPaymentNotice, B2BSponsorInvoice,
+  api, ApiError, B2BAdminPaymentInstructions, B2BCollectionsQueue, B2BOrgPaying, B2BPaymentInstructions, B2BPaymentInstructionsChange, B2BPaymentNotice, B2BSponsorInvoice,
 } from '@/lib/api';
 import { Alert, Badge, Button, Card, CardContent, Checkbox, Field, Input, Select, Spinner, Table, TBody, Td, Textarea, Th, THead, Tr } from '@/components/shared';
 import { Dialog } from '@/components/dialog';
 import { PAYMENT_METHOD, day } from '@/components/b2b-finance';
 import { money } from '@/lib/admin-utils';
+import { fill } from '@/components/communication-shared';
+import { errorCode, whenText } from '@/lib/money-approval';
+import type { MessageKey } from '@/lib/i18n';
 
 const ERRORS: Record<string, string> = {
   invalid_amount: 'Enter a whole amount in TSh, more than zero.',
@@ -26,6 +30,15 @@ const ERRORS: Record<string, string> = {
 const said = (e: unknown, fallback: string) => {
   const code = e instanceof ApiError ? (e.body as { error?: string } | null)?.error : undefined;
   return (code && ERRORS[code]) || fallback;
+};
+/** Two-admin payment-details change: the server's refusal, in the reader's language. */
+const PAY_DETAILS_ERRORS: Record<string, MessageKey> = {
+  cannot_confirm_own_request: 'money2.err.cannot_confirm_own_request',
+  no_pending_change: 'b2bPay.err.no_pending_change',
+};
+const payDetailsError = (e: unknown, t: (key: MessageKey) => string) => {
+  const code = errorCode(e);
+  return PAY_DETAILS_ERRORS[code] ? t(PAY_DETAILS_ERRORS[code]) : (ERRORS[code] ?? t('b2bPay.err.generic'));
 };
 const whole = (v: string) => (/^\d+$/.test(v.trim()) ? Number(v.trim()) : NaN);
 const todayEat = () => new Date(Date.now() + 3 * 3_600_000).toISOString().slice(0, 10);
@@ -206,13 +219,15 @@ type Can = { bill: boolean; approve: boolean; pay: boolean };
 export function CollectionsPanel({ token, can, onOpenOrganization, onChanged }: {
   token: string; can: Can; onOpenOrganization: (org: { id: string; name: string }) => void; onChanged?: () => void;
 }) {
+  const { user, t, locale } = useApp();
   const [q, setQ] = useState<B2BCollectionsQueue | null>(null);
-  const [details, setDetails] = useState<{ instructions: B2BPaymentInstructions; configured: boolean } | null>(null);
+  const [details, setDetails] = useState<B2BAdminPaymentInstructions | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
   const [deciding, setDeciding] = useState<{ notice: B2BPaymentNotice; action: 'confirm' | 'reject' } | null>(null);
   const [holding, setHolding] = useState<{ id: string; name: string; onHold: boolean } | null>(null);
   const [editing, setEditing] = useState(false);
+  const [reviewing, setReviewing] = useState<'confirm' | 'cancel' | null>(null);
 
   const load = async () => {
     try {
@@ -252,6 +267,10 @@ export function CollectionsPanel({ token, can, onOpenOrganization, onChanged }: 
         </div>
         {error && <Alert tone="error">{error}</Alert>}
         {info && <Alert tone="success">{info}</Alert>}
+        {details.pendingChange && (
+          <PendingPaymentDetails current={details.instructions} change={details.pendingChange} canDecide={can.approve} userId={user?.id ?? null}
+            t={t} locale={locale} onConfirm={() => setReviewing('confirm')} onCancel={() => setReviewing('cancel')} />
+        )}
         {!details.configured && <Alert tone="warning">Organisations can’t see where to pay yet. Set FitFlex’s bank or Lipa Namba details.</Alert>}
 
         <div>
@@ -347,7 +366,11 @@ export function CollectionsPanel({ token, can, onOpenOrganization, onChanged }: 
 
       {deciding && <DecideNotice token={token} notice={deciding.notice} action={deciding.action} onClose={() => setDeciding(null)} onDone={async (m) => { setDeciding(null); setInfo(m); await changed(); }} />}
       {holding && <HoldDialog token={token} org={holding} onClose={() => setHolding(null)} onDone={async (m) => { setHolding(null); setInfo(m); await changed(); }} />}
-      {editing && <PaymentDetailsDialog token={token} current={details.instructions} onClose={() => setEditing(false)} onDone={async () => { setEditing(false); setInfo('Payment details saved.'); await load(); }} />}
+      {editing && <PaymentDetailsDialog token={token} current={details.instructions} pending={!!details.pendingChange} onClose={() => setEditing(false)} onDone={async () => { setEditing(false); setInfo(t('b2bPay.requested')); await load(); }} />}
+      {reviewing && details.pendingChange && (
+        <DecidePaymentDetails token={token} action={reviewing} onClose={() => setReviewing(null)}
+          onDone={async (m) => { setReviewing(null); setInfo(m); await load(); }} />
+      )}
     </Card>
   );
 }
@@ -437,12 +460,104 @@ function HoldDialog({ token, org, onClose, onDone }: { token: string; org: { id:
   );
 }
 
-const DETAIL_FIELDS: Array<[keyof B2BPaymentInstructions, string]> = [
+const DETAIL_FIELDS: Array<[keyof B2BPaymentInstructionsChange['instructions'], string]> = [
   ['bankName', 'Bank'], ['accountName', 'Account name'], ['accountNumber', 'Account number'], ['branch', 'Branch'], ['swiftCode', 'SWIFT code'],
   ['lipaNamba', 'Lipa Namba'], ['lipaNambaName', 'Lipa Namba name'],
 ];
 
-function PaymentDetailsDialog({ token, current, onClose, onDone }: { token: string; current: B2BPaymentInstructions; onClose: () => void; onDone: () => void }) {
+/**
+ * A change to the payment details asked for by one admin: the proposed values
+ * beside the ones in force, who asked and when, and Confirm / Cancel. Whoever
+ * asked can only withdraw it; a different admin confirms it.
+ */
+function PendingPaymentDetails({ current, change, canDecide, userId, t, locale, onConfirm, onCancel }: {
+  current: B2BPaymentInstructions; change: B2BPaymentInstructionsChange; canDecide: boolean; userId: string | null;
+  t: (key: MessageKey) => string; locale: 'en' | 'sw'; onConfirm: () => void; onCancel: () => void;
+}) {
+  const own = !!userId && change.requestedBy === userId;
+  const who = own ? t('money2.you') : fill(t('money2.otherAdmin'), { id: change.requestedBy || '—' });
+  const rows: Array<[keyof B2BPaymentInstructionsChange['instructions'], string]> = [...DETAIL_FIELDS, ['notes', t('b2bPay.notes')]];
+  return (
+    <div className="space-y-3 rounded-lg border border-[var(--color-warning-200)] bg-[var(--color-warning-25)] px-3 py-3" data-testid="payment-details-pending">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div>
+          <div className="flex items-center gap-2 text-sm font-semibold">{t('b2bPay.pendingTitle')}<Badge tone="warning">{t('b2bPay.pendingBadge')}</Badge></div>
+          <div className="text-xs text-[var(--color-fg-tertiary)]">{fill(t('b2bPay.requestedBy'), { who, time: whenText(change.requestedAt, locale) })}</div>
+          <div className="mt-1 text-xs text-[var(--color-fg-quaternary)]">{t('b2bPay.pendingBody')}</div>
+        </div>
+        {canDecide && (
+          <span className="inline-flex gap-2">
+            <Button size="sm" onClick={onConfirm} disabled={own} title={own ? t('money2.confirmChangeBlockedOwn') : undefined} data-testid="payment-details-confirm">{t('money2.confirmChange')}</Button>
+            <Button size="sm" variant="secondary" onClick={onCancel} data-testid="payment-details-cancel">{t('money2.cancelChange')}</Button>
+          </span>
+        )}
+      </div>
+      {canDecide && own && <p className="text-xs text-[var(--color-fg-tertiary)]" data-testid="payment-details-own">{t('money2.confirmChangeBlockedOwn')}</p>}
+      <Table aria-label={t('b2bPay.pendingTitle')}>
+        <THead>
+          <Tr><Th /><Th>{t('b2bPay.current')}</Th><Th>{t('b2bPay.proposed')}</Th></Tr>
+        </THead>
+        <TBody>
+          {rows.map(([k, label]) => {
+            const was = (current[k] as string | null) ?? '';
+            const next = change.instructions[k] ?? '';
+            const differs = was !== next;
+            return (
+              <Tr key={k} className="align-top">
+                <Td className="text-[var(--color-fg-quaternary)]">{label}</Td>
+                <Td>{was || '—'}</Td>
+                <Td className={differs ? 'font-semibold' : undefined} data-testid={`pending-${k}`}>{next || '—'}</Td>
+              </Tr>
+            );
+          })}
+        </TBody>
+      </Table>
+    </div>
+  );
+}
+
+/** Confirm (a different admin) or cancel (anyone allowed to approve) the waiting change. */
+function DecidePaymentDetails({ token, action, onClose, onDone }: { token: string; action: 'confirm' | 'cancel'; onClose: () => void; onDone: (message: string) => void }) {
+  const { t } = useApp();
+  const [reason, setReason] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const go = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setBusy(true); setError(null);
+    try {
+      if (action === 'confirm') {
+        await api.confirmB2BPaymentInstructions(token);
+        return onDone(t('b2bPay.confirmed'));
+      }
+      await api.cancelB2BPaymentInstructions(token, reason.trim() || undefined);
+      onDone(t('b2bPay.cancelled'));
+    } catch (err) {
+      setError(payDetailsError(err, t));
+      setBusy(false);
+    }
+  };
+  return (
+    <Dialog open onClose={onClose} title={action === 'confirm' ? t('b2bPay.confirmTitle') : t('money2.cancelChangeTitle')} size="md">
+      <form className="space-y-3" onSubmit={go} data-testid="payment-details-decide">
+        {error && <Alert tone="error">{error}</Alert>}
+        {action === 'confirm' ? <p className="text-sm text-[var(--color-fg-tertiary)]">{t('b2bPay.confirmBody')}</p> : (
+          <>
+            <p className="text-sm text-[var(--color-fg-tertiary)]">{t('b2bPay.cancelBody')}</p>
+            <Field label={t('money2.reasonOptional')}><Textarea rows={2} maxLength={500} value={reason} onChange={e => setReason(e.target.value)} data-testid="payment-details-cancel-reason" /></Field>
+          </>
+        )}
+        <div className="flex justify-end gap-2 border-t border-[var(--color-border-secondary)] pt-3">
+          <Button type="button" variant="secondary" onClick={onClose}>{action === 'confirm' ? t('common.cancel') : t('money2.keepRequest')}</Button>
+          <Button type="submit" disabled={busy} data-testid="payment-details-decide-submit">{action === 'confirm' ? t('money2.confirmChange') : t('money2.cancelChange')}</Button>
+        </div>
+      </form>
+    </Dialog>
+  );
+}
+
+function PaymentDetailsDialog({ token, current, pending, onClose, onDone }: { token: string; current: B2BPaymentInstructions; pending: boolean; onClose: () => void; onDone: () => void }) {
+  const { t } = useApp();
   const [f, setF] = useState<Record<string, string>>(Object.fromEntries([...DETAIL_FIELDS.map(([k]) => k), 'notes'].map(k => [k, (current[k as keyof B2BPaymentInstructions] as string | null) ?? ''])));
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -458,9 +573,10 @@ function PaymentDetailsDialog({ token, current, onClose, onDone }: { token: stri
     }
   };
   return (
-    <Dialog open onClose={onClose} title="FitFlex payment details" description="Shown to every organisation on its Billing page and in reminder emails." size="lg">
+    <Dialog open onClose={onClose} title="FitFlex payment details" description={`Shown to every organisation on its Billing page and in reminder emails. ${t('b2bPay.dialogApproval')}`} size="lg">
       <form className="space-y-3" onSubmit={go} data-testid="payment-details-form">
         {error && <Alert tone="error">{error}</Alert>}
+        {pending && <Alert tone="warning">{t('b2bPay.replacesPending')}</Alert>}
         <div className="grid gap-3 sm:grid-cols-2">
           {DETAIL_FIELDS.map(([k, label]) => (
             <Field key={k} label={label}><Input value={f[k]} onChange={e => setF({ ...f, [k]: e.target.value })} data-testid={`details-${k}`} /></Field>
@@ -469,7 +585,7 @@ function PaymentDetailsDialog({ token, current, onClose, onDone }: { token: stri
         <Field label="Anything else organisations should know (optional)"><Textarea rows={2} maxLength={1000} value={f.notes} onChange={e => setF({ ...f, notes: e.target.value })} /></Field>
         <div className="flex justify-end gap-2 border-t border-[var(--color-border-secondary)] pt-3">
           <Button type="button" variant="secondary" onClick={onClose}>Cancel</Button>
-          <Button type="submit" disabled={busy} data-testid="details-save">Save</Button>
+          <Button type="submit" disabled={busy} data-testid="details-save">{t('b2bPay.sendForApproval')}</Button>
         </div>
       </form>
     </Dialog>
