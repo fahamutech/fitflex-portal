@@ -22,7 +22,7 @@ async function openLogin(page: Page, locale: 'en' | 'sw' = 'en') {
 test('the login page has one h1 and no "FF" text square', async ({ page }) => {
   await openLogin(page);
   await expect(page.locator('h1')).toHaveCount(1);
-  await expect(page.getByRole('heading', { level: 1, name: 'Operator / Admin login' })).toBeVisible();
+  await expect(page.getByRole('heading', { level: 1, name: 'Sign in to FitFlex for partners' })).toBeVisible();
   await expect(page.getByText('FF', { exact: true })).toHaveCount(0);
 });
 

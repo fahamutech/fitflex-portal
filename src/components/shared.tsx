@@ -570,6 +570,7 @@ export function Segmented({
         <button
           key={id}
           type="button"
+          aria-pressed={value === id}
           onClick={() => onChange(id)}
           className={cn(
             'rounded-[var(--radius-md)] px-3 py-1.5 text-sm font-medium transition-colors whitespace-nowrap',
