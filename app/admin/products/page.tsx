@@ -1,11 +1,30 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Plus, RefreshCw, Save } from 'lucide-react';
+import { ChevronDown, ChevronRight, Plus, RefreshCw, Save } from 'lucide-react';
 import { useApp } from '../../providers';
-import { api, AdminProductDraft, ShopProduct, VendorSummary } from '@/lib/api';
+import { api, AdminProductDraft, ApiError, ShopProduct, VendorSummary } from '@/lib/api';
+import { money } from '@/lib/admin-utils';
+import { variantsOf } from '@/lib/vendor';
 import { Alert, Badge, Button, Card, Checkbox, Field, Input, PageHeader, Select, Spinner, Textarea } from '@/components/shared';
 import { Dialog, DialogFooter } from '@/components/dialog';
+
+/** Cost and reorder level as typed: '' clears (sent as null). */
+type PrivateDraft = { cost: string; reorder: string; variants: Record<string, { cost: string; reorder: string }> };
+const asText = (v: number | null | undefined) => (v == null ? '' : String(v));
+const parseWhole = (text: string): number | null | 'invalid' => {
+  if (text.trim() === '') return null;
+  const n = Number(text);
+  return Number.isInteger(n) && n >= 0 ? n : 'invalid';
+};
+/** The ledger is on when the server sends the private keys at all. */
+const hasPrivate = (p: ShopProduct) => 'costTzs' in p || 'reorderLevel' in p;
+function draftOf(p: ShopProduct): PrivateDraft {
+  return {
+    cost: asText(p.costTzs), reorder: asText(p.reorderLevel),
+    variants: Object.fromEntries(variantsOf(p).map(v => [v.name, { cost: asText(v.costTzs), reorder: asText(v.reorderLevel) }])),
+  };
+}
 
 const EMPTY_PRODUCT: AdminProductDraft = {
   vendorId: '', name: '', description: '', category: '', brand: '',
@@ -23,6 +42,18 @@ export default function ProductsPage() {
   const [success, setSuccess] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [draft, setDraft] = useState<AdminProductDraft>({ ...EMPTY_PRODUCT });
+  const [privates, setPrivates] = useState<Record<string, PrivateDraft>>({});
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  const [openVariants, setOpenVariants] = useState<Set<string>>(new Set());
+  const vendorName = (id: string) => {
+    const v = vendors.find(x => x.id === id);
+    return v?.vendorProfile?.businessName || v?.displayName || id;
+  };
+  const privateOf = (p: ShopProduct) => privates[p.id] ?? draftOf(p);
+  const editPrivate = (p: ShopProduct, patch: (d: PrivateDraft) => PrivateDraft) => {
+    setPrivates(cur => ({ ...cur, [p.id]: patch(cur[p.id] ?? draftOf(p)) }));
+    setFieldErrors(cur => Object.fromEntries(Object.entries(cur).filter(([k]) => !k.startsWith(`${p.id}:`))));
+  };
 
   async function load() {
     if (!token) return;
@@ -34,6 +65,8 @@ export default function ProductsPage() {
       ]);
       setProducts(productRows);
       setVendors(vendorRows);
+      setPrivates({});
+      setFieldErrors({});
       setError(null);
     } catch {
       setError(t('products.error'));
@@ -55,6 +88,24 @@ export default function ProductsPage() {
 
   async function save(product: ShopProduct) {
     if (!token) return;
+    // Private fields (stock ledger on only): checked here, cleared with an empty box.
+    let privateBody = {};
+    if (hasPrivate(product)) {
+      const d = privateOf(product);
+      const errors: Record<string, string> = {};
+      const cost = parseWhole(d.cost), reorder = parseWhole(d.reorder);
+      if (cost === 'invalid') errors[`${product.id}:costTzs`] = t('products.invalidNumber');
+      if (reorder === 'invalid') errors[`${product.id}:reorderLevel`] = t('products.invalidNumber');
+      const variants = variantsOf(product).map(v => {
+        const vd = d.variants[v.name] ?? { cost: asText(v.costTzs), reorder: asText(v.reorderLevel) };
+        const vc = parseWhole(vd.cost), vr = parseWhole(vd.reorder);
+        if (vc === 'invalid') errors[`${product.id}:${v.name}:costTzs`] = t('products.invalidNumber');
+        if (vr === 'invalid') errors[`${product.id}:${v.name}:reorderLevel`] = t('products.invalidNumber');
+        return { name: v.name, costTzs: vc === 'invalid' ? null : vc, reorderLevel: vr === 'invalid' ? null : vr };
+      });
+      if (Object.keys(errors).length) { setFieldErrors(cur => ({ ...cur, ...errors })); return; }
+      privateBody = { costTzs: cost, reorderLevel: reorder, ...(variants.length ? { variants } : {}) };
+    }
     setSavingId(product.id);
     setSuccess(null);
     try {
@@ -62,12 +113,22 @@ export default function ProductsPage() {
         homepageVisible: product.homepageVisible !== false,
         homepagePriority: Number(product.homepagePriority || 0),
         approvalStatus: product.approvalStatus || 'pending',
+        ...privateBody,
       });
       updateDraft(product.id, updated);
+      setPrivates(cur => { const next = { ...cur }; delete next[product.id]; return next; });
       setSuccess(t('products.saved'));
       setError(null);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : t('products.error'));
+      const body = cause instanceof ApiError ? (cause.body as { error?: string; field?: string } | null) : null;
+      if (body?.error === 'invalid_field' && (body.field === 'costTzs' || body.field === 'reorderLevel')) {
+        setFieldErrors(cur => ({ ...cur, [`${product.id}:${body.field}`]: t('products.invalidNumber') }));
+      } else if (body?.error === 'duplicate_variant' || body?.error === 'variant_not_found' || (body?.error === 'invalid_field' && body.field === 'variants')) {
+        setError(t('products.variantChanged'));
+        await load();
+      } else {
+        setError(cause instanceof Error ? cause.message : t('products.error'));
+      }
     } finally {
       setSavingId(null);
     }
@@ -127,8 +188,12 @@ export default function ProductsPage() {
                     <Badge tone={product.status === 'active' ? 'success' : 'gray'}>{product.status}</Badge>
                   </div>
                   <p className="mt-1 text-xs text-[var(--color-fg-tertiary)]">
-                    {t('products.vendor')}: {product.vendorId} · {t('products.stock')}: {product.stock}
+                    {t('products.vendor')}: {vendorName(product.vendorId)} · {t('products.stock')}: {product.stock}
+                    {hasPrivate(product) && <> · {t('vendor.stock.reorderLevel')}: {product.reorderLevel ?? '—'} · {t('vendor.costPrice')}: {product.costTzs == null ? '—' : money(product.costTzs)}</>}
                   </p>
+                  {hasPrivate(product) && product.reorderLevel != null && product.stock <= product.reorderLevel && (
+                    <div className="mt-1"><Badge tone="warning">{t('vendor.stock.lowBadge')}</Badge></div>
+                  )}
                 </div>
                 <Checkbox
                   aria-label={`${t('listing.visible')}: ${product.name}`}
@@ -166,6 +231,49 @@ export default function ProductsPage() {
                   {t('products.save')}
                 </Button>
               </div>
+              {hasPrivate(product) && (
+                <div className="mt-4 space-y-3 border-t border-[var(--color-border-secondary)] pt-4" data-testid={`product-private-${product.id}`}>
+                  <div className="grid gap-4 sm:grid-cols-2 md:max-w-xl">
+                    <Field label={t('products.costPrice')} error={fieldErrors[`${product.id}:costTzs`]}>
+                      <Input aria-label={`${t('products.costPrice')}: ${product.name}`} type="number" min="0" step="1" inputMode="numeric"
+                        value={privateOf(product).cost} onChange={e => editPrivate(product, d => ({ ...d, cost: e.target.value }))} data-testid={`product-cost-${product.id}`} />
+                    </Field>
+                    <Field label={t('products.reorderLevel')} error={fieldErrors[`${product.id}:reorderLevel`]}>
+                      <Input aria-label={`${t('products.reorderLevel')}: ${product.name}`} type="number" min="0" step="1" inputMode="numeric"
+                        value={privateOf(product).reorder} onChange={e => editPrivate(product, d => ({ ...d, reorder: e.target.value }))} data-testid={`product-reorder-${product.id}`} />
+                    </Field>
+                  </div>
+                  {variantsOf(product).length > 0 && (
+                    <div>
+                      <Button variant="ghost" size="sm" className="min-h-11" aria-expanded={openVariants.has(product.id)}
+                        onClick={() => setOpenVariants(cur => { const n = new Set(cur); if (n.has(product.id)) n.delete(product.id); else n.add(product.id); return n; })}>
+                        {openVariants.has(product.id) ? <ChevronDown aria-hidden="true" className="h-4 w-4" /> : <ChevronRight aria-hidden="true" className="h-4 w-4" />}
+                        {t('products.variants')}
+                      </Button>
+                      {openVariants.has(product.id) && (
+                        <ul className="mt-2 space-y-3">
+                          {variantsOf(product).map(v => {
+                            const vd = privateOf(product).variants[v.name] ?? { cost: '', reorder: '' };
+                            const setV = (patch: Partial<{ cost: string; reorder: string }>) =>
+                              editPrivate(product, d => ({ ...d, variants: { ...d.variants, [v.name]: { ...(d.variants[v.name] ?? { cost: '', reorder: '' }), ...patch } } }));
+                            return (
+                              <li key={v.name} className="grid gap-3 sm:grid-cols-[10rem_1fr_1fr] sm:items-end">
+                                <p className="text-sm font-medium">{v.name} · {t('products.stock')}: {v.stock ?? '—'}</p>
+                                <Field label={t('products.costPrice')} error={fieldErrors[`${product.id}:${v.name}:costTzs`]}>
+                                  <Input aria-label={`${t('products.costPrice')}: ${product.name} · ${v.name}`} type="number" min="0" step="1" inputMode="numeric" value={vd.cost} onChange={e => setV({ cost: e.target.value })} />
+                                </Field>
+                                <Field label={t('products.reorderLevel')} error={fieldErrors[`${product.id}:${v.name}:reorderLevel`]}>
+                                  <Input aria-label={`${t('products.reorderLevel')}: ${product.name} · ${v.name}`} type="number" min="0" step="1" inputMode="numeric" value={vd.reorder} onChange={e => setV({ reorder: e.target.value })} />
+                                </Field>
+                              </li>
+                            );
+                          })}
+                        </ul>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
             </Card>
           ))}
         </div>

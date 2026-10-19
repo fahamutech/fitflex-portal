@@ -33,7 +33,12 @@ const PORTAL_SIGN_IN_ROLES = [
   { requestedRole: 'admin' },
   { requestedRole: 'gym_operator', existingOnly: true },
   { requestedRole: 'gym_staff', existingOnly: true },
+  // A business that sells on FitFlex, and its staff (vendor portal, S2). Never created here.
+  { requestedRole: 'vendor', existingOnly: true },
+  { requestedRole: 'vendor_staff', existingOnly: true },
 ];
+/** Session user types that open the vendor area (/vendor). */
+export const VENDOR_USER_TYPES = new Set(['vendor', 'vendor_staff']);
 const NO_SUCH_PROFILE = new Set(['admin_self_registration_not_allowed', 'profile_not_found']);
 /** Roles in a B2B organisation that see its billing (invoices, payments, statement). */
 export const ORG_BILLING_ROLES = new Set(['owner', 'admin', 'finance']);
@@ -248,6 +253,10 @@ export const api = {
         return await request<SessionResult>('/auth/firebase/session', { method: 'POST', body: JSON.stringify({ idToken, ...role }) });
       } catch (err) {
         const code = err instanceof ApiError ? (err.body as { error?: string } | null)?.error : undefined;
+        // A vendor staff profile the business owner turned off: say so, not the generic "suspended".
+        if (role.requestedRole === 'vendor_staff' && code === 'account_suspended') {
+          throw new ApiError((err as ApiError).status, { error: 'vendor_staff_inactive' });
+        }
         if (!code || !NO_SUCH_PROFILE.has(code)) throw err;
         refused = err;
       }
@@ -266,6 +275,31 @@ export const api = {
     }
     throw refused;
   },
+  // ─── Identity V2 · I7a: number or email + PIN (404 while V2_PIN_LOGIN is off) ───
+  authOptions: () => request<{ pinLogin?: boolean }>('/auth/options'),
+  /** A wrong PIN is a 401 refusal, not a dead session: never signs anyone out. */
+  pinLogin: (body: { phone?: string; email?: string; pin: string }) =>
+    request<PinLoginResult>('/auth/pin/login', { method: 'POST', body: JSON.stringify(body) }, undefined, () => true),
+
+  // ─── Vendor portal (S2): the signed-in vendor or vendor staff ───
+  vendorMe: (token: string) => request<VendorMe>('/vendor/me', {}, token),
+  vendorProducts: (token: string) => request<VendorProduct[]>('/vendor/products', {}, token),
+  vendorLowStock: (token: string) => request<LowStockRow[]>('/vendor/stock/low', {}, token),
+  vendorAdjustStock: (token: string, productId: string, body: StockAdjustmentInput) =>
+    request<{ movement: StockMovement; product: ProductStock }>(`/vendor/products/${encodeURIComponent(productId)}/stock-adjustments`, { method: 'POST', body: JSON.stringify(body) }, token),
+  vendorStockMovements: (token: string, productId: string, query: { from?: string; to?: string; variant?: string; limit?: number; cursor?: string }) =>
+    request<StockMovementPage>(`/vendor/products/${encodeURIComponent(productId)}/stock-movements${qs(query)}`, {}, token),
+  /** Always paged: newest first, `limit` 1–200; `nextCursor` null on the last page. */
+  vendorOrders: (token: string, page: { limit?: number; cursor?: string | null } = {}) =>
+    request<{ orders: VendorOrder[]; nextCursor: string | null }>(`/vendor/orders${qs({ limit: page.limit ?? 50, cursor: page.cursor })}`, {}, token),
+  vendorOrder: (token: string, id: string) => request<VendorOrder>(`/vendor/orders/${encodeURIComponent(id)}`, {}, token),
+  vendorOrderStatus: (token: string, id: string, body: { status: string; reason?: string }) =>
+    request<VendorOrder>(`/vendor/orders/${encodeURIComponent(id)}/status`, { method: 'POST', body: JSON.stringify(body) }, token),
+  vendorPayments: (token: string) => request<VendorPayments>('/vendor/payments', {}, token),
+  vendorStatements: (token: string) => request<VendorStatementList>('/vendor/statements', {}, token),
+  vendorStatement: (token: string, id: string) =>
+    request<{ statement: VendorStatement; lines: PartnerSettlementLine[] }>(`/vendor/statements/${encodeURIComponent(id)}`, {}, token),
+
   // ─── Identity V2 personas (404 while the backend flags are off) ───
   myPersonas: (token: string) =>
     request<{ personas: PersonaSummary[]; activePersonaId: string }>('/me/personas', {}, token),
@@ -872,7 +906,12 @@ export const api = {
   adminProducts: (token: string) => request<ShopProduct[]>('/admin/products', {}, token),
   createAdminProduct: (token: string, product: AdminProductDraft) =>
     request<ShopProduct>('/admin/products', { method: 'POST', body: JSON.stringify(product) }, token),
-  updateProductListing: (token: string, id: string, listing: { homepageVisible: boolean; homepagePriority: number; approvalStatus?: 'pending' | 'approved' | 'rejected' }) =>
+  /** With the stock ledger on the server also takes the private fields (null clears one). */
+  updateProductListing: (token: string, id: string, listing: {
+    homepageVisible: boolean; homepagePriority: number; approvalStatus?: 'pending' | 'approved' | 'rejected';
+    costTzs?: number | null; reorderLevel?: number | null;
+    variants?: Array<{ name: string; costTzs?: number | null; reorderLevel?: number | null }>;
+  }) =>
     request<ShopProduct>(`/admin/products/${id}/listing`, { method: 'PUT', body: JSON.stringify(listing) }, token),
   adminVendors: (token: string) => request<VendorSummary[]>('/admin/vendors', {}, token),
   updateAdminVendor: (token: string, id: string, patch: Partial<Pick<VendorSummary, 'approvalStatus' | 'accountStatus' | 'approvalNote' | 'commissionPct'>>) =>
@@ -1562,6 +1601,133 @@ export interface ShopProduct {
   approvalStatus?: 'pending' | 'approved' | 'rejected';
   homepageVisible?: boolean;
   homepagePriority?: number;
+  /** Private, stock ledger on only (absent otherwise): what the vendor paid for one. */
+  costTzs?: number | null;
+  /** Private, stock ledger on only (absent otherwise). */
+  reorderLevel?: number | null;
+  variants?: ProductVariant[] | unknown;
+}
+
+/** A product option ("variant"). Private and effective fields come only with the stock ledger on. */
+export interface ProductVariant {
+  name: string;
+  stock?: number | null;
+  costTzs?: number | null;
+  reorderLevel?: number | null;
+  effectiveCostTzs?: number | null;
+  effectiveReorderLevel?: number | null;
+}
+
+// ─── Vendor portal (S2) ───
+
+/** GET /vendor/me: who I am in my business. */
+export interface VendorMe {
+  vendorId: string;
+  businessName: string | null;
+  userType: 'vendor' | 'vendor_staff';
+  vendorRole: string | null;
+  permissions: string[];
+  approvalStatus: string | null;
+  accountStatus: string | null;
+  tools: VendorTools;
+}
+
+/** The vendor tools switched on (same object as GET /vendor/tools/options). */
+export interface VendorTools {
+  portal?: boolean;
+  stockLedger?: boolean;
+  buyerContact?: boolean;
+  canSeeCost?: boolean;
+  [tool: string]: unknown;
+}
+
+export interface VendorProduct extends ShopProduct {
+  variants?: ProductVariant[];
+}
+
+export interface LowStockRow { productId: string; name: string; variant: string | null; stock: number; reorderLevel: number }
+
+export type StockReason = 'count' | 'restock' | 'returned' | 'found' | 'damaged' | 'expired' | 'lost' | 'other';
+
+export interface StockAdjustmentInput {
+  variant?: string;
+  reason: StockReason;
+  quantity: number;
+  expectedStock?: number;
+  direction?: 'in' | 'out';
+  note?: string;
+  clientRef: string;
+}
+
+/** A product's stock as the stock endpoints return it (no private fields). */
+export interface ProductStock { id: string; stock: number; variants: Array<{ name: string; stock: number | null }> }
+
+export interface StockMovement {
+  id: string;
+  productId: string;
+  variant: string | null;
+  reason: string;
+  kind?: string;
+  delta: number;
+  stockBefore: number | null;
+  stockAfter: number | null;
+  note: string | null;
+  actor: { id: string; name: string | null } | null;
+  orderId?: string | null;
+  document: { type: string; id: string; number: string | null } | null;
+  createdAt: string;
+}
+
+export interface StockMovementPage {
+  productId: string;
+  variant: string | null;
+  openingStock: number;
+  closingStock: number;
+  rows: StockMovement[];
+  nextCursor: string | null;
+}
+
+/** A marketplace order as its vendor sees it (server allowlist; own lines and own status only). */
+export interface VendorOrder {
+  id: string;
+  shortRef: string;
+  createdAt: string | null;
+  /** This vendor's own fulfilment status. */
+  status: string;
+  /** The combined, customer-facing status. */
+  orderStatus: string;
+  nextStatuses: string[];
+  timeline: Array<{ status: string; at: string | null; reason?: string }>;
+  items: Array<{ productId: string | null; name: string | null; variant: string | null; qty: number; priceTzs: number; image: string | null; commissionTzs?: number | null; vendorPayoutTzs?: number | null }>;
+  totalTzs: number;
+  paymentStatus: string | null;
+  paymentMethod: string | null;
+  deliveryMethod: string | null;
+  note: string | null;
+  pickupGymId: string | null;
+  pickupGym: { id: string; name: string | null } | null;
+  buyer: { customerId: string | null; displayName: string | null; phone?: string | null; contactVisibleUntil?: string | null };
+  deliveryAddress?: string | null;
+}
+
+export interface VendorPayments { todaySalesTzs: number; pendingSettlementTzs: number; [figure: string]: unknown }
+
+/** A vendor's own payout statement (partner view: no staff ids, `paidTo` instead of the snapshot). */
+export interface VendorStatement extends Omit<PartnerSettlement, 'destinationSnapshot' | 'submittedBy'> {
+  onHold?: boolean;
+  paidTo?: { method: string | null; provider: string | null; accountLast4: string | null } | null;
+}
+
+export interface VendorStatementList { statements: VendorStatement[]; payoutReady: boolean; payoutBlockedBy: string | null }
+
+/** POST /auth/pin/login: a session, or a step to finish in the app. */
+export interface PinLoginResult {
+  token?: string;
+  user?: { id: string; userType: string; gymId?: string; email?: string; portalUser?: boolean; aclPermissions?: string[]; displayName?: string | null };
+  personas?: PersonaSummary[];
+  setupRequired?: boolean;
+  startPin?: boolean;
+  onboarding?: boolean;
 }
 
 export interface AdminProductDraft {

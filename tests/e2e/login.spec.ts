@@ -1,5 +1,7 @@
 import { expect, test } from '@playwright/test';
 
+const API = process.env.FITFLEX_API_URL || 'http://localhost:3000';
+
 test('login renders cleanly on iPhone 15 Pro Max and opens email form', async ({ browser }) => {
   const context = await browser.newContext({
     viewport: { width: 430, height: 932 },
@@ -17,9 +19,11 @@ test('login renders cleanly on iPhone 15 Pro Max and opens email form', async ({
     }
   });
 
+  // The page asks which sign-in methods the server offers (business PIN sign-in, S2).
+  await page.route(`${API}/auth/options`, route => route.fulfill({ json: { pinLogin: false } }));
   await page.goto('/login');
 
-  await expect(page.getByRole('heading', { name: 'Operator / Admin login' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Sign in to FitFlex for partners' })).toBeVisible();
   await expect(page.getByTestId('google-submit')).toBeVisible();
   await expect(page.getByText('Unable to process request due to missing initial state')).toHaveCount(0);
 
