@@ -4,6 +4,7 @@ import { Locale, MessageKey, t as translate } from '@/lib/i18n';
 import { api, ApiError, setOnUnauthorized, type PersonaSummary } from '@/lib/api';
 import { PwaRegistration } from '@/components/pwa-registration';
 import { ToastProvider } from '@/components/ui/toast';
+import { VendorProvider } from '@/components/vendor-context';
 
 export interface PortalAppUser {
   id: string;
@@ -35,9 +36,9 @@ interface AppCtx {
   invitesEnabled: boolean;
 }
 
-// Only personas the portal has screens for; members, trainers and vendors
-// use the app, and admin personas are never switched into.
-const PORTAL_PERSONA_TYPES = new Set(['gym_operator', 'gym_staff', 'corporate_hr']);
+// Only personas the portal has screens for; members and trainers use the app,
+// and admin personas are never switched into. Vendors have a web area (S2).
+const PORTAL_PERSONA_TYPES = new Set(['gym_operator', 'gym_staff', 'corporate_hr', 'vendor', 'vendor_staff']);
 
 const Ctx = createContext<AppCtx | null>(null);
 
@@ -131,7 +132,7 @@ export function Providers({ children }: { children: ReactNode }) {
   return (
     <Ctx.Provider value={{ ready, locale, setLocale, t: (k) => translate(locale, k), token, user, signIn, signOut, hasPermission, switchablePersonas, switchPersona, invitesEnabled }}>
       <PwaRegistration />
-      <ToastProvider>{children}</ToastProvider>
+      <ToastProvider><VendorProvider>{children}</VendorProvider></ToastProvider>
     </Ctx.Provider>
   );
 }
