@@ -15,6 +15,8 @@ const ERROR_KEYS: Record<string, MessageKey> = {
   password_unchanged: 'pwc.err.unchanged',
   password_change_not_required: 'pwc.err.notRequired',
   firebase_update_failed: 'pwc.err.saveFailed',
+  password_change_in_progress: 'pwc.err.inProgress',
+  start_password_not_configured: 'pwc.err.notConfigured',
 };
 
 /**
@@ -57,6 +59,14 @@ export function ChangePasswordGate() {
     } catch (err) {
       const code = err instanceof ApiError ? (err.body as { error?: string } | null)?.error : undefined;
       const key = code ? ERROR_KEYS[code] : undefined;
+      if (code === 'password_changed_session_failed') {
+        // The password did change, but no new session came back: start over at sign-in with the new one.
+        await signOutFirebase().catch(() => undefined);
+        signOut();
+        toast.error(t('pwc.err.sessionFailed'));
+        router.replace('/login');
+        return;
+      }
       if (code === 'password_too_short') { setPasswordError(tooShort); passwordRef.current?.focus(); }
       else if (code === 'password_unchanged') { setPasswordError(t('pwc.err.unchanged')); passwordRef.current?.focus(); }
       else setError(key ? t(key) : t('pwc.err.generic'));

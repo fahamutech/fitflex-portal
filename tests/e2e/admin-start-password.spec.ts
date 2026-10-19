@@ -64,14 +64,15 @@ type Calls = { paths: string[]; changes: Array<{ auth: string | undefined; body:
  * The backend as the contract describes it: a `pwc` token is refused (403 password_change_required)
  * everywhere except the shell's reads and the password route; `change` answers that route.
  */
-async function mockBackend(page: Page, calls: Calls, change: (body: any) => { status: number; json: object }) {
+type Reply = { status: number; json: object };
+async function mockBackend(page: Page, calls: Calls, change: (body: any) => Reply, session: () => Reply = () => ({ status: 200, json: { token: PWC_TOKEN, user: ADMIN } })) {
   await page.route(`${API}/**`, async route => {
     const request = route.request();
     const path = new URL(request.url()).pathname;
     const auth = request.headers()['authorization'];
     calls.paths.push(`${request.method()} ${path}`);
     if (path === '/auth/options') return route.fulfill({ json: { pinLogin: false } });
-    if (path === '/auth/firebase/session') return route.fulfill({ json: { token: PWC_TOKEN, user: ADMIN } });
+    if (path === '/auth/firebase/session') return route.fulfill(session());
     if (path === '/auth/portal/password') {
       const body = request.postDataJSON();
       calls.changes.push({ auth, body });
@@ -186,6 +187,8 @@ test('each refusal of the password route reads plainly, and the session is kept'
     { status: 400, json: { error: 'password_too_short' } },
     { status: 502, json: { error: 'firebase_update_failed' } },
     { status: 409, json: { error: 'password_change_not_required' } },
+    { status: 409, json: { error: 'password_change_in_progress' } },
+    { status: 503, json: { error: 'start_password_not_configured' } },
     { status: 500, json: { error: 'boom' } },
   ];
   await blockOutside(page);
@@ -209,8 +212,12 @@ test('each refusal of the password route reads plainly, and the session is kept'
   await submit();
   await expect(page.getByText('Your password has already been changed. Sign out, then sign in with your own password.')).toBeVisible();
   await submit();
+  await expect(page.getByText('A password change is already in progress. Wait a minute and try again.')).toBeVisible();
+  await submit();
+  await expect(page.getByText('Password changes are not set up on the server yet. Your password has not changed.')).toBeVisible();
+  await submit();
   await expect(page.getByText('Something went wrong. Your password has not changed. Try again.')).toBeVisible();
-  expect(calls.changes).toHaveLength(5);
+  expect(calls.changes).toHaveLength(7);
   await expect(gate(page)).toBeVisible();
   expect(await page.evaluate(() => localStorage.getItem('token'))).toBe('opaque-session-token');
 });
@@ -236,4 +243,71 @@ test('sign out stays available on the step and ends the session', async ({ page 
   await expect(page).toHaveURL(/\/login/);
   expect(await page.evaluate(() => localStorage.getItem('token'))).toBeNull();
   expect(calls.changes).toEqual([]);
+});
+
+test('changed but no new session: signed out and sent to sign in with the new password', async ({ page }) => {
+  const calls: Calls = { paths: [], changes: [] };
+  await blockOutside(page);
+  await page.addInitScript(([user]) => {
+    if (!sessionStorage.getItem('seeded')) {
+      sessionStorage.setItem('seeded', '1');
+      localStorage.setItem('token', 'opaque-session-token');
+      localStorage.setItem('user', user);
+    }
+    localStorage.setItem('locale', 'en');
+  }, [JSON.stringify(ADMIN)]);
+  await mockBackend(page, calls, () => ({ status: 500, json: { error: 'password_changed_session_failed' } }));
+
+  await page.goto('/admin/users');
+  await expect(gate(page)).toBeVisible();
+  await page.getByTestId('pwc-new').fill(CHOSEN);
+  await page.getByTestId('pwc-confirm').fill(CHOSEN);
+  await page.getByTestId('pwc-submit').click();
+  await expect(page).toHaveURL(/\/login/);
+  await expect(page.getByText('Your password was changed, but we could not start your new session. Sign in again with your new password.')).toBeVisible();
+  expect(await page.evaluate(() => localStorage.getItem('token'))).toBeNull();
+});
+
+/** Users kept by the Firebase client in this browser (its IndexedDB persistence). */
+const firebaseUsersStored = (page: Page) => page.evaluate(() => new Promise<number>(resolve => {
+  const open = indexedDB.open('firebaseLocalStorageDb');
+  open.onerror = () => resolve(-1);
+  open.onsuccess = () => {
+    const db = open.result;
+    if (!db.objectStoreNames.contains('firebaseLocalStorage')) { db.close(); return resolve(0); }
+    const req = db.transaction('firebaseLocalStorage', 'readonly').objectStore('firebaseLocalStorage').getAll();
+    req.onsuccess = () => { const n = (req.result as Array<{ fbase_key?: string }>).filter(r => String(r.fbase_key).startsWith('firebase:authUser:')).length; db.close(); resolve(n); };
+    req.onerror = () => { db.close(); resolve(-1); };
+  };
+}));
+
+test('session_ended at sign-in drops the Firebase session, says why, and the next sign-in works', async ({ page }) => {
+  const calls: Calls = { paths: [], changes: [] };
+  const sessions: Reply[] = [
+    { status: 401, json: { error: 'session_ended' } },
+    { status: 200, json: { token: NEW_TOKEN, user: ADMIN } },
+  ];
+  await blockOutside(page);
+  await mockFirebase(page, CHOSEN);
+  await mockBackend(page, calls, ok, () => sessions.shift()!);
+  await page.addInitScript(() => localStorage.setItem('locale', 'en'));
+  await page.goto('/login');
+  await page.getByTestId('email-method-btn').click();
+  await page.getByTestId('email-input').fill(EMAIL);
+  await page.getByTestId('password-input').fill(CHOSEN);
+  await page.getByTestId('password-input').press('Enter');
+
+  await expect(page.getByText('Sign in again with your current password.')).toBeVisible();
+  await expect(page).toHaveURL(/\/login/);
+  await expect.poll(() => firebaseUsersStored(page)).toBe(0);
+  expect(await page.evaluate(() => localStorage.getItem('token'))).toBeNull();
+
+  await page.getByTestId('password-input').fill(CHOSEN);
+  await page.getByTestId('password-input').press('Enter');
+  await expect(page).toHaveURL(/\/admin/, { timeout: 15_000 });
+  await expect(page.locator('aside').first()).toBeAttached();
+  expect(await page.evaluate(() => localStorage.getItem('token'))).toBe(NEW_TOKEN);
+  expect(calls.paths.filter(p => p === 'POST /auth/firebase/session')).toHaveLength(2);
+  // A normal sign-in keeps its Firebase user, so the 0 above really was the sign-out.
+  await expect.poll(() => firebaseUsersStored(page)).toBe(1);
 });

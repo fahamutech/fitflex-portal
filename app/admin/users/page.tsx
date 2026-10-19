@@ -155,6 +155,8 @@ export default function PortalUsersPage() {
       const body = err instanceof ApiError ? (err.body as any) : null;
       setError(body?.error === 'email_already_exists'
         ? 'A user with this email already exists.'
+        : body?.error === 'start_password_not_configured'
+          ? t('users.startPassword.notConfigured')
         : body?.error === 'firebase_user_creation_failed'
           ? `Firebase error: ${body?.detail}`
           : (err instanceof Error ? err.message : 'Failed to create user'));
