@@ -227,7 +227,11 @@ export default function PaymentsPage() {
       key: 'status', header: 'Status', sortable: true,
       cell: (p) => (
         <div className="space-y-1">
-          <Badge tone={statusTone(p.status)}>{statusLabel(p.status)}</Badge>
+          {/* Awaiting verification / second approval are a more precise "Pending": show the stage alone.
+              A change request sits on a decided payment, so its status still adds something. */}
+          {!(p.secondApproverRequired && (p.approvalStage === 'awaiting_verification' || p.approvalStage === 'awaiting_second_approval')) && (
+            <div data-testid="payment-status"><Badge tone={statusTone(p.status)}>{statusLabel(p.status)}</Badge></div>
+          )}
           {p.secondApproverRequired && p.approvalStage && (
             <div data-testid="payment-stage"><Badge tone={PAYMENT_STAGE_TONE[p.approvalStage]}>{t(paymentStageKey(p.approvalStage))}</Badge></div>
           )}

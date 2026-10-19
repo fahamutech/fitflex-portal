@@ -133,12 +133,12 @@ export default function RefundsPage() {
     {
       key: 'status', header: 'Status', sortable: true,
       cell: (r) => (
-        <div className="space-y-1">
-          <Badge tone={STATUS[r.status].tone}>{STATUS[r.status].label}</Badge>
-          {r.secondApproverRequired && r.approvalStage && (
-            <div data-testid="refund-stage"><Badge tone={REFUND_STAGE_TONE[r.approvalStage]}>{t(refundStageKey(r.approvalStage))}</Badge></div>
-          )}
-        </div>
+        // One badge per row: with two-admin approval on, the stage says what the status says, more precisely.
+        r.secondApproverRequired && r.approvalStage ? (
+          <span data-testid="refund-stage"><Badge tone={REFUND_STAGE_TONE[r.approvalStage]}>{t(refundStageKey(r.approvalStage))}</Badge></span>
+        ) : (
+          <span data-testid="refund-status"><Badge tone={STATUS[r.status].tone}>{STATUS[r.status].label}</Badge></span>
+        )
       ),
     },
     {

@@ -64,6 +64,7 @@ test.describe('Payments: second approver', () => {
     await page.goto('/admin/payments');
     await expect(page.getByText('Asha Member')).toBeVisible();
     await expect(page.getByTestId('payment-stage')).toHaveCount(0);
+    await expect(page.getByTestId('payment-status')).toHaveText('Pending');
     await expect(page.getByTestId('payment-verify')).toHaveCount(0);
     await expect(page.getByTestId('payment-approve-blocked')).toHaveCount(0);
     await page.getByTitle('Approve').click();
@@ -97,6 +98,7 @@ test.describe('Payments: second approver', () => {
     });
     await page.goto('/admin/payments');
     await expect(page.getByTestId('payment-stage')).toHaveText('Awaiting verification');
+    await expect(page.getByTestId('payment-status')).toHaveCount(0); // one badge: the stage replaces "Pending"
     // Not verified yet: Approve is disabled with the reason.
     await expect(page.getByTestId('payment-approve')).toBeDisabled();
     await expect(page.getByTestId('payment-approve-blocked')).toHaveAttribute('title', 'Verify this payment first. A different admin then approves it.');
@@ -109,6 +111,7 @@ test.describe('Payments: second approver', () => {
     await expect(page.getByText('Payment verified. A different admin can now approve it.')).toBeVisible();
 
     await expect(page.getByTestId('payment-stage')).toHaveText('Awaiting second approval');
+    await expect(page.getByTestId('payment-status')).toHaveCount(0);
     await expect(page.getByTestId('payment-verified-by')).toContainText('Verified by you');
     await expect(page.getByTestId('payment-verify')).toHaveCount(0);
     await expect(page.getByTestId('payment-approve')).toBeDisabled();
@@ -193,6 +196,7 @@ test.describe('Payments: second approver', () => {
     await one.getByTestId('change-submit').click();
     await expect.poll(() => oneCalls.find(c => c.path.endsWith('/change-request'))?.body).toEqual({ status: 'rejected', reason: 'Money never arrived' });
     await expect(one.getByTestId('payment-stage')).toHaveText('Change requested');
+    await expect(one.getByTestId('payment-status')).toHaveText('Approved'); // the status still adds something here
     await expect(one.getByTestId('payment-change-requested-by')).toContainText('you asked to change this to Rejected');
     await expect(one.getByTestId('payment-confirm-change')).toBeDisabled();
     await expect(one.getByTestId('payment-confirm-change-blocked')).toHaveAttribute('title', 'You asked for this change. A different admin must confirm it.');
@@ -296,6 +300,7 @@ test.describe('Refunds: second approver', () => {
     await page.goto('/admin/refunds');
     await page.getByTestId('refund-filter-all').click();
     await expect(page.getByTestId('refund-stage')).toHaveCount(0);
+    await expect(page.getByTestId('refund-status')).toHaveText(['To decide', 'To pay']);
     await expect(page.getByTestId('refund-approve')).toBeEnabled();
     await expect(page.getByTestId('refund-paid')).toBeEnabled();
   });
@@ -325,6 +330,7 @@ test.describe('Refunds: second approver', () => {
     await page.goto('/admin/refunds');
     await page.getByTestId('refund-filter-all').click();
     await expect(page.getByTestId('refund-stage')).toHaveText(['Awaiting approval', 'Awaiting payment', 'Awaiting payment']);
+    await expect(page.getByTestId('refund-status')).toHaveCount(0); // one badge per row
 
     await expect(page.getByTestId('refund-approve')).toBeDisabled();
     await expect(page.getByTestId('refund-approve-blocked')).toHaveAttribute('title', 'You raised this refund. A different admin must approve it.');
