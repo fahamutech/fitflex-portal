@@ -385,7 +385,9 @@ test.describe('void', () => {
     await page.getByTestId('sale-void').click();
     await page.getByTestId('sale-void-reason').fill('Wrong item');
     await page.getByTestId('sale-void-confirm').click();
-    await expect(page.getByText('This sale was already voided.')).toBeVisible();
+    // UAT: the wording shows (toast and a notice in the panel), not only a silent refresh.
+    await expect(page.getByRole('status').getByText('This sale was already voided.')).toBeVisible();
+    await expect(page.getByTestId('sale-notice')).toHaveText('This sale was already voided.');
     await expect(page.getByTestId('sale-voided')).toBeVisible();
   });
 
@@ -517,4 +519,41 @@ test.describe('Swahili and targets', () => {
     await expect(page.getByTestId('sale-card-sale_1')).toBeVisible();
     await tall(page.getByTestId('sale-card-sale_1'));
   });
+});
+
+test.describe('UAT', () => {
+  // D3: at 1280 with a sale open the list column is narrow; summary tiles must wrap, never cut money or labels.
+  for (const locale of ['en', 'sw'] as const) {
+    test(`D3 (${locale}): summary tiles at 1280 with a sale open show every figure and label in full`, async ({ page }) => {
+      await page.setViewportSize({ width: 1280, height: 800 });
+      await signedInAs(page, VENDOR, locale);
+      await mockApi(page, base({
+        'GET /vendor/sales': { json: { sales: [row()], nextCursor: null, summary: summary({
+          count: 1234, totalTzs: 12454000, discountTzs: 454000, overrideCount: 12, lateCount: 7,
+          byMethod: [{ method: 'cash', amountTzs: 454000 }, { method: 'halopesa', amountTzs: 10000000 }, { method: 'bank', amountTzs: 2000000 }],
+        }) } },
+      }));
+      await page.goto('/vendor/sales/?id=sale_1');
+      await expect(page.getByTestId('sale-detail')).toBeVisible();
+      const summaryEl = page.getByTestId('sales-summary');
+      await expect(summaryEl).toBeVisible();
+      await expect(page.getByTestId('sales-summary-total')).toHaveText('TSh 12,454,000');
+      await expect(page.getByTestId('sales-by-method-cash')).toHaveText('TSh 454,000');
+      await expect(page.getByTestId('sales-by-method-halopesa')).toHaveText('TSh 10,000,000');
+      // Nothing inside a tile is clipped or ellipsised: each text fits its own box and sits inside its card.
+      const cut = await summaryEl.evaluate(root => {
+        const bad: string[] = [];
+        for (const el of Array.from(root.querySelectorAll('p'))) {
+          const style = getComputedStyle(el);
+          const card = el.parentElement!.getBoundingClientRect();
+          const box = el.getBoundingClientRect();
+          if (el.scrollWidth > el.clientWidth + 1 || style.textOverflow === 'ellipsis' || box.right > card.right + 1 || box.bottom > card.bottom + 1) bad.push(el.textContent || '');
+        }
+        return bad;
+      });
+      expect(cut).toEqual([]);
+      const labels = locale === 'sw' ? ['Mauzo yenye bei iliyobadilishwa', 'Yalirekodiwa bila mtandao', 'HaloPesa', 'Uhamisho wa benki'] : ['Sales with a changed price', 'Recorded offline', 'HaloPesa', 'Bank transfer'];
+      for (const l of labels) await expect(summaryEl.getByText(l, { exact: true })).toBeVisible();
+    });
+  }
 });
