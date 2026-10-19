@@ -29,6 +29,11 @@ export const messages = {
     'login.verifyNotYet': 'That email is not verified yet. Open the link we sent, then try again.',
     'login.verifySendFailed': 'We could not send the link right now. Wait a moment and resend.',
     'login.verifyOtherAccount': 'Use a different account',
+    // Photo hero login panel (spec photo-hero-screens §11.2; NEXT_PUBLIC_PHOTO_HERO_UI).
+    'login.hero.eyebrow': 'FITFLEX PORTAL',
+    'login.hero.lead': 'Run it all from',
+    'login.hero.accent': 'one place.',
+    'login.hero.sub': 'Check-ins, members, statements and programmes for FitFlex partners and companies.',
     'nav.dashboard': 'Dashboard',
     'nav.scan': 'Scan member',
     'nav.checkins': 'Check-ins',
@@ -2149,6 +2154,12 @@ export const messages = {
     'login.verifyNotYet': 'Barua pepe hiyo bado haijathibitishwa. Fungua kiungo tulichotuma, kisha jaribu tena.',
     'login.verifySendFailed': 'Imeshindikana kutuma kiungo sasa hivi. Subiri kidogo kisha tuma tena.',
     'login.verifyOtherAccount': 'Tumia akaunti nyingine',
+    // Photo hero login panel (spec photo-hero-screens §11.2). Swahili is a DRAFT
+    // pending native review ("taarifa za malipo" and "washirika" to confirm).
+    'login.hero.eyebrow': 'PORTAL YA FITFLEX',
+    'login.hero.lead': 'Simamia kila kitu',
+    'login.hero.accent': 'mahali pamoja.',
+    'login.hero.sub': 'Mahudhurio, wanachama, taarifa za malipo na programu kwa washirika wa FitFlex na makampuni.',
     'nav.dashboard': 'Dashibodi',
     'nav.scan': 'Skani mwanachama',
     'nav.checkins': 'Mahudhurio',
