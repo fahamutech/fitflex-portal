@@ -937,6 +937,8 @@ export const api = {
   updateSettings: (token: string, data: Partial<PlatformSettings>) =>
     request<PlatformSettings>('/admin/settings', { method: 'PUT', body: JSON.stringify(data) }, token),
   getSpecialties: () => request<string[]>('/settings/specialties'),
+  /** Public: the FitFlex Pass tiers on sale today (fitflex-functions#189 lists only sellable tiers). */
+  subscriptionTiers: () => request<unknown>('/subscription-tiers'),
   adminGetSpecialties: (token: string) => request<string[]>('/admin/settings/specialties', {}, token),
   adminSaveSpecialty: (token: string, name: string) =>
     request<string[]>('/admin/settings/specialties', { method: 'POST', body: JSON.stringify({ name }) }, token),
@@ -1194,7 +1196,8 @@ export interface SubscriptionTierConfig {
   key: string;
   label: string;
   monthlyPrice: number;
-  visits: number;
+  /** -1 = unlimited; a whole number above zero = visits a month. Null (not set): the tier isn't sold and holders can't check in. */
+  visits: number | null;
   gymAccess: string;
 }
 

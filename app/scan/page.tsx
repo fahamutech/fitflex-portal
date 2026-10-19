@@ -13,6 +13,7 @@ const FAILURE_KEYS: Record<string, MessageKey> = {
   visits_exhausted:      'scan.fail.visits_exhausted',
   gym_closed:            'scan.fail.gym_closed',
   basic_daily_limit:     'scan.fail.basic_daily_limit',
+  tier_not_configured:   'scan.fail.tier_not_configured',
   invalid_or_expired_qr: 'scan.fail.invalid_or_expired_qr',
 };
 

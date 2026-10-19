@@ -3,12 +3,12 @@ import { useEffect, useState } from 'react';
 import { RefreshCw, Save, Plus, Trash2, X } from 'lucide-react';
 import { useApp } from '../../providers';
 import { api, PlatformSettings, SubscriptionTierConfig, PayoutBandConfig } from '@/lib/api';
+import { SubscriptionTiersEditor, tiersSavable } from '@/components/subscription-tiers-editor';
+import { fillIn, settingsTierError } from '@/lib/pass-tiers';
 import { Button, PageHeader, Alert, Spinner, Card, Field, Input, Select, Table, TBody, Td, Th, THead, Tr } from '@/components/shared';
 import { money, currencyLabel } from '@/lib/admin-utils';
 
-const EMPTY_TIER: SubscriptionTierConfig = { key: '', label: '', monthlyPrice: 0, visits: 0, gymAccess: 'standard' };
 const EMPTY_BAND: PayoutBandConfig = { key: '', label: '', minVisits: 0, maxVisits: 0, payoutTiming: 'weekly', commissionPct: 10 };
-const GYM_ACCESS_OPTIONS = ['standard', 'midtier', 'premium', 'luxury_executive'];
 const TIMING_OPTIONS: PayoutBandConfig['payoutTiming'][] = ['daily', 'weekly', 'biweekly', 'monthly'];
 const PERIOD_OPTIONS = [
   { value: 1, label: 'Daily' },
@@ -18,7 +18,7 @@ const PERIOD_OPTIONS = [
 ];
 
 export default function SettingsPage() {
-  const { token, user } = useApp();
+  const { token, user, t } = useApp();
   const [settings, setSettings] = useState<PlatformSettings | null>(null);
   const [loading, setLoading]   = useState(true);
   const [saving, setSaving]     = useState(false);
@@ -60,8 +60,11 @@ export default function SettingsPage() {
 
   async function handleSave() {
     if (!token) return;
+    // A tier with no visits set stops its holders checking in (fitflex-functions#189): don't save one.
+    if (!tiersSavable(tiers)) { setSuccess(null); setError(t('tiers.err.blocked')); return; }
     setSaving(true);
     setSuccess(null);
+    setError(null);
     try {
       const updated = await api.updateSettings(token, {
         subscriptionTiers: tiers,
@@ -74,14 +77,13 @@ export default function SettingsPage() {
       setSuccess('Settings saved successfully.');
       setTimeout(() => setSuccess(null), 3000);
     } catch (e) {
+      // 400 invalid_subscription_tier (fitflex-functions#189): name the tier and what's wrong; nothing was saved.
+      const bad = settingsTierError(e);
+      if (bad) { setError(bad.tier ? fillIn(t('tiers.err.server'), { tier: bad.tier, problem: t(bad.key) }) : t(bad.key)); return; }
       setError(e instanceof Error ? e.message : 'Failed to save settings');
     } finally {
       setSaving(false);
     }
-  }
-
-  function updateTier(idx: number, field: keyof SubscriptionTierConfig, value: string | number) {
-    setTiers(prev => prev.map((t, i) => i === idx ? { ...t, [field]: value } : t));
   }
 
   function updateBand(idx: number, field: keyof PayoutBandConfig, value: string | number) {
@@ -169,64 +171,8 @@ export default function SettingsPage() {
 
       {/* Subscription Tiers */}
       <Card>
-        <div className="p-5 space-y-4">
-          <div className="flex items-center justify-between">
-            <h3 className="text-sm font-semibold text-[var(--color-fg-primary)]">Subscription Tiers</h3>
-            <Button variant="ghost" size="sm" onClick={() => setTiers(prev => [...prev, { ...EMPTY_TIER, key: `tier_${Date.now()}`, label: 'New Tier' }])}>
-              <Plus className="h-3.5 w-3.5" /> Add tier
-            </Button>
-          </div>
-          <Table aria-label="Subscription Tiers">
-            <THead>
-              <Tr>
-                <Th>Tier Key</Th>
-                <Th>Label</Th>
-                <Th className="!text-right">Monthly Price ({currencyLabel(currency)})</Th>
-                <Th className="!text-right">Visits / Month</Th>
-                <Th>Gym Access Level</Th>
-                <Th className="w-10"></Th>
-              </Tr>
-            </THead>
-            <TBody>
-              {tiers.map((t, i) => (
-                <Tr key={t.key || i}>
-                  <Td>
-                    <Input size="sm" className="font-mono" aria-label="Tier Key" value={t.key} onChange={e => updateTier(i, 'key', e.target.value)} />
-                  </Td>
-                  <Td>
-                    <Input size="sm" aria-label="Label" value={t.label} onChange={e => updateTier(i, 'label', e.target.value)} />
-                  </Td>
-                  <Td>
-                    <Input size="sm" className="text-right font-mono tabular-nums" aria-label={`Monthly Price (${currencyLabel(currency)})`} type="number" value={t.monthlyPrice} onChange={e => updateTier(i, 'monthlyPrice', Number(e.target.value))} />
-                  </Td>
-                  <Td>
-                    <Input size="sm" className="text-right font-mono tabular-nums" aria-label="Visits / Month" type="number" value={t.visits} onChange={e => updateTier(i, 'visits', Number(e.target.value))} placeholder="-1 = unlimited" />
-                  </Td>
-                  <Td>
-                    <Select size="sm" aria-label="Gym Access Level" value={t.gymAccess} onChange={e => updateTier(i, 'gymAccess', e.target.value)}>
-                      {GYM_ACCESS_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
-                    </Select>
-                  </Td>
-                  <Td>
-                    <Button variant="ghost" size="sm" onClick={() => setTiers(prev => prev.filter((_, idx) => idx !== i))}>
-                      <Trash2 className="h-3.5 w-3.5 text-[var(--color-error-600)]" />
-                    </Button>
-                  </Td>
-                </Tr>
-              ))}
-            </TBody>
-          </Table>
-          {tiers.length > 0 && (
-            <div className="flex flex-wrap gap-3 mt-2">
-              {tiers.map(t => (
-                <div key={t.key} className="rounded-[var(--radius-lg)] border border-[var(--color-border-secondary)] p-3 text-center min-w-[120px]">
-                  <p className="text-xs text-[var(--color-fg-quaternary)]">{t.label}</p>
-                  <p className="text-lg font-bold tabular-nums">{money(t.monthlyPrice)}</p>
-                  <p className="text-xs text-[var(--color-fg-quaternary)]">{t.visits === -1 ? 'Unlimited' : `${t.visits} visits`}</p>
-                </div>
-              ))}
-            </div>
-          )}
+        <div className="p-5">
+          <SubscriptionTiersEditor tiers={tiers} setTiers={setTiers} currency={currency} />
         </div>
       </Card>
 
