@@ -19,6 +19,13 @@ type SortDir = 'asc' | 'desc' | null;
 
 const PAGE_SIZES = [10, 25, 50];
 
+// Pinned actions column (1280px and wider): opaque so scrolled cells pass underneath, with a divider on its
+// left edge. Narrower (the sidebar already takes 256px from 1024px), pinning would cover most of the row and
+// squeeze the member and status columns, so the actions scroll with the row instead.
+const STICKY_BASE = 'xl:sticky xl:right-0 xl:z-[1] xl:shadow-[inset_1px_0_0_var(--color-border-secondary)]';
+const STICKY_HEAD = `${STICKY_BASE} xl:bg-[var(--color-gray-50)]`;
+const STICKY_CELL = `${STICKY_BASE} xl:bg-[var(--color-bg-primary)]`;
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function DataTable<T extends Record<string, any>>({
   columns,
@@ -31,6 +38,9 @@ export function DataTable<T extends Record<string, any>>({
   extraFilters,
   onRowClick,
   label,
+  stickyActions = false,
+  dense = false,
+  defaultSort,
 }: {
   columns: ColumnDef<T>[];
   data: T[];
@@ -43,12 +53,18 @@ export function DataTable<T extends Record<string, any>>({
   onRowClick?: (row: T) => void;
   /** Names the table's scroll region for assistive tech (what the table lists). */
   label?: string;
+  /** Keeps the actions column pinned to the right edge, so it stays visible when the table scrolls sideways. */
+  stickyActions?: boolean;
+  /** Tighter cell padding, for wide admin tables that must fit a laptop screen. */
+  dense?: boolean;
+  /** Sort applied on first render (shown in aria-sort like any other sort). */
+  defaultSort?: { key: string; dir: 'asc' | 'desc' };
 }) {
   const { t } = useApp();
   const tableId = useId();
   const [query, setQuery]         = useState('');
-  const [sortKey, setSortKey]     = useState<string | null>(null);
-  const [sortDir, setSortDir]     = useState<SortDir>(null);
+  const [sortKey, setSortKey]     = useState<string | null>(defaultSort?.key ?? null);
+  const [sortDir, setSortDir]     = useState<SortDir>(defaultSort?.dir ?? null);
   const [page, setPage]           = useState(1);
   const [pageSize, setPageSize]   = useState(defaultPageSize);
 
@@ -90,9 +106,12 @@ export function DataTable<T extends Record<string, any>>({
   const paged      = sorted.slice((safePage - 1) * pageSize, safePage * pageSize);
 
   function toggleSort(key: string) {
-    if (sortKey !== key) { setSortKey(key); setSortDir('asc'); return; }
+    // Back to the default column from another one: start where it starts (newest first for dates).
+    if (sortKey !== key) { setSortKey(key); setSortDir(defaultSort && key === defaultSort.key ? defaultSort.dir : 'asc'); return; }
     if (sortDir === 'asc') { setSortDir('desc'); return; }
-    setSortKey(null); setSortDir(null);
+    // With a default sort, its column alternates desc/asc, and clearing another column returns to it.
+    if (defaultSort && key === defaultSort.key) { setSortDir('asc'); return; }
+    setSortKey(defaultSort?.key ?? null); setSortDir(defaultSort?.dir ?? null);
   }
 
   function SortIcon({ col }: { col: ColumnDef<T> }) {
@@ -108,8 +127,9 @@ export function DataTable<T extends Record<string, any>>({
   return (
     <div className="flex flex-col gap-4">
       {/* Toolbar */}
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="relative flex-1 max-w-xs">
+      {/* The search keeps a usable width; the filters move to a second row when both don't fit. */}
+      <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
+        <div className="relative flex-1 max-w-xs sm:min-w-[200px]">
           <Search aria-hidden="true" className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[var(--color-fg-disabled)] pointer-events-none" />
           <Input
             value={query}
@@ -119,7 +139,7 @@ export function DataTable<T extends Record<string, any>>({
             className="!pl-9"
           />
         </div>
-        {extraFilters && <div className="flex items-center gap-2 flex-wrap">{extraFilters}</div>}
+        {extraFilters && <div className="flex min-w-0 items-center gap-2 flex-wrap">{extraFilters}</div>}
       </div>
 
       {/* Table */}
@@ -129,7 +149,7 @@ export function DataTable<T extends Record<string, any>>({
         tabIndex={0}
         className="overflow-x-auto rounded-[var(--radius-xl)] border border-[var(--color-border-secondary)]"
       >
-        <table className="ui-table min-w-full">
+        <table className={cn('ui-table min-w-full', dense && 'ui-table-dense')}>
           <thead>
             <tr>
               {columns.map(col => (
@@ -151,7 +171,8 @@ export function DataTable<T extends Record<string, any>>({
                     <button
                       type="button"
                       aria-label={t('common.sortBy').replace('{column}', col.header)}
-                      className="inline-flex items-center gap-1.5 font-[inherit] text-[inherit]"
+                      // 44px tall hit area over the header's own padding: the row grows by 2px only.
+                      className="-my-3 inline-flex min-h-[44px] min-w-[44px] items-center gap-1.5 py-3 font-[inherit] text-[inherit]"
                     >
                       {col.header}
                       <SortIcon col={col} />
@@ -162,7 +183,7 @@ export function DataTable<T extends Record<string, any>>({
                 </th>
               ))}
               {hasActions && (
-                <th scope="col" className="text-right w-px whitespace-nowrap">{t('common.actions')}</th>
+                <th scope="col" className={cn('text-right w-px whitespace-nowrap', stickyActions && STICKY_HEAD)}>{t('common.actions')}</th>
               )}
             </tr>
           </thead>
@@ -195,8 +216,8 @@ export function DataTable<T extends Record<string, any>>({
                     </td>
                   ))}
                   {hasActions && (
-                    <td className="text-right">
-                      <div className="flex items-center justify-end gap-2">
+                    <td className={cn('text-right', stickyActions && STICKY_CELL)}>
+                      <div className={cn('flex items-center justify-end whitespace-nowrap', dense ? 'gap-0.5' : 'gap-2')}>
                         {actions!(row)}
                       </div>
                     </td>

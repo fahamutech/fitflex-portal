@@ -267,6 +267,29 @@ body {
   border-bottom: 1px solid var(--color-border-secondary);
 }
 
+/* Dense variant: wide admin tables (payments) that must fit 1280px with their actions. */
+.ui-table-dense th,
+.ui-table-dense td {
+  padding-left: 0.625rem;
+  padding-right: 0.625rem;
+}
+
+/* Touch target: a small control (24px filter chip) keeps its look but answers taps over at
+   least 44×44px. The hit area is centred on the control; groups of these space their rows
+   20px apart (gap-y-5) so wrapped rows never overlap. */
+.hit-target {
+  position: relative;
+}
+.hit-target::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: max(100%, 44px);
+  height: max(100%, 44px);
+  transform: translate(-50%, -50%);
+}
+
 .ui-table tbody tr:last-child td {
   border-bottom: none;
 }

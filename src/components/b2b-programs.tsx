@@ -202,7 +202,7 @@ export function B2BPrograms({ token, org, beneficiaries, onChanged }: { token: s
     trainerIds: (b.providerRules.trainerIds ?? []).join(', '), vendorIds: (b.providerRules.vendorIds ?? []).join(', '),
     productCategories: (b.providerRules.productCategories ?? []).join(', '), challengeIds: (b.providerRules.challengeIds ?? []).join(', '),
     groups: (b.eligibility?.groups ?? []).join(', '), types: (b.eligibility?.beneficiaryTypes ?? []).join(', '),
-  } : { ...EMPTY_BENEFIT, passTier: tiers?.[0]?.key ?? '' });
+  } : { ...EMPTY_BENEFIT }); // no pass tier chosen for the admin: they pick one
 
   const saveBenefit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -319,8 +319,10 @@ export function B2BPrograms({ token, org, beneficiaries, onChanged }: { token: s
         </Select>
       </Field>
       {bf.benefitType === FLAT_FEE && (
+        // Spans both columns so each option (name · price · visits) reads in full.
+        <div className="sm:col-span-2">
         <Field label="Pass tier" error={tiers && tiers.length === 0 ? t(tiersFailed ? 'tiers.loadFailed' : 'tiers.noneOnSale') : undefined}>
-          <Select value={bf.passTier} onChange={e => setBenefitForm({ ...bf, passTier: e.target.value })} data-testid="benefit-pass-tier">
+          <Select required value={bf.passTier} onChange={e => setBenefitForm({ ...bf, passTier: e.target.value })} data-testid="benefit-pass-tier">
             {!bf.passTier && <option value="">{t('tiers.choose')}</option>}
             {/* A saved benefit's tier that is no longer on sale stays visible, marked, so it isn't silently swapped. */}
             {bf.passTier && tiers && !tiers.some(x => x.key === bf.passTier) && (
@@ -334,6 +336,7 @@ export function B2BPrograms({ token, org, beneficiaries, onChanged }: { token: s
             ))}
           </Select>
         </Field>
+        </div>
       )}
       {bf.benefitType === FLAT_FEE && (
         <Field label="Fee per person per month, TSh (optional)" hint="Leave empty to use the organisation's agreed rate, or the pass price less the programme's discount. Applies to months not yet invoiced.">

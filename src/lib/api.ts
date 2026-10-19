@@ -306,6 +306,12 @@ export const api = {
   vendorOrder: (token: string, id: string) => request<VendorOrder>(`/vendor/orders/${encodeURIComponent(id)}`, {}, token),
   vendorOrderStatus: (token: string, id: string, body: { status: string; reason?: string }) =>
     request<VendorOrder>(`/vendor/orders/${encodeURIComponent(id)}/status`, { method: 'POST', body: JSON.stringify(body) }, token),
+  // Walk-in (counter) sales, S3: read, detail, void. Recording happens in the app (no POS in the portal).
+  vendorSales: (token: string, query: VendorSalesQuery = {}) =>
+    request<VendorSalePage>(`/vendor/sales${qs({ ...query, limit: query.limit ?? 50 })}`, {}, token),
+  vendorSale: (token: string, id: string) => request<{ sale: VendorSale }>(`/vendor/sales/${encodeURIComponent(id)}`, {}, token),
+  vendorVoidSale: (token: string, id: string, reason: string) =>
+    request<{ sale: VendorSale }>(`/vendor/sales/${encodeURIComponent(id)}/void`, { method: 'POST', body: JSON.stringify({ reason }) }, token),
   vendorPayments: (token: string) => request<VendorPayments>('/vendor/payments', {}, token),
   vendorStatements: (token: string) => request<VendorStatementList>('/vendor/statements', {}, token),
   vendorStatement: (token: string, id: string) =>
@@ -924,6 +930,9 @@ export const api = {
     variants?: Array<{ name: string; costTzs?: number | null; reorderLevel?: number | null }>;
   }) =>
     request<ShopProduct>(`/admin/products/${id}/listing`, { method: 'PUT', body: JSON.stringify(listing) }, token),
+  /** Works rating/reviewCount/soldCount out again from real reviews and orders; writes only with apply true. */
+  recomputeProductStats: (token: string, body: { apply?: boolean; productIds?: string[] } = {}) =>
+    request<ProductStatsRecompute>('/admin/shop/product-stats/recompute', { method: 'POST', body: JSON.stringify(body) }, token),
   adminVendors: (token: string) => request<VendorSummary[]>('/admin/vendors', {}, token),
   updateAdminVendor: (token: string, id: string, patch: Partial<Pick<VendorSummary, 'approvalStatus' | 'accountStatus' | 'approvalNote' | 'commissionPct'>>) =>
     request<VendorSummary>(`/admin/vendors/${id}`, { method: 'PUT', body: JSON.stringify(patch) }, token),
@@ -1177,6 +1186,8 @@ export interface CheckInResult {
   error?: string;
   checkin?: CheckIn;
   visitNumberInCycle?: number;
+  /** True when the member already checked in at this gym today: the existing visit is returned, no new one is used. */
+  idempotent?: boolean;
 }
 
 export interface Gym {
@@ -1458,6 +1469,10 @@ export interface Refund {
   approveNotBy?: string | null;
   /** The admin who may not mark it paid (approved it). */
   payNotBy?: string | null;
+  /** Display names (functions#206; null for members, policy or unknown; absent on older servers). */
+  requestedByName?: string | null;
+  decidedByName?: string | null;
+  paidByName?: string | null;
 }
 
 /** A1 second approver: where a payment or refund stands (flag MONEY_SECOND_APPROVER on only). */
@@ -1515,6 +1530,15 @@ export interface PaymentRequest {
   approveNotBy?: string | null;
   /** The admin who may not confirm the requested change (requested it). */
   confirmChangeNotBy?: string | null;
+  /**
+   * Display names of the admins above (functions#206; null for members, policy or unknown; absent on older servers).
+   * Without a name the portal says "another admin", never the raw id.
+   */
+  verifiedByName?: string | null;
+  changeRequestedByName?: string | null;
+  /** The admin who decided it (the row column; the list spreads the whole row). */
+  decidedBy?: string | null;
+  decidedByName?: string | null;
 }
 
 export interface MemberProfile {
@@ -1721,6 +1745,86 @@ export interface VendorOrder {
   deliveryAddress?: string | null;
 }
 
+/** GET /vendor/sales query. from/to are EAT days (YYYY-MM-DD, inclusive, on soldAt). */
+export interface VendorSalesQuery {
+  from?: string;
+  to?: string;
+  status?: 'completed' | 'voided' | 'all';
+  createdBy?: 'me';
+  limit?: number;
+  cursor?: string | null;
+}
+export type VendorSalePerson = { id: string; name: string | null } | null;
+/** A row of GET /vendor/sales. */
+export interface VendorSaleRow {
+  id: string;
+  number: string;
+  soldAt: string;
+  recordedAt: string;
+  status: 'completed' | 'voided';
+  totalTzs: number;
+  itemCount: number;
+  methods: string[];
+  createdBy: VendorSalePerson;
+  /** A line was sold at another price than the shop's. (#214 always sends it; the UI still copes if absent.) */
+  hasOverride: boolean;
+  /** Line discounts + sale discount. */
+  discountTzs: number;
+  /** recordedAt − soldAt > 5 min (the UI falls back to comparing them if absent). */
+  lateRecorded: boolean;
+}
+/** Completed sales over the whole from/to/createdBy range (not the page, not the status filter); cash net of change. */
+export interface VendorSaleSummary {
+  count: number;
+  totalTzs: number;
+  voidedCount: number;
+  byMethod: Array<{ method: string; amountTzs: number }>;
+  /** Completed: line + sale discounts. (#214 always sends these three; the UI hides a tile if one is absent.) */
+  discountTzs: number;
+  /** Completed sales with a changed price. */
+  overrideCount: number;
+  /** All sales in the range (voided too) recorded > 5 min after soldAt. */
+  lateCount: number;
+}
+export interface VendorSalePage { sales: VendorSaleRow[]; nextCursor: string | null; summary?: VendorSaleSummary | null }
+/** A walk-in sale (GET /vendor/sales/:id, POST …/void). Never carries cost. */
+export interface VendorSale {
+  id: string;
+  number: string;
+  status: 'completed' | 'voided';
+  kind: string;
+  soldAt: string;
+  recordedAt: string;
+  /** Σ qty × unitPriceTzs, before discounts. */
+  subtotalTzs: number;
+  /** Σ line discounts. */
+  lineDiscountTzs: number;
+  /** Whole-sale discount, after line discounts. */
+  discountTzs: number;
+  totalTzs: number;
+  paidTzs: number;
+  changeTzs: number;
+  note: string | null;
+  createdBy: VendorSalePerson;
+  voidedBy: VendorSalePerson;
+  voidedAt: string | null;
+  voidReason: string | null;
+  /** recordedAt − soldAt > 5 min (the UI falls back to comparing them if absent). */
+  lateRecorded: boolean;
+  lines: Array<{
+    nameSnapshot: string;
+    variant: string | null;
+    qty: number;
+    listPriceTzs: number;
+    unitPriceTzs: number;
+    priceChanged: boolean;
+    priceChangedBy: VendorSalePerson;
+    discountTzs: number;
+    lineTotalTzs: number;
+  }>;
+  payments: Array<{ method: string; amountTzs: number; reference: string | null }>;
+}
+
 export interface VendorPayments { todaySalesTzs: number; pendingSettlementTzs: number; [figure: string]: unknown }
 
 /** A vendor's own payout statement (partner view: no staff ids, `paidTo` instead of the snapshot). */
@@ -1752,6 +1856,21 @@ export interface AdminProductDraft {
   approvalStatus?: 'pending' | 'approved' | 'rejected';
   homepageVisible?: boolean;
   homepagePriority?: number;
+}
+
+/** A product's stored marketplace stats, as POST /admin/shop/product-stats/recompute reports them (rating to 2 decimals). */
+export interface ProductStats { rating: number; reviewCount: number; soldCount: number }
+/**
+ * POST /admin/shop/product-stats/recompute (functions#220): a dry run (apply false) or the applied run.
+ * Errors: 403 non-admin; 409 recompute_in_progress (another apply running); 400 invalid_apply / invalid_product_ids / too_many_product_ids.
+ */
+export interface ProductStatsRecompute {
+  dryRun: boolean;
+  checked: number;
+  changed: Array<{ productId: string; name: string; vendorId: string; before: ProductStats; after: ProductStats }>;
+  unchanged: number;
+  appliedAt?: string;
+  runId?: string;
 }
 
 export interface VendorSummary {

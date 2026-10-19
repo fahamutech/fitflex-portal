@@ -1,5 +1,5 @@
 // Small helpers for the vendor area (S2). No strings here: every label is an i18n key.
-import { ApiError, type ProductVariant, type VendorOrder } from '@/lib/api';
+import { ApiError, type ProductVariant, type VendorOrder, type VendorSale, type VendorTools } from '@/lib/api';
 import type { BadgeTone } from '@/lib/admin-utils';
 import type { Locale, MessageKey } from '@/lib/i18n';
 
@@ -151,13 +151,128 @@ export function newClientRef() {
   return `ref-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
 }
 
-/** Permissions a vendor user needs for each area. */
-export const VENDOR_AREAS = [
+/** Permissions (and, for some, a switched-on vendor tool) a vendor user needs for each area. */
+export const VENDOR_AREAS: ReadonlyArray<{ href: string; permission: string | null; tool?: keyof VendorTools }> = [
   { href: '/vendor', permission: null },
   { href: '/vendor/products', permission: 'products' },
   { href: '/vendor/orders', permission: 'orders' },
+  // S3: walk-in sales need the tool on (fails closed: missing = off) and the `sales` permission.
+  { href: '/vendor/sales', permission: 'sales', tool: 'walkInSales' },
   { href: '/vendor/payouts', permission: 'payments' },
-] as const;
+];
+/** Whether this person may open an area: its permission, and its tool switched on (=== true). */
+export function vendorAreaOpen(area: (typeof VENDOR_AREAS)[number], permissions: readonly string[], tools: VendorTools | null | undefined) {
+  if (area.permission && !permissions.includes(area.permission)) return false;
+  if (area.tool && tools?.[area.tool] !== true) return false;
+  return true;
+}
+/** Walk-in sales are open for this person (S3): tool on and `sales` permission. */
+export const canWalkInSales = (me: { permissions?: string[]; tools?: VendorTools } | null | undefined) =>
+  !!me && me.tools?.walkInSales === true && !!me.permissions?.includes('sales');
+
+// ── Walk-in sales (S3) ──
+const SALE_METHOD_KEYS: Record<string, MessageKey> = {
+  cash: 'vendor.pos.method.cash',
+  mpesa: 'vendor.orders.method.mpesa',
+  airtel_money: 'vendor.orders.method.airtel_money',
+  mixx: 'vendor.orders.method.mixx',
+  halopesa: 'vendor.pos.method.halopesa',
+  card: 'vendor.orders.method.card',
+  bank: 'vendor.orders.method.bank',
+  other: 'vendor.pos.method.other',
+};
+/** A walk-in payment method code in the chosen language; an unknown code falls back to "Other". */
+export const saleMethodLabel = (method: string, t: (k: MessageKey) => string) => t(SALE_METHOD_KEYS[method] ?? 'vendor.pos.method.other');
+/** "Cash + M-Pesa". */
+export const saleMethodsLabel = (methods: string[] | null | undefined, t: (k: MessageKey) => string) =>
+  (methods ?? []).map(m => saleMethodLabel(m, t)).join(' + ');
+/** Recorded offline: it reached FitFlex more than 5 minutes after it was sold. */
+export const recordedOffline = (sale: { soldAt?: string | null; recordedAt?: string | null; lateRecorded?: boolean }) => {
+  // The server's own mark wins when it sends one (security follow-up on #214).
+  if (typeof sale.lateRecorded === 'boolean') return sale.lateRecorded;
+  const sold = Date.parse(sale.soldAt ?? ''); const rec = Date.parse(sale.recordedAt ?? '');
+  return Number.isFinite(sold) && Number.isFinite(rec) && rec - sold > 5 * 60_000;
+};
+/** The EAT calendar day "YYYY-MM-DD" of a timestamp. */
+export const eatDayOf = (iso: string | null | undefined) => {
+  const ms = Date.parse(iso ?? '');
+  return Number.isFinite(ms) ? eatToday(new Date(ms)) : null;
+};
+/**
+ * Who may void a completed sale (security follow-up on #214; the server decides, this only hides the button):
+ * the vendor account and admin-role staff any sale; other staff only their own, on the EAT day it was sold.
+ */
+export function mayVoidSale(
+  sale: { status: string; soldAt: string; createdBy: { id: string } | null },
+  who: { userId: string | null | undefined; userType: string | null | undefined; vendorRole: string | null | undefined },
+  now = new Date(),
+) {
+  if (sale.status !== 'completed') return false;
+  if (who.userType === 'vendor' || who.vendorRole === 'admin') return true;
+  return !!who.userId && sale.createdBy?.id === who.userId && eatDayOf(sale.soldAt) === eatToday(now);
+}
+
+const RECEIPT_WIDTH = 32;
+const amountOnly = (n: number) => new Intl.NumberFormat('en-US').format(Number(n || 0));
+/** "label      amount", padded to 32 characters where it fits (WhatsApp on phones). */
+function receiptRow(label: string, amount: string) {
+  // Too long for one line (e.g. a method with its reference): label alone, then the amount in the right-hand column.
+  if (label.length + 1 + amount.length > RECEIPT_WIDTH) return `${label}\n${amount.padStart(RECEIPT_WIDTH)}`;
+  return `${label}${' '.repeat(RECEIPT_WIDTH - label.length - amount.length)}${amount}`;
+}
+
+// The app's receipt clock (fitflexmobile lib/shared/formatters.dart formatDateTime / formatTimeOfDay), in EAT:
+// en "19 Oct 2026, 14:05"; sw a 12-hour clock with the part of the day, "19 Okt 2026, 2:05 mchana".
+const RECEIPT_MONTHS = {
+  en: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'],
+  sw: ['Jan', 'Feb', 'Mac', 'Apr', 'Mei', 'Jun', 'Jul', 'Ago', 'Sep', 'Okt', 'Nov', 'Des'],
+} as const;
+const swDayPeriod = (h: number) => (h >= 5 && h < 12 ? 'asubuhi' : h >= 12 && h < 16 ? 'mchana' : h >= 16 && h < 19 ? 'jioni' : 'usiku');
+/** "19 Oct 2026, 14:05" / "19 Okt 2026, 2:05 mchana" in EAT, as the app writes it on receipts. */
+export function receiptDateTime(iso: string | null | undefined, locale: Locale) {
+  const ms = Date.parse(iso ?? '');
+  if (!Number.isFinite(ms)) return '—';
+  const d = new Date(ms + 3 * 3_600_000); // EAT has no DST: read the UTC fields of the shifted time.
+  const [h, m] = [d.getUTCHours(), d.getUTCMinutes()];
+  const mm = String(m).padStart(2, '0');
+  const time = locale === 'sw' ? `${h % 12 === 0 ? 12 : h % 12}:${mm} ${swDayPeriod(h)}` : `${String(h).padStart(2, '0')}:${mm}`;
+  return `${d.getUTCDate()} ${RECEIPT_MONTHS[locale === 'sw' ? 'sw' : 'en'][d.getUTCMonth()]} ${d.getUTCFullYear()}, ${time}`;
+}
+/**
+ * The receipt as plain text (spec §4.2), in the language `t` speaks. Not a TRA fiscal receipt; no customer
+ * details, no marketing line. `totalLabel` is the formatted total ("TSh 95,000").
+ */
+export function saleReceiptText(
+  sale: Pick<VendorSale, 'number' | 'soldAt' | 'subtotalTzs' | 'lineDiscountTzs' | 'discountTzs' | 'totalTzs' | 'changeTzs' | 'createdBy' | 'lines' | 'payments'>,
+  opts: { business: string; locale: Locale; t: (k: MessageKey) => string; totalLabel: string },
+) {
+  const { t } = opts;
+  const rule = '-'.repeat(20);
+  const out: string[] = [opts.business, fmt(t('vendor.pos.receiptNo'), { number: sale.number }), receiptDateTime(sale.soldAt, opts.locale), rule];
+  for (const line of sale.lines) {
+    const name = `${line.qty} x ${line.nameSnapshot}${line.variant ? ` (${line.variant})` : ''}`;
+    const gross = amountOnly(line.qty * line.unitPriceTzs);
+    if (line.qty > 1 || line.priceChanged || line.unitPriceTzs !== line.listPriceTzs) {
+      out.push(name, receiptRow(`   @ ${amountOnly(line.unitPriceTzs)}`, gross));
+    } else {
+      out.push(receiptRow(name, gross));
+    }
+    if (line.discountTzs > 0) out.push(receiptRow(`   ${t('vendor.pos.lineDiscountShort')}`, `-${amountOnly(line.discountTzs)}`));
+  }
+  out.push(rule, receiptRow(t('vendor.pos.subtotal'), amountOnly(sale.subtotalTzs)));
+  const discounts = Number(sale.lineDiscountTzs || 0) + Number(sale.discountTzs || 0);
+  if (discounts > 0) out.push(receiptRow(t('vendor.pos.discounts'), `-${amountOnly(discounts)}`));
+  out.push(receiptRow(t('vendor.pos.total'), opts.totalLabel));
+  for (const p of sale.payments) {
+    const method = saleMethodLabel(p.method, t);
+    out.push(receiptRow(p.reference ? `${method} (${p.reference})` : method, amountOnly(p.amountTzs)));
+  }
+  if (sale.changeTzs > 0) out.push(receiptRow(t('vendor.pos.change'), amountOnly(sale.changeTzs)));
+  out.push(rule);
+  if (sale.createdBy?.name) out.push(fmt(t('vendor.pos.servedBy'), { name: sale.createdBy.name }));
+  out.push(fmt(t('vendor.pos.receiptFooter'), { business: opts.business }), t('vendor.pos.notFiscal'));
+  return out.join('\n');
+}
 
 /** The products page's query string, remembered so stock history can go back to the same filters. */
 export const PRODUCTS_QS_KEY = 'vendor.products.qs';

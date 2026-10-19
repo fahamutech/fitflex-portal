@@ -206,9 +206,12 @@ export function ConfirmDialog({
 
         <div className="px-6 py-5 text-center">
           <h3 id={titleId} className="text-base font-semibold text-[var(--color-fg-primary)]">{title}</h3>
-          {description && (
+          {description && (typeof description === 'string' ? (
             <p id={descId} className="mt-2 text-sm text-[var(--color-fg-quaternary)]">{description}</p>
-          )}
+          ) : (
+            // Structured detail (for example a list of facts to check) can't sit inside a <p>.
+            <div id={descId} className="mt-2 text-sm text-[var(--color-fg-quaternary)]">{description}</div>
+          ))}
         </div>
 
         <div className="flex gap-3 px-6 pb-6">
