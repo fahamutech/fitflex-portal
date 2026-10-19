@@ -905,6 +905,16 @@ export const api = {
     }, token),
   updatePayment: (token: string, id: string, patch: Pick<Partial<PaymentRequest>, 'status' | 'reference' | 'note'>) =>
     request<PaymentRequest>(`/admin/payment-requests/${id}`, { method: 'POST', body: JSON.stringify(patch) }, token),
+  // A1 second approver (MONEY_SECOND_APPROVER; 404 feature_disabled while off).
+  verifyPayment: (token: string, id: string, body: { reference?: string; note?: string }) =>
+    request<PaymentRequest>(`/admin/payment-requests/${encodeURIComponent(id)}/verify`, { method: 'POST', body: JSON.stringify(body) }, token),
+  requestPaymentChange: (token: string, id: string, body: { status: PaymentStatusValue; reason: string }) =>
+    request<PaymentRequest>(`/admin/payment-requests/${encodeURIComponent(id)}/change-request`, { method: 'POST', body: JSON.stringify(body) }, token),
+  /** amountTzs (the amount actually received) is required when a shop-order payment becomes approved. */
+  confirmPaymentChange: (token: string, id: string, body: { amountTzs?: number } = {}) =>
+    request<PaymentRequest>(`/admin/payment-requests/${encodeURIComponent(id)}/change-request/confirm`, { method: 'POST', body: JSON.stringify(body) }, token),
+  cancelPaymentChange: (token: string, id: string, body: { reason?: string }) =>
+    request<PaymentRequest>(`/admin/payment-requests/${encodeURIComponent(id)}/change-request/cancel`, { method: 'POST', body: JSON.stringify(body) }, token),
   members: (token: string) => request<MemberSummary[]>('/admin/members', {}, token),
   saveMember: (token: string, member: Partial<MemberSummary>) =>
     request<MemberSummary>('/admin/members', { method: 'POST', body: JSON.stringify(member) }, token),
@@ -1364,7 +1374,19 @@ export interface Refund {
   paidTo: string | null;
   createdAt: string;
   member?: { id: string; displayName: string | null; phone: string | null; email: string | null } | null;
+  /** MONEY_SECOND_APPROVER on only (absent while it is off). */
+  secondApproverRequired?: boolean;
+  approvalStage?: RefundApprovalStage | null;
+  /** The admin who may not approve it (raised it). */
+  approveNotBy?: string | null;
+  /** The admin who may not mark it paid (approved it). */
+  payNotBy?: string | null;
 }
+
+/** A1 second approver: where a payment or refund stands (flag MONEY_SECOND_APPROVER on only). */
+export type PaymentApprovalStage = 'awaiting_verification' | 'awaiting_second_approval' | 'change_requested';
+export type RefundApprovalStage = 'awaiting_approval' | 'awaiting_payment';
+export type PaymentStatusValue = 'pending' | 'approved' | 'rejected' | 'cancelled';
 
 export interface PaymentRequest {
   id: string;
@@ -1398,6 +1420,24 @@ export interface PaymentRequest {
     renewsAt?: string;
     expiresAt?: string | null;
   } | null;
+  /** Manual payments (functions#188): the transaction ID the member typed, kept apart from `reference`. */
+  memberReference?: string | null;
+  /** The number the member paid from, when the server sends it (functions#188). */
+  payerPhone?: string | null;
+  /** Columns (null unless used): who checked the money arrived, and a pending change request. */
+  verifiedBy?: string | null;
+  verifiedAt?: string | null;
+  changeRequestedStatus?: PaymentStatusValue | null;
+  changeRequestedBy?: string | null;
+  changeRequestedAt?: string | null;
+  changeRequestReason?: string | null;
+  /** MONEY_SECOND_APPROVER on only (absent while it is off). */
+  secondApproverRequired?: boolean;
+  approvalStage?: PaymentApprovalStage | null;
+  /** The admin who may not approve it (verified it). */
+  approveNotBy?: string | null;
+  /** The admin who may not confirm the requested change (requested it). */
+  confirmChangeNotBy?: string | null;
 }
 
 export interface MemberProfile {
