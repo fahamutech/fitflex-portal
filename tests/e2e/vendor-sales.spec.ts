@@ -557,3 +557,64 @@ test.describe('UAT', () => {
     });
   }
 });
+
+test.describe('UAT re-check', () => {
+  const routes = () => base({
+    'GET /vendor/sales': { json: { sales: [
+      row({ id: 'sale_14', number: 'R-000014', totalTzs: 1234, methods: ['cash', 'mpesa', 'halopesa'], createdBy: { id: 'usr_vendor', name: 'Asha Mohamedi Juma' } }),
+      row({ id: 'sale_1', totalTzs: 12454000, methods: ['bank'] }),
+    ], nextCursor: null, summary: summary({
+      count: 1234, totalTzs: 12454000, discountTzs: 454000, overrideCount: 12, lateCount: 7,
+      byMethod: [{ method: 'cash', amountTzs: 454000 }, { method: 'halopesa', amountTzs: 10000000 }, { method: 'bank', amountTzs: 2000000 }],
+    }) } },
+  });
+  /** Texts (by selector) that render on more than one line, and whether the list column scrolls sideways. */
+  const layout = (page: Page, selectors: string[]) => page.getByTestId('sales-list').evaluate((root, sels) => {
+    const lines = (el: Element) => {
+      const range = document.createRange(); range.selectNodeContents(el);
+      return new Set(Array.from(range.getClientRects()).filter(r => r.width > 0).map(r => Math.round(r.top))).size;
+    };
+    const visible = (el: Element) => (el as HTMLElement).offsetParent !== null;
+    const wrapped = sels.flatMap(sel => Array.from(root.querySelectorAll(sel)).filter(visible).filter(el => lines(el) > 1).map(el => el.textContent || ''));
+    // Screen-reader-only text (sr-only: 1px, clipped on purpose) is not a scroller.
+    const scrollers = [root, ...Array.from(root.querySelectorAll('*'))].filter(el => visible(el) && !el.classList.contains('sr-only') && el.scrollWidth > el.clientWidth + 1 && getComputedStyle(el).overflowX !== 'visible');
+    return { wrapped, sideways: root.scrollWidth > root.clientWidth + 1 || scrollers.length > 0 };
+  }, selectors);
+
+  for (const locale of ['en', 'sw'] as const) {
+    test(`(${locale}) at 1280 with no sale open: one-line receipt numbers and money, no sideways scroll`, async ({ page }) => {
+      await page.setViewportSize({ width: 1280, height: 800 });
+      await signedInAs(page, VENDOR, locale);
+      await mockApi(page, routes());
+      await page.goto('/vendor/sales/');
+      await expect(page.getByTestId('vendor-sales-table')).toBeVisible();
+      await expect(page.getByTestId('sale-row-sale_14')).toContainText('TSh 1,234');
+      const res = await layout(page, ['[id^="sale-link-"]', '[data-testid^="sale-row-"] td:nth-child(6) span', '[data-testid^="sales-summary-"]', '[data-testid^="sales-by-method-"]']);
+      expect(res.wrapped).toEqual([]);
+      expect(res.sideways).toBe(false);
+    });
+
+    test(`(${locale}) at 1280 with a sale open: the list shows cards, Total and Status without sideways scroll`, async ({ page }) => {
+      await page.setViewportSize({ width: 1280, height: 800 });
+      await signedInAs(page, VENDOR, locale);
+      await mockApi(page, routes());
+      await page.goto('/vendor/sales/?id=sale_1');
+      await expect(page.getByTestId('sale-detail')).toBeVisible();
+      await expect(page.getByTestId('vendor-sales-table')).toBeHidden();
+      const card = page.getByTestId('sale-card-sale_14');
+      await expect(card).toBeVisible();
+      await expect(card).toContainText('R-000014');
+      await expect(card).toContainText('TSh 1,234');
+      await expect(card).toContainText(locale === 'sw' ? 'Yamekamilika' : 'Completed');
+      const res = await layout(page, ['[data-testid^="sale-card-"] .font-mono', '[data-testid^="sale-card-"] .tabular-nums', '[data-testid^="sales-summary-"]', '[data-testid^="sales-by-method-"]']);
+      expect(res.wrapped).toEqual([]);
+      expect(res.sideways).toBe(false);
+      // The detail heading's receipt number stays on one line too.
+      const headingLines = await page.getByTestId('sale-heading').evaluate(el => {
+        const r = document.createRange(); r.selectNodeContents(el);
+        return new Set(Array.from(r.getClientRects()).map(x => Math.round(x.top))).size;
+      });
+      expect(headingLines).toBe(1);
+    });
+  }
+});
