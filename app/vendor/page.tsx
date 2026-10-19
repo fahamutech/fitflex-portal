@@ -2,9 +2,9 @@
 import { ReactNode, useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { Inbox } from 'lucide-react';
-import { api, type LowStockRow, type VendorOrder, type VendorPayments, type VendorStatementList } from '@/lib/api';
+import { api, type LowStockRow, type VendorOrder, type VendorPayments, type VendorSaleSummary, type VendorStatementList } from '@/lib/api';
 import { money } from '@/lib/admin-utils';
-import { countsOf, eatDateTime, fmt, isOpenOrder, itemsKey, payoutWhyKey, statusKey, statusTone, type OrderCounts } from '@/lib/vendor';
+import { canWalkInSales, countsOf, eatDateTime, eatToday, fmt, isOpenOrder, itemsKey, payoutWhyKey, statusKey, statusTone, type OrderCounts } from '@/lib/vendor';
 import { Badge, Button, Card, CardContent, CardHeader, EmptyState, PageHeader, Skeleton } from '@/components/shared';
 import { useVendor } from '@/components/vendor-context';
 import { useApp } from '../providers';
@@ -46,6 +46,8 @@ export default function VendorDashboardPage() {
   const canPay = vendor.can('payments');
   const canOrders = vendor.can('orders');
   const canLow = vendor.can('products') && vendor.me?.tools.stockLedger === true;
+  // S3: counter sales today, a card of its own (never added to the app-order figures).
+  const canSales = canWalkInSales(vendor.me);
 
   const [payments, retryPayments] = useLoad<VendorPayments>(!!token && canPay, () => api.vendorPayments(token!));
   const [statements, retryStatements] = useLoad<VendorStatementList>(!!token && canPay, () => api.vendorStatements(token!));
@@ -54,6 +56,10 @@ export default function VendorDashboardPage() {
     return { orders: page.orders, counts: countsOf(page.counts) };
   });
   const [low, retryLow] = useLoad<LowStockRow[]>(!!token && canLow, () => api.vendorLowStock(token!));
+  const [shopSales, retryShopSales] = useLoad<VendorSaleSummary | null>(!!token && canSales, async () => {
+    const day = eatToday();
+    return (await api.vendorSales(token!, { from: day, to: day, limit: 1 })).summary ?? null;
+  });
 
   const failed = (retry: () => void) => (
     <div className="space-y-2" role="alert">
@@ -64,7 +70,7 @@ export default function VendorDashboardPage() {
   const loading = <div aria-busy="true"><Skeleton className="h-8 w-24" /></div>;
   const value = (v: ReactNode, testId?: string) => <p className="text-3xl font-semibold tracking-tight tabular-nums text-[var(--color-fg-primary)]" data-testid={testId}>{v}</p>;
 
-  if (!canPay && !canOrders && !vendor.can('products')) {
+  if (!canPay && !canOrders && !vendor.can('products') && !canSales) {
     return (
       <div className="space-y-6">
         <PageHeader title={vendor.me?.businessName || t('vendor.nav.dashboard')} />
@@ -94,6 +100,17 @@ export default function VendorDashboardPage() {
           <Tile label={t('vendor.dash.openOrders')} testId="dash-open-orders">
             {orders.state === 'loading' ? loading : orders.state === 'failed' ? failed(retryOrders) : (
               <>{value(openCount, 'dash-open-orders-value')}<Link href="/vendor/orders/?status=open" className={linkCls}>{t('vendor.dash.viewAll')}</Link></>
+            )}
+          </Tile>
+        )}
+        {canSales && (
+          <Tile label={t('vendor.dash.shopSalesToday')} testId="dash-shop-sales">
+            {shopSales.state === 'loading' ? loading : shopSales.state === 'failed' ? failed(retryShopSales) : (
+              <>
+                {value(shopSales.data ? money(shopSales.data.totalTzs) : '—', 'dash-shop-sales-value')}
+                <p className="mt-1 text-sm text-[var(--color-fg-quaternary)]">{t('vendor.dash.shopSalesHint')}</p>
+                <Link href="/vendor/sales/" className={linkCls}>{t('vendor.dash.viewAll')}</Link>
+              </>
             )}
           </Tile>
         )}
