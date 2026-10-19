@@ -361,12 +361,13 @@ function SaleDetail({ id, onBack, onUpdated }: { id: string; onBack: () => void;
         toast.info(t('vendor.sales.alreadyVoided'));
         try { const fresh = await api.vendorSale(token, sale.id); setSale(fresh.sale); onUpdated(fresh.sale); } catch { /* the toast still stands */ }
       } else if (code === 'has_refunds') {
+        // Not sent by #214; kept for S7 refunds (spec §5.3), harmless until then.
         toast.error(t('vendor.sales.voidHasRefunds'));
       } else if (code === 'void_not_allowed') {
         const why = errorBody<{ reason?: string }>(err)?.reason;
-        toast.error(t(why === 'too_old' ? 'vendor.sales.voidTooOld' : 'vendor.sales.voidNotOwn'));
+        toast.error(t(why === 'too_old' ? 'vendor.sales.voidTooOld' : why === 'not_own' ? 'vendor.sales.voidNotOwn' : 'vendor.sales.err.voidNotAllowed'));
       } else if (code === 'vendor_permission_forbidden') {
-        toast.error(t('vendor.pos.err.notAllowed'));
+        toast.error(t('vendor.sales.err.voidNotAllowed'));
         void vendor.refresh();
       } else if (code === 'sale_not_found') {
         setState('notFound');

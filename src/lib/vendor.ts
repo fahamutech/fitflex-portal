@@ -212,21 +212,31 @@ export function mayVoidSale(
   return !!who.userId && sale.createdBy?.id === who.userId && eatDayOf(sale.soldAt) === eatToday(now);
 }
 
-/** "19 Oct 2026, 14:05" in EAT. */
-export function eatDateTimeLong(iso: string | null | undefined, locale: Locale) {
-  if (!iso) return '—';
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return '—';
-  const time = date.toLocaleTimeString(intlLocale(locale), { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: EAT });
-  return `${eatDay(iso, locale)}, ${time}`;
-}
-
 const RECEIPT_WIDTH = 32;
 const amountOnly = (n: number) => new Intl.NumberFormat('en-US').format(Number(n || 0));
 /** "label      amount", padded to 32 characters where it fits (WhatsApp on phones). */
 function receiptRow(label: string, amount: string) {
-  const gap = Math.max(1, RECEIPT_WIDTH - label.length - amount.length);
-  return `${label}${' '.repeat(gap)}${amount}`;
+  // Too long for one line (e.g. a method with its reference): label alone, then the amount in the right-hand column.
+  if (label.length + 1 + amount.length > RECEIPT_WIDTH) return `${label}\n${amount.padStart(RECEIPT_WIDTH)}`;
+  return `${label}${' '.repeat(RECEIPT_WIDTH - label.length - amount.length)}${amount}`;
+}
+
+// The app's receipt clock (fitflexmobile lib/shared/formatters.dart formatDateTime / formatTimeOfDay), in EAT:
+// en "19 Oct 2026, 14:05"; sw a 12-hour clock with the part of the day, "19 Okt 2026, 2:05 mchana".
+const RECEIPT_MONTHS = {
+  en: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'],
+  sw: ['Jan', 'Feb', 'Mac', 'Apr', 'Mei', 'Jun', 'Jul', 'Ago', 'Sep', 'Okt', 'Nov', 'Des'],
+} as const;
+const swDayPeriod = (h: number) => (h >= 5 && h < 12 ? 'asubuhi' : h >= 12 && h < 16 ? 'mchana' : h >= 16 && h < 19 ? 'jioni' : 'usiku');
+/** "19 Oct 2026, 14:05" / "19 Okt 2026, 2:05 mchana" in EAT, as the app writes it on receipts. */
+export function receiptDateTime(iso: string | null | undefined, locale: Locale) {
+  const ms = Date.parse(iso ?? '');
+  if (!Number.isFinite(ms)) return '—';
+  const d = new Date(ms + 3 * 3_600_000); // EAT has no DST: read the UTC fields of the shifted time.
+  const [h, m] = [d.getUTCHours(), d.getUTCMinutes()];
+  const mm = String(m).padStart(2, '0');
+  const time = locale === 'sw' ? `${h % 12 === 0 ? 12 : h % 12}:${mm} ${swDayPeriod(h)}` : `${String(h).padStart(2, '0')}:${mm}`;
+  return `${d.getUTCDate()} ${RECEIPT_MONTHS[locale === 'sw' ? 'sw' : 'en'][d.getUTCMonth()]} ${d.getUTCFullYear()}, ${time}`;
 }
 /**
  * The receipt as plain text (spec §4.2), in the language `t` speaks. Not a TRA fiscal receipt; no customer
@@ -238,7 +248,7 @@ export function saleReceiptText(
 ) {
   const { t } = opts;
   const rule = '-'.repeat(20);
-  const out: string[] = [opts.business, fmt(t('vendor.pos.receiptNo'), { number: sale.number }), eatDateTimeLong(sale.soldAt, opts.locale), rule];
+  const out: string[] = [opts.business, fmt(t('vendor.pos.receiptNo'), { number: sale.number }), receiptDateTime(sale.soldAt, opts.locale), rule];
   for (const line of sale.lines) {
     const name = `${line.qty} x ${line.nameSnapshot}${line.variant ? ` (${line.variant})` : ''}`;
     const gross = amountOnly(line.qty * line.unitPriceTzs);

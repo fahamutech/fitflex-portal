@@ -259,7 +259,11 @@ test.describe('list', () => {
 test.describe('detail', () => {
   test('shows the receipt with the price-change audit line; Copy receipt text; Back returns focus to the row', async ({ page }) => {
     await signedInAs(page, VENDOR);
-    await mockApi(page, base());
+    await mockApi(page, base({ 'GET /vendor/sales/sale_1': { json: { sale: sale({ soldAt: '2026-10-19T11:05:00.000Z', payments: [
+      { method: 'cash', amountTzs: 60000, reference: null },
+      { method: 'mpesa', amountTzs: 40000, reference: 'QK12AB34' },
+      { method: 'airtel_money', amountTzs: 1000, reference: 'AIRTEL-REF-0000123456' },
+    ] }) } } }));
     await page.goto('/vendor/sales/');
     await page.getByTestId('vendor-sales-table').getByRole('link', { name: 'R-000123' }).click();
     await expect(page).toHaveURL(/\?id=sale_1/);
@@ -288,7 +292,11 @@ test.describe('detail', () => {
     expect(text).toMatch(/ {3}Discount +-5,000/);
     expect(text).toMatch(/1 x Shaker +10,000/);
     expect(text).toMatch(/Total +TSh 95,000/);
+    expect(text.split('\n')[2]).toBe('19 Oct 2026, 14:05');
     expect(text).toMatch(/M-Pesa \(QK12AB34\) +40,000/);
+    // Every amount row is 32 wide; a method + reference too long for one line wraps, amount still right-aligned.
+    expect(text).toContain(`Airtel Money (AIRTEL-REF-0000123456)\n${'1,000'.padStart(32)}`);
+    for (const l of text.split('\n').filter(x => /\d$/.test(x) && / {2,}/.test(x))) expect(l.length).toBe(32);
     expect(text).toMatch(/Change +5,000/);
     expect(text).toContain('Served by Asha');
     expect(text).toContain('Payment received by Dar Fitness Gear.');
@@ -381,6 +389,17 @@ test.describe('void', () => {
     await expect(page.getByTestId('sale-voided')).toBeVisible();
   });
 
+  test('403 vendor_permission_forbidden on void says so', async ({ page }) => {
+    await signedInAs(page, VENDOR);
+    await mockApi(page, base({ 'POST /vendor/sales/sale_1/void': { status: 403, json: { error: 'vendor_permission_forbidden', requiredPermission: 'sales' } } }));
+    await page.goto('/vendor/sales/?id=sale_1');
+    await page.getByTestId('sale-void').click();
+    await page.getByTestId('sale-void-reason').fill('Wrong item');
+    await page.getByTestId('sale-void-confirm').click();
+    await expect(page.getByText("You don't have permission to void sales.")).toBeVisible();
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+  });
+
   test("non-admin staff: Void only on their own sale of today; admin-role staff on any", async ({ page, browser }) => {
     const staffMe = (vendorRole: string) => me({ userType: 'vendor_staff', vendorRole, permissions: ['sales'] });
     await signedInAs(page, STAFF);
@@ -459,9 +478,10 @@ test.describe('dashboard and stock history', () => {
 test.describe('Swahili and targets', () => {
   test('Swahili nav, notice, detail and copied receipt text', async ({ page }) => {
     await signedInAs(page, VENDOR, 'sw');
-    await mockApi(page, base());
+    await mockApi(page, base({ 'GET /vendor/sales/sale_1': { json: { sale: sale({ soldAt: '2026-10-19T11:05:00.000Z' }) } } }));
     await page.goto('/vendor/sales/?id=sale_1');
     await expect(page.getByRole('link', { name: 'Mauzo', exact: true }).first()).toBeVisible();
+    await expect(page.getByText('Rekodi mauzo mapya kwenye app ya FitFlex (simu au kivinjari).')).toBeVisible();
     await expect(page.getByTestId('sale-heading')).toHaveText('Risiti R-000123');
     await expect(page.getByTestId('sale-not-fiscal')).toHaveText('Hii si risiti ya kodi ya TRA.');
     await expect(page.getByTestId('sale-detail')).toContainText('FitFlex haishughulikii pesa hii');
@@ -472,7 +492,9 @@ test.describe('Swahili and targets', () => {
     expect(text).toMatch(/Jumla +TSh 95,000/);
     expect(text).toMatch(/Taslimu +60,000/);
     expect(text).toMatch(/Chenji +5,000/);
-    expect(text).toContain('Muhudumu: Asha');
+    expect(text).toContain('Mhudumu: Asha');
+    // The app's Swahili clock: 12-hour with the part of the day (14:05 EAT → "2:05 mchana").
+    expect(text.split('\n')[2]).toBe('19 Okt 2026, 2:05 mchana');
     expect(text.trim().split('\n').at(-1)).toBe('Hii si risiti ya kodi ya TRA.');
   });
 

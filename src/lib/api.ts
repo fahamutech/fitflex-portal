@@ -1761,12 +1761,12 @@ export interface VendorSaleRow {
   itemCount: number;
   methods: string[];
   createdBy: VendorSalePerson;
-  /** Security follow-up on #214 (optional until it lands): a line price was changed by the seller. */
-  hasOverride?: boolean;
-  /** Optional: sale + line discounts. */
-  discountTzs?: number;
-  /** Optional: the server's own "reached FitFlex late" mark (else the portal compares soldAt and recordedAt). */
-  lateRecorded?: boolean;
+  /** A line was sold at another price than the shop's. (#214 always sends it; the UI still copes if absent.) */
+  hasOverride: boolean;
+  /** Line discounts + sale discount. */
+  discountTzs: number;
+  /** recordedAt − soldAt > 5 min (the UI falls back to comparing them if absent). */
+  lateRecorded: boolean;
 }
 /** Completed sales over the whole from/to/createdBy range (not the page, not the status filter); cash net of change. */
 export interface VendorSaleSummary {
@@ -1774,10 +1774,12 @@ export interface VendorSaleSummary {
   totalTzs: number;
   voidedCount: number;
   byMethod: Array<{ method: string; amountTzs: number }>;
-  /** Optional (security follow-up on #214): discounts given, sales with a changed price, sales recorded late. */
-  discountTzs?: number;
-  overrideCount?: number;
-  lateCount?: number;
+  /** Completed: line + sale discounts. (#214 always sends these three; the UI hides a tile if one is absent.) */
+  discountTzs: number;
+  /** Completed sales with a changed price. */
+  overrideCount: number;
+  /** All sales in the range (voided too) recorded > 5 min after soldAt. */
+  lateCount: number;
 }
 export interface VendorSalePage { sales: VendorSaleRow[]; nextCursor: string | null; summary?: VendorSaleSummary | null }
 /** A walk-in sale (GET /vendor/sales/:id, POST …/void). Never carries cost. */
@@ -1802,8 +1804,8 @@ export interface VendorSale {
   voidedBy: VendorSalePerson;
   voidedAt: string | null;
   voidReason: string | null;
-  /** Optional (security follow-up on #214). */
-  lateRecorded?: boolean;
+  /** recordedAt − soldAt > 5 min (the UI falls back to comparing them if absent). */
+  lateRecorded: boolean;
   lines: Array<{
     nameSnapshot: string;
     variant: string | null;
