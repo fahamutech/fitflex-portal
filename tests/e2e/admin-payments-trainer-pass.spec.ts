@@ -54,7 +54,9 @@ test('trainer pass requests show period and gym, and can be filtered', async ({ 
 
   await page.goto('/admin/payments');
 
-  await expect(page.getByText('TRAINER PASS · WEEKLY')).toBeVisible();
+  // Kind on the badge, period on the line under it.
+  await expect(page.getByText('TRAINER PASS', { exact: true })).toBeVisible();
+  await expect(page.getByTestId('payment-detail').first()).toHaveText('WEEKLY');
   await expect(page.getByText('Gym Tu')).toBeVisible();
   await expect(page.getByText('Regular Member')).toBeVisible();
 
@@ -63,7 +65,8 @@ test('trainer pass requests show period and gym, and can be filtered', async ({ 
   await expect(page.getByText('Regular Member')).toHaveCount(0);
 
   await page.getByTitle('Approve').click();
-  await expect(page.getByText(/trainer pass · weekly at Gym Tu/)).toBeVisible();
+  // The approve dialog lists what is being approved (kind, period and gym) with the amount.
+  await expect(page.getByTestId('decision-facts')).toContainText('TRAINER PASS · WEEKLY · Gym Tu');
   await expect(page.getByText(/The pass period starts now\./)).toBeVisible();
   expect(runtimeErrors).toEqual([]);
 });

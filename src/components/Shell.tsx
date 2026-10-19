@@ -40,7 +40,11 @@ import {
 } from 'lucide-react';
 import { useApp } from '../../app/providers';
 import { cn } from '@/lib/cn';
-import { Avatar, Badge } from './shared';
+import { VENDOR_USER_TYPES } from '@/lib/api';
+import type { MessageKey } from '@/lib/i18n';
+import { fmt, VENDOR_AREAS } from '@/lib/vendor';
+import { Alert, Avatar, Badge, Button, Card, CardContent, SkeletonCard, useToast } from './shared';
+import { useVendor } from './vendor-context';
 import { BrandLogo } from './brand-logo';
 import { LanguageToggle } from './language-toggle';
 import { PhotoPanel } from './photo-panel';
@@ -54,11 +58,13 @@ type NavItem = {
   groupKey?: string;
   aclScope?: string; // required ACL scope for portal staff; undefined = super-admin only
   aclAny?: string[]; // other scopes that also open the page
+  /** A count pill (e.g. low stock) and the accessible name that says what it counts. */
+  count?: { n: number; labelKey: MessageKey; tone: 'warning' | 'fuel' };
 };
 const scopesOf = (item: NavItem) => [item.aclScope, ...(item.aclAny ?? [])].filter(Boolean) as string[];
 
 // Section roots highlight only on themselves, not on their sub-pages.
-const ROOTS = new Set(['/admin', '/hr', '/org']);
+const ROOTS = new Set(['/admin', '/hr', '/org', '/vendor']);
 
 // Someone who looks after a B2B organisation's billing: that, and nothing else.
 // What each role is offered; the server decides what each page shows.
@@ -100,6 +106,40 @@ const OPERATOR_NAV: NavItem[] = [
   // Owners always; gym staff only with the payments permission (read-only).
   { href: '/owner/statements', labelKey: 'nav.statements', icon: HandCoins, aclScope: 'payments' },
 ];
+
+// A business that sells on FitFlex (vendor portal, S2): each item needs its permission.
+function vendorNav(permissions: string[], lowCount: number | null, waitingCount: number | null): NavItem[] {
+  const icons: Record<string, React.ElementType> = { '/vendor': LayoutDashboard, '/vendor/products': ShoppingBag, '/vendor/orders': ClipboardList, '/vendor/payouts': HandCoins };
+  const labels: Record<string, string> = { '/vendor': 'vendor.nav.dashboard', '/vendor/products': 'vendor.nav.products', '/vendor/orders': 'vendor.nav.orders', '/vendor/payouts': 'vendor.nav.payouts' };
+  return VENDOR_AREAS.filter(a => !a.permission || permissions.includes(a.permission)).map(a => ({
+    href: a.href, labelKey: labels[a.href], icon: icons[a.href],
+    ...(a.href === '/vendor/products' && lowCount ? { count: { n: lowCount, labelKey: 'vendor.nav.productsLow' as MessageKey, tone: 'warning' as const } } : {}),
+    ...(a.href === '/vendor/orders' && waitingCount ? { count: { n: waitingCount, labelKey: 'vendor.nav.ordersWaiting' as MessageKey, tone: 'fuel' as const } } : {}),
+  }));
+}
+
+/** Where each kind of session lives. */
+export function homeFor(user: { userType?: string } | null | undefined) {
+  if (!user) return '/login';
+  if (VENDOR_USER_TYPES.has(user.userType ?? '')) return '/vendor';
+  if (user.userType === 'admin') return '/admin';
+  if (user.userType === 'corporate_hr') return '/hr';
+  return '/dashboard';
+}
+
+/** The signed-in person's role, in the chosen language. */
+function roleLabel(t: (key: MessageKey) => string, user: { userType?: string; portalUser?: boolean; organizationUser?: boolean } | null) {
+  const type = user?.userType ?? '';
+  const base = type === 'vendor' ? t('vendor.role.owner')
+    : type === 'vendor_staff' ? t('vendor.role.staff')
+    : type === 'admin' ? t('shell.role.admin')
+    : type === 'corporate_hr' ? t('nav.personaHr')
+    : user?.organizationUser ? t('shell.role.organization')
+    : type === 'gym_operator' ? t('nav.personaOwner')
+    : type === 'gym_staff' ? t('nav.personaStaff')
+    : type;
+  return user?.portalUser ? `${base} · ${t('shell.role.staffSuffix')}` : base;
+}
 
 const ADMIN_NAV: NavItem[] = [
   { href: '/admin',               labelKey: 'admin.nav.overview',       icon: LayoutDashboard, groupKey: 'nav.group.platform' },
@@ -149,27 +189,42 @@ function SidebarLink({
   icon: Icon,
   active,
   onClick,
+  count,
 }: {
   href: string;
   label: string;
   icon: React.ElementType;
   active: boolean;
   onClick?: () => void;
+  count?: { n: number; label: string; tone: 'warning' | 'fuel' };
 }) {
   return (
     <Link
       href={href}
       onClick={onClick}
       aria-current={active ? 'page' : undefined}
+      aria-label={count ? count.label : undefined}
       className={cn(
-        'group flex items-center gap-3 rounded-[var(--radius-md)] px-3 py-2.5 text-sm font-medium transition-colors',
+        'group flex min-h-11 items-center gap-3 rounded-[var(--radius-md)] px-3 py-2.5 text-sm font-medium transition-colors',
         active
           ? 'bg-[var(--color-sidebar-active)] text-[var(--color-sidebar-text-active)] font-semibold'
           : 'text-[var(--color-sidebar-text)] hover:bg-[var(--color-sidebar-hover)] hover:text-white',
       )}
     >
       <Icon aria-hidden="true" className="h-5 w-5 shrink-0" strokeWidth={active ? 2.5 : 1.75} />
-      <span className="flex-1 truncate">{label}</span>
+      <span className="flex-1 truncate" title={label}>{label}</span>
+      {count && (
+        <span
+          aria-hidden="true"
+          title={count.label}
+          className={cn(
+            'shrink-0 rounded-full px-2 py-0.5 text-xs font-semibold tabular-nums',
+            count.tone === 'fuel' ? 'bg-[var(--color-fuel-on-dark)] text-[var(--color-on-volt)]' : 'bg-[var(--color-warning-100)] text-[var(--color-warning-800)]',
+          )}
+        >
+          {count.n > 99 ? '99+' : count.n}
+        </span>
+      )}
       {active && <ChevronRight aria-hidden="true" className="h-4 w-4 shrink-0 opacity-60" />}
     </Link>
   );
@@ -192,6 +247,9 @@ function SidebarContent({
   const pathname = usePathname();
   const router = useRouter();
   const { t, user, signOut, locale, setLocale, switchablePersonas, switchPersona } = useApp();
+  const vendor = useVendor();
+  const isVendor = VENDOR_USER_TYPES.has(user?.userType ?? '');
+  const businessName = vendor.me?.businessName || t('vendor.shell.unnamed');
   const [switching, setSwitching] = useState(false);
   const [switchError, setSwitchError] = useState<string | null>(null);
 
@@ -201,7 +259,7 @@ function SidebarContent({
     setSwitching(true); setSwitchError(null);
     try {
       const next = await switchPersona(personaId);
-      router.replace(next.userType === 'corporate_hr' ? '/hr' : '/dashboard');
+      router.replace(homeFor(next));
     } catch {
       setSwitchError(t('nav.switchRoleFailed'));
     } finally {
@@ -215,10 +273,19 @@ function SidebarContent({
       <div className="flex h-16 shrink-0 items-center gap-3 px-4 border-b border-[var(--color-gray-800)]">
         <BrandLogo className="h-8 w-8 rounded-[var(--radius-md)]" />
         <div className="flex-1 min-w-0">
-          <p className="truncate text-sm font-semibold text-white">FitFlex Af</p>
-          <p className="truncate text-xs text-[var(--color-gray-400)]">
-            {user?.userType === 'admin' ? 'Pilot Console' : user?.userType === 'corporate_hr' || user?.organizationUser ? 'FitFlex for Business' : 'Operator Portal'}
-          </p>
+          {isVendor ? (
+            <>
+              <p className="truncate text-sm font-semibold text-white" title={businessName} data-testid="vendor-business-name">{businessName}</p>
+              <p className="truncate text-xs text-[var(--color-gray-400)]">{t('vendor.shell.subtitle')}</p>
+            </>
+          ) : (
+            <>
+              <p className="truncate text-sm font-semibold text-white">FitFlex Af</p>
+              <p className="truncate text-xs text-[var(--color-gray-400)]">
+                {user?.userType === 'admin' ? t('shell.subtitle.admin') : user?.userType === 'corporate_hr' || user?.organizationUser ? t('shell.subtitle.business') : t('shell.subtitle.operator')}
+              </p>
+            </>
+          )}
         </div>
       </div>
 
@@ -238,6 +305,7 @@ function SidebarContent({
                   icon={item.icon}
                   active={ROOTS.has(item.href) ? pathname.replace(/\/$/, '') === item.href : (pathname === item.href || pathname.startsWith(item.href + '/'))}
                   onClick={onLinkClick}
+                  count={item.count ? { n: item.count.n, tone: item.count.tone, label: fmt(t(item.count.labelKey), { n: item.count.n }) } : undefined}
                 />
               ))}
               {groups.map(groupKey => (
@@ -270,7 +338,7 @@ function SidebarContent({
             aria-label={t('common.language')}
             value={locale}
             onChange={e => setLocale(e.target.value as 'en' | 'sw')}
-            className="flex-1 bg-transparent text-xs text-[var(--color-gray-400)] border-none outline-none cursor-pointer"
+            className="min-h-11 flex-1 bg-transparent text-xs text-[var(--color-gray-400)] border-none outline-none cursor-pointer"
           >
             <option value="en">English</option>
             <option value="sw">Kiswahili</option>
@@ -294,7 +362,7 @@ function SidebarContent({
               <option value="" disabled>{t('nav.switchRoleChoose')}</option>
               {switchablePersonas.map(p => (
                 <option key={p.id} value={p.id}>
-                  {p.userType === 'corporate_hr' ? t('nav.personaHr') : p.userType === 'gym_staff' ? t('nav.personaStaff') : t('nav.personaOwner')}
+                  {p.userType === 'corporate_hr' ? t('nav.personaHr') : p.userType === 'gym_staff' ? t('nav.personaStaff') : p.userType === 'vendor' ? t('nav.personaVendor') : p.userType === 'vendor_staff' ? t('nav.personaVendorStaff') : t('nav.personaOwner')}
                   {p.approvalStatus === 'pending_approval' ? ` · ${t('nav.personaPending')}` : ''}
                 </option>
               ))}
@@ -303,16 +371,21 @@ function SidebarContent({
           </div>
         )}
 
+        {/* Staff are managed in the app (no web staff screen in S2). */}
+        {isVendor && vendor.can('staff') && (
+          <p className="px-3 py-1 text-xs text-[var(--color-gray-400)]" data-testid="vendor-staff-in-app">{t('vendor.shell.staffInApp')}</p>
+        )}
+
         {/* User row + sign out */}
         <div className="flex items-center gap-3 rounded-[var(--radius-md)] px-3 py-2">
           <Avatar name={(user as any)?.displayName || user?.email || user?.id || 'User'} size="sm" />
           <div className="flex-1 min-w-0">
             <p className="truncate text-xs font-medium text-white">{(user as any)?.displayName || user?.email || user?.id || '—'}</p>
-            <p className="truncate text-xs text-[var(--color-gray-400)] capitalize">{user?.userType === 'corporate_hr' ? 'Company HR' : user?.userType}{user?.portalUser ? ' · staff' : ''}</p>
+            <p className="truncate text-xs text-[var(--color-gray-400)]" data-testid="shell-role">{roleLabel(t, user)}</p>
           </div>
           <button
             onClick={() => { signOut(); router.replace('/login'); }}
-            className="shrink-0 text-[var(--color-gray-400)] hover:text-white transition-colors"
+            className="-m-2 inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-[var(--radius-md)] text-[var(--color-gray-400)] hover:text-white transition-colors"
             title={t('nav.signout')}
             aria-label={t('nav.signout')}
           >
@@ -326,7 +399,9 @@ function SidebarContent({
 
 /* ── Shell ───────────────────────────────────────────────── */
 export function Shell({ children }: { children: ReactNode }) {
-  const { ready, token, user, hasPermission, locale, setLocale, t } = useApp();
+  const { ready, token, user, hasPermission, signOut, t } = useApp();
+  const vendor = useVendor();
+  const toast = useToast();
   const pathname = usePathname();
   const router = useRouter();
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -337,10 +412,13 @@ export function Shell({ children }: { children: ReactNode }) {
   const isHr          = token && user?.userType === 'corporate_hr';
   const isOrgUser     = token && user?.organizationUser === true && user?.userType !== 'admin';
   const isPortalStaff = isAdminUser && user?.portalUser === true;
+  const isVendor      = !!token && VENDOR_USER_TYPES.has(user?.userType ?? '');
 
   // Build the visible nav — portal staff only see items their ACL permits.
   // Overview (/admin) is always visible to all admin users.
-  const visibleNav = isAdminUser
+  const visibleNav = isVendor
+    ? (vendor.status === 'ready' ? vendorNav(vendor.me?.permissions ?? [], vendor.lowCount, vendor.waitingCount) : [])
+    : isAdminUser
     ? ADMIN_NAV.filter(item => {
         if (!item.aclScope) return true;             // no scope = super-admin only (overview)
         if (!isPortalStaff) return true;             // super-admin sees everything
@@ -350,36 +428,59 @@ export function Shell({ children }: { children: ReactNode }) {
     : isHr ? HR_NAV
     : OPERATOR_NAV.filter(item => !item.aclScope || user?.userType !== 'gym_staff' || hasPermission(item.aclScope));
 
-  useEffect(() => {
-    if (!ready) return;
-    if (!token && pathname !== '/login' && pathname !== '/') router.replace('/login');
+  // Where this person must go instead of the current page, or null when they may see it. One decision
+  // drives both the redirect and the render: a page's content (and its requests) waits until it passes.
+  const path = pathname.replace(/\/$/, '') || '/';
+  const vendorPermissionMissing = (() => {
+    if (!isVendor || vendor.status !== 'ready') return false;
+    const area = [...VENDOR_AREAS].reverse().find(a => path === a.href || path.startsWith(`${a.href}/`));
+    return !!area?.permission && !vendor.can(area.permission);
+  })();
+  const redirectTo = ((): string | null => {
+    if (!ready) return null;
+    if (!token) return path !== '/login' && path !== '/' ? '/login' : null;
+
+    // A business (vendor or vendor staff) only ever sees /vendor; nobody else does.
+    const inVendorArea = path === '/vendor' || path.startsWith('/vendor/');
+    if (isVendor) return !inVendorArea || vendorPermissionMissing ? '/vendor/' : null;
+    if (inVendorArea) return homeFor(user);
 
     // Someone signed in for an organisation's billing only ever sees /org; nobody else does.
-    if (token && isOrgUser && !pathname.startsWith('/org')) { router.replace(orgNav(user?.organizationRoles)[0].href); return; }
-    if (token && !isOrgUser && pathname.startsWith('/org')) { router.replace(user?.userType === 'admin' ? '/admin' : user?.userType === 'corporate_hr' ? '/hr' : '/dashboard'); return; }
+    if (isOrgUser && !path.startsWith('/org')) return orgNav(user?.organizationRoles)[0].href;
+    if (!isOrgUser && path.startsWith('/org')) return user?.userType === 'admin' ? '/admin' : user?.userType === 'corporate_hr' ? '/hr' : '/dashboard';
 
     // Company HR only ever sees /hr; nobody else does.
-    if (token && user?.userType === 'corporate_hr' && !pathname.startsWith('/hr')) { router.replace('/hr'); return; }
-    if (token && user?.userType !== 'corporate_hr' && pathname.startsWith('/hr')) router.replace(user?.userType === 'admin' ? '/admin' : '/dashboard');
+    if (user?.userType === 'corporate_hr' && !path.startsWith('/hr')) return '/hr';
+    if (user?.userType !== 'corporate_hr' && path.startsWith('/hr')) return user?.userType === 'admin' ? '/admin' : '/dashboard';
 
     // Block non-admin users from admin routes
-    if (token && user?.userType !== 'admin' && pathname.startsWith('/admin')) router.replace(user?.userType === 'corporate_hr' ? '/hr' : '/dashboard');
+    if (user?.userType !== 'admin' && path.startsWith('/admin')) return '/dashboard';
 
     // All admin users (including portal staff) go to /admin, not operator pages
-    if (token && user?.userType === 'admin' && ['/dashboard', '/scan', '/checkins'].includes(pathname)) router.replace('/admin');
+    if (user?.userType === 'admin' && ['/dashboard', '/scan', '/checkins'].includes(path)) return '/admin';
 
-    // Portal staff: redirect away from pages outside their ACL
-    if (token && isPortalStaff && pathname.startsWith('/admin')) {
-      const matchedItem = ADMIN_NAV.find(item =>
-        ROOTS.has(item.href) ? pathname.replace(/\/$/, '') === item.href : pathname.startsWith(item.href)
-      );
+    // Portal staff: away from pages outside their ACL, to the first permitted page (or the overview)
+    if (isPortalStaff && path.startsWith('/admin')) {
+      const matchedItem = ADMIN_NAV.find(item => (ROOTS.has(item.href) ? path === item.href : path.startsWith(item.href)));
       if (matchedItem?.aclScope && !scopesOf(matchedItem).some(hasPermission)) {
-        // Redirect to the first permitted page, or just /admin overview
         const firstAllowed = ADMIN_NAV.find(i => !i.aclScope || scopesOf(i).some(hasPermission));
-        router.replace(firstAllowed?.href ?? '/admin');
+        const to = firstAllowed?.href ?? '/admin';
+        return to === path ? null : to;
       }
     }
-  }, [ready, token, user, isPortalStaff, isOrgUser, pathname, router, hasPermission]);
+    return null;
+  })();
+
+  // Vendor pages need their permission: without it, back to the dashboard with a note (once per visit).
+  const bouncedFrom = useRef<string | null>(null);
+  useEffect(() => {
+    if (!redirectTo) { if (!vendorPermissionMissing) bouncedFrom.current = null; return; }
+    if (vendorPermissionMissing && bouncedFrom.current !== path) {
+      toast.error(t('vendor.noAccess'));
+      bouncedFrom.current = path;
+    }
+    router.replace(redirectTo);
+  }, [redirectTo, vendorPermissionMissing, path, router, toast, t]);
 
   /* Close mobile drawer on route change */
   useEffect(() => { setMobileOpen(false); }, [pathname]);
@@ -422,7 +523,7 @@ export function Shell({ children }: { children: ReactNode }) {
     );
   }
 
-  const isLoginPage = pathname === '/login' || !token;
+  const isLoginPage = path === '/login' || !token;
 
   /* Public / login layout — no sidebar */
   if (isLoginPage) {
@@ -437,10 +538,52 @@ export function Shell({ children }: { children: ReactNode }) {
           </div>
           <LanguageToggle className="justify-self-end" />
         </header>
-        <main className="flex-1">{children}</main>
+        <main className="flex-1">{redirectTo ? <div aria-busy="true" data-testid="shell-redirecting" /> : children}</main>
       </div>
     );
   }
+
+  // Vendor area: nothing but a card when it is closed for this person (fails closed, no nav).
+  if (isVendor && ['off', 'inactive', 'suspended'].includes(vendor.status)) {
+    const [title, body, testId] = vendor.status === 'inactive'
+      ? [t('vendor.staffDisabled.title'), t('vendor.staffDisabled.body'), 'vendor-staff-disabled']
+      : vendor.status === 'suspended'
+        ? [t('vendor.suspended.title'), t('vendor.suspended.banner'), 'vendor-suspended']
+        : [t('vendor.portalOff.title'), t('vendor.portalOff.body'), 'vendor-portal-off'];
+    return (
+      <div className="min-h-screen bg-[var(--color-bg-canvas)] flex flex-col">
+        <header className="h-16 flex items-center justify-between px-4 border-b border-[var(--color-border-canvas)] bg-[var(--color-bg-primary)]">
+          <div className="w-24" />
+          <div className="flex items-center gap-2.5">
+            <BrandLogo className="h-7 w-7 rounded-[var(--radius-md)]" />
+            <span className="text-sm font-semibold text-[var(--color-fg-primary)]">FitFlex Af</span>
+          </div>
+          <LanguageToggle className="justify-self-end" />
+        </header>
+        <main className="flex flex-1 items-center justify-center p-4">
+          <Card className="w-full max-w-sm" data-testid={testId}>
+            <CardContent className="space-y-4 text-center">
+              <h1 className="text-lg font-semibold text-[var(--color-fg-primary)]">{title}</h1>
+              <p className="text-sm text-[var(--color-fg-tertiary)]">{body}</p>
+              <Button size="lg" className="w-full" onClick={() => { signOut(); router.replace('/login'); }}>{t('nav.signout')}</Button>
+            </CardContent>
+          </Card>
+        </main>
+      </div>
+    );
+  }
+
+  // Only inside the vendor area: swapping the page tree out elsewhere (e.g. /login right after
+  // sign-in) would drop the navigation to /vendor/ that is under way.
+  const inVendorPath = pathname === '/vendor' || pathname.startsWith('/vendor/');
+  const vendorLoading = isVendor && inVendorPath && (vendor.status === 'loading' || vendor.status === 'none');
+  const vendorBanner = isVendor && vendor.status === 'ready' && vendor.me
+    ? vendor.me.accountStatus === 'suspended'
+      ? <Alert tone="error" className="mb-4">{t('vendor.suspended.banner')}</Alert>
+      : vendor.me.approvalStatus === 'pending_approval'
+        ? <Alert tone="info" className="mb-4">{t('vendor.pending.banner')}</Alert>
+        : null
+    : null;
 
   return (
     <div className="flex h-screen overflow-hidden bg-[var(--color-bg-canvas)] print:block print:h-auto print:overflow-visible print:bg-white">
@@ -475,7 +618,7 @@ export function Shell({ children }: { children: ReactNode }) {
             aria-label={mobileOpen ? t('common.closeMenu') : t('common.openMenu')}
             aria-expanded={mobileOpen}
             aria-controls="mobile-drawer"
-            className="p-2 -m-2 text-[var(--color-fg-tertiary)] hover:text-[var(--color-fg-primary)] transition-colors"
+            className="-m-2 inline-flex h-11 w-11 items-center justify-center text-[var(--color-fg-tertiary)] hover:text-[var(--color-fg-primary)] transition-colors"
           >
             {mobileOpen ? <X aria-hidden="true" className="h-5 w-5" /> : <Menu aria-hidden="true" className="h-5 w-5" />}
           </button>
@@ -487,13 +630,24 @@ export function Shell({ children }: { children: ReactNode }) {
           </div>
           <div className="flex items-center gap-1">
             <LanguageToggle />
-            <Badge tone="brand">{user?.userType === 'corporate_hr' ? 'Company HR' : user?.userType}</Badge>
+            <Badge tone="brand">{roleLabel(t, user)}</Badge>
           </div>
         </header>
 
         {/* Page content */}
-        <main className="flex-1 overflow-y-auto px-4 py-6 sm:px-6 lg:px-8 print:overflow-visible print:p-0">
-          {children}
+        <main id="main-content" className="flex-1 overflow-y-auto px-4 py-6 sm:px-6 lg:px-8 print:overflow-visible print:p-0">
+          {redirectTo ? (
+            <div className="space-y-4" aria-busy="true" data-testid="shell-redirecting"><SkeletonCard /></div>
+          ) : vendorLoading ? (
+            <div className="space-y-4" aria-busy="true" data-testid="vendor-loading">
+              <SkeletonCard /><SkeletonCard /><SkeletonCard />
+            </div>
+          ) : (
+            <>
+              {vendorBanner}
+              {children}
+            </>
+          )}
         </main>
 
       </div>

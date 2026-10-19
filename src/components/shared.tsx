@@ -570,9 +570,10 @@ export function Segmented({
         <button
           key={id}
           type="button"
+          aria-pressed={value === id}
           onClick={() => onChange(id)}
           className={cn(
-            'rounded-[var(--radius-md)] px-3 py-1.5 text-sm font-medium transition-colors whitespace-nowrap',
+            'inline-flex min-h-11 items-center justify-center rounded-[var(--radius-md)] px-3 py-1.5 text-sm font-medium transition-colors whitespace-nowrap',
             value === id
               ? 'bg-[var(--color-bg-primary)] text-[var(--color-fg-primary)] shadow-[var(--shadow-xs)]'
               : 'text-[var(--color-fg-tertiary)] hover:text-[var(--color-fg-secondary)]',

@@ -84,7 +84,7 @@ test.describe('collections', () => {
     mock.on('POST', /^\/admin\/b2b\/payment-instructions\/confirm$/, () => ({ status: 200, json: { instructions: { ...PAYMENT_INSTRUCTIONS, bankName: 'NMB Bank' }, configured: true, pendingChange: null } }));
     await page.goto('/admin/b2b-billing');
     const pending = page.getByTestId('payment-details-pending');
-    await expect(pending).toContainText('another admin (admin-2)');
+    await expect(pending).toContainText('Asked for by another admin');
     await expect(page.getByTestId('payment-details-own')).toHaveCount(0);
     await page.getByTestId('payment-details-confirm').click();
     await page.getByTestId('payment-details-decide-submit').click();

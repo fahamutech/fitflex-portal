@@ -6,6 +6,7 @@ import { useApp } from '../providers';
 import { api, ApiError, CheckInResult, Gym } from '@/lib/api';
 import { Button, Card, CardHeader, CardContent, Badge, PageHeader, Alert, Input, Field, Select } from '@/components/shared';
 import { MessageKey } from '@/lib/i18n';
+import { sellableFrom } from '@/lib/pass-tiers';
 
 const FAILURE_KEYS: Record<string, MessageKey> = {
   subscription_inactive: 'scan.fail.subscription_inactive',
@@ -93,6 +94,22 @@ export default function ScanPage() {
   }
   const [manual, setManual] = useState('');
   const inFlight = useRef(false);
+  // The result sits above the camera; a new one is scrolled into view so it is never below the fold.
+  const resultRef = useRef<HTMLDivElement | null>(null);
+  const [resultSeq, setResultSeq] = useState(0);
+  useEffect(() => {
+    if (resultSeq) resultRef.current?.scrollIntoView?.({ behavior: 'smooth', block: 'nearest' });
+  }, [resultSeq]);
+  // Pass tier names as set in Settings ("premium" → "Premium"); the key, capitalised, if it isn't listed.
+  const [tierLabels, setTierLabels] = useState<Record<string, string>>({});
+  useEffect(() => {
+    let live = true;
+    api.subscriptionTiers()
+      .then(rows => { if (live) setTierLabels(Object.fromEntries(sellableFrom(rows).map(x => [x.key, x.label || x.key]))); })
+      .catch(() => { /* fall back to the key */ });
+    return () => { live = false; };
+  }, []);
+  const tierLabel = (key: string) => tierLabels[key] ?? key.charAt(0).toLocaleUpperCase() + key.slice(1).replace(/_/g, ' ');
 
   useEffect(() => () => stopCamera(), []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -108,6 +125,7 @@ export default function ScanPage() {
     } catch {
       setLast(null);
       setProblem('camera');
+      setResultSeq(n => n + 1);
     }
   }
 
@@ -145,6 +163,7 @@ export default function ScanPage() {
       } else {
         setLast({ ok: false, failure: refusalCode(r) ?? 'unknown' });
       }
+      setResultSeq(n => n + 1);
     } catch (e) {
       if (e instanceof ApiError) {
         // Any answer from the backend is a refusal; never guess "QR expired".
@@ -152,9 +171,11 @@ export default function ScanPage() {
         const code = refusalCode(e.body) ?? `http_${e.status}`;
         if (code === 'gym_required') { setGymRequired(true); setGymId(''); stopCamera(); }
         setLast({ ok: false, failure: code });
+        setResultSeq(n => n + 1);
       } else {
         setLast(null);
         setProblem('network');
+        setResultSeq(n => n + 1);
       }
     } finally {
       setTimeout(() => { inFlight.current = false; }, 2500);
@@ -169,7 +190,7 @@ export default function ScanPage() {
     <div className="space-y-6">
       <PageHeader
         title={t('scan.heading')}
-        description="Point the camera at the member's QR code to record a check-in."
+        description={t('scan.subtitle')}
       />
 
       {gymsFailed && <Alert tone="error">{t('scan.gym.loadFailed')}</Alert>}
@@ -192,79 +213,11 @@ export default function ScanPage() {
         </Card>
       )}
 
-      {/* Camera card */}
-      <Card>
-        <CardHeader>
-          <h2 className="text-sm font-semibold text-[var(--color-fg-primary)]">Camera</h2>
-          {streaming
-            ? (
-              <Button variant="secondary" size="sm" onClick={stopCamera}>
-                <CameraOff className="h-4 w-4" />
-                {t('scan.stop')}
-              </Button>
-            ) : (
-              <Button size="sm" onClick={startCamera} data-testid="start-scan" disabled={!canScan}>
-                <Camera className="h-4 w-4" />
-                {t('scan.start')}
-              </Button>
-            )}
-        </CardHeader>
-
-        {/* Viewfinder */}
-        <div className="relative mx-6 mb-6 aspect-video overflow-hidden rounded-[var(--radius-xl)] bg-[var(--color-gray-950)]">
-          <video
-            ref={videoRef}
-            className={streaming ? 'h-full w-full object-cover' : 'hidden'}
-            muted
-            playsInline
-          />
-          {!streaming && (
-            <div className="flex h-full flex-col items-center justify-center gap-3 text-[var(--color-gray-600)]">
-              <Camera className="h-10 w-10" />
-              <p className="text-sm">Camera is off</p>
-            </div>
-          )}
-          {/* Scan overlay guide lines */}
-          {streaming && (
-            <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-              <div className="h-48 w-48 rounded-[var(--radius-xl)] border-2 border-white/40" />
-            </div>
-          )}
-        </div>
-
-        <canvas ref={canvasRef} className="hidden" />
-      </Card>
-
-      {/* Manual token input */}
-      <Card>
-        <CardHeader>
-          <h2 className="text-sm font-semibold text-[var(--color-fg-primary)]">Manual entry</h2>
-        </CardHeader>
-        <CardContent>
-          <Field label="QR token (for testing)" hint="Format: usr_xxx.<bucket>.<sig>">
-            <div className="flex gap-2">
-              <Input
-                data-testid="manual-token"
-                value={manual}
-                onChange={e => setManual(e.target.value)}
-                placeholder="usr_xxx.<bucket>.<sig>"
-                className="font-mono"
-              />
-              <Button
-                data-testid="manual-submit"
-                onClick={() => manual && submit(manual)}
-                disabled={!manual || !canScan}
-              >
-                Submit
-              </Button>
-            </div>
-          </Field>
-        </CardContent>
-      </Card>
-
       {/* Result card */}
       {last && (
         <div
+          ref={resultRef}
+          role="status"
           data-testid="scan-result"
           className={`rounded-[var(--radius-xl)] border-2 p-5 ${
             last.ok
@@ -279,21 +232,27 @@ export default function ScanPage() {
             <div className="flex-1 space-y-2">
               <div className="flex items-center gap-2">
                 <Badge tone={last.ok ? 'success' : 'danger'} dot>
-                  {last.ok ? t('scan.success') : t('scan.fail')}
+                  {/* A repeat scan at the same gym the same day returns the visit already recorded (idempotent). */}
+                  {last.ok ? t(last.idempotent ? 'scan.already' : 'scan.success') : t('scan.fail')}
                 </Badge>
               </div>
+              {last.ok && last.idempotent && (
+                <p data-testid="scan-already" className="text-sm text-[var(--color-success-800)]">{t('scan.alreadyBody')}</p>
+              )}
               {last.ok && last.checkin && (
                 <div className="grid gap-1.5 text-sm text-[var(--color-success-800)]">
-                  <div className="flex items-center gap-1.5">
-                    <Hash className="h-3.5 w-3.5 opacity-60" />
-                    Visit #{last.checkin.visitNumberInCycle ?? '—'}
+                  {!last.idempotent && (
+                    <div className="flex items-center gap-1.5" data-testid="scan-visit-number">
+                      <Hash aria-hidden="true" className="h-3.5 w-3.5 opacity-60" />
+                      {t('scan.visitNumber').replace('{n}', String(last.checkin.visitNumberInCycle ?? '—'))}
+                    </div>
+                  )}
+                  <div className="flex items-center gap-1.5" data-testid="scan-tier">
+                    <Tag aria-hidden="true" className="h-3.5 w-3.5 opacity-60" />
+                    {last.checkin.passTier ? tierLabel(last.checkin.passTier) : t('scan.gymMembership')}
                   </div>
                   <div className="flex items-center gap-1.5">
-                    <Tag className="h-3.5 w-3.5 opacity-60" />
-                    {last.checkin.passTier ?? 'Direct subscription'}
-                  </div>
-                  <div className="flex items-center gap-1.5">
-                    <User className="h-3.5 w-3.5 opacity-60" />
+                    <User aria-hidden="true" className="h-3.5 w-3.5 opacity-60" />
                     {last.checkin.memberPublicId ?? last.checkin.memberId}
                   </div>
                 </div>
@@ -319,6 +278,77 @@ export default function ScanPage() {
           </Alert>
         </div>
       )}
+      {/* Camera card */}
+      <Card>
+        <CardHeader>
+          <h2 className="text-sm font-semibold text-[var(--color-fg-primary)]">{t('scan.camera')}</h2>
+          {streaming
+            ? (
+              <Button variant="secondary" size="sm" onClick={stopCamera}>
+                <CameraOff className="h-4 w-4" />
+                {t('scan.stop')}
+              </Button>
+            ) : (
+              <Button size="sm" onClick={startCamera} data-testid="start-scan" disabled={!canScan}>
+                <Camera className="h-4 w-4" />
+                {t('scan.start')}
+              </Button>
+            )}
+        </CardHeader>
+
+        {/* Viewfinder */}
+        <div className="relative mx-6 mb-6 aspect-video overflow-hidden rounded-[var(--radius-xl)] bg-[var(--color-gray-950)]">
+          <video
+            ref={videoRef}
+            className={streaming ? 'h-full w-full object-cover' : 'hidden'}
+            muted
+            playsInline
+          />
+          {!streaming && (
+            // gray-400 on gray-950 is about 7:1 (gray-600 was 2.45:1).
+            <div className="flex h-full flex-col items-center justify-center gap-3 text-[var(--color-gray-400)]">
+              <Camera aria-hidden="true" className="h-10 w-10" />
+              <p className="text-sm">{t('scan.cameraOff')}</p>
+            </div>
+          )}
+          {/* Scan overlay guide lines */}
+          {streaming && (
+            <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+              <div className="h-48 w-48 rounded-[var(--radius-xl)] border-2 border-white/40" />
+            </div>
+          )}
+        </div>
+
+        <canvas ref={canvasRef} className="hidden" />
+      </Card>
+
+      {/* Manual token input */}
+      <Card>
+        <CardHeader>
+          <h2 className="text-sm font-semibold text-[var(--color-fg-primary)]">{t('scan.manual')}</h2>
+        </CardHeader>
+        <CardContent>
+          <Field label={t('scan.manualLabel')} hint={t('scan.manualHint')}>
+            <div className="flex gap-2">
+              <Input
+                data-testid="manual-token"
+                value={manual}
+                onChange={e => setManual(e.target.value)}
+                placeholder="usr_xxx.<bucket>.<sig>"
+                className="font-mono"
+              />
+              <Button
+                data-testid="manual-submit"
+                onClick={() => manual && submit(manual)}
+                disabled={!manual || !canScan}
+              >
+                {t('scan.submit')}
+              </Button>
+            </div>
+          </Field>
+        </CardContent>
+      </Card>
+
     </div>
   );
 }

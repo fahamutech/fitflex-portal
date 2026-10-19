@@ -50,11 +50,15 @@ test.describe('Settings: subscription tiers', () => {
     await expect(editor).toBeVisible();
 
     await expect(page.getByTestId('tier-0-status')).toHaveText('On sale');
-    await expect(page.getByTestId('tier-1-status')).toHaveText('Not on sale — members holding it can’t check in');
+    // Short badge; what it means for holders on a line under it (design QA M9).
+    await expect(page.getByTestId('tier-0-status-hint')).toHaveCount(0);
+    await expect(page.getByTestId('tier-1-status')).toHaveText('Not set up');
+    await expect(page.getByTestId('tier-1-status-hint')).toHaveText('Not sold; holders can’t check in');
     await expect(page.getByTestId('tier-1-error-visits')).toBeVisible();
-    await expect(page.getByTestId('tier-2-status')).toHaveText('Not on sale — members holding it can still check in');
+    await expect(page.getByTestId('tier-2-status')).toHaveText('Not on sale');
+    await expect(page.getByTestId('tier-2-status-hint')).toHaveText('Holders can still check in');
     await expect(page.getByTestId('tier-2-error-monthlyPrice')).toBeVisible();
-    await expect(page.getByTestId('tier-3-status')).toHaveText('Not on sale — members holding it can’t check in');
+    await expect(page.getByTestId('tier-3-status')).toHaveText('Not set up');
     await expect(page.getByTestId('tier-3-error-gymAccess')).toBeVisible();
     // Unlimited is an explicit choice, not a typed -1.
     await expect(page.getByTestId('tier-3-unlimited')).toBeChecked();
@@ -87,13 +91,17 @@ test.describe('Settings: subscription tiers', () => {
     await page.getByTestId('tier-add').click();
     const i = SETTINGS.subscriptionTiers.length;
     await expect(page.getByTestId(`tier-${i}-visits`)).toHaveValue('');
-    await expect(page.getByTestId(`tier-${i}-status`)).toHaveText('Not on sale — members holding it can’t check in');
+    await expect(page.getByTestId(`tier-${i}-status`)).toHaveText('Not set up');
     await expect(page.getByTestId(`tier-${i}-error-monthlyPrice`)).toBeVisible();
     await expect(page.getByTestId(`tier-${i}-error-visits`)).toBeVisible();
     await expect(page.getByTestId(`tier-${i}-error-gymAccess`)).toBeVisible();
 
     // Leave only the new tier, and set it up.
-    for (let k = 0; k < i; k++) await page.getByRole('button', { name: 'Remove tier' }).first().click();
+    // Removing a saved tier asks first (holders are refused at check-in once saved).
+    for (let k = 0; k < i; k++) {
+      await page.getByTestId('tier-0-remove').click();
+      await page.getByRole('alertdialog').getByRole('button', { name: 'Remove tier' }).click();
+    }
     await page.getByTestId('tier-0-price').fill('250000');
     await page.getByTestId('tier-0-unlimited').check();
     await page.getByTestId('tier-0-gym-access').selectOption('luxury_executive');
@@ -108,9 +116,10 @@ test.describe('Settings: subscription tiers', () => {
   test('the backend refusal names the tier and the field', async ({ page }) => {
     await mockSettings(page, () => ({ status: 400, json: { error: 'invalid_subscription_tier', tier: 'basic', field: 'visits', hint: '-1 for unlimited, or a whole number above 0' } }));
     await page.goto('/admin/settings');
-    await page.getByRole('button', { name: 'Remove tier' }).nth(1).click(); // legacy
-    await page.getByRole('button', { name: 'Remove tier' }).nth(1).click(); // free
-    await page.getByRole('button', { name: 'Remove tier' }).nth(1).click(); // odd
+    for (const _ of ['legacy', 'free', 'odd']) {
+      await page.getByTestId('tier-1-remove').click();
+      await page.getByRole('alertdialog').getByRole('button', { name: 'Remove tier' }).click();
+    }
     await page.getByRole('button', { name: /Save all/ }).click();
     await expect(page.getByText('Not saved. Tier basic: Enter the visits a month as a whole number above zero, or tick Unlimited.')).toBeVisible();
   });
@@ -120,7 +129,8 @@ test.describe('Settings: subscription tiers', () => {
     await page.addInitScript(() => localStorage.setItem('locale', 'sw'));
     await page.goto('/admin/settings');
     await expect(page.getByTestId('tier-0-status')).toHaveText('Inauzwa');
-    await expect(page.getByTestId('tier-1-status')).toHaveText('Haiuzwi — wanachama walio nayo hawawezi kuingia gym');
+    await expect(page.getByTestId('tier-1-status')).toHaveText('Haijakamilika');
+    await expect(page.getByTestId('tier-1-status-hint')).toHaveText('Haiuzwi; walio nayo hawawezi kuingia gym');
   });
 });
 
@@ -134,11 +144,13 @@ test.describe('B2B: only tiers on sale, and tier errors', () => {
     await page.getByTestId('benefit-new').click();
     await page.getByTestId('benefit-type').selectOption('sponsored_pass');
     const picker = page.getByTestId('benefit-pass-tier');
+    // Nothing is preselected: the admin chooses (design QA L).
     await expect(picker.locator('option')).toHaveText([
-      'Basic · TSh 30,000 · 12 visits a month', 'Pro · TSh 60,000 · 30 visits a month',
+      'Choose a pass…', 'Basic · TSh 30,000 · 12 visits a month', 'Pro · TSh 60,000 · 30 visits a month',
       'Premium · TSh 100,000 · 30 visits a month', 'Executive · TSh 200,000 · 30 visits a month',
     ].map(s => new RegExp(s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace('TSh ', 'TSh\\s?'))));
-    await expect(picker).toHaveValue('basic');
+    await expect(picker).toHaveValue('');
+    await picker.selectOption('basic');
     await page.getByTestId('benefit-form').getByLabel('Benefit name', { exact: true }).fill('Pass');
     await page.getByTestId('benefit-funding').selectOption('sponsor_fixed');
     await page.getByTestId('benefit-sponsor-amount').fill('30000');

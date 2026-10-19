@@ -1,8 +1,9 @@
 'use client';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useApp } from '../providers';
-import { api, ApiError, ORG_BILLING_ROLES, ORG_PEOPLE_ROLES } from '@/lib/api';
+import { api, ApiError, ORG_BILLING_ROLES, ORG_PEOPLE_ROLES, VENDOR_USER_TYPES, isPin, type PersonaSummary, type PinLoginResult } from '@/lib/api';
+import { fmt } from '@/lib/vendor';
 import {
   signInWithGoogleIdToken,
   signInWithEmailPasswordIdToken,
@@ -20,18 +21,98 @@ export default function LoginPage() {
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [method, setMethod] = useState<'choose' | 'email' | 'hr' | 'verify'>('choose');
+  const [method, setMethod] = useState<'choose' | 'email' | 'hr' | 'verify' | 'pin'>('choose');
   const [notice, setNotice] = useState<string | null>(null);
   const [verifyEmail, setVerifyEmail] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  // Business sign-in (number or email + PIN): offered only when the server says it is on.
+  const [pinLogin, setPinLogin] = useState(false);
+  const [identifier, setIdentifier] = useState('');
+  const [pin, setPin] = useState('');
+  const [pinError, setPinError] = useState<string | null>(null);
+  const pinRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    api.authOptions()
+      .then(o => { if (!cancelled) setPinLogin(o?.pinLogin === true); })
+      .catch(() => { if (!cancelled) setPinLogin(false); });
+    return () => { cancelled = true; };
+  }, []);
 
   function handleSuccess(token: string, user: { id: string; userType: string; gymId?: string; portalUser?: boolean; aclPermissions?: string[]; email?: string; organizationUser?: boolean; organizationRoles?: string[] }) {
     signIn(token, user);
     // An organisation user lands on what their role is for: its people, else its billing, else its programmes.
     const roles = user.organizationRoles ?? [];
     const orgHome = roles.some(r => ORG_PEOPLE_ROLES.has(r)) ? '/org/people' : roles.some(r => ORG_BILLING_ROLES.has(r)) ? '/org' : '/org/programmes';
-    router.replace(user.userType === 'admin' ? '/admin' : user.organizationUser ? orgHome : user.userType === 'corporate_hr' ? '/hr' : '/dashboard');
+    router.replace(VENDOR_USER_TYPES.has(user.userType) ? '/vendor/' : user.userType === 'admin' ? '/admin' : user.organizationUser ? orgHome : user.userType === 'corporate_hr' ? '/hr' : '/dashboard');
+  }
+
+  // Portal personas a member or trainer session can move to, the business first.
+  const PIN_SWITCH_ORDER = ['vendor', 'vendor_staff', 'gym_operator', 'gym_staff', 'corporate_hr'];
+  const PORTAL_TYPES = new Set(['admin', 'gym_operator', 'gym_staff', 'corporate_hr', 'vendor', 'vendor_staff']);
+
+  async function onPinSignIn(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null); setNotice(null); setPinError(null);
+    const id = identifier.trim();
+    if (!isPin(pin)) { setPinError(t('login.pinFormat')); pinRef.current?.focus(); return; }
+    setBusy(true);
+    try {
+      const res: PinLoginResult = await api.pinLogin({ ...(id.includes('@') ? { email: id } : { phone: id }), pin });
+      if (res.setupRequired) { setNotice(t('login.pinSetupInApp')); return; }
+      if (res.startPin || res.onboarding || !res.token || !res.user) { setNotice(t('login.pinNoBusiness')); return; }
+      if (PORTAL_TYPES.has(res.user.userType)) { handleSuccess(res.token, res.user); return; }
+      // A member or trainer session: move to a portal persona of the same person, or refuse (nothing stored).
+      const personas: PersonaSummary[] = Array.isArray(res.personas) ? res.personas : [];
+      const usable = personas.filter(p => !p.portalOnly && p.accountStatus !== 'suspended' && p.approvalStatus !== 'rejected');
+      const target = PIN_SWITCH_ORDER.map(type => usable.find(p => p.userType === type)).find(Boolean);
+      if (target) {
+        const switched = await api.switchPersona(res.token, target.id);
+        handleSuccess(switched.token, switched.user);
+        return;
+      }
+      // No portal persona: someone who looks after a company (B2B organisation) opens its area, as with Google/email.
+      const organizations = await api.myOrganizations(res.token).then(r => r?.organizations ?? []).catch(() => []);
+      if (organizations.length) {
+        handleSuccess(res.token, { ...res.user, organizationUser: true, organizationRoles: [...new Set(organizations.map(o => o.role))] });
+        return;
+      }
+      // Nothing usable: say why, and store nothing.
+      const off = (type: string) => personas.some(p => p.userType === type && p.accountStatus === 'suspended');
+      setError(off('vendor') ? t('login.suspendedBusiness') : off('vendor_staff') ? t('login.vendorStaffDisabled') : t('login.pinNoAccess'));
+    } catch (err) {
+      const code = err instanceof ApiError ? (err.body as { error?: string } | null)?.error : undefined;
+      const status = err instanceof ApiError ? err.status : 0;
+      if (code === 'invalid_credentials') {
+        setError(t('login.pinWrong'));
+        setPin('');
+        pinRef.current?.focus();
+      } else if (code === 'too_many_attempts') {
+        const seconds = Number((err as ApiError).body && ((err as ApiError).body as { retryAfterSeconds?: number }).retryAfterSeconds) || 60;
+        setError(fmt(t('login.pinTooMany'), { minutes: Math.max(1, Math.ceil(seconds / 60)) }));
+      } else if (code === 'pin_reset_required') {
+        setError(t('login.pinLocked'));
+      } else if (code === 'vendor_staff_inactive') {
+        setError(t('login.vendorStaffDisabled'));
+      } else if (code === 'no_profile') {
+        setError(t('login.pinNoAccess'));
+      } else if (code === 'account_suspended') {
+        setError(t('login.suspendedBusiness'));
+      } else if (code === 'person_not_active') {
+        setError(t('login.suspended'));
+      } else if (status === 404 || code === 'pin_not_configured') {
+        // Switched off on the server: hide the method and send them back to the other options.
+        setPinLogin(false);
+        setMethod('choose');
+        setError(t('login.pinUnavailable'));
+      } else {
+        setError(t('login.error'));
+      }
+    } finally {
+      setBusy(false);
+    }
   }
 
   function mapError(err: unknown): string {
@@ -39,6 +120,10 @@ export default function LoginPage() {
       const body = err.body as any;
       if (body?.error === 'admin_self_registration_not_allowed' || body?.error === 'profile_not_found')
         return t('login.adminRequired');
+      if (body?.error === 'vendor_staff_inactive')
+        return t('login.vendorStaffDisabled');
+      if (body?.error === 'vendor_account_suspended')
+        return t('login.suspendedBusiness');
       if (body?.error === 'account_suspended')
         return t('login.suspended');
       return t('login.error');
@@ -225,6 +310,18 @@ export default function LoginPage() {
                 >
                   {t('login.emailMethod')}
                 </Button>
+                {pinLogin && (
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="lg"
+                    className="w-full h-auto min-h-11 whitespace-normal py-2"
+                    data-testid="pin-method-btn"
+                    onClick={() => { setMethod('pin'); setError(null); setNotice(null); setPinError(null); }}
+                  >
+                    {t('login.pinMethod')}
+                  </Button>
+                )}
                 <Button
                   type="button"
                   variant="link"
@@ -256,6 +353,55 @@ export default function LoginPage() {
                   type="button"
                   variant="link"
                   onClick={() => { setMethod('choose'); setError(null); }}
+                  className="h-auto w-full px-0 text-xs font-normal text-[var(--color-fg-quaternary)] hover:text-[var(--color-fg-secondary)] hover:no-underline"
+                >
+                  {t('login.back')}
+                </Button>
+              </form>
+            )}
+
+            {method === 'pin' && (
+              <form onSubmit={onPinSignIn} className="space-y-4" data-testid="pin-login-form" noValidate>
+                <div>
+                  <p className="text-sm font-semibold text-[var(--color-fg-primary)]">{t('login.pinHeading')}</p>
+                  <p className="text-xs text-[var(--color-fg-quaternary)]">{t('login.pinHint')}</p>
+                </div>
+                {notice && <Alert tone="info">{notice}</Alert>}
+                <Field label={t('login.identifier')} required>
+                  <input
+                    type="text"
+                    inputMode="email"
+                    className="ui-input"
+                    value={identifier}
+                    onChange={e => setIdentifier(e.target.value)}
+                    autoComplete="username"
+                    required
+                    data-testid="pin-identifier-input"
+                  />
+                </Field>
+                <Field label={t('login.pin')} required error={pinError ?? undefined}>
+                  <input
+                    ref={pinRef}
+                    type="password"
+                    inputMode="numeric"
+                    pattern="[0-9]{4}"
+                    maxLength={4}
+                    className="ui-input"
+                    value={pin}
+                    onChange={e => { setPin(e.target.value.replace(/\D/g, '').slice(0, 4)); setPinError(null); }}
+                    autoComplete="current-password"
+                    required
+                    data-testid="pin-input"
+                  />
+                </Field>
+                <Button type="submit" size="lg" className="w-full" disabled={busy || !identifier.trim()} data-testid="pin-submit">
+                  {busy ? <><Spinner className="h-4 w-4 text-white" /> {t('login.signingIn')}</> : t('login.submit')}
+                </Button>
+                <p className="text-xs text-[var(--color-fg-quaternary)]">{t('login.pinForgot')}</p>
+                <Button
+                  type="button"
+                  variant="link"
+                  onClick={() => { setMethod('choose'); setError(null); setNotice(null); }}
                   className="h-auto w-full px-0 text-xs font-normal text-[var(--color-fg-quaternary)] hover:text-[var(--color-fg-secondary)] hover:no-underline"
                 >
                   {t('login.back')}

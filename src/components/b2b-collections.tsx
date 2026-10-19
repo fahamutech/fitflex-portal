@@ -479,7 +479,7 @@ function PendingPaymentDetails({ current, change, canDecide, userId, t, locale, 
   t: (key: MessageKey) => string; locale: 'en' | 'sw'; onConfirm: () => void; onCancel: () => void;
 }) {
   const own = !!userId && change.requestedBy === userId;
-  const who = own ? t('money2.you') : fill(t('money2.otherAdmin'), { id: change.requestedBy || '—' });
+  const who = own ? t('money2.you') : t('money2.otherAdmin');
   const rows: Array<[keyof B2BPaymentInstructionsChange['instructions'], string]> = [...DETAIL_FIELDS, ['notes', t('b2bPay.notes')]];
   return (
     <div className="space-y-3 rounded-lg border border-[var(--color-warning-200)] bg-[var(--color-warning-25)] px-3 py-3" data-testid="payment-details-pending">

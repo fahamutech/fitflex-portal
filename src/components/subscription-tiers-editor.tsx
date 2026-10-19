@@ -1,19 +1,28 @@
 'use client';
-import { Dispatch, SetStateAction } from 'react';
+import { Dispatch, SetStateAction, useState } from 'react';
 import { Plus, Trash2 } from 'lucide-react';
 import { useApp } from '../../app/providers';
 import { SubscriptionTierConfig } from '@/lib/api';
 import { Badge, Button, Checkbox, Input, Select, Table, TBody, Td, Th, THead, Tr } from '@/components/shared';
+import { ConfirmDialog } from '@/components/dialog';
 import { money, currencyLabel } from '@/lib/admin-utils';
 import {
-  GYM_ACCESS_LABEL, GYM_ACCESS_VALUES, TierField, UNLIMITED_VISITS, fillIn, gymAccessValid, tierErrors, tierStatus,
+  GYM_ACCESS_LABEL, GYM_ACCESS_VALUES, TierField, UNLIMITED_VISITS, fillIn, gymAccessValid, tierErrors, tierSellable, tierStatus,
 } from '@/lib/pass-tiers';
 
 /** A new tier starts with nothing set, so it can't be saved until price, visits and gyms are chosen. */
 const newTier = (label: string): SubscriptionTierConfig => ({ key: `tier_${Date.now()}`, label, monthlyPrice: 0, visits: null, gymAccess: '' });
 
-/** True when every tier can be saved (see tierErrors). */
-export const tiersSavable = (tiers: SubscriptionTierConfig[]) => tiers.every(t => Object.keys(tierErrors(t, tiers)).length === 0);
+/**
+ * True when the list can be saved: at least one tier, at least one on sale, and every tier valid (see tierErrors).
+ * An empty list would stop every pass selling and every holder checking in (functions#206 refuses it too).
+ */
+export const tiersSavable = (tiers: SubscriptionTierConfig[]) =>
+  tiers.length > 0 && tiers.some(tierSellable) && tiers.every(t => Object.keys(tierErrors(t, tiers)).length === 0);
+
+/** Keys of tiers that were saved before but are no longer in the list (removed or renamed). */
+export const missingSavedKeys = (saved: string[], tiers: SubscriptionTierConfig[]) =>
+  saved.filter(k => !tiers.some(t => (t.key?.trim() ?? '') === k));
 
 const wholeOrNull = (s: string) => (s.trim() === '' ? null : Number(s));
 
@@ -21,12 +30,25 @@ const wholeOrNull = (s: string) => (s.trim() === '' ? null : Number(s));
  * The FitFlex Pass tiers in Settings. Settings is the only price source (fitflex-functions#189):
  * each row shows whether it is on sale, and why not, before the admin saves.
  */
-export function SubscriptionTiersEditor({ tiers, setTiers, currency }: {
+export function SubscriptionTiersEditor({ tiers, setTiers, currency, savedKeys = [], onRemoveSaved }: {
   tiers: SubscriptionTierConfig[];
   setTiers: Dispatch<SetStateAction<SubscriptionTierConfig[]>>;
   currency: string;
+  /** Keys of the tiers as last saved: removing one of these asks first (holders lose check-in). */
+  savedKeys?: string[];
+  /** Called with the key once the admin confirms removing a saved tier. */
+  onRemoveSaved?: (key: string) => void;
 }) {
   const { t } = useApp();
+  // The saved tier waiting for the admin to confirm its removal (row index), or null.
+  const [removing, setRemoving] = useState<number | null>(null);
+  const removeAt = (idx: number) => setTiers(prev => prev.filter((_, i) => i !== idx));
+  const askRemove = (idx: number) => {
+    const key = tiers[idx]?.key?.trim() ?? '';
+    if (key && savedKeys.includes(key)) setRemoving(idx);
+    else removeAt(idx); // never saved: nobody holds it yet
+  };
+  const removingRow = removing != null ? tiers[removing] : null;
   const update = (idx: number, patch: Partial<SubscriptionTierConfig>) =>
     setTiers(prev => prev.map((row, i) => (i === idx ? { ...row, ...patch } : row)));
   const visitsText = (v: number | null) =>
@@ -64,14 +86,14 @@ export function SubscriptionTiersEditor({ tiers, setTiers, currency }: {
             return (
               <Tr key={i} data-testid={`tier-row-${i}`}>
                 <Td>
-                  <Input size="sm" className="font-mono" aria-label={t('tiers.col.key')} aria-invalid={!!errs.key} value={row.key} onChange={e => update(i, { key: e.target.value })} />
+                  <Input size="sm" className="font-mono min-w-[5.5rem]" aria-label={t('tiers.col.key')} aria-invalid={!!errs.key} value={row.key} onChange={e => update(i, { key: e.target.value })} />
                   {err('key')}
                 </Td>
                 <Td>
-                  <Input size="sm" aria-label={t('tiers.col.label')} value={row.label} onChange={e => update(i, { label: e.target.value })} />
+                  <Input size="sm" className="min-w-[6rem]" aria-label={t('tiers.col.label')} value={row.label} onChange={e => update(i, { label: e.target.value })} />
                 </Td>
                 <Td>
-                  <Input size="sm" className="text-right font-mono tabular-nums" type="number" min={0} step={1}
+                  <Input size="sm" className="min-w-[6rem] text-right font-mono tabular-nums" type="number" min={0} step={1}
                     aria-label={fillIn(t('tiers.col.price'), { currency: currencyLabel(currency) })} aria-invalid={!!errs.monthlyPrice}
                     value={Number.isFinite(Number(row.monthlyPrice)) ? row.monthlyPrice : ''}
                     onChange={e => update(i, { monthlyPrice: e.target.value === '' ? NaN : Number(e.target.value) })}
@@ -79,12 +101,16 @@ export function SubscriptionTiersEditor({ tiers, setTiers, currency }: {
                   {err('monthlyPrice')}
                 </Td>
                 <Td>
-                  <div className="flex items-center gap-3">
+                  {/* Unlimited sits under the number so the column stays narrow. */}
+                  <div className="flex flex-col items-start gap-1.5 whitespace-nowrap">
                     {!unlimited && (
-                      <Input size="sm" className="w-24 text-right font-mono tabular-nums" type="number" min={1} step={1}
-                        aria-label={t('tiers.col.visits')} aria-invalid={!!errs.visits}
-                        value={row.visits ?? ''} onChange={e => update(i, { visits: wholeOrNull(e.target.value) })}
-                        data-testid={`tier-${i}-visits`} />
+                      // Fixed-width wrapper: .ui-input is width 100%, so a width class on the input itself doesn't hold.
+                      <div className="w-24 shrink-0">
+                        <Input size="sm" className="text-right font-mono tabular-nums" type="number" min={1} step={1}
+                          aria-label={t('tiers.col.visits')} aria-invalid={!!errs.visits}
+                          value={row.visits ?? ''} onChange={e => update(i, { visits: wholeOrNull(e.target.value) })}
+                          data-testid={`tier-${i}-visits`} />
+                      </div>
                     )}
                     <Checkbox label={t('tiers.unlimited')} checked={unlimited}
                       onChange={e => update(i, { visits: e.target.checked ? UNLIMITED_VISITS : null })}
@@ -93,7 +119,7 @@ export function SubscriptionTiersEditor({ tiers, setTiers, currency }: {
                   {err('visits')}
                 </Td>
                 <Td>
-                  <Select size="sm" aria-label={t('tiers.col.gymAccess')} aria-invalid={!!errs.gymAccess}
+                  <Select size="sm" className="min-w-[9.5rem]" aria-label={t('tiers.col.gymAccess')} aria-invalid={!!errs.gymAccess}
                     value={gymAccessValid(row.gymAccess) ? row.gymAccess : ''} onChange={e => update(i, { gymAccess: e.target.value })}
                     data-testid={`tier-${i}-gym-access`}>
                     {!gymAccessValid(row.gymAccess) && <option value="">{t('tiers.gymAccess.choose')}</option>}
@@ -101,11 +127,12 @@ export function SubscriptionTiersEditor({ tiers, setTiers, currency }: {
                   </Select>
                   {err('gymAccess')}
                 </Td>
-                <Td data-testid={`tier-${i}-status`}>
-                  <Badge tone={status.tone} dot>{t(status.key)}</Badge>
+                <Td>
+                  <span className="whitespace-nowrap" data-testid={`tier-${i}-status`}><Badge tone={status.tone} dot>{t(status.key)}</Badge></span>
+                  {status.hint && <p className="mt-1 max-w-[9rem] text-xs text-[var(--color-fg-tertiary)]" data-testid={`tier-${i}-status-hint`}>{t(status.hint)}</p>}
                 </Td>
                 <Td>
-                  <Button variant="ghost" size="sm" aria-label={t('tiers.remove')} onClick={() => setTiers(prev => prev.filter((_, idx) => idx !== i))}>
+                  <Button variant="ghost" size="sm" aria-label={t('tiers.remove')} title={t('tiers.remove')} onClick={() => askRemove(i)} data-testid={`tier-${i}-remove`}>
                     <Trash2 className="h-3.5 w-3.5 text-[var(--color-error-600)]" />
                   </Button>
                 </Td>
@@ -125,6 +152,21 @@ export function SubscriptionTiersEditor({ tiers, setTiers, currency }: {
           ))}
         </div>
       )}
+      <ConfirmDialog
+        open={!!removingRow}
+        onClose={() => setRemoving(null)}
+        onConfirm={() => {
+          if (removing == null || !removingRow) return;
+          const key = removingRow.key.trim();
+          removeAt(removing);
+          setRemoving(null);
+          onRemoveSaved?.(key);
+        }}
+        title={fillIn(t('tiers.removeTitle'), { tier: removingRow?.label || removingRow?.key || '' })}
+        description={t('tiers.removeBody')}
+        confirmLabel={t('tiers.removeConfirm')}
+        tone="danger"
+      />
     </div>
   );
 }

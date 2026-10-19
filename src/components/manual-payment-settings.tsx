@@ -120,9 +120,16 @@ export function ManualPaymentSettingsCard({ initial }: { initial: ManualPaymentS
       <div className="p-5 space-y-4">
         <h3 className="text-sm font-semibold text-[var(--color-fg-primary)]">{t('manualPay.title')}</h3>
         <p className="text-xs text-[var(--color-fg-quaternary)]">{t('manualPay.intro')}</p>
-        {live && <div data-testid="manual-pay-live"><Alert tone={liveTone} className="text-xs">{t(`manualPay.status.${live}` as MessageKey)}</Alert></div>}
+        {/* One message: after a save, "saved" and whether it is live for members share the same alert. */}
+        {(live || notice) && (
+          <div data-testid="manual-pay-live">
+            <Alert tone={live ? liveTone : 'success'} className="text-xs">
+              {notice && <span data-testid="manual-pay-notice">{notice} </span>}
+              {live && t(`manualPay.status.${live}` as MessageKey)}
+            </Alert>
+          </div>
+        )}
         {error && <Alert tone="error">{error}</Alert>}
-        {notice && <Alert tone="success">{notice}</Alert>}
         {!saved && <p className="text-xs text-[var(--color-fg-tertiary)]">{t('manualPay.notSaved')}</p>}
 
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
