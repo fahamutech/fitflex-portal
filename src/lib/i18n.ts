@@ -2127,6 +2127,16 @@ export const messages = {
     "products.variants": "Variants",
     "products.invalidNumber": "Enter a whole number, 0 or more, or leave empty.",
     "products.variantChanged": "The product's variants changed. The list has been reloaded.",
+    // Vendor portal (S2) and payouts i18n. Swahili drafts pending native review.
+    "vendor.orders.itemsCountOne": "1 item",
+    "vendor.stock.note.productCreated": "Starting stock when the product was added",
+    "vendor.stock.note.variantsTracked": "Moved to stock per variant",
+    "vendor.orders.notPaid": "This order is not paid yet, so it can't move. Here is where it stands now.",
+    "vendor.orders.cancelledAlready": "This order has been cancelled. Here is where it stands now.",
+    "vendor.orders.statusFinal": "Your part of this order is already finished. Here is where it stands now.",
+    "vendor.orders.multiVendorCancel": "This order has items from other businesses. Ask FitFlex to cancel your part.",
+    "vendor.orders.moveRefused": "This order can't move right now. Here is where it stands now.",
+    "vendor.orders.suspendedNoMove": "Your business account is suspended, so orders can't be moved.",
   },
   sw: {
     'app.title': 'FitFlex Af — Portal ya Waendeshaji',
@@ -4254,6 +4264,16 @@ export const messages = {
     "products.variants": "Machaguo",
     "products.invalidNumber": "Weka namba kamili, 0 au zaidi, au acha wazi.",
     "products.variantChanged": "Machaguo ya bidhaa yamebadilika. Orodha imepakiwa upya.",
+    // Vendor portal (S2) and payouts i18n. Drafts pending native review.
+    "vendor.orders.itemsCountOne": "Bidhaa 1",
+    "vendor.stock.note.productCreated": "Stock ya kuanzia bidhaa ilipoongezwa",
+    "vendor.stock.note.variantsTracked": "Imehamishiwa kwenye Stock ya kila chaguo",
+    "vendor.orders.notPaid": "Oda hii bado haijalipwa, kwa hiyo haiwezi kusogezwa. Hapa ndipo ilipo sasa.",
+    "vendor.orders.cancelledAlready": "Oda hii imeghairiwa. Hapa ndipo ilipo sasa.",
+    "vendor.orders.statusFinal": "Sehemu yako ya oda hii imeshakamilika. Hapa ndipo ilipo sasa.",
+    "vendor.orders.multiVendorCancel": "Oda hii ina bidhaa za biashara nyingine. Omba FitFlex ighairi sehemu yako.",
+    "vendor.orders.moveRefused": "Oda hii haiwezi kusogezwa kwa sasa. Hapa ndipo ilipo sasa.",
+    "vendor.orders.suspendedNoMove": "Akaunti ya biashara yako imesimamishwa, kwa hiyo oda haziwezi kusogezwa.",
   }
 } as const;
 

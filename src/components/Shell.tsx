@@ -205,7 +205,7 @@ function SidebarLink({
       aria-current={active ? 'page' : undefined}
       aria-label={count ? count.label : undefined}
       className={cn(
-        'group flex items-center gap-3 rounded-[var(--radius-md)] px-3 py-2.5 text-sm font-medium transition-colors',
+        'group flex min-h-11 items-center gap-3 rounded-[var(--radius-md)] px-3 py-2.5 text-sm font-medium transition-colors',
         active
           ? 'bg-[var(--color-sidebar-active)] text-[var(--color-sidebar-text-active)] font-semibold'
           : 'text-[var(--color-sidebar-text)] hover:bg-[var(--color-sidebar-hover)] hover:text-white',
@@ -385,7 +385,7 @@ function SidebarContent({
           </div>
           <button
             onClick={() => { signOut(); router.replace('/login'); }}
-            className="shrink-0 text-[var(--color-gray-400)] hover:text-white transition-colors"
+            className="-m-2 inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-[var(--radius-md)] text-[var(--color-gray-400)] hover:text-white transition-colors"
             title={t('nav.signout')}
             aria-label={t('nav.signout')}
           >
@@ -618,7 +618,7 @@ export function Shell({ children }: { children: ReactNode }) {
             aria-label={mobileOpen ? t('common.closeMenu') : t('common.openMenu')}
             aria-expanded={mobileOpen}
             aria-controls="mobile-drawer"
-            className="p-2 -m-2 text-[var(--color-fg-tertiary)] hover:text-[var(--color-fg-primary)] transition-colors"
+            className="-m-2 inline-flex h-11 w-11 items-center justify-center text-[var(--color-fg-tertiary)] hover:text-[var(--color-fg-primary)] transition-colors"
           >
             {mobileOpen ? <X aria-hidden="true" className="h-5 w-5" /> : <Menu aria-hidden="true" className="h-5 w-5" />}
           </button>

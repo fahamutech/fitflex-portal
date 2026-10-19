@@ -10,7 +10,7 @@ import {
 import { money, trainerNames } from '@/lib/admin-utils';
 import type { MessageKey } from '@/lib/i18n';
 import { STATEMENT_STATUS, STATEMENT_TABS, shortDay } from '@/lib/settlements';
-import { eatDay, errorCode, fmt, payoutWhyKey, shortRefOf } from '@/lib/vendor';
+import { dayMonth, eatDay, errorCode, fmt, payLabel, payoutWhyKey, shortRefOf } from '@/lib/vendor';
 import { Alert, Badge, Button, Card, CardContent, CardHeader, EmptyState, ErrorState, Field, Input, PageHeader, SkeletonTable, Spinner, Table, TBody, Td, Textarea, Th, THead, Tr } from '@/components/shared';
 import { Dialog, DialogFooter } from '@/components/dialog';
 import { useVendor } from './vendor-context';
@@ -57,6 +57,8 @@ function errorText(t: T, kind: PayoutKind, err: unknown) {
 }
 
 const week = (s: Pick<PartnerSettlement, 'periodStartDate' | 'periodEndDate'>) => `${shortDay(s.periodStartDate)} – ${shortDay(s.periodEndDate)}`;
+/** The week in the partner's chosen language ("6 Okt – 12 Okt"). */
+const weekIn = (s: Pick<PartnerSettlement, 'periodStartDate' | 'periodEndDate'>, locale: 'en' | 'sw') => `${dayMonth(s.periodStartDate, locale)} – ${dayMonth(s.periodEndDate, locale)}`;
 const statusLabel = (t: T, s: GymSettlementStatus) => t(`payouts.status.${s}` as MessageKey);
 
 /** The open statement lives in the URL so it survives a refresh and can be shared. */
@@ -416,7 +418,7 @@ const partnerStatusKey = (status: string) =>
   (['submitted', 'approved', 'payable', 'paid'].includes(status) ? `vendor.payouts.status.${status}` : 'vendor.payouts.status.submitted') as MessageKey;
 
 function PartnerOwnPayouts() {
-  const { token, t } = useApp();
+  const { token, t, locale } = useApp();
   const vendor = useVendor();
   const [list, setList] = useState<VendorStatementList | null>(null);
   const [failed, setFailed] = useState(false);
@@ -446,7 +448,7 @@ function PartnerOwnPayouts() {
       <PageHeader
         title={t('vendor.payouts.title')}
         description={t('vendor.payouts.description')}
-        actions={<Button variant="secondary" size="sm" onClick={load}><RefreshCw aria-hidden="true" className="h-4 w-4" />{t('admin.action.refresh')}</Button>}
+        actions={<Button variant="secondary" size="sm" className="min-h-11" onClick={load}><RefreshCw aria-hidden="true" className="h-4 w-4" />{t('admin.action.refresh')}</Button>}
       />
       {blocked}
       {list == null && !failed ? <div aria-busy="true"><SkeletonTable rows={4} columns={6} /></div>
@@ -470,7 +472,7 @@ function PartnerOwnPayouts() {
                   {rows.map(r => (
                     <Tr key={r.id} data-testid={`vendor-payout-row-${r.id}`}>
                       <Td>
-                        <Button variant="link" className="h-auto min-h-11 px-0 font-medium" onClick={() => open(r.id)}>{week(r)}</Button>
+                        <Button variant="link" className="h-auto min-h-11 px-0 font-medium" onClick={() => open(r.id)}>{weekIn(r, locale)}</Button>
                       </Td>
                       <Td className="text-right tabular-nums">{r.orderCount ?? 0}</Td>
                       <Td className="whitespace-nowrap text-right tabular-nums">{money(r.salesTzs ?? 0)}</Td>
@@ -491,7 +493,7 @@ function PartnerOwnPayouts() {
                   <Card className="p-0">
                     <button type="button" onClick={() => open(r.id)} className="block w-full space-y-1 p-4 text-left">
                       <span className="flex flex-wrap items-center justify-between gap-2">
-                        <span className="font-medium">{week(r)}</span>
+                        <span className="font-medium">{weekIn(r, locale)}</span>
                         <Badge tone={PARTNER_TONE[r.status] ?? 'gray'}>{t(partnerStatusKey(r.status))}</Badge>
                       </span>
                       <span className="block text-sm text-[var(--color-fg-tertiary)]">{t('vendor.payouts.toPay')}: <span className="font-semibold tabular-nums text-[var(--color-fg-primary)]">{money(r.finalNetTzs)}</span></span>
@@ -537,7 +539,7 @@ function PartnerStatementView({ id, onBack, blocked }: { id: string; onBack: () 
   return (
     <div className="space-y-5" data-testid="vendor-payout-detail">
       {back}
-      <PageHeader title={week(s)} actions={<Badge tone={PARTNER_TONE[s.status] ?? 'gray'}>{t(partnerStatusKey(s.status))}</Badge>} />
+      <PageHeader title={weekIn(s, locale)} actions={<Badge tone={PARTNER_TONE[s.status] ?? 'gray'}>{t(partnerStatusKey(s.status))}</Badge>} />
       {s.status !== 'paid' && blocked}
       {onHold && <Alert tone="warning">{t('vendor.payouts.onHoldHint')}</Alert>}
       <div className="grid gap-4 sm:grid-cols-3">
@@ -551,7 +553,7 @@ function PartnerStatementView({ id, onBack, blocked }: { id: string; onBack: () 
             <p>{fmt(t('vendor.payouts.paidOn'), { date: eatDay(s.paidAt, locale) })}</p>
             {s.paymentReference && <p>{t('vendor.payouts.reference')}: <span className="font-mono">{s.paymentReference}</span></p>}
             {s.paidTo && (
-              <p>{t('vendor.payouts.paidTo')}: {[s.paidTo.provider ?? s.paidTo.method, s.paidTo.accountLast4 ? `····${s.paidTo.accountLast4}` : null].filter(Boolean).join(' ')}</p>
+              <p>{t('vendor.payouts.paidTo')}: {[payLabel(s.paidTo.provider ?? s.paidTo.method, t), s.paidTo.accountLast4 ? `····${s.paidTo.accountLast4}` : null].filter(Boolean).join(' ')}</p>
             )}
           </CardContent>
         </Card>
