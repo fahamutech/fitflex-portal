@@ -254,7 +254,8 @@ export default function PaymentsPage() {
   // Fits 1280px with the actions pinned: the date sits under the member, the note under the type.
   const columns: ColumnDef<PaymentRequest>[] = [
     {
-      key: 'memberId', header: t('payments.col.member'), sortable: true,
+      // Sorts by date (the line under the name); newest first by default.
+      key: 'requestedAt', header: t('payments.col.memberDate'), sortable: true,
       cell: (p) => (
         <div className="min-w-[7.5rem] max-w-[10rem]">
           <div className="font-medium text-[var(--color-fg-primary)] text-sm" title={p.id}>{memberName(p)}</div>
@@ -393,6 +394,7 @@ export default function PaymentsPage() {
               label={t('payments.title')}
               stickyActions
               dense
+              defaultSort={{ key: 'requestedAt', dir: 'desc' }}
               filterPlaceholder={t('payments.search')}
               emptyState={t('payments.empty')}
               extraFilters={

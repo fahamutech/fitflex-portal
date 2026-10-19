@@ -2252,7 +2252,9 @@ export const messages = {
     "refunds.approvedByYou": "Approved by you",
     "tiers.err.noneOnSale": "At least one pass must stay on sale.",
     // Journey-audit Phase A design-QA fixes
-    "tiers.err.inUse": "{tier} can’t be removed or switched off: {holders} passes or accounts still use it. Nothing was saved."
+    "tiers.err.inUse": "{tier} can’t be removed or switched off: {holders} passes or accounts still use it. Nothing was saved.",
+    // Journey-audit Phase A design-QA fixes
+    "payments.col.memberDate": "Member · date"
   },
   sw: {
     'app.title': 'FitFlex Af — Portal ya Waendeshaji',
@@ -4505,7 +4507,9 @@ export const messages = {
     "refunds.approvedByYou": "Umeyaidhinisha wewe",
     "tiers.err.noneOnSale": "Angalau pasi moja lazima ibaki inauzwa.",
     // Journey-audit Phase A design-QA fixes
-    "tiers.err.inUse": "{tier} haiwezi kuondolewa wala kuzimwa: pasi au akaunti {holders} bado zinaitumia. Hakuna kilichohifadhiwa."
+    "tiers.err.inUse": "{tier} haiwezi kuondolewa wala kuzimwa: pasi au akaunti {holders} bado zinaitumia. Hakuna kilichohifadhiwa.",
+    // Journey-audit Phase A design-QA fixes
+    "payments.col.memberDate": "Mwanachama · tarehe"
   }
 } as const;
 

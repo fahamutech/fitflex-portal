@@ -122,6 +122,41 @@ test.describe('Payments layout (H4, M3)', () => {
   });
 });
 
+test.describe('Payments: date sorting', () => {
+  test('newest first by default; the Member · date header sorts oldest first, with aria-sort', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await signInAdmin(page);
+    // API order deliberately mixed.
+    const rows = [
+      { ...base, id: 'pay-mid', status: 'pending', reference: null, requestedAt: '2026-10-18T08:00:00.000Z', member: { displayName: 'Middle Member' } },
+      { ...base, id: 'pay-old', status: 'pending', reference: null, requestedAt: '2026-10-01T08:00:00.000Z', member: { displayName: 'Oldest Member' } },
+      { ...base, id: 'pay-new', status: 'pending', reference: null, requestedAt: '2026-10-19T08:00:00.000Z', member: { displayName: 'Newest Member' } },
+    ];
+    await mockApi(page, ({ method, path }) => (method === 'GET' && path === '/admin/payment-requests' ? { json: rows } : null));
+    await page.goto('/admin/payments');
+    const names = page.locator('tbody tr td:first-child .font-medium');
+    const header = page.getByRole('columnheader', { name: /Member · date/ });
+    await expect(names).toHaveText(['Newest Member', 'Middle Member', 'Oldest Member']);
+    await expect(header).toHaveAttribute('aria-sort', 'descending');
+
+    await header.getByRole('button').click(); // newest first → oldest first (never back to API order)
+    await expect(header).toHaveAttribute('aria-sort', 'ascending');
+    await expect(names).toHaveText(['Oldest Member', 'Middle Member', 'Newest Member']);
+    await header.getByRole('button').click();
+    await expect(header).toHaveAttribute('aria-sort', 'descending');
+    await expect(names).toHaveText(['Newest Member', 'Middle Member', 'Oldest Member']);
+    // Sorting adds no width: the actions stay on screen.
+    for (const edit of await page.getByTestId('payment-edit').all()) await expect(edit).toBeInViewport();
+  });
+
+  test('Swahili header', async ({ page }) => {
+    await signInAdmin(page, 'admin-1', 'sw');
+    await mockApi(page, ({ method, path }) => (method === 'GET' && path === '/admin/payment-requests' ? { json: [{ ...base, id: 'pay-1', status: 'pending', reference: null }] } : null));
+    await page.goto('/admin/payments');
+    await expect(page.getByRole('columnheader', { name: /Mwanachama · tarehe/ })).toHaveAttribute('aria-sort', 'descending');
+  });
+});
+
 test.describe('Payments: stages, reasons and names (M10, M11)', () => {
   test('awaiting second approval is amber, and why Approve is blocked is visible text', async ({ page }) => {
     await signInAdmin(page, 'admin-1');

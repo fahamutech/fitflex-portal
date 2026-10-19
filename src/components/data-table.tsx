@@ -38,6 +38,7 @@ export function DataTable<T extends Record<string, any>>({
   label,
   stickyActions = false,
   dense = false,
+  defaultSort,
 }: {
   columns: ColumnDef<T>[];
   data: T[];
@@ -54,12 +55,14 @@ export function DataTable<T extends Record<string, any>>({
   stickyActions?: boolean;
   /** Tighter cell padding, for wide admin tables that must fit a laptop screen. */
   dense?: boolean;
+  /** Sort applied on first render (shown in aria-sort like any other sort). */
+  defaultSort?: { key: string; dir: 'asc' | 'desc' };
 }) {
   const { t } = useApp();
   const tableId = useId();
   const [query, setQuery]         = useState('');
-  const [sortKey, setSortKey]     = useState<string | null>(null);
-  const [sortDir, setSortDir]     = useState<SortDir>(null);
+  const [sortKey, setSortKey]     = useState<string | null>(defaultSort?.key ?? null);
+  const [sortDir, setSortDir]     = useState<SortDir>(defaultSort?.dir ?? null);
   const [page, setPage]           = useState(1);
   const [pageSize, setPageSize]   = useState(defaultPageSize);
 
@@ -103,7 +106,9 @@ export function DataTable<T extends Record<string, any>>({
   function toggleSort(key: string) {
     if (sortKey !== key) { setSortKey(key); setSortDir('asc'); return; }
     if (sortDir === 'asc') { setSortDir('desc'); return; }
-    setSortKey(null); setSortDir(null);
+    // With a default sort, its column alternates desc/asc, and clearing another column returns to it.
+    if (defaultSort && key === defaultSort.key) { setSortDir('asc'); return; }
+    setSortKey(defaultSort?.key ?? null); setSortDir(defaultSort?.dir ?? null);
   }
 
   function SortIcon({ col }: { col: ColumnDef<T> }) {
