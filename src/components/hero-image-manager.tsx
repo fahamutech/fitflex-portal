@@ -50,6 +50,8 @@ const PEOPLE_OPTIONS: Array<{ value: HeroPeople; key: MessageKey }> = [
 /** Owner decision 2026-10-19: only photos without people for now. Widen this to offer the others again. */
 export const HERO_PEOPLE_ALLOWED: readonly HeroPeople[] = ['none'];
 const ONLY_NO_PEOPLE = HERO_PEOPLE_ALLOWED.length === 1 && HERO_PEOPLE_ALLOWED[0] === 'none';
+/** While only "No people" is allowed the box says exactly that; the wider wording returns with the other options. */
+const FACES_CONFIRM_KEY: MessageKey = ONLY_NO_PEOPLE ? 'heroImages.faces.confirm' : 'heroImages.faces.confirmUnclear';
 
 /** Areas in display order when the server does not send them (spec §36.2). */
 const DEFAULT_AREAS = ['preSignIn', 'members', 'partners', 'footers', 'portal'];
@@ -532,7 +534,7 @@ function Confirmations({ rights, faces, setRights, setFaces, disabled, rightsErr
       <legend className="text-sm font-medium text-[var(--color-fg-secondary)]">{t('heroImages.confirmations')}<span aria-hidden="true" className="text-[var(--color-error-600)]"> *</span></legend>
       <Checkbox checked={rights} onChange={e => setRights(e.target.checked)} disabled={disabled} label={t('heroImages.rights.confirm')} invalid={!!rightsError} aria-required data-testid="hero-rights" />
       {rightsError && <p className="text-xs text-[var(--color-error-700)]">{rightsError}</p>}
-      <Checkbox checked={faces} onChange={e => setFaces(e.target.checked)} disabled={disabled} label={t('heroImages.faces.confirm')} invalid={!!facesError} aria-required data-testid="hero-faces" />
+      <Checkbox checked={faces} onChange={e => setFaces(e.target.checked)} disabled={disabled} label={t(FACES_CONFIRM_KEY)} invalid={!!facesError} aria-required data-testid="hero-faces" />
       {facesError && <p className="text-xs text-[var(--color-error-700)]">{facesError}</p>}
     </fieldset>
   );

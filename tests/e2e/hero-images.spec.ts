@@ -158,6 +158,9 @@ test.describe('App photos (flag on)', () => {
     await expect(dialog.getByTestId('hero-people-hands_backs')).toHaveCount(0);
     await expect(dialog.getByTestId('hero-people-unclear_faces')).toHaveCount(0);
     await expect(dialog.getByText('For now only photos without people can be used.')).toBeVisible();
+    await expect(dialog.getByTestId('hero-faces')).toBeVisible();
+    await expect(dialog.getByText('There are no people in this photo.')).toBeVisible();
+    await expect(dialog.getByText('only backs, hands or unclear faces', { exact: false })).toHaveCount(0);
 
     await expect(submit).toBeDisabled();
     await dialog.getByTestId('hero-source').fill('Partner gym');
@@ -494,7 +497,7 @@ test.describe('App photos (flag on)', () => {
     await page.getByTestId('hero-upload-open').click();
     const dialog = page.getByRole('dialog', { name: 'Pakia picha' });
     await expect(dialog.getByText('Nathibitisha kuwa FitFlex ina haki ya kutumia picha hii kwenye app na portal zake.')).toBeVisible();
-    await expect(dialog.getByText('Hakuna mtu anayeweza kutambulika kwenye picha hii: migongo, mikono au nyuso zisizo wazi tu.')).toBeVisible();
+    await expect(dialog.getByText('Hakuna watu kwenye picha hii.')).toBeVisible();
     await expect(dialog.getByText('Kwa sasa picha zisizo na watu pekee ndizo zinaweza kutumika.')).toBeVisible();
     await dialog.getByTestId('hero-file-input').setInputFiles({ name: 'a.gif', mimeType: 'image/gif', buffer: GIF });
     await expect(dialog.getByTestId('hero-file-error')).toHaveText('Aina hii ya faili haikubaliki. Tumia JPEG, PNG au WebP.');
@@ -600,6 +603,15 @@ test.describe('login panel reads the remote photo (flag on)', () => {
     await expect(page.getByTestId('login-photo-panel-remote-img')).toHaveCount(0);
     expect(calls.filter(c => c === '/x.webp')).toEqual([]);
   });
+
+  for (const bad of ['/storage/%2e%2e/x.webp', '/storage/..%2fadmin/x.webp', '/storage/../x.webp', '/storage/bafy/..', '/storage/a/b/c.webp']) {
+    test(`a smuggled storage path is refused: ${bad}`, async ({ page }) => {
+      const calls = await openLogin(page, { manifest: MANIFEST(bad) });
+      await page.waitForTimeout(1800);
+      await expect(page.getByTestId('login-photo-panel-remote-img')).toHaveCount(0);
+      expect(calls.filter(c => c.startsWith('/storage') || c.startsWith('/admin') || c === '/x.webp')).toEqual([]);
+    });
+  }
 
   test('no request under high contrast', async ({ page }) => {
     await page.emulateMedia({ contrast: 'more' });

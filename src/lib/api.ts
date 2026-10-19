@@ -1307,7 +1307,9 @@ export interface HeroManifest {
  * else (absolute, protocol-relative, other paths) is refused so the portal only ever loads FitFlex's files.
  */
 export function heroAssetUrl(path: string | null | undefined): string | null {
-  if (typeof path !== 'string' || !/^\/storage\/[A-Za-z0-9._~%-]+\/[A-Za-z0-9._~%-]+$/.test(path)) return null;
+  // No percent-escapes (so no %2e / %2f smuggling), no "..", and no "." segment.
+  const m = typeof path === 'string' ? /^\/storage\/([A-Za-z0-9._~-]+)\/([A-Za-z0-9._~-]+)$/.exec(path) : null;
+  if (!m || [m[1], m[2]].some(seg => seg === '.' || seg.includes('..'))) return null;
   return `${BASE}${path}`;
 }
 

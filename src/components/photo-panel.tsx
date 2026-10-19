@@ -71,10 +71,12 @@ function useRemoteHeroPhoto(slot: string | undefined): RemotePhoto | null {
     if ((navigator as Navigator & { connection?: { saveData?: boolean } }).connection?.saveData) return;
     let cancelled = false;
     let expired = false;
+    // Unmounting cancels the manifest request (the photo download itself is left to the browser cache).
+    const controller = new AbortController();
     const timer = window.setTimeout(() => { expired = true; }, REMOTE_WINDOW_MS);
     (async () => {
       try {
-        const manifest = await api.appHeroImages();
+        const manifest = await api.appHeroImages(controller.signal);
         const entry = manifest?.slots?.[slot]?.[0];
         const src = heroAssetUrl(entry?.urlWide) ?? heroAssetUrl(entry?.url);
         if (!entry || !src || cancelled) return;
@@ -88,7 +90,7 @@ function useRemoteHeroPhoto(slot: string | undefined): RemotePhoto | null {
         // Any failure keeps the bundled photo.
       }
     })();
-    return () => { cancelled = true; window.clearTimeout(timer); };
+    return () => { cancelled = true; controller.abort(); window.clearTimeout(timer); };
   }, [slot]);
   return remote;
 }
