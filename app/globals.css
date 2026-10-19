@@ -312,3 +312,165 @@ body {
     animation-iteration-count: infinite !important;
   }
 }
+
+/* ── Photo hero (design spec photo-hero-screens §3.3, §5, §9, §12) ──
+   Mirrors the mobile FFTokens hero* tokens. The photo is an always-dark
+   island: text sits on a slate-950 scrim and every contrast figure assumes a
+   pure-white photo pixel under it (§5.1), so any photo is safe.
+   Used by src/components/photo-panel.tsx (login, NEXT_PUBLIC_PHOTO_HERO_UI). */
+:root {
+  --hero-scrim-rgb: 2 6 23;                       /* #020617 */
+  --hero-scrim: rgb(var(--hero-scrim-rgb));
+  --hero-scrim-top: 0.5;                          /* top band: icons / logo only */
+  --hero-scrim-text: 0.8;                         /* minimum under any text */
+  --hero-scrim-ground: 1;                         /* seamless join to a dark page */
+  --hero-scrim-panel-lead: 0.92;                  /* horizontal scrim, leading edge */
+  --hero-scrim-panel-tail: 0.3;                   /* horizontal scrim, far edge (photo only) */
+  --hero-scrim-panel-bottom: 0.85;                /* bottom layer under the horizontal scrim (§5.2) */
+  --hero-text: #f1f5f9;                           /* headline, eyebrow: 10.63:1 on the 0.80 zone */
+  --hero-text-body: #cbd5e1;                      /* subline: 7.84:1. Never gray-400 on a hero */
+  --hero-accent-dark: var(--color-volt);          /* mobile dark theme only; never on the portal (light page) */
+  --hero-accent-light: var(--color-brand-500);    /* portal accent: large text only (>= 24px, w800) */
+  --hero-chip-fuel-text: var(--color-fuel-on-dark);
+  --hero-chip-fuel-border: color-mix(in srgb, var(--color-fuel-on-dark) 60%, transparent);
+  --hero-chip-fuel-fill: rgb(var(--hero-scrim-rgb) / 0.4);
+  --hero-placeholder: #0b192c;                    /* canon logo navy deep: before decode, high contrast, reduced data */
+  --hero-sheet-overlap: 24px;
+  --hero-sheet-radius: 24px;
+  --hero-display-size: 34px;                      /* >= 375 wide */
+  --hero-display-line: 36px;
+  --hero-display-size-small: 30px;                /* < 375 wide */
+  --hero-display-line-small: 32px;
+  --hero-display-size-wide: 48px;                 /* >= 1024 wide, panel */
+  --hero-display-line-wide: 52px;
+  --hero-display-tracking: -0.03em;
+  --hero-eyebrow-font: "JetBrains Mono", var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  --hero-eyebrow-size: 11px;
+  --hero-eyebrow-tracking: 0.18em;
+  --hero-fade: 250ms;
+}
+
+/* Login layout with the photo panel: band on top below 1024, columns from 1024. */
+.photo-panel {
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+  background: var(--hero-placeholder);
+  color: var(--hero-text);
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  /* Phone band (<640): 160px, eyebrow + headline only. The 0.80 stop sits at
+     --photo-panel-stop; text never starts less than 24px below it. */
+  --photo-panel-stop: 16px;
+  min-height: 160px;
+  padding: calc(var(--photo-panel-stop) + 24px) 24px 20px;
+}
+.photo-panel__img {
+  position: absolute;
+  inset: 0;
+  z-index: -2;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center;
+  opacity: 0;
+  transition: opacity var(--hero-fade) ease-out;
+}
+.photo-panel__img[data-loaded="true"] { opacity: 1; }
+.photo-panel__scrim {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background: linear-gradient(
+    to bottom,
+    rgb(var(--hero-scrim-rgb) / var(--hero-scrim-top)) 0,
+    rgb(var(--hero-scrim-rgb) / var(--hero-scrim-text)) var(--photo-panel-stop),
+    rgb(var(--hero-scrim-rgb) / var(--hero-scrim-text)) 100%
+  );
+}
+.photo-panel__content { max-width: 40rem; }
+.photo-panel__eyebrow {
+  margin: 0 0 8px;
+  font-family: var(--hero-eyebrow-font);
+  font-size: var(--hero-eyebrow-size);
+  font-weight: 500;
+  letter-spacing: var(--hero-eyebrow-tracking);
+  text-transform: uppercase;
+  color: var(--hero-text);
+}
+.photo-panel__headline {
+  margin: 0;
+  font-weight: 900;
+  letter-spacing: var(--hero-display-tracking);
+  font-size: var(--hero-display-size-small);
+  line-height: var(--hero-display-line-small);
+  color: var(--hero-text);
+}
+.photo-panel__accent { color: var(--hero-accent-light); }
+.photo-panel__sub {
+  display: none;
+  margin: 12px 0 0;
+  font-size: 1rem;
+  line-height: 1.5rem;
+  font-weight: 400;
+  color: var(--hero-text-body);
+}
+@media (min-width: 375px) {
+  .photo-panel__headline {
+    font-size: var(--hero-display-size);
+    line-height: var(--hero-display-line);
+  }
+}
+/* Tablet band (640–1023): 220px, eyebrow + headline + subline. */
+@media (min-width: 640px) {
+  .photo-panel {
+    --photo-panel-stop: 40px;
+    min-height: 220px;
+    padding: calc(var(--photo-panel-stop) + 24px) 32px 24px;
+  }
+  .photo-panel__sub { display: block; }
+}
+/* Desktop panel (>= 1024): left 55%, full height, horizontal scrim plus a
+   bottom layer. Text stays in the left 50% of the panel, where the
+   horizontal scrim alone is >= 0.80. */
+@media (min-width: 1024px) {
+  .photo-panel {
+    width: 55%;
+    flex: 0 0 55%;
+    min-height: 0;
+    padding: 64px;
+  }
+  .photo-panel__scrim {
+    background:
+      linear-gradient(
+        to top,
+        rgb(var(--hero-scrim-rgb) / var(--hero-scrim-panel-bottom)) 0%,
+        rgb(var(--hero-scrim-rgb) / 0) 30%
+      ),
+      linear-gradient(
+        to right,
+        rgb(var(--hero-scrim-rgb) / var(--hero-scrim-panel-lead)) 0%,
+        rgb(var(--hero-scrim-rgb) / var(--hero-scrim-text)) 50%,
+        rgb(var(--hero-scrim-rgb) / var(--hero-scrim-panel-tail)) 100%
+      );
+  }
+  /* 50% of the content box ends exactly at the panel's midline (64px padding each side). */
+  .photo-panel__content { max-width: 50%; min-width: 0; }
+  .photo-panel__headline {
+    font-size: var(--hero-display-size-wide);
+    line-height: var(--hero-display-line-wide);
+  }
+}
+/* No photo under reduced data (no band at all below 1024; navy panel above)
+   or high contrast (navy ground, same text). The <picture> also swaps to an
+   inline empty image for these, so nothing is requested. */
+@media (prefers-contrast: more) {
+  .photo-panel__img { display: none; }
+}
+@media (prefers-reduced-data: reduce) {
+  .photo-panel__img { display: none; }
+}
+@media (prefers-reduced-data: reduce) and (max-width: 1023px) {
+  .photo-panel { display: none; }
+}

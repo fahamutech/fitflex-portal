@@ -12,6 +12,8 @@ import {
   signOutFirebase,
 } from '@/lib/firebase';
 import { Button, Card, CardContent, Alert, Spinner, Field } from '@/components/shared';
+import { PhotoPanel, LOGIN_HERO_PHOTO } from '@/components/photo-panel';
+import { PHOTO_HERO_UI } from '@/lib/flags';
 
 export default function LoginPage() {
   const { t, signIn } = useApp();
@@ -162,8 +164,7 @@ export default function LoginPage() {
     }
   }
 
-  return (
-    <div className="flex min-h-[calc(100vh-4rem)] items-center justify-center p-4">
+  const signInColumn = (
       <div className="w-full max-w-sm">
         {/* No brand mark here: the login header already carries the logo (spec §12, F-7). */}
         <div className="mb-8 text-center">
@@ -338,6 +339,29 @@ export default function LoginPage() {
           {t('login.noSelfRegistration')}
         </p>
       </div>
+  );
+
+  // Photo hero layout (spec photo-hero-screens §12), dormant unless
+  // NEXT_PUBLIC_PHOTO_HERO_UI=true at build time. The card is unchanged.
+  if (PHOTO_HERO_UI) {
+    return (
+      <div className="flex min-h-[calc(100vh-4rem)] flex-col lg:flex-row" data-testid="login-photo-layout">
+        <PhotoPanel
+          photo={LOGIN_HERO_PHOTO}
+          eyebrow={t('login.hero.eyebrow')}
+          headlineLead={t('login.hero.lead')}
+          headlineAccent={t('login.hero.accent')}
+          subline={t('login.hero.sub')}
+          data-testid="login-photo-panel"
+        />
+        <div className="flex flex-1 items-center justify-center p-4 lg:p-8">{signInColumn}</div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex min-h-[calc(100vh-4rem)] items-center justify-center p-4">
+      {signInColumn}
     </div>
   );
 }
