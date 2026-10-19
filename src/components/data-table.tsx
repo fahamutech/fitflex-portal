@@ -147,7 +147,9 @@ export function DataTable<T extends Record<string, any>>({
         role={label ? 'region' : undefined}
         aria-label={label}
         tabIndex={0}
-        className="overflow-x-auto rounded-[var(--radius-xl)] border border-[var(--color-border-secondary)]"
+        // relative: the containing block for any absolutely positioned descendant (e.g. an sr-only label), so it
+        // stays inside this scroll box instead of widening the page.
+        className="relative overflow-x-auto rounded-[var(--radius-xl)] border border-[var(--color-border-secondary)]"
       >
         <table className={cn('ui-table min-w-full', dense && 'ui-table-dense')}>
           <thead>
@@ -216,7 +218,7 @@ export function DataTable<T extends Record<string, any>>({
                     </td>
                   ))}
                   {hasActions && (
-                    <td className={cn('text-right', stickyActions && STICKY_CELL)}>
+                    <td className={cn('relative text-right', stickyActions && STICKY_CELL) /* relative below 1280 (xl:sticky above): sr-only labels stay in this cell */}>
                       <div className={cn('flex items-center justify-end whitespace-nowrap', dense ? 'gap-0.5' : 'gap-2')}>
                         {actions!(row)}
                       </div>
