@@ -75,7 +75,7 @@ test('summary numbers, dashes for rates with nothing to divide by, and zero-even
   await expect(page.getByTestId('pan-value-bookingClicks')).toHaveText('20');
   await expect(page.getByTestId('pan-value-subscriptionClicks')).toHaveText('5');
   await expect(page.getByTestId('pan-value-purchases')).toHaveText('3');
-  await expect(page.getByTestId('pan-sub-purchases')).toHaveText('TZS 150,000');
+  await expect(page.getByTestId('pan-sub-purchases')).toHaveText('TSh 150,000');
   await expect(page.getByTestId('pan-value-uniqueViewers')).toHaveText('800');
   // A promotion with no events at all is still listed, with zeros and a dash (not 0%).
   const row = page.getByTestId('pan-row-p2');

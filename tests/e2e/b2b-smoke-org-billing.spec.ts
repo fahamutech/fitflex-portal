@@ -13,7 +13,7 @@ const todayEat = () => new Date(Date.now() + 3 * 3_600_000).toISOString().slice(
 test('overview shows balances, terms, contact and the latest invoices', async ({ page }) => {
   await page.goto('/org');
   await expect(page.getByRole('heading', { name: 'Billing' })).toBeVisible();
-  await expect(page.getByTestId('billing-balances')).toContainText('TZS 150,000');
+  await expect(page.getByTestId('billing-balances')).toContainText('TSh 150,000');
   await expect(page.getByTestId('billing-aging')).toBeVisible();
   await expect(page.getByText('Payment terms')).toBeVisible();
   await expect(page.getByText('Neema Finance')).toBeVisible();
@@ -49,7 +49,7 @@ test('payment notice: controls and request body', async ({ page }) => {
   await page.getByRole('button', { name: 'Pay', exact: true }).click();
   const form = page.getByTestId('payment-notice-form');
   await expect(page.getByTestId('payment-details')).toContainText('CRDB Bank');
-  for (const label of ['Amount paid (TZS)', 'Date paid', 'How', 'Bank or mobile-money reference', 'Note (optional)']) {
+  for (const label of ['Amount paid (TSh)', 'Date paid', 'How', 'Bank or mobile-money reference', 'Note (optional)']) {
     await expect(form.getByLabel(label, { exact: true })).toBeVisible();
   }
   await expect(form.getByText('Proof of payment (optional)')).toBeVisible();

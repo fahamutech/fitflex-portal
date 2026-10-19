@@ -35,21 +35,21 @@ test('gym owner sees their statements, how one was calculated and how it was pai
   await expect(page.getByTestId('statement-row-st-oct')).toContainText('October 2026');
   await expect(page.getByTestId('statement-row-st-oct')).toContainText('Being prepared');
   await expect(page.getByTestId('statement-row-st-oct')).toContainText('On hold');
-  await expect(page.getByTestId('statement-row-st-sep')).toContainText('TZS 101,500');
+  await expect(page.getByTestId('statement-row-st-sep')).toContainText('TSh 101,500');
 
   await page.getByTestId('statement-row-st-sep').click();
   await expect(page).toHaveURL(/statement=st-sep/);
-  await expect(page.getByTestId('statement-net')).toHaveText('TZS 101,500');
+  await expect(page.getByTestId('statement-net')).toHaveText('TSh 101,500');
   // The network adjustment is money taken off: shown with a minus sign.
-  await expect(page.getByText('−TZS 15,000').first()).toBeVisible();
+  await expect(page.getByText('−TSh 15,000').first()).toBeVisible();
   await expect(page.getByTestId('statement-reference')).toHaveText('MPESA-QK7H2L9');
   await expect(page.getByText('····4821')).toBeVisible();
   await expect(page.getByTestId('statement-lines')).toContainText('Sponsored');
   await expect(page.getByTestId('statement-adjustments')).toContainText('Visit voided after last month was paid');
-  await expect(page.getByTestId('statement-adjustments')).toContainText('−TZS 3,500');
+  await expect(page.getByTestId('statement-adjustments')).toContainText('−TSh 3,500');
 
   await page.getByTestId('statement-line-0').click();
-  await expect(page.getByText('Your rates: daily TZS 12,000 · weekly TZS 70,000 · monthly TZS 200,000')).toBeVisible();
+  await expect(page.getByText('Your rates: daily TSh 12,000 · weekly TSh 70,000 · monthly TSh 200,000')).toBeVisible();
   await expect(page.getByText('12 Sept').or(page.getByText('12 Sep'))).toBeVisible();
 
   await page.getByTestId('statement-back').click();

@@ -65,11 +65,11 @@ test('admin prepares a statement: adjustment, submit, and cannot approve their o
   await page.goto('/admin/settlements');
   await expect(page.getByTestId('settlement-table')).toContainText('Mikocheni Fitness');
   await expect(page.getByTestId('settlement-table')).toContainText('October 2026');
-  await expect(page.getByTestId('settlement-total')).toHaveText('TZS 105,000');
+  await expect(page.getByTestId('settlement-total')).toHaveText('TSh 105,000');
 
   await page.getByTestId('settlement-row-st-1').click();
   await expect(page).toHaveURL(/statement=st-1/);
-  await expect(page.getByTestId('settlement-net')).toHaveText('TZS 105,000');
+  await expect(page.getByTestId('settlement-net')).toHaveText('TSh 105,000');
   await expect(page.getByTestId('settlement-lines')).toContainText('Asha M');
   await expect(page.getByTestId('settlement-lines')).toContainText('Sponsored');
 
@@ -139,7 +139,7 @@ test('voiding takes two people: one requests with a reason, another confirms; am
   await setup(page, { id: 'admin-2', userType: 'admin', email: 'second@example.com' }, state);
 
   await page.goto('/admin/settlements');
-  await expect(page.getByTestId('settlement-clawbacks-pending')).toContainText('Kariakoo Gym −TZS 61,638');
+  await expect(page.getByTestId('settlement-clawbacks-pending')).toContainText('Kariakoo Gym −TSh 61,638');
   await expect(page.getByText('has a disputed or flagged visit that needs a decision first')).toBeVisible();
 
   await page.getByTestId('settlement-tab-submitted').click();

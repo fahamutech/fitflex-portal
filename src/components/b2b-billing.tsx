@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react';
 import { api, ApiError, B2BPassEntitlement, B2BProgram, B2BSponsorInvoice, B2BSponsorInvoiceLine } from '@/lib/api';
 import { Alert, Badge, Button, Spinner } from '@/components/shared';
+import { money } from '@/lib/admin-utils';
 import { useApp } from '../../app/providers';
 
 const ERRORS: Record<string, string> = {
@@ -34,7 +35,7 @@ const PASS_STATE: Record<string, string> = {
   active: 'Pass running',
 };
 const KIND: Record<string, string> = { prepaid: 'Flat fees', usage: 'Per use', fee: 'Platform fee', credit_note: 'Credit note', debit_note: 'Debit note' };
-const tzs = (n?: number | null) => (n == null ? '—' : `TZS ${n.toLocaleString('en-US')}`);
+const tzs = (n?: number | null) => (n == null ? '—' : money(n));
 /** This month and its neighbours as "YYYY-MM", in East Africa Time. */
 function months() {
   const eat = new Date(Date.now() + 3 * 3_600_000);

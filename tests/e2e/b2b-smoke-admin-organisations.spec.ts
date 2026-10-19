@@ -129,7 +129,7 @@ test.describe('programmes', () => {
     await expect(page.getByTestId('program-list')).toContainText('Safari Wellness 2026');
     await page.getByTestId('program-new').click();
     const form = page.getByTestId('program-form');
-    for (const label of ['Name', 'Type', 'Starts', 'Ends (optional)', 'Sponsor budget, TZS (optional)', 'Discount on pass prices, % (optional)', 'Who is eligible',
+    for (const label of ['Name', 'Type', 'Starts', 'Ends (optional)', 'Sponsor budget, TSh (optional)', 'Discount on pass prices, % (optional)', 'Who is eligible',
       'Only these beneficiary types (optional, comma-separated)', 'Description']) {
       await expect(form.getByLabel(label, { exact: true })).toBeVisible();
     }
@@ -137,7 +137,7 @@ test.describe('programmes', () => {
     await form.getByLabel('Type', { exact: true }).selectOption('fitness');
     await form.getByLabel('Starts', { exact: true }).fill('2026-11-01');
     await form.getByLabel('Ends (optional)', { exact: true }).fill('2027-01-31');
-    await form.getByLabel('Sponsor budget, TZS (optional)', { exact: true }).fill('2500000');
+    await form.getByLabel('Sponsor budget, TSh (optional)', { exact: true }).fill('2500000');
     await form.getByLabel('Discount on pass prices, % (optional)', { exact: true }).fill('12.5');
     await form.getByLabel('Who is eligible', { exact: true }).selectOption('groups');
     // Group checkboxes come from the organisation's beneficiaries.
@@ -238,7 +238,7 @@ test.describe('programmes', () => {
     await page.getByTestId('benefit-type').selectOption('sponsored_pass');
     await expect(form.getByLabel('Pass tier', { exact: true })).toBeVisible();
     await page.getByTestId('benefit-funding').selectOption('sponsor_fixed');
-    await form.getByLabel('Sponsor pays per person per month (TZS)', { exact: true }).fill('30000');
+    await form.getByLabel('Sponsor pays per person per month (TSh)', { exact: true }).fill('30000');
     await form.getByLabel('Pass tier', { exact: true }).selectOption('premium');
     await page.getByTestId('benefit-save').click();
     await expect.poll(() => mock.writes(/\/prog-1\/benefits$/).length).toBe(1);

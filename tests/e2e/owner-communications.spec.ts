@@ -86,7 +86,7 @@ test('an owner with two gyms opens a sent campaign, sees how it did, and uses it
   // A sent campaign: results in three groups, recipients with reasons.
   await page.getByTestId('campaign-cmp_sent').first().click();
   await expect(page.getByTestId('comms-detail')).toBeVisible();
-  await expect(page.getByTestId('result-revenue')).toContainText('TZS 1,920,000');
+  await expect(page.getByTestId('result-revenue')).toContainText('TSh 1,920,000');
   await expect(page.getByTestId('result-renewed')).toContainText('24');
   await expect(page.getByTestId('delivery')).toContainText('Account suspended');
   await expect(page.getByTestId('delivery')).toContainText('Not a member of this gym');
