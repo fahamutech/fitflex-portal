@@ -1,5 +1,5 @@
 'use client';
-import { Suspense, useCallback, useEffect, useRef, useState } from 'react';
+import { type ReactNode, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { ArrowLeft, ChevronRight, Copy, Receipt, RefreshCw } from 'lucide-react';
@@ -12,7 +12,7 @@ import {
 } from '@/lib/vendor';
 import {
   Alert, Badge, Button, Card, CardContent, CardHeader, Checkbox, EmptyState, ErrorState, Field, Input, PageHeader, Segmented, Select,
-  SkeletonCard, SkeletonTable, Spinner, Stat, Table, TBody, Td, Textarea, Th, THead, Tr, useToast,
+  SkeletonCard, SkeletonTable, Spinner, Table, TBody, Td, Textarea, Th, THead, Tr, useToast,
 } from '@/components/shared';
 import { Dialog, DialogFooter } from '@/components/dialog';
 import { useVendor } from '@/components/vendor-context';
@@ -40,6 +40,21 @@ function SaleBadges({ sale }: { sale: Pick<VendorSaleRow, 'status' | 'soldAt' | 
     </span>
   );
 }
+/**
+ * A summary tile that never cuts anything off (UAT D3): the label wraps, money may wrap between "TSh" and the
+ * figure but is never truncated. Tiles size to the space they have (list column next to the open sale), not to
+ * the viewport.
+ */
+function SummaryTile({ label, value, testId }: { label: string; value: ReactNode; testId?: string }) {
+  return (
+    <Card className="min-w-0 p-4">
+      <p className="text-sm font-medium text-[var(--color-fg-quaternary)] [overflow-wrap:anywhere]">{label}</p>
+      <p className="mt-1 text-xl font-semibold tracking-tight tabular-nums text-[var(--color-fg-primary)] [overflow-wrap:anywhere]" data-testid={testId}>{value}</p>
+    </Card>
+  );
+}
+const TILE_GRID = 'grid gap-3 grid-cols-[repeat(auto-fill,minmax(10.5rem,1fr))]';
+
 /** The total, struck through when voided (the badge says "Voided" in words too). */
 function Total({ sale }: { sale: Pick<VendorSaleRow, 'status' | 'totalTzs'> }) {
   return <span className={`tabular-nums ${sale.status === 'voided' ? 'line-through text-[var(--color-fg-quaternary)]' : ''}`}>{money(sale.totalTzs)}</span>;
@@ -202,18 +217,18 @@ function SalesInner() {
 
       {summary && sales != null && !failed && (
         <section aria-label={t('vendor.sales.title')} className="space-y-3" data-testid="sales-summary">
-          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-            <Stat label={t('vendor.sales.count')} value={<span data-testid="sales-summary-count">{summary.count}</span>} />
-            <Stat label={t('vendor.sales.total')} value={<span data-testid="sales-summary-total">{money(summary.totalTzs)}</span>} />
-            {typeof summary.discountTzs === 'number' && <Stat label={t('vendor.pos.discounts')} value={<span data-testid="sales-summary-discounts">{money(summary.discountTzs)}</span>} />}
-            {typeof summary.overrideCount === 'number' && <Stat label={t('vendor.sales.overrideCount')} value={<span data-testid="sales-summary-overrides">{summary.overrideCount}</span>} />}
-            {typeof summary.lateCount === 'number' && <Stat label={t('vendor.sales.lateCount')} value={<span data-testid="sales-summary-late">{summary.lateCount}</span>} />}
+          <div className={TILE_GRID}>
+            <SummaryTile label={t('vendor.sales.count')} value={summary.count} testId="sales-summary-count" />
+            <SummaryTile label={t('vendor.sales.total')} value={money(summary.totalTzs)} testId="sales-summary-total" />
+            {typeof summary.discountTzs === 'number' && <SummaryTile label={t('vendor.pos.discounts')} value={money(summary.discountTzs)} testId="sales-summary-discounts" />}
+            {typeof summary.overrideCount === 'number' && <SummaryTile label={t('vendor.sales.overrideCount')} value={summary.overrideCount} testId="sales-summary-overrides" />}
+            {typeof summary.lateCount === 'number' && <SummaryTile label={t('vendor.sales.lateCount')} value={summary.lateCount} testId="sales-summary-late" />}
           </div>
           {summary.byMethod?.length > 0 && (
             <div>
               <h2 className="mb-2 text-sm font-semibold text-[var(--color-fg-secondary)]">{t('vendor.sales.byMethod')}</h2>
-              <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4" data-testid="sales-by-method">
-                {summary.byMethod.map(m => <Stat key={m.method} label={saleMethodLabel(m.method, t)} value={money(m.amountTzs)} />)}
+              <div className={TILE_GRID} data-testid="sales-by-method">
+                {summary.byMethod.map(m => <SummaryTile key={m.method} label={saleMethodLabel(m.method, t)} value={money(m.amountTzs)} testId={`sales-by-method-${m.method}`} />)}
               </div>
             </div>
           )}
@@ -313,6 +328,8 @@ function SaleDetail({ id, onBack, onUpdated }: { id: string; onBack: () => void;
   const [reason, setReason] = useState('');
   const [reasonError, setReasonError] = useState<string | null>(null);
   const [voidError, setVoidError] = useState<string | null>(null);
+  /** Why the sale is shown again after a refused void (it was reloaded); stays until another sale opens. */
+  const [notice, setNotice] = useState<MessageKey | null>(null);
   const [busy, setBusy] = useState(false);
   const headingRef = useRef<HTMLHeadingElement>(null);
 
@@ -330,7 +347,7 @@ function SaleDetail({ id, onBack, onUpdated }: { id: string; onBack: () => void;
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token, id]);
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => { setNotice(null); void load(); }, [load]);
 
   const business = vendor.me?.businessName || t('vendor.shell.unnamed');
 
@@ -358,6 +375,8 @@ function SaleDetail({ id, onBack, onUpdated }: { id: string; onBack: () => void;
       if (code === 'reason_required' || code === 'reason_too_long') { setReasonError(t('vendor.sales.voidReasonMissing')); return; }
       setVoidOpen(false);
       if (code === 'already_voided') {
+        // Say so in the panel too (UAT): the reload alone looks like nothing happened.
+        setNotice('vendor.sales.alreadyVoided');
         toast.info(t('vendor.sales.alreadyVoided'));
         try { const fresh = await api.vendorSale(token, sale.id); setSale(fresh.sale); onUpdated(fresh.sale); } catch { /* the toast still stands */ }
       } else if (code === 'has_refunds') {
@@ -408,6 +427,8 @@ function SaleDetail({ id, onBack, onUpdated }: { id: string; onBack: () => void;
           {s.createdBy?.name && <p className="text-sm text-[var(--color-fg-tertiary)]">{fmt(t('vendor.pos.servedBy'), { name: s.createdBy.name })}</p>}
         </CardContent>
       </Card>
+
+      {notice && <div data-testid="sale-notice"><Alert tone="warning">{t(notice)}</Alert></div>}
 
       {s.status === 'voided' && (
         <div data-testid="sale-voided">
