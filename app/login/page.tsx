@@ -165,11 +165,8 @@ export default function LoginPage() {
   return (
     <div className="flex min-h-[calc(100vh-4rem)] items-center justify-center p-4">
       <div className="w-full max-w-sm">
-        {/* Brand mark */}
+        {/* No brand mark here: the login header already carries the logo (spec §12, F-7). */}
         <div className="mb-8 text-center">
-          <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-[var(--radius-xl)] bg-[var(--color-brand-600)] shadow-[var(--shadow-lg)]">
-            <span className="text-2xl font-bold text-white">FF</span>
-          </div>
           <h1 className="text-2xl font-semibold text-[var(--color-fg-primary)]">{t('login.heading')}</h1>
           <p className="mt-1.5 text-sm text-[var(--color-fg-quaternary)]">
             {t('login.assignedAccount')}
