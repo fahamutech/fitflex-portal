@@ -235,11 +235,48 @@ test.describe('Payments: second approver', () => {
     await expect(two.getByText(/Change this payment from Approved to Rejected/)).toBeVisible();
     await expect(two.getByText(/Money never arrived/).first()).toBeVisible();
     await two.getByTestId('confirm-change-submit').click();
-    await expect.poll(() => twoCalls.some(c => c.path.endsWith('/change-request/confirm'))).toBe(true);
+    await expect.poll(() => twoCalls.find(c => c.path.endsWith('/change-request/confirm'))?.body).toEqual({}); // no amount: not a shop order
     await expect(two.getByText('Change confirmed. The payment is now Rejected.')).toBeVisible();
     await expect(two.getByTestId('payment-stage')).toHaveCount(0);
     expect(twoErrors).toEqual([]);
     await two.close();
+  });
+
+  test('confirming a shop-order payment as approved asks for the amount received', async ({ page }) => {
+    const errors = watchErrors(page);
+    await signIn(page, 'admin-2');
+    let attempts = 0;
+    const calls = await mockApi(page, ({ method, path }) => {
+      if (method === 'GET' && path === '/admin/payment-requests') {
+        return {
+          json: [{
+            ...basePayment, id: 'pay-ord', subscriptionId: null, orderId: 'ord-1', subscription: null, status: 'rejected', reference: 'MPESA77',
+            decidedAt: '2026-10-19T10:00:00.000Z',
+            changeRequestedStatus: 'approved', changeRequestedBy: 'admin-1', changeRequestedAt: '2026-10-19T11:00:00.000Z', changeRequestReason: 'Money did arrive',
+            secondApproverRequired: true, approvalStage: 'change_requested', approveNotBy: null, confirmChangeNotBy: 'admin-1',
+          }],
+        };
+      }
+      if (method === 'POST' && path === '/admin/payment-requests/pay-ord/change-request/confirm') {
+        attempts += 1;
+        if (attempts === 1) return { status: 409, json: { error: 'amount_mismatch', expectedTzs: 30000 } };
+        return { json: { ...basePayment, id: 'pay-ord', status: 'approved' } };
+      }
+      return null;
+    });
+    await page.goto('/admin/payments');
+    await page.getByRole('button', { name: 'All', exact: true }).click();
+    await page.getByTestId('payment-confirm-change').click();
+    await expect(page.getByTestId('confirm-change-submit')).toBeDisabled(); // amount required
+    await page.getByTestId('confirm-change-amount').fill('25000');
+    await page.getByTestId('confirm-change-submit').click();
+    await expect(page.getByText(/The amount received does not match this payment \(.*30,000.*\)\. Check what arrived\./)).toBeVisible();
+    await page.getByTestId('confirm-change-amount').fill('30000');
+    await page.getByTestId('confirm-change-submit').click();
+    await expect(page.getByText('Change confirmed. The payment is now Approved.')).toBeVisible();
+    const bodies = calls.filter(c => c.path.endsWith('/change-request/confirm')).map(c => c.body);
+    expect(bodies).toEqual([{ amountTzs: 25000 }, { amountTzs: 30000 }]);
+    expect(errors).toEqual([]);
   });
 
   test('cancel a change request; confirm errors are mapped; Swahili stage text', async ({ page }) => {
@@ -344,8 +381,29 @@ test.describe('Refunds: second approver', () => {
     await paid.nth(1).click();
     await page.getByPlaceholder('e.g. MPESA QX12AB34').fill('MPESA999');
     await page.getByTestId('refund-submit').click();
-    await expect(page.getByText('You raised this refund. A different admin must record the payment.')).toBeVisible();
+    await expect(page.getByText('You started this refund. A different admin must record the payment.')).toBeVisible();
     expect(calls.filter(c => c.path === '/admin/refunds/r-2/paid')).toHaveLength(0);
     expect(errors).toEqual([]);
+  });
+
+  test('a policy-approved refund the admin started cannot be marked paid by them', async ({ page }) => {
+    await signIn(page, 'admin-1');
+    await mockApi(page, ({ method, path }) => {
+      if (method === 'GET' && path === '/admin/refunds') {
+        return {
+          json: {
+            refunds: [
+              { ...baseRefund, id: 'r-9', kind: 'trainer_booking', status: 'approved', requestedBy: 'admin-1', requestedRole: 'admin',
+                decidedBy: 'policy', decidedAt: '2026-10-19T09:00:00.000Z',
+                secondApproverRequired: true, approvalStage: 'awaiting_payment', approveNotBy: null, payNotBy: 'admin-1' },
+            ],
+          },
+        };
+      }
+      return null;
+    });
+    await page.goto('/admin/refunds');
+    await expect(page.getByTestId('refund-paid')).toBeDisabled();
+    await expect(page.getByTestId('refund-paid-blocked')).toHaveAttribute('title', 'You started this refund. A different admin must record the payment.');
   });
 });

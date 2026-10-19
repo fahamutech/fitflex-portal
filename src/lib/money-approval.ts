@@ -35,7 +35,7 @@ const KNOWN_ERRORS = [
   // change request
   'invalid_status', 'reason_required', 'no_change', 'not_decided', 'change_already_requested', 'payment_already_confirmed',
   // confirm / cancel
-  'cannot_confirm_own_request', 'change_not_requested', 'reference_already_used',
+  'cannot_confirm_own_request', 'change_not_requested', 'reference_already_used', 'amount_required', 'amount_mismatch',
   // decision / update with the flag on
   'verification_required', 'cannot_approve_own_verification', 'reference_differs_from_verification', 'change_requires_confirmation',
   // refunds with the flag on
@@ -61,6 +61,12 @@ export const FLAG_ON_ONLY_ERRORS = [
  * two-admin row (secondApproverRequired), so the flag-off page is unchanged.
  */
 const TWO_ADMIN_ROW_ERRORS = ['reference_already_used'];
+
+/** The amount the server expected, when it answers amount_mismatch with one. */
+export const expectedAmount = (err: unknown): number | null => {
+  const v = (err as { body?: { expectedTzs?: number } } | null)?.body?.expectedTzs;
+  return typeof v === 'number' ? v : null;
+};
 
 export function moneyErrorKey(err: unknown): MessageKey {
   const code = errorCode(err);

@@ -9,7 +9,7 @@ import { Dialog, DialogFooter, ConfirmDialog } from '@/components/dialog';
 import { money, statusTone, statusLabel, formatDateTime } from '@/lib/admin-utils';
 import { fill } from '@/components/communication-shared';
 import {
-  DECIDED_STATUSES, PAYMENT_STATUSES, PAYMENT_STAGE_TONE, flagOnErrorKey, moneyErrorKey, paymentStageKey, paymentStatusKey, whenText,
+  DECIDED_STATUSES, PAYMENT_STATUSES, PAYMENT_STAGE_TONE, errorCode, expectedAmount, flagOnErrorKey, moneyErrorKey, paymentStageKey, paymentStatusKey, whenText,
 } from '@/lib/money-approval';
 
 type PaymentFilter = 'pending' | 'approved' | 'rejected' | 'cancelled' | 'all';
@@ -76,6 +76,8 @@ export default function PaymentsPage() {
   const [confirmTarget, setConfirmTarget] = useState<PaymentRequest | null>(null);
   const [cancelTarget, setCancelTarget] = useState<PaymentRequest | null>(null);
   const [cancelReason, setCancelReason] = useState('');
+  // Confirming a shop-order payment as approved needs the amount actually received.
+  const [confirmAmount, setConfirmAmount] = useState('');
   const [dialogError, setDialogError] = useState<string | null>(null);
 
   const load = async () => {
@@ -159,7 +161,8 @@ export default function PaymentsPage() {
       setNotice(success(updated));
       await load();
     } catch (e) {
-      setDialogError(t(moneyErrorKey(e)));
+      const expected = errorCode(e) === 'amount_mismatch' ? expectedAmount(e) : null;
+      setDialogError(expected != null ? fill(t('money2.err.amount_mismatch_expected'), { amount: money(expected) }) : t(moneyErrorKey(e)));
     } finally {
       setBusy(false);
     }
@@ -176,7 +179,7 @@ export default function PaymentsPage() {
     () => t('money2.notice.changeRequested'),
   );
   const handleConfirmChange = () => confirmTarget && runApproval(
-    () => api.confirmPaymentChange(token!, confirmTarget.id),
+    () => api.confirmPaymentChange(token!, confirmTarget.id, needsAmount(confirmTarget) ? { amountTzs: Number(confirmAmount) } : {}),
     () => setConfirmTarget(null),
     (p) => fill(t('money2.notice.changeConfirmed'), { status: statusText(p.status) }),
   );
@@ -191,6 +194,7 @@ export default function PaymentsPage() {
   const statusText = (s: string | null | undefined) =>
     s && (PAYMENT_STATUSES as string[]).includes(s) ? t(paymentStatusKey(s as PaymentStatusValue)) : (s || '—');
   const who = (id: string | null | undefined) => (id && id === user.id ? t('money2.you') : fill(t('money2.otherAdmin'), { id: id || '—' }));
+  const needsAmount = (p: PaymentRequest | null) => !!p?.orderId && p.changeRequestedStatus === 'approved';
   const isDecided = (p: PaymentRequest) => (DECIDED_STATUSES as string[]).includes(p.status);
   /** Why Approve is not offered to this admin on a two-admin payment, or null. */
   const approveBlocked = (p: PaymentRequest): string | null => {
@@ -355,7 +359,7 @@ export default function PaymentsPage() {
                           </Button>
                         </span>
                       ) : (
-                        <Button variant="ghost" size="sm" data-testid="payment-confirm-change" onClick={() => { setConfirmTarget(payment); setDialogError(null); setNotice(null); }}>
+                        <Button variant="ghost" size="sm" data-testid="payment-confirm-change" onClick={() => { setConfirmTarget(payment); setConfirmAmount(''); setDialogError(null); setNotice(null); }}>
                           {t('money2.confirmChange')}
                         </Button>
                       )}
@@ -509,10 +513,15 @@ export default function PaymentsPage() {
             </p>
           )}
           {dialogError && <Alert tone="error">{dialogError}</Alert>}
+          {needsAmount(confirmTarget) && (
+            <Field label={t('money2.amountReceived')} hint={t('money2.amountReceivedHint')} required>
+              <input className="ui-input" inputMode="numeric" data-testid="confirm-change-amount" value={confirmAmount} onChange={e => setConfirmAmount(e.target.value.replace(/[^0-9]/g, ''))} />
+            </Field>
+          )}
         </div>
         <DialogFooter>
           <Button variant="secondary" size="md" onClick={() => setConfirmTarget(null)} disabled={busy}>{t('money2.close')}</Button>
-          <Button variant="primary" size="md" onClick={handleConfirmChange} disabled={busy} data-testid="confirm-change-submit">{busy ? t('money2.saving') : t('money2.confirmChange')}</Button>
+          <Button variant="primary" size="md" onClick={handleConfirmChange} disabled={busy || (needsAmount(confirmTarget) && !(Number(confirmAmount) > 0))} data-testid="confirm-change-submit">{busy ? t('money2.saving') : t('money2.confirmChange')}</Button>
         </DialogFooter>
       </Dialog>
 

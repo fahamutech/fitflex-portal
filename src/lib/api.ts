@@ -900,8 +900,9 @@ export const api = {
     request<PaymentRequest>(`/admin/payment-requests/${encodeURIComponent(id)}/verify`, { method: 'POST', body: JSON.stringify(body) }, token),
   requestPaymentChange: (token: string, id: string, body: { status: PaymentStatusValue; reason: string }) =>
     request<PaymentRequest>(`/admin/payment-requests/${encodeURIComponent(id)}/change-request`, { method: 'POST', body: JSON.stringify(body) }, token),
-  confirmPaymentChange: (token: string, id: string) =>
-    request<PaymentRequest>(`/admin/payment-requests/${encodeURIComponent(id)}/change-request/confirm`, { method: 'POST', body: JSON.stringify({}) }, token),
+  /** amountTzs (the amount actually received) is required when a shop-order payment becomes approved. */
+  confirmPaymentChange: (token: string, id: string, body: { amountTzs?: number } = {}) =>
+    request<PaymentRequest>(`/admin/payment-requests/${encodeURIComponent(id)}/change-request/confirm`, { method: 'POST', body: JSON.stringify(body) }, token),
   cancelPaymentChange: (token: string, id: string, body: { reason?: string }) =>
     request<PaymentRequest>(`/admin/payment-requests/${encodeURIComponent(id)}/change-request/cancel`, { method: 'POST', body: JSON.stringify(body) }, token),
   members: (token: string) => request<MemberSummary[]>('/admin/members', {}, token),

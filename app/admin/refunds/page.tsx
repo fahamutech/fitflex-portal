@@ -102,7 +102,9 @@ export default function RefundsPage() {
 
   // MONEY_SECOND_APPROVER on: the admin who raised a refund doesn't approve it; the approver doesn't pay it.
   const approveBlocked = (r: Refund) => (r.secondApproverRequired && r.approveNotBy && r.approveNotBy === user.id ? t('money2.refundApproveBlockedOwn') : null);
-  const payBlocked = (r: Refund) => (r.secondApproverRequired && r.payNotBy && r.payNotBy === user.id ? t('money2.refundPayBlockedOwn') : null);
+  // payNotBy is the approver, or (policy-approved refunds) the admin who started it.
+  const payBlocked = (r: Refund) => (r.secondApproverRequired && r.payNotBy && r.payNotBy === user.id
+    ? t(r.decidedBy === 'policy' ? 'money2.refundPayBlockedStarted' : 'money2.refundPayBlockedOwn') : null);
 
   const shown = refunds.filter(r => filter === 'all' || r.status === filter);
   const count = (s: RefundStatus) => refunds.filter(r => r.status === s).length;
