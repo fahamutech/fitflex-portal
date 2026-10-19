@@ -2,6 +2,9 @@ import { expect, test } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
 
 const FLUTTER_WEB = process.env.FITFLEX_FLUTTER_WEB_URL || 'http://127.0.0.1:8082';
+
+// Needs a Flutter web build of fitflexmobile served at FITFLEX_FLUTTER_WEB_URL; the portal suite does not start one.
+test.skip(!process.env.FITFLEX_FLUTTER_WEB_URL, 'set FITFLEX_FLUTTER_WEB_URL to a running Flutter web build');
 const EVIDENCE = '/Users/joshuamshana/FitFlexPlatform/FeedbackDocs/uat-evidence-27.08.26';
 
 async function enableSemantics(page: import('@playwright/test').Page) {
