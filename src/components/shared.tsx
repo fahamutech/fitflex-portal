@@ -341,7 +341,7 @@ export function Table({ className, wrapperClassName, children, 'aria-label': ari
       role={ariaLabel ? 'region' : undefined}
       aria-label={ariaLabel}
       tabIndex={0}
-      className={cn('overflow-x-auto rounded-[var(--radius-xl)] border border-[var(--color-border-secondary)]', wrapperClassName)}
+      className={cn('relative overflow-x-auto rounded-[var(--radius-xl)] border border-[var(--color-border-secondary)]', wrapperClassName)}
     >
       <table {...rest} className={cn('ui-table min-w-full', className)}>{children}</table>
     </div>

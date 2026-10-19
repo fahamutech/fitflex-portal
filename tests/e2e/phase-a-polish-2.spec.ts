@@ -233,7 +233,8 @@ test.describe('Payments: toolbar and actions at narrow widths (5, 6)', () => {
       await page.getByRole('button', { name: 'Yote', exact: true }).click();
       const row = page.locator('tbody tr').filter({ hasText: 'Asha Mwanachama Mrefu' });
       const actions = row.locator('td').last();
-      await expect(actions).toHaveCSS('position', 'static');
+      // Not pinned (relative only, so its sr-only labels stay inside the table's scroll box).
+      await expect(actions).toHaveCSS('position', 'relative');
       // The member cell is not covered by a pinned column.
       const member = (await row.locator('td').first().boundingBox())!;
       expect(member.width).toBeGreaterThanOrEqual(120);
@@ -402,4 +403,26 @@ test.describe('Scan: already checked in is information, not success (11)', () =>
     await page.getByTestId('manual-submit').click();
     await expect(page.getByTestId('scan-result')).toHaveAttribute('data-tone', 'info');
   });
+});
+
+test.describe('Payments: the page never scrolls sideways below 1280px (regression from #110)', () => {
+  // The icon-only Verify keeps its word as an sr-only (absolutely positioned) label; with the actions no longer
+  // pinned below 1280px it escaped the table's scroll box and widened the page.
+  for (const locale of ['en', 'sw'] as const) {
+    for (const width of [390, 768, 1024]) {
+      test(`${locale} at ${width}px`, async ({ page }) => {
+        await page.setViewportSize({ width, height: 900 });
+        await signInAdmin(page, 'admin-1', locale);
+        await mockApi(page, ({ method, path }) => (method === 'GET' && path === '/admin/payment-requests' ? { json: ROWS_LONG } : null));
+        await page.goto('/admin/payments');
+        await expect(page.getByTestId('payment-verify')).toBeAttached();
+        const { scrollWidth, innerWidth } = await page.evaluate(() => ({ scrollWidth: document.documentElement.scrollWidth, innerWidth: window.innerWidth }));
+        expect(scrollWidth).toBe(innerWidth);
+        // With every row (incl. decided ones) too.
+        await page.getByRole('group').getByRole('button').nth(4).click();
+        await expect(page.locator('tbody tr')).toHaveCount(2);
+        expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(innerWidth);
+      });
+    }
+  }
 });
