@@ -69,6 +69,17 @@ export const expectedAmount = (err: unknown): number | null => {
   return typeof v === 'number' ? v : null;
 };
 
+/**
+ * Trainer session outcomes (functions#231): approving a booking group's payment is refused with
+ * 409 group_slot_rebooked when a rejected session's slot was booked by someone else since.
+ * Returns the booking ids the server listed (possibly none), or null for any other error.
+ */
+export const rebookedBookingIds = (err: unknown): string[] | null => {
+  if (errorCode(err) !== 'group_slot_rebooked') return null;
+  const ids = (err as { body?: { bookingIds?: unknown } } | null)?.body?.bookingIds;
+  return Array.isArray(ids) ? ids.filter((x): x is string => typeof x === 'string' && x.length > 0) : [];
+};
+
 export function moneyErrorKey(err: unknown): MessageKey {
   const code = errorCode(err);
   return (KNOWN_ERRORS.includes(code) ? `money2.err.${code}` : 'money2.err.generic') as MessageKey;
