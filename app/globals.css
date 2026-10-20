@@ -750,8 +750,9 @@ body {
   background: linear-gradient(90deg, rgb(var(--hero-scrim-rgb) / var(--hero-scrim-text)) 0%, rgb(var(--hero-scrim-rgb) / 0.35) 100%);
 }
 .banner-slide__chip {
-  position: absolute; top: 16px; left: 16px; max-width: calc(100% - 32px);
-  padding: 4px 10px; border-radius: 9999px;
+  /* In the flow, above the text (not over it): the slide grows instead of the chip covering the headline (QA1 #1). */
+  position: static; align-self: flex-start; margin-bottom: auto; max-width: 100%;
+  padding: 4px 10px; border-radius: 12px;
   background: rgb(var(--hero-scrim-rgb) / 0.75); color: white;   /* 9.68:1 over a white photo (spec §11.1) */
   font-size: 12px; line-height: 16px; font-weight: 600;
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;

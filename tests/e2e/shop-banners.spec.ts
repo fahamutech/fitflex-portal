@@ -71,7 +71,7 @@ const ITEMS = () => [
   banner({ id: 'bn_mine', origin: 'staff', vendorId: null, vendorName: null, createdBy: 'admin-x', submittedBy: 'admin-x', ownItem: true, allowedActions: ['edit', 'image', 'withdraw'], headlineLead: bi('Shop the', 'Nunua'), headlineAccent: bi('new season', 'msimu mpya') }),
   banner({ id: 'bn_old', status: 'rejected', effectiveStatus: 'rejected', statusReason: 'image', statusReasonNote: 'Blurred edges.', allowedActions: [], expiresAt: null }),
   // Sent later but expires sooner: listed first in Requests.
-  banner({ id: 'bn_soon', expiresAt: at(20), submittedAt: at(-1), headlineLead: bi('Last chance for', 'Nafasi ya mwisho kwa'), headlineAccent: bi('yoga mats', 'mikeka ya yoga') }),
+  banner({ id: 'bn_soon', expiresAt: at(20.5), submittedAt: at(-1), headlineLead: bi('Last chance for', 'Nafasi ya mwisho kwa'), headlineAccent: bi('yoga mats', 'mikeka ya yoga') }),
 ];
 
 async function signIn(page: Page, user: Json, locale: 'en' | 'sw' = 'en') {
@@ -119,7 +119,7 @@ function adminRoutes(items: Json[], extra: Array<[string, RegExp, Handler]> = []
     ...extra,
     ['GET', /^\/admin\/shop-merch$/, () => ({ json: { items, total: items.length, nextCursor: null, confirmation: CONFIRMATION } })],
     ['GET', /^\/admin\/shop-banners\/([^/]+)\/image$/, photo],
-    ['GET', /^\/admin\/shop-banners\/([^/]+)$/, (_r, _c, m) => (find(m[1]) ? { json: { banner: find(m[1]), history: [{ id: 1, action: 'shop_banner.submitted', actor: 'usr_vendor', actorName: 'Rehema', at: at(-2) }] } } : { status: 404, json: { error: 'banner_not_found' } })],
+    ['GET', /^\/admin\/shop-banners\/([^/]+)$/, (_r, _c, m) => (find(m[1]) ? { json: { banner: find(m[1]), history: [{ id: 1, action: 'shop_banner.submitted', actor: 'usr_vendor', actorName: 'Rehema', at: at(-2) }, { id: 2, action: 'shop_banner.image_published', actor: 'admin-y', actorName: 'Yusuf', at: at(-1) }, { id: 3, action: 'shop_banner.public_files_orphaned', actor: 'admin-y', actorName: 'Yusuf', at: at(-1) }, { id: 4, action: 'shop_banner.something_new', actor: 'admin-y', actorName: 'Yusuf', at: at(-1) }] } } : { status: 404, json: { error: 'banner_not_found' } })],
     ['POST', /^\/admin\/shop-banners\/([^/]+)\/approve$/, (_r, c, m) => { Object.assign(find(m[1])!, { status: 'approved', effectiveStatus: 'approved', allowedActions: ['end', 'position'], approvedBy: 'admin-x' }); return { json: { banner: find(m[1]) } }; }],
     ['POST', /^\/admin\/shop-banners\/([^/]+)\/reject$/, (_r, c, m) => { Object.assign(find(m[1])!, { status: 'rejected', effectiveStatus: 'rejected', statusReason: c.body?.code, statusReasonNote: c.body?.note ?? null, allowedActions: [] }); return { json: { banner: find(m[1]) } }; }],
     ['POST', /^\/admin\/shop-banners\/([^/]+)\/end$/, (_r, c, m) => { Object.assign(find(m[1])!, { status: 'ended', effectiveStatus: 'ended', statusReason: 'ended_by_fitflex', statusReasonNote: c.body?.note, allowedActions: [] }); return { json: { banner: find(m[1]) } }; }],
@@ -149,9 +149,17 @@ test.describe('admin merch queue', () => {
     await nav(page).getByRole('link', { name: 'Banners & flash sales' }).click();
     await expect(page).toHaveURL(/\/admin\/shop-merch\/?/);
     await expect(page.getByTestId('merch-count-requests')).toHaveText('3');
-    // Sorted by expiresAt, soonest first (review #10); under a day: "Expires in 1 day" (singular key).
+    // Sorted by expiresAt, soonest first (review #10); under a day in hours, under 72 h in days (QA1 #5).
     await expect(page.getByTestId('merch-table').locator('tbody tr').first()).toHaveAttribute('data-testid', 'merch-row-bn_soon');
-    await expect(page.getByTestId('merch-expires-bn_soon')).toHaveText('Expires in 1 day');
+    await expect(page.getByTestId('merch-expires-bn_soon')).toHaveText('Expires in 20 hours');
+    await expect(page.getByTestId('merch-expires-bn_1')).toHaveText('Expires in 1 day');
+    // Sent column, type filter and search (QA1 #6).
+    await expect(page.getByTestId('merch-row-bn_soon')).toContainText('1 hour ago');
+    await expect(page.getByTestId('merch-type-filter').getByRole('button', { name: 'All' })).toHaveAttribute('aria-pressed', 'true');
+    await page.getByTestId('merch-search').fill('yoga');
+    await expect(page.getByTestId('merch-row-bn_soon')).toBeVisible();
+    await expect(page.getByTestId('merch-row-bn_1')).toHaveCount(0);
+    await page.getByTestId('merch-search').fill('');
     await expect(page.getByTestId('merch-count-live')).toHaveText('1');
     await expect(page.getByTestId('merch-count-closed')).toHaveText('1');
     await expect(page.getByTestId('merch-count-drafts')).toHaveText('0');
@@ -180,9 +188,37 @@ test.describe('admin merch queue', () => {
     await expect(detail.getByTestId('merch-confirmation-version')).toHaveText('2026-10-20.draft1');
     await expect(detail.getByTestId('merch-consent-ref')).toHaveText('MR-2026-007');
     await expect(detail.getByTestId('merch-history')).toContainText('Sent for approval');
+    // Every event is labelled (QA1 #2), unknown ones too, with the person's name.
+    await expect(detail.getByTestId('merch-history')).toContainText('Photo published');
+    await expect(detail.getByTestId('merch-history')).toContainText('Public photo files were not used (recorded)');
+    await expect(detail.getByTestId('merch-history')).toContainText('Other change');
+    await expect(detail.getByTestId('merch-history')).not.toContainText('something');
+    await expect(detail.getByTestId('merch-history')).toContainText('Yusuf');
     // The private photo is fetched with the session (no public copy before approval).
     expect(only(calls, 'GET', '/admin/shop-banners/bn_1/image').length).toBeGreaterThan(0);
     expect(calls.outside).toEqual([]);
+  });
+
+  test('QA1: SW phone preview chip sits above the headline; store target shows the store name; 375 px queue is cards', async ({ page }) => {
+    await signIn(page, SUPER, 'sw');
+    const items = [banner({ target: { type: 'vendor_store', value: 'usr_vendor' }, targetName: null, vendorName: 'FitFlex Performance Store Dar es Salaam' })];
+    await mockApi(page, adminRoutes(items));
+    await page.goto('/admin/shop-merch/?item=bn_1');
+    const phone = page.getByTestId('merch-detail').getByTestId('banner-preview-phone');
+    for (const theme of ['Mwanga', 'Giza']) {
+      await page.getByTestId('banner-preview-theme').getByRole('button', { name: theme }).click();
+      const chip = await phone.getByTestId('banner-preview-from').boundingBox();
+      const head = await phone.getByTestId('banner-preview-headline').boundingBox();
+      expect(chip && head && chip.y + chip.height <= head.y + 0.5).toBeTruthy();
+    }
+    await expect(page.getByTestId('merch-target')).toHaveText('Duka la muuzaji: FitFlex Performance Store Dar es Salaam');
+    await page.setViewportSize({ width: 375, height: 812 });
+    await page.goto('/admin/shop-merch/');
+    await expect(page.getByTestId('merch-cards')).toBeVisible();
+    await expect(page.getByTestId('merch-table')).toBeHidden();
+    await expect(page.getByTestId('merch-card-bn_1')).toContainText('Lilitumwa');
+    await page.getByTestId('merch-card-bn_1').click();
+    await expect(page).toHaveURL(/item=bn_1/);
   });
 
   test('approve needs all three checks and sends them; the item moves to Scheduled', async ({ page }) => {
@@ -636,12 +672,41 @@ test.describe('vendor banners', () => {
     await expect(page.getByTestId('merch-propose')).toBeDisabled();
   });
 
-  test('a business not yet approved sees "Available once your business is approved"', async ({ page }) => {
+  test('a business not yet approved: spec copy + Verification centre, the list without Edit/Send, no Propose', async ({ page }) => {
     await signIn(page, VENDOR);
-    await mockApi(page, vendorRoutes([], [['GET', /^\/vendor\/me$/, () => ({ json: me({ approvalStatus: 'pending_approval' }) })]], { canPropose: false, reason: 'vendor_not_approved' }));
+    const items = [vendorView({ id: 'bn_d', status: 'draft', effectiveStatus: 'draft', allowedActions: ['edit', 'image', 'submit', 'withdraw'], expiresAt: null })];
+    await mockApi(page, vendorRoutes(items, [['GET', /^\/vendor\/me$/, () => ({ json: me({ approvalStatus: 'pending_approval' }) })]], { canPropose: false, reason: 'vendor_not_approved' }));
     await page.goto('/vendor/promotions/');
-    await expect(page.getByText('Available once your business is approved')).toBeVisible();
+    await expect(page.getByTestId('merch-pending-vendor')).toContainText('Available once your business is approved');
+    await expect(page.getByTestId('merch-pending-vendor')).toContainText('You can propose banners and flash sales after FitFlex approves your business.');
+    await expect(page.getByTestId('merch-pending-verification')).toHaveText('Open the Verification centre in the FitFlex app to finish your business details.');
     await expect(page.getByTestId('merch-propose')).toHaveCount(0);
+    await expect(page.getByTestId('banner-card-bn_d')).toBeVisible();
+    await expect(page.getByTestId('banner-edit-bn_d')).toHaveCount(0);
+    await expect(page.getByTestId('banner-submit-bn_d')).toHaveCount(0);
+    await expect(page.getByTestId('banner-withdraw-bn_d')).toBeVisible();
+  });
+
+  test('suspended staff: the suspended alert and no Propose', async ({ page }) => {
+    await signIn(page, { id: 'usr_staff', userType: 'vendor_staff', vendorId: 'usr_vendor', displayName: 'Juma' });
+    await mockApi(page, vendorRoutes([vendorView()], [['GET', /^\/vendor\/me$/, () => ({ json: me({ userType: 'vendor_staff', permissions: ['products'] }) })]], { canPropose: false, reason: 'vendor_suspended' }));
+    await page.goto('/vendor/promotions/');
+    await expect(page.getByText('Your account is suspended.')).toBeVisible();
+    await expect(page.getByTestId('merch-propose')).toHaveCount(0);
+    await expect(page.getByTestId('banner-edit-bn_1')).toHaveCount(0);
+  });
+
+  test('ended card uses endedAt; rejected without a note shows the category alone; /vendor/merch without ?item opens the list', async ({ page }) => {
+    await signIn(page, VENDOR);
+    const endedAt = '2026-10-21T09:00:00.000Z';
+    await mockApi(page, vendorRoutes([
+      vendorView({ id: 'bn_end', status: 'ended', effectiveStatus: 'ended', statusReason: 'ended_by_vendor', endedAt, endsAt: '2026-10-30T09:00:00.000Z', allowedActions: [], expiresAt: null }),
+      vendorView({ id: 'bn_rej', status: 'rejected', effectiveStatus: 'rejected', statusReason: 'claim', statusReasonNote: null, allowedActions: ['edit', 'image'], expiresAt: null }),
+    ]));
+    await page.goto('/vendor/merch/');
+    await expect(page).toHaveURL(/\/vendor\/promotions\/$/);
+    await expect(page.getByTestId('banner-line-bn_end')).toHaveText('Ended 21 Oct, 12:00');
+    await expect(page.getByTestId('banner-line-bn_rej')).toHaveText('Reason: Misleading claim');
   });
 
   test('Swahili: nav, list and form read in Swahili; /vendor/merch?item= opens /vendor/promotions', async ({ page }) => {
