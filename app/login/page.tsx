@@ -14,7 +14,7 @@ import {
 } from '@/lib/firebase';
 import { Button, Card, CardContent, Alert, Spinner, Field } from '@/components/shared';
 import { PhotoPanel, LOGIN_HERO_PHOTO } from '@/components/photo-panel';
-import { PHOTO_HERO_UI } from '@/lib/flags';
+import { HERO_IMAGES_REMOTE, PHOTO_HERO_UI } from '@/lib/flags';
 
 export default function LoginPage() {
   const { t, signIn } = useApp();
@@ -498,6 +498,7 @@ export default function LoginPage() {
           headlineLead={t('login.hero.lead')}
           headlineAccent={t('login.hero.accent')}
           subline={t('login.hero.sub')}
+          remoteSlot={HERO_IMAGES_REMOTE ? 'portalLogin' : undefined}
           data-testid="login-photo-panel"
         />
         <div className="flex flex-1 items-center justify-center p-4 lg:p-8">{signInColumn}</div>
