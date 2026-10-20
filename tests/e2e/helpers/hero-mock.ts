@@ -88,6 +88,8 @@ export type HeroState = {
   calls: Array<{ method: string; path: string; body: Json | null; headers: Record<string, string> }>;
   upload?: { size: number; contentType: string; raw: Buffer; authorization: string };
   previewRequests: Array<{ path: string; authorization: string | undefined }>;
+  /** Bytes served for every photo preview (default: a small slate-blue PNG). */
+  previewPng?: Buffer;
   nextPublicationId?: number;
 };
 
@@ -149,7 +151,7 @@ export async function mockHeroApi(page: Page, s: HeroState, opts: { serverOff?: 
     const preview = path.match(/^\/admin\/hero-images\/([^/]+)\/preview$/);
     if (preview) {
       s.previewRequests.push({ path: path + url.search, authorization: req.headers().authorization });
-      return route.fulfill({ status: 200, contentType: 'image/png', body: PREVIEW_PNG, headers: { 'cache-control': 'no-store, private' } });
+      return route.fulfill({ status: 200, contentType: 'image/png', body: s.previewPng ?? PREVIEW_PNG, headers: { 'cache-control': 'no-store, private' } });
     }
     if (path === '/admin/hero-images' && method === 'GET') {
       const f = fail('load');

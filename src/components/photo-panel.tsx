@@ -36,6 +36,11 @@ type PhotoPanelProps = {
    * first; the remote one replaces it only if it has loaded within REMOTE_WINDOW_MS.
    */
   remoteSlot?: string;
+  /**
+   * App photos admin preview (spec §36.5): draw this photo instead of `photo`, so the preview is the
+   * login's own panel (same classes, same scrim) with the photo being edited. Never set on the login.
+   */
+  previewImage?: { src?: string; objectPosition: string };
   'data-testid'?: string;
 };
 
@@ -122,6 +127,7 @@ export function PhotoPanel({
   subline,
   className,
   remoteSlot,
+  previewImage,
   'data-testid': testId = 'photo-panel',
 }: PhotoPanelProps) {
   const remote = useRemoteHeroPhoto(remoteSlot);
@@ -143,7 +149,24 @@ export function PhotoPanel({
     if (img?.complete && img.naturalWidth > 0) setLoaded(true);
   }, []);
 
-  const picture = photo ? (
+  const picture = previewImage ? (
+    previewImage.src ? (
+      // eslint-disable-next-line @next/next/no-img-element
+      <img
+        key={previewImage.src}
+        ref={imgRef}
+        src={previewImage.src}
+        alt=""
+        role="presentation"
+        decoding="async"
+        className="photo-panel__img"
+        style={{ objectPosition: previewImage.objectPosition }}
+        data-loaded={loaded ? 'true' : 'false'}
+        onLoad={() => setLoaded(true)}
+        data-testid={`${testId}-img`}
+      />
+    ) : null
+  ) : photo ? (
     <picture>
       <source media={NO_PHOTO_MEDIA} srcSet={NO_PHOTO} />
       <source media={WIDE} type="image/avif" srcSet={photo.panel.avif} width={photo.panel.width} height={photo.panel.height} />
