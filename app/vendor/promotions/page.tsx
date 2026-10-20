@@ -6,7 +6,7 @@ import { api, type VendorProduct } from '@/lib/api';
 import { eatDateTime, fmt } from '@/lib/vendor';
 import {
   AUDIENCE_KEY, PHASE_KEY, PHASE_TONE, VENDOR_GROUPS, VENDOR_GROUP_KEY, bannersApi, canDo, errorCodeOf, errorKeyOf, headlineOf, isNetworkError, phaseOf,
-  targetLabelOf, vendorGroupOf, type ShopBanner,
+  reasonText, targetLabelOf, vendorGroupOf, type ShopBanner,
 } from '@/lib/shop-banners';
 import { Alert, Badge, Button, Card, EmptyState, ErrorState, PageHeader, SkeletonCard } from '@/components/shared';
 import { Dialog } from '@/components/dialog';
@@ -175,10 +175,10 @@ export default function VendorPromotionsPage() {
     if (p === 'pending') return fmt(t('merch.line.expires'), { date: eatDateTime(b.expiresAt ?? b.startsAt, locale) });
     if (p === 'scheduled') return fmt(t('merch.line.starts'), { date: eatDateTime(b.startsAt, locale) });
     if (p === 'live') return fmt(t('merch.line.ends'), { date: eatDateTime(b.endsAt, locale) });
-    if (p === 'rejected') return b.statusReason ? fmt(t('merch.line.reason'), { reason: b.statusReason }) : t('merch.status.rejected');
+    if (p === 'rejected') return reasonText(b, t) ? fmt(t('merch.line.reason'), { reason: reasonText(b, t) }) : t('merch.status.rejected');
     if (p === 'expired') return t('merch.line.notReviewed');
     if (p === 'withdrawn') return t('merch.line.youWithdrew');
-    if (p === 'ended') return (b.endedByFitflex ?? !!b.statusReason) && b.statusReason ? fmt(t('merch.line.endedByFitflex'), { reason: b.statusReason }) : fmt(t('merch.line.endedOn'), { date: eatDateTime(b.endsAt, locale) });
+    if (p === 'ended') return (b.endedByFitflex ?? !!b.statusReason) && reasonText(b, t) ? fmt(t('merch.line.endedByFitflex'), { reason: reasonText(b, t) }) : fmt(t('merch.line.endedOn'), { date: eatDateTime(b.endsAt, locale) });
     return t('merch.line.draft');
   };
   const targetLine = (b: ShopBanner) => b.target?.type === 'vendor_store' ? t('merch.line.linksStore')
@@ -203,6 +203,7 @@ export default function VendorPromotionsPage() {
             <div className="flex flex-wrap gap-1 pt-1">
               {canDo(b, 'submit') && <Button size="sm" className="min-h-11" disabled={busy || suspended} onClick={() => void submit(b)} aria-label={fmt(t('merch.action.sendA11y'), { headline })} data-testid={`banner-submit-${b.id}`}>{t('merch.send')}</Button>}
               {canDo(b, 'edit') && <Button size="sm" variant="ghost" className="min-h-11" disabled={suspended} onClick={() => go(`edit=${encodeURIComponent(b.id)}`)} aria-label={fmt(t('merch.action.editA11y'), { headline })} data-testid={`banner-edit-${b.id}`}>{t('merch.action.edit')}</Button>}
+              {(p === 'rejected' || p === 'live') && canDo(b, 'image') && <Button size="sm" variant="ghost" className="min-h-11" disabled={suspended} onClick={() => go(`edit=${encodeURIComponent(b.id)}`)} data-testid={`banner-photo-${b.id}`}>{t('merch.banner.replaceImage')}</Button>}
               {canDo(b, 'end') && <Button size="sm" variant="ghost" className="min-h-11" disabled={busy} onClick={() => setEnding(b)} aria-label={fmt(t('merch.action.endA11y'), { headline })} data-testid={`banner-end-${b.id}`}>{t('merch.action.endNow')}</Button>}
               {canDo(b, 'withdraw') && <Button size="sm" variant="ghost" className="min-h-11" disabled={busy} onClick={() => setWithdrawing(b)} aria-label={fmt(t('merch.action.withdrawA11y'), { headline })} data-testid={`banner-withdraw-${b.id}`}>{t('merch.action.withdraw')}</Button>}
               {vendorGroupOf(b) === 'past' && <Button size="sm" variant="ghost" className="min-h-11" disabled={suspended} onClick={() => go(`copy=${encodeURIComponent(b.id)}`)} data-testid={`banner-copy-${b.id}`}>{t('merch.action.copy')}</Button>}

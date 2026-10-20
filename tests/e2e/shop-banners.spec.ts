@@ -50,9 +50,9 @@ function banner(over: Json = {}): Json {
     target: { type: 'product', value: 'prd_1' }, targetName: 'Trail runner', audienceRoles: ['member', 'trainer', 'owner'],
     startsAt: at(48), endsAt: at(24 * 9), position: null, statusReason: null, statusReasonCode: null, expiresAt: at(47),
     submittedAt: at(-2), createdAt: at(-3), createdBy: 'usr_vendor', createdByName: 'Rehema', submittedBy: 'usr_vendor', submittedByName: 'Rehema',
-    approvedBy: null, ownItem: false, allowedActions: ['approve', 'reject'],
+    approvedBy: null, ownItem: false, allowedActions: ['approve', 'reject'], revision: 3, updatedAt: '2026-10-20T08:30:00.000Z',
     image: {
-      id: 'img_1', width: 1600, height: 1000, people: 'product_models', focal: { x: 0, y: 0 },
+      id: 'img_1', uploadedBy: 'usr_vendor', width: 1600, height: 1000, people: 'product_models', focal: { x: 0, y: 0 },
       rightsConfirmedAt: '2026-10-20T08:00:00.000Z', peopleConfirmedAt: '2026-10-20T08:00:00.000Z',
       rightsConfirmedBy: 'usr_vendor', rightsConfirmedByName: 'Rehema', peopleConfirmedBy: 'usr_vendor', peopleConfirmedByName: 'Rehema',
       previewUrl: '/admin/shop-banners/bn_1/image', public: null,
@@ -64,7 +64,9 @@ const ITEMS = () => [
   banner(),
   banner({ id: 'bn_live', status: 'approved', effectiveStatus: 'live', startsAt: at(-5), endsAt: at(48), position: 2, approvedBy: 'admin-y', approvedByName: 'Yusuf', allowedActions: ['end', 'position'], expiresAt: null, headlineLead: bi('Strong days with', 'Siku imara na'), headlineAccent: bi('FitFlex gear', 'vifaa vya FitFlex') }),
   banner({ id: 'bn_mine', origin: 'staff', vendorId: null, vendorName: null, createdBy: 'admin-x', submittedBy: 'admin-x', ownItem: true, allowedActions: ['edit', 'image', 'withdraw'], headlineLead: bi('Shop the', 'Nunua'), headlineAccent: bi('new season', 'msimu mpya') }),
-  banner({ id: 'bn_old', status: 'rejected', effectiveStatus: 'rejected', statusReason: 'Image quality / Ubora wa picha', allowedActions: [], expiresAt: null }),
+  banner({ id: 'bn_old', status: 'rejected', effectiveStatus: 'rejected', statusReasonCode: 'image', statusReasonNote: 'Blurred edges.', statusReason: 'Blurred edges.', allowedActions: [], expiresAt: null }),
+  // Sent later but expires sooner: listed first in Requests.
+  banner({ id: 'bn_soon', expiresAt: at(20), submittedAt: at(-1), headlineLead: bi('Last chance for', 'Nafasi ya mwisho kwa'), headlineAccent: bi('yoga mats', 'mikeka ya yoga') }),
 ];
 
 async function signIn(page: Page, user: Json, locale: 'en' | 'sw' = 'en') {
@@ -114,7 +116,7 @@ function adminRoutes(items: Json[], extra: Array<[string, RegExp, Handler]> = []
     ['GET', /^\/admin\/shop-banners\/([^/]+)\/image$/, photo],
     ['GET', /^\/admin\/shop-banners\/([^/]+)$/, (_r, _c, m) => (find(m[1]) ? { json: { banner: find(m[1]), history: [{ id: 1, action: 'shop_banner.submitted', actor: 'usr_vendor', actorName: 'Rehema', at: at(-2) }] } } : { status: 404, json: { error: 'banner_not_found' } })],
     ['POST', /^\/admin\/shop-banners\/([^/]+)\/approve$/, (_r, c, m) => { Object.assign(find(m[1])!, { status: 'approved', effectiveStatus: 'approved', allowedActions: ['end', 'position'], approvedBy: 'admin-x' }); return { json: { banner: find(m[1]) } }; }],
-    ['POST', /^\/admin\/shop-banners\/([^/]+)\/reject$/, (_r, c, m) => { Object.assign(find(m[1])!, { status: 'rejected', effectiveStatus: 'rejected', statusReason: c.body?.reason, allowedActions: [] }); return { json: { banner: find(m[1]) } }; }],
+    ['POST', /^\/admin\/shop-banners\/([^/]+)\/reject$/, (_r, c, m) => { Object.assign(find(m[1])!, { status: 'rejected', effectiveStatus: 'rejected', statusReasonCode: c.body?.code, statusReasonNote: c.body?.note ?? null, statusReason: c.body?.note ?? null, allowedActions: [] }); return { json: { banner: find(m[1]) } }; }],
     ['POST', /^\/admin\/shop-banners\/([^/]+)\/end$/, (_r, c, m) => { Object.assign(find(m[1])!, { status: 'ended', effectiveStatus: 'ended', statusReason: c.body?.reason, allowedActions: [] }); return { json: { banner: find(m[1]) } }; }],
     ['POST', /^\/admin\/shop-banners\/([^/]+)\/position$/, (_r, c, m) => { find(m[1])!.position = c.body?.position; return { json: { banner: find(m[1]) } }; }],
     ['GET', /^\/admin\/products$/, () => ({ json: [{ id: 'prd_1', vendorId: 'usr_vendor', name: 'Trail runner', priceTzs: 90000, stock: 4, status: 'active' }] })],
@@ -141,7 +143,10 @@ test.describe('admin merch queue', () => {
     await page.goto('/admin/');
     await nav(page).getByRole('link', { name: 'Banners & flash sales' }).click();
     await expect(page).toHaveURL(/\/admin\/shop-merch\/?/);
-    await expect(page.getByTestId('merch-count-requests')).toHaveText('2');
+    await expect(page.getByTestId('merch-count-requests')).toHaveText('3');
+    // Sorted by expiresAt, soonest first (review #10); under a day: "Expires in 1 day" (singular key).
+    await expect(page.getByTestId('merch-table').locator('tbody tr').first()).toHaveAttribute('data-testid', 'merch-row-bn_soon');
+    await expect(page.getByTestId('merch-expires-bn_soon')).toHaveText('Expires in 1 day');
     await expect(page.getByTestId('merch-count-live')).toHaveText('1');
     await expect(page.getByTestId('merch-count-closed')).toHaveText('1');
     await expect(page.getByTestId('merch-count-drafts')).toHaveText('0');
@@ -186,7 +191,8 @@ test.describe('admin merch queue', () => {
     await dlg.getByTestId('merch-check-languages').check();
     await dlg.getByTestId('merch-approve-confirm').click();
     await expect(page.getByTestId('merch-status')).toHaveText('Scheduled');
-    expect(only(calls, 'POST', '/admin/shop-banners/bn_1/approve')[0].body).toEqual({ checks: ['people', 'text', 'languages'] });
+    // H2: the revision and photo the reviewer saw go with the decision.
+    expect(only(calls, 'POST', '/admin/shop-banners/bn_1/approve')[0].body).toEqual({ checks: ['people', 'text', 'languages'], revision: 3, imageId: 'img_1' });
   });
 
   test('approve refusals are shown in words (image_people_unconfirmed, cannot_approve_own_submission)', async ({ page }) => {
@@ -200,7 +206,7 @@ test.describe('admin merch queue', () => {
     await expect(page.getByTestId('merch-approve-dialog')).toContainText("make sure the photo's confirmations were given");
     refusal = { error: 'cannot_approve_own_submission' };
     await page.getByTestId('merch-approve-confirm').click();
-    await expect(page.getByTestId('merch-approve-dialog')).toContainText('You created this, so another admin must approve it.');
+    await expect(page.getByTestId('merch-approve-dialog')).toContainText('You created, changed or added the photo for this banner, so another admin must decide on it.');
   });
 
   test('reject needs a reason; "Other" needs a note; reason and code are sent', async ({ page }) => {
@@ -218,10 +224,9 @@ test.describe('admin merch queue', () => {
     await dlg.getByTestId('merch-reject-note').fill('The photo is blurred at the edges.');
     await dlg.getByTestId('merch-reject-confirm').click();
     await expect(page.getByTestId('merch-status')).toHaveText('Rejected');
-    const body = only(calls, 'POST', '/admin/shop-banners/bn_1/reject')[0].body!;
-    expect(body.code).toBe('image');
-    expect(body.reason).toBe('Image quality / Ubora wa picha: The photo is blurred at the edges.');
-    await expect(page.getByTestId('merch-reason')).toContainText('Reason: Image quality / Ubora wa picha');
+    // Code and note apart (review #5); the label is rendered from the code in the reader's language.
+    expect(only(calls, 'POST', '/admin/shop-banners/bn_1/reject')[0].body).toEqual({ code: 'image', note: 'The photo is blurred at the edges.', revision: 3, imageId: 'img_1' });
+    await expect(page.getByTestId('merch-reason')).toHaveText('Reason: Image quality: The photo is blurred at the edges.');
   });
 
   test('own item: Approve and Reject are disabled with the visible reason', async ({ page }) => {
@@ -238,6 +243,58 @@ test.describe('admin merch queue', () => {
     await expect(page.getByTestId('merch-withdraw')).toBeVisible();
     await expect(page.getByTestId('banner-preview-from')).toHaveCount(0);
     expect(only(calls, 'POST', '/admin/shop-banners/bn_mine/approve')).toHaveLength(0);
+  });
+
+  test('H1: you uploaded its photo → Approve/Reject disabled with the reason; the server refusal reads the same', async ({ page }) => {
+    await signIn(page, { id: 'admin-up', userType: 'admin' });
+    const items = [banner({ image: { ...banner().image, uploadedBy: 'admin-up' } })];
+    await mockApi(page, adminRoutes(items));
+    await page.goto('/admin/shop-merch/?item=bn_1');
+    await expect(page.getByTestId('merch-own-item')).toHaveText('You created, changed or added the photo for this banner, so another admin must decide on it.');
+    await expect(page.getByTestId('merch-approve')).toBeDisabled();
+    await expect(page.getByTestId('merch-reject')).toBeDisabled();
+  });
+
+  test('H2: a banner that changed after it was opened is not decided: message, and the detail reloads', async ({ page }) => {
+    await signIn(page, SUPER);
+    const items = ITEMS();
+    let changed = false;
+    const calls = await mockApi(page, adminRoutes(items, [
+      ['POST', /^\/admin\/shop-banners\/bn_1\/reject$/, () => { changed = true; return { status: 409, json: { error: 'banner_changed' } }; }],
+      ['GET', /^\/admin\/shop-banners\/bn_1$/, () => { return { json: { banner: changed ? { ...items[0], revision: 4, headlineAccent: bi('trail shoes', 'viatu vya milimani') } : items[0], history: [] } }; }],
+    ]));
+    await page.goto('/admin/shop-merch/?item=bn_1');
+    await page.getByTestId('merch-reject').click();
+    await page.getByTestId('merch-reason-link').check();
+    await page.getByTestId('merch-reject-confirm').click();
+    await expect(page.getByTestId('merch-stale')).toHaveText('This banner changed after you opened it. Review it again.');
+    await expect(page.getByTestId('merch-reject-dialog')).toHaveCount(0);
+    await expect(page.getByTestId('merch-headline')).toHaveText('Run further in trail shoes');
+    expect(only(calls, 'POST', '/admin/shop-banners/bn_1/reject')[0].body).toMatchObject({ code: 'link', revision: 3 });
+    // The next decision carries the new revision.
+    await page.getByTestId('merch-approve').click();
+    for (const c of ['people', 'text', 'languages']) await page.getByTestId(`merch-check-${c}`).check();
+    await page.getByTestId('merch-approve-confirm').click();
+    await expect.poll(() => only(calls, 'POST', '/admin/shop-banners/bn_1/approve')[0]?.body?.revision).toBe(4);
+  });
+
+  test('429 rate_limited is shown in words', async ({ page }) => {
+    await signIn(page, SUPER);
+    await mockApi(page, adminRoutes(ITEMS(), [['POST', /^\/admin\/shop-banners\/bn_live\/position$/, () => ({ status: 429, json: { error: 'rate_limited' } })]]));
+    await page.goto('/admin/shop-merch/?item=bn_live');
+    await page.getByTestId('merch-set-position').click();
+    await page.getByTestId('merch-position-input').fill('1');
+    await page.getByTestId('merch-position-save').click();
+    await expect(page.getByTestId('merch-position-dialog')).toContainText('Too many tries. Wait a minute and try again.');
+  });
+
+  test('Swahili (glossary 2026-10-20): Sitisha sasa, Weka mpangilio, Kutoka {vendor}', async ({ page }) => {
+    await signIn(page, SUPER, 'sw');
+    await mockApi(page, adminRoutes(ITEMS()));
+    await page.goto('/admin/shop-merch/?item=bn_live');
+    await expect(page.getByTestId('merch-end')).toHaveText('Sitisha sasa');
+    await expect(page.getByTestId('merch-set-position')).toHaveText('Weka mpangilio');
+    await expect(page.getByTestId('banner-preview-from').first()).toHaveText('Kutoka Dar Fitness Gear');
   });
 
   test('end a live banner needs a reason; set position', async ({ page }) => {
@@ -313,9 +370,9 @@ test.describe('admin merch queue', () => {
     const body = only(calls, 'POST', '/admin/shop-banners')[0].body!;
     expect(body).toMatchObject({
       headlineLead: { en: 'Shop the', sw: 'Nunua' }, headlineAccent: { en: 'new season', sw: 'msimu mpya' }, subline: null,
-      ctaLabel: { en: 'View all', sw: 'Tazama zote' }, target: { type: 'category', value: 'footwear' }, audienceRoles: ['member', 'trainer', 'owner'],
+      ctaKey: 'view_all', target: { type: 'category', value: 'footwear' }, audienceRoles: ['member', 'trainer', 'owner'],
     });
-    expect(Object.keys(body).sort()).toEqual(['audienceRoles', 'ctaLabel', 'endsAt', 'headlineAccent', 'headlineLead', 'imageAlt', 'startsAt', 'subline', 'target']);
+    expect(Object.keys(body).sort()).toEqual(['audienceRoles', 'ctaKey', 'endsAt', 'headlineAccent', 'headlineLead', 'imageAlt', 'startsAt', 'subline', 'target']);
     const upload = only(calls, 'POST', '/admin/shop-banners/bn_new/image')[0];
     expect(upload.raw).toContain('name="people"\r\n\r\nnone');
     expect(upload.raw).toContain('name="rightsConfirmed"\r\n\r\ntrue');
@@ -419,6 +476,7 @@ test.describe('vendor banners', () => {
     await expect(page.getByTestId('banner-line-bn_v')).toContainText('Expires');
     const body = only(calls, 'POST', '/vendor/shop-banners')[0].body!;
     expect(body).toMatchObject({ target: { type: 'product', value: 'prd_1' }, audienceRoles: ['member', 'trainer', 'owner'], headlineAccent: { en: 'new shoes', sw: 'viatu vipya' } });
+    expect(body.ctaKey).toBe('view_product');
     expect(body.ctaLabel).toBeUndefined();
     const upload = only(calls, 'POST', '/vendor/shop-banners/bn_v/image')[0];
     expect(upload.raw).toContain('name="people"\r\n\r\nproduct_models');
@@ -471,6 +529,15 @@ test.describe('vendor banners', () => {
     refusal = { status: 403, json: { error: 'target_not_owned', field: 'target.value' } };
     await page.getByTestId('banner-submit').click();
     await expect(page.getByTestId('banner-target-error')).toHaveText('Choose one of your own products.');
+    refusal = { status: 409, json: { error: 'too_many_open_proposals' } };
+    await page.getByTestId('banner-submit').click();
+    await expect(page.getByTestId('banner-form').getByRole('alert').first()).toContainText('You have too many banners waiting or scheduled.');
+    refusal = { status: 422, json: { error: 'cta_label_not_allowed', field: 'ctaKey' } };
+    await page.getByTestId('banner-submit').click();
+    await expect(page.getByTestId('banner-form').getByRole('alert').first()).toContainText("That button label isn't allowed for this link.");
+    refusal = { status: 429, json: { error: 'rate_limited' } };
+    await page.getByTestId('banner-submit').click();
+    await expect(page.getByTestId('banner-form').getByRole('alert').first()).toContainText('Too many tries.');
   });
 
   test('withdraw a waiting banner, end a live one; a rejected one shows its reason', async ({ page }) => {
@@ -478,12 +545,15 @@ test.describe('vendor banners', () => {
     const items = [
       vendorView(),
       vendorView({ id: 'bn_live', status: 'approved', effectiveStatus: 'live', startsAt: at(-5), endsAt: at(48), allowedActions: ['edit', 'end'], expiresAt: null }),
-      vendorView({ id: 'bn_old', status: 'rejected', effectiveStatus: 'rejected', statusReason: 'Image quality / Ubora wa picha', allowedActions: ['edit'], expiresAt: null }),
+      vendorView({ id: 'bn_old', status: 'rejected', effectiveStatus: 'rejected', statusReasonCode: 'people', statusReasonNote: 'Remove the caption.', statusReason: 'Remove the caption.', allowedActions: ['edit', 'image'], expiresAt: null }),
     ];
     const calls = await mockApi(page, vendorRoutes(items));
     await page.goto('/vendor/promotions/');
     await expect(page.getByTestId('banner-status-bn_live')).toHaveText('Live');
-    await expect(page.getByTestId('banner-line-bn_old')).toHaveText('Reason: Image quality / Ubora wa picha');
+    await expect(page.getByTestId('banner-line-bn_old')).toHaveText('Reason: People framed as members or partners: Remove the caption.');
+    // Review #1: "Change photo" on rejected and live banners once the server allows it.
+    await expect(page.getByTestId('banner-photo-bn_old')).toBeVisible();
+    await expect(page.getByTestId('banner-photo-bn_live')).toHaveCount(0);
     await page.getByTestId('banner-withdraw-bn_1').click();
     await page.getByTestId('banner-withdraw-confirm').click();
     await expect(page.getByTestId('banner-status-bn_1')).toHaveText('Withdrawn');
@@ -510,9 +580,12 @@ test.describe('vendor banners', () => {
     await expect(page).toHaveURL(/\/vendor\/promotions\/\?item=bn_1/);
     await expect(nav(page).getByRole('link', { name: 'Mabango na ofa' })).toBeVisible();
     await expect(page.getByTestId('banner-status-bn_1')).toHaveText('Inasubiri idhini');
+    await expect(page.getByTestId('merch-group-waiting')).toContainText('Yanasubiri idhini');
+    await expect(page.getByTestId('banner-line-bn_1')).toContainText('Litaisha muda');
     await expect(page.getByTestId('banner-card-bn_1')).toContainText('Kimbia mbali zaidi na viatu vipya');
     await page.getByTestId('merch-propose').click();
     await expect(page.getByText('Pendekeza bango').first()).toBeVisible();
     await expect(page.getByTestId('banner-cta')).toHaveText('Kitufe: Tazama bidhaa');
+    await expect(page.getByTestId('banner-form').getByTestId('banner-preview-from')).toHaveText('Kutoka Dar Fitness Gear');
   });
 });

@@ -124,7 +124,8 @@ export default function ShopMerchPage() {
   const now = Date.now();
   const counts = (s: MerchTab) => serverCounts?.[s] ?? (rows ?? []).filter(r => tabOfBanner(r, now) === s).length;
   const shown = (rows ?? []).filter(r => tabOfBanner(r, now) === tab)
-    .sort((a, b) => (tab === 'requests' ? Date.parse(a.submittedAt ?? a.createdAt ?? a.startsAt) - Date.parse(b.submittedAt ?? b.createdAt ?? b.startsAt)
+    // Requests: soonest to expire first (as the server sorts them); the rest by position, then start.
+    .sort((a, b) => (tab === 'requests' ? (Date.parse(a.expiresAt ?? a.startsAt) - Date.parse(b.expiresAt ?? b.startsAt)) || a.id.localeCompare(b.id)
       : (a.position ?? 999) - (b.position ?? 999) || Date.parse(a.startsAt) - Date.parse(b.startsAt)));
   const expiresInDays = (b: ShopBanner) => {
     if (b.status !== 'pending_approval') return null;
@@ -198,7 +199,7 @@ export default function ShopMerchPage() {
                       <Td className="tabular-nums">{b.position ?? '—'}</Td>
                       <Td>
                         <Badge tone={PHASE_TONE[phase]} dot>{t(PHASE_KEY[phase])}</Badge>
-                        {days != null && <p className="mt-1 text-xs text-[var(--color-warning-700)]" data-testid={`merch-expires-${b.id}`}>{fmt(t('merchAdmin.expiresIn'), { n: days })}</p>}
+                        {days != null && <p className="mt-1 text-xs text-[var(--color-warning-700)]" data-testid={`merch-expires-${b.id}`}>{days === 0 ? t('merchAdmin.expiresToday') : days === 1 ? t('merchAdmin.expiresInOne') : fmt(t('merchAdmin.expiresIn'), { n: days })}</p>}
                       </Td>
                     </Tr>
                   );

@@ -1,10 +1,10 @@
 'use client';
 import { useCallback, useEffect, useId, useState } from 'react';
 import { ArrowLeft } from 'lucide-react';
-import { messages, type MessageKey } from '@/lib/i18n';
+import type { MessageKey } from '@/lib/i18n';
 import { eatDateTime, fmt } from '@/lib/vendor';
 import {
-  AUDIENCE_KEY, PHASE_KEY, PHASE_TONE, REJECT_CODES, REVIEW_CHECKS, TARGET_KEY, bannersApi, errorCodeOf, errorKeyOf, headlineOf, phaseOf, targetLabelOf,
+  AUDIENCE_KEY, PHASE_KEY, PHASE_TONE, REJECT_CODES, REJECT_KEY, REVIEW_CHECKS, TARGET_KEY, reasonText, bannersApi, errorCodeOf, errorKeyOf, headlineOf, phaseOf, targetLabelOf,
   type AuditRow, type BannerAction, type RejectCode, type ShopBanner,
 } from '@/lib/shop-banners';
 import { Alert, Badge, Button, Card, CardContent, CardHeader, Checkbox, Field, Input, Radio, Spinner, Textarea } from './shared';
@@ -13,10 +13,6 @@ import { BannerPreview, useBannerPhoto } from './shop-banner-preview';
 import { useToast } from './ui/toast';
 import { useApp } from '../../app/providers';
 
-const REJECT_KEY: Record<RejectCode, MessageKey> = {
-  image: 'merchAdmin.reason.image', people: 'merchAdmin.reason.people', text: 'merchAdmin.reason.text',
-  claim: 'merchAdmin.reason.claim', link: 'merchAdmin.reason.link', other: 'merchAdmin.reason.other',
-};
 const CHECK_KEY: Record<(typeof REVIEW_CHECKS)[number], MessageKey> = {
   people: 'merchAdmin.check.people', text: 'merchAdmin.check.text', languages: 'merchAdmin.check.languages',
 };
@@ -33,11 +29,16 @@ const adminErrorKey = (err: unknown): MessageKey => ADMIN_ERROR_KEY[errorCodeOf(
 const NOTE_MIN = 10;
 const NOTE_MAX = 500;
 
-/** The reason the seller reads: the chosen reason in English and Swahili, then the note ("Other": the note alone). */
-export function rejectReasonText(code: RejectCode, note: string) {
-  const label = `${messages.en[REJECT_KEY[code]]} / ${messages.sw[REJECT_KEY[code]]}`;
-  const n = note.trim();
-  return code === 'other' ? n : n ? `${label}: ${n}` : label;
+/**
+ * H1: whoever created, sent, changed or uploaded the photo of a banner can't approve or reject it
+ * (the server answers 403 cannot_approve_own_submission). Uses the server's ownItem plus what the view shows.
+ */
+export function workedOn(b: ShopBanner, userId: string | undefined): 'created' | 'worked' | null {
+  if (!userId) return b.ownItem ? 'created' : null;
+  if (b.ownItem || userId === b.createdBy || userId === b.submittedBy) return 'created';
+  const uploader = b.image?.uploadedBy ?? b.image?.rightsConfirmedBy;
+  if (uploader === userId || (b.editedBy ?? []).includes(userId)) return 'worked';
+  return null;
 }
 
 /**
@@ -58,6 +59,7 @@ export function ShopMerchDetail({ id, fallback, onBack, onEdit, onChanged }: {
   const [notFound, setNotFound] = useState(false);
   const [dialog, setDialog] = useState<'approve' | 'reject' | 'end' | 'position' | 'withdraw' | null>(null);
   const [busy, setBusy] = useState(false);
+  const [staleNotice, setStaleNotice] = useState(false);
 
   const load = useCallback(async () => {
     if (!token) return;
@@ -78,7 +80,8 @@ export function ShopMerchDetail({ id, fallback, onBack, onEdit, onChanged }: {
 
   const phase = phaseOf(banner);
   const canApproveScope = hasPermission('promotions_approve');
-  const mine = banner.ownItem ?? (!!user && (user.id === banner.createdBy || user.id === banner.submittedBy));
+  const own = workedOn(banner, user?.id);
+  const mine = !!own;
   const pending = phase === 'pending';
   const allowed = (a: BannerAction) => (Array.isArray(banner.allowedActions) ? banner.allowedActions.includes(a) : false);
   // Shown disabled with the reason, so the admin sees why (spec §5.3.2 "Own item").
@@ -86,12 +89,13 @@ export function ShopMerchDetail({ id, fallback, onBack, onEdit, onChanged }: {
   const decideBlocked = showDecide && mine;
 
   const finish = async (doneKey: MessageKey, next?: ShopBanner | null) => {
-    setDialog(null);
+    setDialog(null); setStaleNotice(false);
     toast.success(t(doneKey));
     if (next?.id) setBanner(next);
     await load();
     onChanged();
   };
+  const stale = () => { setDialog(null); setStaleNotice(true); void load(); onChanged(); };
   const simple = async (fn: () => Promise<ShopBanner>, doneKey: MessageKey) => {
     if (busy) return;
     setBusy(true);
@@ -120,11 +124,12 @@ export function ShopMerchDetail({ id, fallback, onBack, onEdit, onChanged }: {
         <ArrowLeft className="h-4 w-4" />{t('merchAdmin.back')}
       </Button>
       {error && <Alert tone="error">{error}</Alert>}
+      {staleNotice && <Alert tone="warning"><span data-testid="merch-stale">{t('merchAdmin.bannerChanged')}</span></Alert>}
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0 max-w-full [overflow-wrap:anywhere]">
           <p className="text-xs uppercase tracking-wide text-[var(--color-fg-quaternary)]">{t('merchAdmin.type.banner')} · {banner.origin === 'staff' ? t('merchAdmin.sellerFitflex') : banner.vendorName || banner.vendorId}</p>
           <h1 className="text-xl font-semibold" data-testid="merch-headline">{headlineOf(banner, locale) || '—'}</h1>
-          {banner.statusReason && <p className="mt-1 text-sm text-[var(--color-fg-tertiary)]" data-testid="merch-reason">{fmt(t('merch.line.reason'), { reason: banner.statusReason })}</p>}
+          {reasonText(banner, t) && <p className="mt-1 text-sm text-[var(--color-fg-tertiary)]" data-testid="merch-reason">{fmt(t('merch.line.reason'), { reason: reasonText(banner, t) })}</p>}
         </div>
         <Badge tone={PHASE_TONE[phase]} dot><span data-testid="merch-status">{t(PHASE_KEY[phase])}</span></Badge>
       </div>
@@ -171,7 +176,7 @@ export function ShopMerchDetail({ id, fallback, onBack, onEdit, onChanged }: {
           <CardHeader><h2 className="font-semibold">{t('merchAdmin.actions')}</h2></CardHeader>
           <CardContent className="space-y-3">
             {!canApproveScope && <p className="rounded-[var(--radius-md)] bg-[var(--color-bg-secondary)] p-3 text-sm" data-testid="merch-no-approve">{t('merchAdmin.noApprove')}</p>}
-            {decideBlocked && <p id={ownHintId} className="rounded-[var(--radius-md)] bg-[var(--color-bg-secondary)] p-3 text-sm" data-testid="merch-own-item">{t('merchAdmin.ownItem')}</p>}
+            {decideBlocked && <p id={ownHintId} className="rounded-[var(--radius-md)] bg-[var(--color-bg-secondary)] p-3 text-sm" data-testid="merch-own-item">{t(own === 'worked' ? 'merchAdmin.ownWork' : 'merchAdmin.ownItem')}</p>}
             <div className="flex flex-wrap gap-2">
               {showDecide && (
                 <>
@@ -211,8 +216,8 @@ export function ShopMerchDetail({ id, fallback, onBack, onEdit, onChanged }: {
         </Card>
       )}
 
-      {dialog === 'approve' && <ApproveDialog banner={banner} onClose={() => setDialog(null)} onDone={b => finish('merchAdmin.done.approved', b)} />}
-      {dialog === 'reject' && <RejectDialog banner={banner} onClose={() => setDialog(null)} onDone={b => finish('merchAdmin.done.rejected', b)} />}
+      {dialog === 'approve' && <ApproveDialog banner={banner} onClose={() => setDialog(null)} onDone={b => finish('merchAdmin.done.approved', b)} onStale={stale} />}
+      {dialog === 'reject' && <RejectDialog banner={banner} onClose={() => setDialog(null)} onDone={b => finish('merchAdmin.done.rejected', b)} onStale={stale} />}
       {dialog === 'end' && <EndDialog banner={banner} onClose={() => setDialog(null)} onDone={b => finish('merchAdmin.done.ended', b)} />}
       {dialog === 'position' && <PositionDialog banner={banner} onClose={() => setDialog(null)} onDone={b => finish('merchAdmin.done.position', b)} />}
       <Dialog open={dialog === 'withdraw'} onClose={() => setDialog(null)} title={t('merch.withdrawBanner.title')} description={t('merch.withdraw.body')} size="sm">
@@ -225,7 +230,7 @@ export function ShopMerchDetail({ id, fallback, onBack, onEdit, onChanged }: {
   );
 }
 
-function useAction(onDone: (b: ShopBanner) => void) {
+function useAction(onDone: (b: ShopBanner) => void, onStale?: () => void) {
   const { t } = useApp();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -233,20 +238,24 @@ function useAction(onDone: (b: ShopBanner) => void) {
     if (busy) return;
     setBusy(true); setError(null);
     try { onDone(await fn()); }
-    catch (err) { setError(t(adminErrorKey(err))); setBusy(false); }
+    catch (err) {
+      // H2: it changed after the reviewer opened it: close, reload and say so (never decide on what wasn't seen).
+      if (errorCodeOf(err) === 'banner_changed' && onStale) { onStale(); return; }
+      setError(t(adminErrorKey(err))); setBusy(false);
+    }
   };
   return { busy, error, run };
 }
 const footer = 'flex flex-wrap justify-end gap-2 border-t border-[var(--color-border-secondary)] pt-4';
 
-function ApproveDialog({ banner, onClose, onDone }: { banner: ShopBanner; onClose: () => void; onDone: (b: ShopBanner) => void }) {
+function ApproveDialog({ banner, onClose, onDone, onStale }: { banner: ShopBanner; onClose: () => void; onDone: (b: ShopBanner) => void; onStale: () => void }) {
   const { token, t } = useApp();
   const [checks, setChecks] = useState<string[]>([]);
-  const { busy, error, run } = useAction(onDone);
+  const { busy, error, run } = useAction(onDone, onStale);
   const all = REVIEW_CHECKS.every(c => checks.includes(c));
   return (
     <Dialog open onClose={onClose} title={t('merchAdmin.approve')} description={t('merchAdmin.approveHint')} size="md">
-      <form onSubmit={e => { e.preventDefault(); if (all && token) void run(() => bannersApi.adminApprove(token, banner.id, REVIEW_CHECKS)); }} className="space-y-3" data-testid="merch-approve-dialog">
+      <form onSubmit={e => { e.preventDefault(); if (all && token) void run(() => bannersApi.adminApprove(token, banner, REVIEW_CHECKS)); }} className="space-y-3" data-testid="merch-approve-dialog">
         {error && <Alert tone="error">{error}</Alert>}
         <fieldset className="flex flex-col">
           <legend className="text-sm font-medium text-[var(--color-fg-secondary)]">{t('merchAdmin.checklist')}</legend>
@@ -263,18 +272,18 @@ function ApproveDialog({ banner, onClose, onDone }: { banner: ShopBanner; onClos
   );
 }
 
-function RejectDialog({ banner, onClose, onDone }: { banner: ShopBanner; onClose: () => void; onDone: (b: ShopBanner) => void }) {
+function RejectDialog({ banner, onClose, onDone, onStale }: { banner: ShopBanner; onClose: () => void; onDone: (b: ShopBanner) => void; onStale: () => void }) {
   const { token, t } = useApp();
   const [code, setCode] = useState<RejectCode | null>(null);
   const [note, setNote] = useState('');
-  const { busy, error, run } = useAction(onDone);
+  const { busy, error, run } = useAction(onDone, onStale);
   const n = note.trim().length;
   const noteNeeded = code === 'other';
   const noteOk = noteNeeded ? n >= NOTE_MIN : n === 0 || n >= NOTE_MIN;
   const ok = !!code && noteOk;
   return (
     <Dialog open onClose={onClose} title={t('merchAdmin.reject')} description={t('merchAdmin.reason.noteHint')} size="md">
-      <form onSubmit={e => { e.preventDefault(); if (ok && code && token) void run(() => bannersApi.adminReject(token, banner.id, rejectReasonText(code, note), code)); }} className="space-y-3" data-testid="merch-reject-dialog">
+      <form onSubmit={e => { e.preventDefault(); if (ok && code && token) void run(() => bannersApi.adminReject(token, banner, code, note)); }} className="space-y-3" data-testid="merch-reject-dialog">
         {error && <Alert tone="error">{error}</Alert>}
         <fieldset className="flex flex-col">
           <legend className="text-sm font-medium text-[var(--color-fg-secondary)]">{t('merchAdmin.reason')}<span aria-hidden="true" className="text-[var(--color-error-600)]"> *</span></legend>

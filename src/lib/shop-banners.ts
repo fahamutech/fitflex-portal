@@ -22,6 +22,7 @@ export type BannerAction = 'edit' | 'image' | 'submit' | 'withdraw' | 'end' | 'a
 /** Public copies exist only after approval; before that the photo is private (previewUrl, fetched with the token). */
 export interface BannerImage {
   id?: string;
+  uploadedBy?: string | null;
   width?: number;
   height?: number;
   people?: BannerPeople | null;
@@ -63,6 +64,15 @@ export interface ShopBanner {
   effectiveStatus?: BannerEffectiveStatus;
   statusReason: string | null;
   statusReasonCode?: string | null;
+  /** Reject/end note kept apart from the code (review round; the label is rendered from the code in the reader's language). */
+  statusReasonNote?: string | null;
+  /** Fixed button label key (DD-P2-1), when the server sends it. */
+  ctaKey?: string | null;
+  /** The revision the reviewer is looking at (sent back on approve/reject; 409 banner_changed if it moved). */
+  revision?: number | string | null;
+  updatedAt?: string | null;
+  /** People who changed the banner or uploaded its photo (H1: they can't decide on it either), when the server sends them. */
+  editedBy?: string[] | null;
   /** Vendor view: FitFlex ended it (statusReason is then FitFlex's reason). */
   endedByFitflex?: boolean;
   createdBy?: string | null;
@@ -87,8 +97,8 @@ export interface BannerInput {
   headlineLead: Bilingual;
   headlineAccent: Bilingual;
   subline: Bilingual | null;
-  /** Staff only; left out, the server uses the label for the target ("View product", "Visit store", …). */
-  ctaLabel?: Bilingual;
+  /** The fixed button label (DD-P2-1); vendors and staff pick from the list, never free text (422 cta_label_not_allowed). */
+  ctaKey: WireCtaKey;
   target: BannerTarget;
   audienceRoles: string[];
   startsAt: string;
@@ -199,6 +209,17 @@ export const publicPhoto = (img: BannerImage | null | undefined, wide = false): 
   return url && url.startsWith('/') ? `${API_BASE}${url}` : url;
 };
 
+/**
+ * What the reviewer saw (H2): the server refuses a decision on a banner that changed since (409 banner_changed).
+ * [MOCKED, pending the final functions#227 contract: field names revision | updatedAt, imageId.]
+ */
+function seenRevision(b: ShopBanner): Record<string, unknown> {
+  return {
+    ...(b.revision != null ? { revision: b.revision } : b.updatedAt ? { updatedAt: b.updatedAt } : {}),
+    ...(b.image?.id ? { imageId: b.image.id } : {}),
+  };
+}
+
 export const bannersApi = {
   // Admin (list/detail: `promotions` or `promotions_approve`; create, edit, photo, send, withdraw: `promotions`;
   // approve, reject, end, position: `promotions_approve`, never on one's own).
@@ -213,10 +234,11 @@ export const bannersApi = {
   adminUpdate: async (token: string, id: string, body: Partial<BannerInput>) => oneOf(await request<unknown>(`/admin/shop-banners/${enc(id)}`, patch(body), token)),
   adminSubmit: async (token: string, id: string) => oneOf(await request<unknown>(`/admin/shop-banners/${enc(id)}/submit`, json({}), token)),
   adminWithdraw: async (token: string, id: string) => oneOf(await request<unknown>(`/admin/shop-banners/${enc(id)}/withdraw`, json({}), token)),
-  adminApprove: async (token: string, id: string, checks: readonly string[]) =>
-    oneOf(await request<unknown>(`/admin/shop-banners/${enc(id)}/approve`, json({ checks }), token)),
-  adminReject: async (token: string, id: string, reason: string, code: RejectCode) =>
-    oneOf(await request<unknown>(`/admin/shop-banners/${enc(id)}/reject`, json({ reason, code }), token)),
+  adminApprove: async (token: string, b: ShopBanner, checks: readonly string[]) =>
+    oneOf(await request<unknown>(`/admin/shop-banners/${enc(b.id)}/approve`, json({ checks, ...seenRevision(b) }), token)),
+  /** code + note apart (review #5): the label is rendered from the code in each reader's language. */
+  adminReject: async (token: string, b: ShopBanner, code: RejectCode, note: string) =>
+    oneOf(await request<unknown>(`/admin/shop-banners/${enc(b.id)}/reject`, json({ code, ...(note.trim() ? { note: note.trim() } : {}), ...seenRevision(b) }), token)),
   adminEnd: async (token: string, id: string, reason: string) => oneOf(await request<unknown>(`/admin/shop-banners/${enc(id)}/end`, json({ reason }), token)),
   adminPosition: async (token: string, id: string, position: number | null) =>
     oneOf(await request<unknown>(`/admin/shop-banners/${enc(id)}/position`, json({ position }), token)),
@@ -314,7 +336,7 @@ export function canDo(b: ShopBanner, action: BannerAction, now = Date.now()): bo
   const p = phaseOf(b, now);
   switch (action) {
     case 'edit': return ['draft', 'pending', 'rejected', 'scheduled', 'live'].includes(p);
-    case 'image': return ['draft', 'pending', 'scheduled'].includes(p);
+    case 'image': return ['draft', 'pending', 'rejected', 'scheduled', 'live'].includes(p);
     case 'submit': return p === 'draft';
     case 'withdraw': return ['draft', 'pending', 'scheduled'].includes(p);
     case 'end': return p === 'live';
@@ -342,10 +364,15 @@ export const CTA_FOR_TARGET: Record<BannerTargetType, CtaKey[]> = {
   category: ['shopNow', 'viewAll'],
   results: ['viewAll', 'shopNow'],
 };
+/** The key the server takes (ctaKey). */
+export type WireCtaKey = 'view_product' | 'visit_store' | 'shop_now' | 'view_all';
+export const WIRE_CTA: Record<CtaKey, WireCtaKey> = { viewProduct: 'view_product', visitStore: 'visit_store', shopNow: 'shop_now', viewAll: 'view_all' };
+const FROM_WIRE: Record<string, CtaKey> = Object.fromEntries(Object.entries(WIRE_CTA).map(([k, v]) => [v, k as CtaKey]));
 /** Both languages of a CTA label, whatever the screen language is. */
 export const ctaLabelOf = (key: CtaKey): Bilingual => ({ en: messages.en[CTA_KEY[key]], sw: messages.sw[CTA_KEY[key]] });
 /** Which fixed label a saved banner uses (matches the English text), else null. */
-export function ctaKeyOf(label: Bilingual | null | undefined): CtaKey | null {
+export function ctaKeyOf(label: Bilingual | null | undefined, wire?: string | null): CtaKey | null {
+  if (wire && FROM_WIRE[wire]) return FROM_WIRE[wire];
   if (!label) return null;
   return (Object.keys(CTA_KEY) as CtaKey[]).find(k => messages.en[CTA_KEY[k]] === label.en) ?? null;
 }
@@ -453,7 +480,8 @@ export const draftToInput = (d: BannerDraft, mode: 'vendor' | 'staff'): BannerIn
   return {
     imageAlt: trim(d.imageAlt), headlineLead: trim(d.headlineLead), headlineAccent: trim(d.headlineAccent),
     subline: sub.en || sub.sw ? sub : null,
-    ...(mode === 'staff' ? { ctaLabel: ctaLabelOf(d.cta) } : {}),
+    // Vendors get the label for their target; staff pick from the short list. Never free text.
+    ctaKey: WIRE_CTA[mode === 'vendor' ? CTA_FOR_TARGET[d.targetType][0] : d.cta],
     target: { type: d.targetType, value },
     audienceRoles: d.audienceRoles, startsAt: d.startsAt, endsAt: d.endsAt,
   };
@@ -475,7 +503,7 @@ export function draftOf(b: ShopBanner | null, defaults: { targetType: BannerTarg
   const type = b.target?.type ?? defaults.targetType;
   return {
     imageAlt: { ...empty(), ...b.imageAlt }, headlineLead: { ...empty(), ...b.headlineLead }, headlineAccent: { ...empty(), ...b.headlineAccent }, subline: { ...empty(), ...b.subline },
-    targetType: type, targetValue: targetText(b.target) || defaults.targetValue || '', cta: ctaKeyOf(b.ctaLabel) ?? CTA_FOR_TARGET[type][0],
+    targetType: type, targetValue: targetText(b.target) || defaults.targetValue || '', cta: ctaKeyOf(b.ctaLabel, b.ctaKey) ?? CTA_FOR_TARGET[type][0],
     audienceRoles: b.audienceRoles?.length ? [...b.audienceRoles] : [...AUDIENCE_ROLES], startsAt: b.startsAt ?? '', endsAt: b.endsAt ?? '',
   };
 }
@@ -490,7 +518,11 @@ export const isNetworkError = (err: unknown) => err instanceof TypeError;
 
 const ERROR_KEY: Record<string, MessageKey> = {
   // Admin decisions
-  cannot_approve_own_submission: 'merchAdmin.ownItem',
+  cannot_approve_own_submission: 'merchAdmin.ownWork',
+  banner_changed: 'merchAdmin.bannerChanged',
+  rate_limited: 'merch.rateLimited',
+  too_many_open_proposals: 'merch.tooManyOpen',
+  cta_label_not_allowed: 'merch.banner.ctaNotAllowed',
   image_people_unconfirmed: 'merchAdmin.peopleUnconfirmed',
   review_checks_required: 'merchAdmin.checksRequired',
   proposal_expired: 'merchAdmin.proposalExpired',
@@ -558,4 +590,21 @@ export function formFieldOf(err: unknown, d: BannerDraft): string | null {
   if (lang === 'en' || lang === 'sw') return `${field}.${lang}`;
   if (code === 'missing_translation') return `${field}.${d[field].en.trim() ? 'sw' : 'en'}`;
   return `${field}.${hasPrice(d[field].sw) && !hasPrice(d[field].en) ? 'sw' : 'en'}`;
+}
+
+// ─── Reasons (review #5): code and note apart; the label comes from the code in the reader's language ──
+
+export const REJECT_KEY: Record<RejectCode, MessageKey> = {
+  image: 'merchAdmin.reason.image', people: 'merchAdmin.reason.people', text: 'merchAdmin.reason.text',
+  claim: 'merchAdmin.reason.claim', link: 'merchAdmin.reason.link', other: 'merchAdmin.reason.other',
+};
+/**
+ * The reason a banner was rejected, in the reader's language: the label of the code, then the note.
+ * Older rows (one free-text statusReason) are shown as they are.
+ */
+export function reasonText(b: Pick<ShopBanner, 'status' | 'statusReason' | 'statusReasonCode' | 'statusReasonNote'>, t: (k: MessageKey) => string): string {
+  const code = b.statusReasonCode as RejectCode | null | undefined;
+  const label = b.status === 'rejected' && code && REJECT_KEY[code] && code !== 'other' ? t(REJECT_KEY[code]) : '';
+  const note = (b.statusReasonNote ?? (label ? null : b.statusReason) ?? '').trim();
+  return label && note ? `${label}: ${note}` : label || note;
 }

@@ -7,7 +7,7 @@ import type { MessageKey } from '@/lib/i18n';
 import { fmt, categoryLabel, type Category } from '@/lib/vendor';
 import {
   AUDIENCE_KEY, AUDIENCE_ROLES, CTA_FOR_TARGET, CTA_KEY, FIELD_ORDER, IMAGE_MAX_BYTES, IMAGE_MIN_H, IMAGE_MIN_W, IMAGE_TYPES, TARGET_KEY,
-  bannersApi, canDo, ctaLabelOf, draftOf, draftToInput, editResends, errorCodeOf, errorKeyOf, formFieldOf, isNetworkError, validateDraft,
+  bannersApi, canDo, ctaLabelOf, reasonText, draftOf, draftToInput, editResends, errorCodeOf, errorKeyOf, formFieldOf, isNetworkError, validateDraft,
   type BannerDraft, type BannerPeople, type BannerTargetType, type FormErrors, type ShopBanner,
 } from '@/lib/shop-banners';
 import { Alert, Button, Card, CardContent, Checkbox, Field, Input, Radio, Select } from './shared';
@@ -95,7 +95,8 @@ export function BannerForm({ mode, banner, template, vendorId, vendorName, produ
   const savedPhoto = useBannerPhoto(saved, 960);
   const hasImage = !!image || !!saved?.image;
   const needsUpload = !!image;
-  // A live banner's photo can't be swapped (the server allows a new photo before it goes live only).
+  // "Change photo" follows the server's allowedActions (image): drafts, pending, rejected, scheduled and live banners
+  // may get a new photo; on a scheduled or live one that sends it back for approval, like any edit.
   const canChangeImage = !saved || canDo(saved, 'image');
   const resends = !!saved && editResends(saved);
   const dirty = JSON.stringify(d) !== JSON.stringify(initial) || !!image;
@@ -227,7 +228,7 @@ export function BannerForm({ mode, banner, template, vendorId, vendorName, produ
       <form noValidate onSubmit={e => { e.preventDefault(); void save(); }} className="space-y-6">
         {general && <Alert tone="error">{general}</Alert>}
         {resends && <Alert tone="warning">{t('merch.resend.body')}</Alert>}
-        {saved?.status === 'rejected' && saved.statusReason && <Alert tone="warning">{fmt(t('merch.line.reason'), { reason: saved.statusReason })}</Alert>}
+        {saved?.status === 'rejected' && reasonText(saved, t) && <Alert tone="warning">{fmt(t('merch.line.reason'), { reason: reasonText(saved, t) })}</Alert>}
 
         {/* 1–3. Image, people, confirmations */}
         <Card><CardContent className="space-y-4 p-5">
@@ -255,7 +256,7 @@ export function BannerForm({ mode, banner, template, vendorId, vendorName, produ
             )}
           </div>
 
-          {(needsUpload || !saved) && (
+          {(needsUpload || !saved || (canChangeImage && !saved.image)) && (
             <>
               <fieldset className="space-y-1" aria-describedby={errors.people ? `${fid('people')}-err` : undefined}>
                 <legend className="text-sm font-medium text-[var(--color-fg-secondary)]">{t('merch.banner.people')}<span aria-hidden="true" className="text-[var(--color-error-600)]"> *</span></legend>
