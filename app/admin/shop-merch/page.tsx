@@ -151,8 +151,10 @@ export default function ShopMerchPage() {
     const left = Date.parse(b.expiresAt ?? b.startsAt) - now;
     if (!Number.isFinite(left) || left <= 0 || left >= 72 * HOUR) return null;
     if (left < HOUR) return t('merchAdmin.expiresSoon');
-    if (left < 24 * HOUR) { const h = Math.floor(left / HOUR); return h === 1 ? t('merchAdmin.expiresInOneHour') : fmt(t('merchAdmin.expiresInHours'), { n: h }); }
-    const d = Math.floor(left / (24 * HOUR));
+    // Rounded to the nearest hour or day (QA2 #2): ~5 h reads "5 hours", ~2 days "2 days".
+    const h = Math.round(left / HOUR);
+    if (h < 24) return h === 1 ? t('merchAdmin.expiresInOneHour') : fmt(t('merchAdmin.expiresInHours'), { n: h });
+    const d = Math.max(1, Math.round(left / (24 * HOUR)));
     return d === 1 ? t('merchAdmin.expiresInOne') : fmt(t('merchAdmin.expiresIn'), { n: d });
   };
   const sentText = (b: ShopBanner) => relative(b.submittedAt ?? b.createdAt, now, locale);
@@ -165,8 +167,8 @@ export default function ShopMerchPage() {
         description={t('merchAdmin.description')}
         actions={(
           <div className="flex flex-wrap gap-2">
-            <Button variant="secondary" size="sm" onClick={() => void load()} data-testid="merch-refresh"><RefreshCw className="h-4 w-4" />{t('mod.refresh')}</Button>
-            {hasPermission('promotions') && <Button size="sm" onClick={() => go('new=banner')} data-testid="merch-create-banner"><Plus className="h-4 w-4" />{t('merchAdmin.createBanner')}</Button>}
+            <Button variant="secondary" size="sm" className="min-h-11" onClick={() => void load()} data-testid="merch-refresh"><RefreshCw className="h-4 w-4" />{t('mod.refresh')}</Button>
+            {hasPermission('promotions') && <Button size="sm" className="min-h-11" onClick={() => go('new=banner')} data-testid="merch-create-banner"><Plus className="h-4 w-4" />{t('merchAdmin.createBanner')}</Button>}
           </div>
         )}
       />
@@ -182,18 +184,18 @@ export default function ShopMerchPage() {
         </div>
         {/* Type filter (spec §5.3.1). Flash sales join it in slice 4. */}
         <div role="group" aria-label={t('merchAdmin.col.type')} data-testid="merch-type-filter">
-          <Segmented value={kind} onChange={setKind} options={[['all', t('merchAdmin.type.all')], ...MERCH_KINDS.map(k => [k, t('merchAdmin.type.banner')] as [string, string])]} />
+          <Segmented value={kind} onChange={setKind} options={[['all', t('merchAdmin.type.all')], ...MERCH_KINDS.map(k => [k, t('merchAdmin.type.banners')] as [string, string])]} />
         </div>
         <div className="relative w-full sm:w-72">
           <Search aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--color-fg-quaternary)]" />
-          <Input type="search" value={query} onChange={e => setQuery(e.target.value)} placeholder={t('merchAdmin.search')} aria-label={t('merchAdmin.search')} className="pl-9" data-testid="merch-search" />
+          <Input type="search" value={query} onChange={e => setQuery(e.target.value)} placeholder={t('merchAdmin.search')} aria-label={t('merchAdmin.search')} style={{ paddingInlineStart: '2.5rem' }} data-testid="merch-search" />
         </div>
       </div>
       <Card>
         <CardContent className="p-0">
           {rows == null ? <div className="p-6"><Spinner className="h-6 w-6" /></div> : shown.length === 0 ? (error ? null : (
             <div className="flex flex-col items-center gap-2 p-10 text-center text-sm text-[var(--color-fg-quaternary)]" data-testid="merch-empty">
-              <Megaphone aria-hidden="true" className="h-6 w-6" />{t(MERCH_EMPTY_KEY[tab])}
+              <Megaphone aria-hidden="true" className="h-6 w-6" />{t(needle ? 'merchAdmin.noMatches' : MERCH_EMPTY_KEY[tab])}
             </div>
           )) : (
             <>
