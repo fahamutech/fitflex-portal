@@ -11,6 +11,7 @@ import { Alert, Badge, Button, Card, CardContent, CardHeader, Checkbox, Field, I
 import { Dialog } from './dialog';
 import { BannerPreview, useBannerPhoto } from './shop-banner-preview';
 import { useToast } from './ui/toast';
+import { api } from '@/lib/api';
 import { useApp } from '../../app/providers';
 
 const CHECK_KEY: Record<(typeof REVIEW_CHECKS)[number], MessageKey> = {
@@ -19,7 +20,8 @@ const CHECK_KEY: Record<(typeof REVIEW_CHECKS)[number], MessageKey> = {
 const HIST_KEY: Record<string, MessageKey> = {
   created: 'merchAdmin.hist.created', updated: 'merchAdmin.hist.updated', image_uploaded: 'merchAdmin.hist.image', submitted: 'merchAdmin.hist.submitted',
   approved: 'merchAdmin.hist.approved', rejected: 'merchAdmin.hist.rejected', withdrawn: 'merchAdmin.hist.withdrawn', ended: 'merchAdmin.hist.ended',
-  expired: 'merchAdmin.hist.expired', position_set: 'merchAdmin.hist.position',
+  expired: 'merchAdmin.hist.expired', position_set: 'merchAdmin.hist.position', image_published: 'merchAdmin.hist.imagePublished',
+  image_orphaned: 'merchAdmin.hist.imageOrphaned', public_files_orphaned: 'merchAdmin.hist.publicFilesOrphaned',
 };
 /** Refusals worded for the admin (the seller's state, not "your account"). */
 const ADMIN_ERROR_KEY: Record<string, MessageKey> = {
@@ -72,6 +74,15 @@ export function ShopMerchDetail({ id, fallback, onBack, onEdit, onChanged }: {
   }, [token, id, t]);
   useEffect(() => { void load(); }, [load]);
 
+  // "Links to: {store}" with the store's name, not its id (QA1 #7).
+  const [storeNames, setStoreNames] = useState<Record<string, string>>({});
+  const storeId = banner?.target?.type === 'vendor_store' && typeof banner.target.value === 'string' ? banner.target.value : null;
+  useEffect(() => {
+    if (!token || !storeId || storeNames[storeId]) return;
+    api.adminVendors(token)
+      .then(list => setStoreNames(Object.fromEntries(list.map(v => [v.id, v.displayName || v.id]))))
+      .catch(() => {});
+  }, [token, storeId]); // eslint-disable-line react-hooks/exhaustive-deps
   const photo = useBannerPhoto(banner, 960);
   const widePhoto = useBannerPhoto(banner, 960, true);
 
@@ -114,6 +125,9 @@ export function ShopMerchDetail({ id, fallback, onBack, onEdit, onChanged }: {
     <div className="grid gap-1 py-2 sm:grid-cols-3 [&>*]:min-w-0 [overflow-wrap:anywhere]"><dt className="text-sm text-[var(--color-fg-tertiary)]">{label}</dt><dd className="text-sm sm:col-span-2" data-testid={testId}>{value}</dd></div>
   );
   const img = banner.image;
+  const targetName = storeId
+    ? banner.targetName || (storeId === banner.vendorId ? banner.vendorName : null) || storeNames[storeId] || storeId
+    : targetLabelOf(banner);
   const confirmedBy = (who: string | null | undefined, name: string | null | undefined, at: string | null | undefined) =>
     who || name || at ? fmt(t('merchAdmin.confirmedBy'), { name: name || who || '—', date: eatDateTime(at, locale) }) : t('merchAdmin.notRecorded');
   const person = (idv?: string | null, name?: string | null) => name || idv || '';
@@ -155,7 +169,7 @@ export function ShopMerchDetail({ id, fallback, onBack, onEdit, onChanged }: {
                 {row(t('merch.banner.subline'), both(banner.subline))}
                 {row(t('merch.banner.alt'), both(banner.imageAlt))}
                 {row(t('merchAdmin.ctaLabel'), both(banner.ctaLabel))}
-                {row(t('merch.banner.target'), banner.target ? `${t(TARGET_KEY[banner.target.type])}${targetLabelOf(banner) ? `: ${targetLabelOf(banner)}` : ''}` : '—', 'merch-target')}
+                {row(t('merch.banner.target'), banner.target ? `${t(TARGET_KEY[banner.target.type])}${targetName ? `: ${targetName}` : ''}` : '—', 'merch-target')}
                 {row(t('merch.banner.showTo'), (banner.audienceRoles ?? []).map(r => (AUDIENCE_KEY[r] ? t(AUDIENCE_KEY[r]) : r)).join(', ') || '—', 'merch-audience')}
                 {row(t('merchAdmin.col.dates'), `${eatDateTime(banner.startsAt, locale)} → ${eatDateTime(banner.endsAt, locale)} (${t('merch.dates.tzNote')})`)}
                 {row(t('merchAdmin.col.position'), <span data-testid="merch-position">{banner.position ?? '—'}</span>)}
@@ -208,7 +222,7 @@ export function ShopMerchDetail({ id, fallback, onBack, onEdit, onChanged }: {
                 const reason = typeof h.after?.reason === 'string' ? h.after.reason : null;
                 return (
                   <li key={h.id ?? i} className="border-l-2 border-[var(--color-border-secondary)] pl-3 text-sm [overflow-wrap:anywhere]">
-                    <p className="font-medium">{HIST_KEY[verb] ? t(HIST_KEY[verb]) : verb.replace(/_/g, ' ')}</p>
+                    <p className="font-medium">{t(HIST_KEY[verb] ?? 'merchAdmin.hist.other')}</p>
                     <p className="text-xs text-[var(--color-fg-quaternary)]">{eatDateTime(h.at ?? h.createdAt, locale)} · {h.actorName || h.actor || '—'}</p>
                     {reason && <p className="mt-1 text-[var(--color-fg-secondary)]">{reason}</p>}
                   </li>

@@ -57,7 +57,10 @@ export default function VendorPromotionsPage() {
   // The list's own answer wins (vendor.canPropose / reason); /vendor/me is the first guess.
   const approved = standing ? standing.reason !== 'vendor_not_approved' : !me?.approvalStatus || me.approvalStatus === 'approved';
   const suspended = standing ? standing.reason === 'vendor_suspended' : me?.accountStatus === 'suspended';
+  // Proposing and changing need an approved, not suspended business; withdraw and end are always allowed.
+  const mayChange = approved && !suspended;
   const full = !!openProposals && openProposals.max > 0 && openProposals.open >= openProposals.max;
+  const canPropose = mayChange;
 
   useEffect(() => {
     const sync = () => setView(viewOf(window.location.search));
@@ -142,16 +145,18 @@ export default function VendorPromotionsPage() {
       </div>
     );
   }
-  if (!approved) {
-    return (
-      <div className="space-y-6" data-testid="merch-pending-vendor">
-        {header}
-        <EmptyState icon={<Megaphone className="h-6 w-6" />} title={t('merch.pendingTitle')} body={t('merch.pendingBody')} />
-      </div>
-    );
-  }
-
+  // Not approved yet (QA1 #9): the list stays visible, nothing new can be proposed or changed.
+  const pendingNotice = (
+    <div className="rounded-[var(--radius-xl)] border border-[var(--color-border-secondary)] bg-[var(--color-bg-primary)] p-5" data-testid="merch-pending-vendor">
+      <p className="font-semibold">{t('merch.pendingTitle')}</p>
+      <p className="mt-1 text-sm text-[var(--color-fg-tertiary)]">{t('merch.pendingBody')}</p>
+      <p className="mt-2 text-sm text-[var(--color-fg-secondary)]" data-testid="merch-pending-verification">{t('merch.pendingVerification')}</p>
+    </div>
+  );
   const formView = view.creating || view.edit || view.copy;
+  if (formView && !approved) {
+    return <div className="space-y-6">{header}{pendingNotice}<Button variant="secondary" onClick={() => go('')}>{t('merch.back')}</Button></div>;
+  }
   if (formView) {
     const editing = view.edit ? rows?.find(r => r.id === view.edit) ?? null : null;
     const template = view.copy ? rows?.find(r => r.id === view.copy) ?? null : null;
@@ -181,7 +186,7 @@ export default function VendorPromotionsPage() {
     if (p === 'rejected') return reasonText(b, t) ? fmt(t('merch.line.reason'), { reason: reasonText(b, t) }) : t('merch.status.rejected');
     if (p === 'expired') return t('merch.line.notReviewed');
     if (p === 'withdrawn') return t('merch.line.youWithdrew');
-    if (p === 'ended') return (b.endedByFitflex ?? !!b.statusReason) && reasonText(b, t) ? fmt(t('merch.line.endedByFitflex'), { reason: reasonText(b, t) }) : fmt(t('merch.line.endedOn'), { date: eatDateTime(b.endsAt, locale) });
+    if (p === 'ended') return (b.endedByFitflex ?? !!b.statusReason) && reasonText(b, t) ? fmt(t('merch.line.endedByFitflex'), { reason: reasonText(b, t) }) : fmt(t('merch.line.endedOn'), { date: eatDateTime(b.endedAt ?? b.endsAt, locale) });
     return t('merch.line.draft');
   };
   const targetLine = (b: ShopBanner) => b.target?.type === 'vendor_store' ? t('merch.line.linksStore')
@@ -204,12 +209,12 @@ export default function VendorPromotionsPage() {
             <p className="text-xs text-[var(--color-fg-tertiary)]">{targetLine(b)}</p>
             <p className="text-xs text-[var(--color-fg-tertiary)]">{fmt(t('merch.line.shownTo'), { audiences: audiences(b) })}</p>
             <div className="flex flex-wrap gap-1 pt-1">
-              {canDo(b, 'submit') && <Button size="sm" className="min-h-11" disabled={busy || suspended} onClick={() => void submit(b)} aria-label={fmt(t('merch.action.sendA11y'), { headline })} data-testid={`banner-submit-${b.id}`}>{t('merch.send')}</Button>}
-              {canDo(b, 'edit') && <Button size="sm" variant="ghost" className="min-h-11" disabled={suspended} onClick={() => go(`edit=${encodeURIComponent(b.id)}`)} aria-label={fmt(t('merch.action.editA11y'), { headline })} data-testid={`banner-edit-${b.id}`}>{t('merch.action.edit')}</Button>}
-              {(p === 'rejected' || p === 'live') && canDo(b, 'image') && <Button size="sm" variant="ghost" className="min-h-11" disabled={suspended} onClick={() => go(`edit=${encodeURIComponent(b.id)}`)} data-testid={`banner-photo-${b.id}`}>{t('merch.banner.replaceImage')}</Button>}
+              {mayChange && canDo(b, 'submit') && <Button size="sm" className="min-h-11" disabled={busy || suspended} onClick={() => void submit(b)} aria-label={fmt(t('merch.action.sendA11y'), { headline })} data-testid={`banner-submit-${b.id}`}>{t('merch.send')}</Button>}
+              {mayChange && canDo(b, 'edit') && <Button size="sm" variant="ghost" className="min-h-11" disabled={suspended} onClick={() => go(`edit=${encodeURIComponent(b.id)}`)} aria-label={fmt(t('merch.action.editA11y'), { headline })} data-testid={`banner-edit-${b.id}`}>{t('merch.action.edit')}</Button>}
+              {mayChange && (p === 'rejected' || p === 'live') && canDo(b, 'image') && <Button size="sm" variant="ghost" className="min-h-11" disabled={suspended} onClick={() => go(`edit=${encodeURIComponent(b.id)}`)} data-testid={`banner-photo-${b.id}`}>{t('merch.banner.replaceImage')}</Button>}
               {canDo(b, 'end') && <Button size="sm" variant="ghost" className="min-h-11" disabled={busy} onClick={() => setEnding(b)} aria-label={fmt(t('merch.action.endA11y'), { headline })} data-testid={`banner-end-${b.id}`}>{t('merch.action.endNow')}</Button>}
               {canDo(b, 'withdraw') && <Button size="sm" variant="ghost" className="min-h-11" disabled={busy} onClick={() => setWithdrawing(b)} aria-label={fmt(t('merch.action.withdrawA11y'), { headline })} data-testid={`banner-withdraw-${b.id}`}>{t('merch.action.withdraw')}</Button>}
-              {vendorGroupOf(b) === 'past' && <Button size="sm" variant="ghost" className="min-h-11" disabled={suspended} onClick={() => go(`copy=${encodeURIComponent(b.id)}`)} data-testid={`banner-copy-${b.id}`}>{t('merch.action.copy')}</Button>}
+              {mayChange && vendorGroupOf(b) === 'past' && <Button size="sm" variant="ghost" className="min-h-11" disabled={suspended} onClick={() => go(`copy=${encodeURIComponent(b.id)}`)} data-testid={`banner-copy-${b.id}`}>{t('merch.action.copy')}</Button>}
             </div>
           </div>
         </div>
@@ -225,13 +230,14 @@ export default function VendorPromotionsPage() {
       <PageHeader
         title={t('merch.title')}
         description={t('merch.entry.subtitle')}
-        actions={<Button onClick={() => go('new=banner')} disabled={suspended || state !== 'ready' || full} className="min-h-11 max-sm:w-full" data-testid="merch-propose"><Plus className="h-4 w-4" />{t('merch.banners.propose')}</Button>}
+        actions={canPropose ? <Button onClick={() => go('new=banner')} disabled={state !== 'ready' || full} className="min-h-11 max-sm:w-full" data-testid="merch-propose"><Plus className="h-4 w-4" />{t('merch.banners.propose')}</Button> : undefined}
       />
       {/* Flash sales join as a second tab in slice 4. */}
       <div role="tablist" aria-label={t('merch.title')} className="flex w-fit gap-1 rounded-[var(--radius-lg)] bg-[var(--color-bg-secondary)] p-1">
         <button role="tab" aria-selected="true" className="flex min-h-11 items-center rounded-md bg-[var(--color-bg-primary)] px-3 text-sm font-semibold shadow-sm">{t('merch.tab.banners')}</button>
       </div>
       {suspended && <Alert tone="error">{t('merch.suspended')}</Alert>}
+      {!approved && !suspended && pendingNotice}
       {openProposals && openProposals.max > 0 && (
         <p className={full ? 'text-sm font-medium text-[var(--color-warning-700)]' : 'text-sm text-[var(--color-fg-tertiary)]'} data-testid="merch-open-proposals">
           {full ? t('merch.openFull') : fmt(t('merch.openProposals'), { open: openProposals.open, max: openProposals.max })}
@@ -243,7 +249,7 @@ export default function VendorPromotionsPage() {
       {state === 'offline' && <ErrorState title={t('merch.offlineTitle')} message={t('merch.offlineBody')} onRetry={() => void load()} retryLabel={t('common.tryAgain')} />}
       {state === 'ready' && total === 0 && (
         <EmptyState icon={<Megaphone className="h-6 w-6" />} title={t('merch.banners.emptyTitle')} body={t('merch.banners.emptyBody')}
-          action={!suspended ? <Button onClick={() => go('new=banner')} className="min-h-11" data-testid="merch-propose-empty">{t('merch.banners.propose')}</Button> : undefined} />
+          action={canPropose ? <Button onClick={() => go('new=banner')} className="min-h-11" data-testid="merch-propose-empty">{t('merch.banners.propose')}</Button> : undefined} />
       )}
       {state === 'ready' && total > 0 && VENDOR_GROUPS.map(g => {
         const list = grouped[g];
