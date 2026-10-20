@@ -7,7 +7,7 @@ import { api, type VendorOrder } from '@/lib/api';
 import { money } from '@/lib/admin-utils';
 import type { MessageKey } from '@/lib/i18n';
 import {
-  canonicalStatus, countsOf, eatDateTime, errorCode, fmt, inOrderTab, orderTab, isAwaitingPayment, isPaid, isRefundState, isRefusal, isTerminal,
+  canCustomers, canonicalStatus, countsOf, eatDateTime, errorCode, fmt, inOrderTab, orderTab, isAwaitingPayment, isPaid, isRefundState, isRefusal, isTerminal,
   itemsKey, markStatusKey, payLabel, paymentKey, statusKey, statusTone, type OrderCounts, type OrderTab,
 } from '@/lib/vendor';
 import { Alert, Badge, Button, Card, CardContent, CardHeader, EmptyState, ErrorState, Field, Input, PageHeader, Segmented, SkeletonCard, SkeletonTable, Spinner, Table, TBody, Td, Textarea, Th, THead, Tr, useToast } from '@/components/shared';
@@ -414,7 +414,13 @@ function OrderDetail({ id, onBack, onUpdated }: { id: string; onBack: () => void
       <Card>
         <CardHeader><h3 className="font-semibold">{t('vendor.orders.buyerDelivery')}</h3></CardHeader>
         <CardContent className="space-y-3 text-sm">
-          <p data-testid="order-buyer">{o.buyer?.displayName || t('vendor.orders.buyerUnnamed')}</p>
+          <p data-testid="order-buyer">
+            {/* S4: the app customer's profile, when customers are on for this person and the order still names one
+                (a deleted buyer's old orders have customerId null: plain text). */}
+            {canCustomers(vendor.me) && o.buyer?.customerId
+              ? <Link href={`/vendor/customers/?id=${encodeURIComponent(o.buyer.customerId)}`} className="inline-flex min-h-11 items-center font-semibold text-[var(--color-brand-700)] underline-offset-4 hover:underline" data-testid="order-buyer-customer">{o.buyer?.displayName || t('vendor.orders.buyerUnnamed')}</Link>
+              : (o.buyer?.displayName || t('vendor.orders.buyerUnnamed'))}
+          </p>
           <p>{deliveryLine(o, t)}</p>
           {phone && (
             <a href={`tel:${phone.replace(/\s+/g, '')}`} aria-label={fmt(t('vendor.orders.callBuyer'), { phone })}
