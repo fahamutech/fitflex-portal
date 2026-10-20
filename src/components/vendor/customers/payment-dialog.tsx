@@ -147,6 +147,7 @@ export function PaymentDialog({
               )}
               {p.recordedBy?.name && <p className="text-sm text-[var(--color-fg-tertiary)]">{fmt(t('vendor.pay.recordedBy'), { name: p.recordedBy.name })}</p>}
               {p.note && <p className="whitespace-pre-line text-sm text-[var(--color-fg-tertiary)] [overflow-wrap:anywhere]">{p.note}</p>}
+              <p className="text-sm text-[var(--color-fg-tertiary)]" data-testid="payment-received-by">{fmt(t('vendor.pos.receiptFooter'), { business })}</p>
               <p className="text-xs text-[var(--color-fg-quaternary)]">{t('vendor.pos.notFiscal')}</p>
               <Alert tone="info">{t('vendor.pay.notice')}</Alert>
               {p.status === 'recorded' && (

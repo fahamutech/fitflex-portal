@@ -124,6 +124,8 @@ export function OwedView({
         <>
           <div className="hidden @4xl:block">
             <Table aria-label={t('vendor.owed.title')} data-testid="owed-table">
+              {/* The table's own accessible name (the shared Table names only its scroll region). */}
+              <caption className="sr-only">{t('vendor.owed.title')}</caption>
               <THead>
                 <Tr>
                   {sortHeader('name', t('vendor.customers.customer'))}
