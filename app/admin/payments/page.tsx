@@ -11,7 +11,7 @@ import { money, statusTone } from '@/lib/admin-utils';
 import { fill } from '@/components/communication-shared';
 import type { MessageKey } from '@/lib/i18n';
 import {
-  DECIDED_STATUSES, PAYMENT_STATUSES, PAYMENT_STAGE_TONE, errorCode, expectedAmount, flagOnErrorKey, moneyErrorKey, paymentStageKey, paymentStatusKey, whenText,
+  DECIDED_STATUSES, PAYMENT_STATUSES, PAYMENT_STAGE_TONE, errorCode, expectedAmount, flagOnErrorKey, moneyErrorKey, paymentStageKey, paymentStatusKey, rebookedBookingIds, whenText,
 } from '@/lib/money-approval';
 
 type PaymentFilter = 'pending' | 'approved' | 'rejected' | 'cancelled' | 'all';
@@ -119,6 +119,14 @@ export default function PaymentsPage() {
     .filter(p => filter === 'all' || p.status === filter)
     .filter(p => kind === 'all' || isTrainerPass(p));
 
+  /** The full "slots were taken" message for a 409 group_slot_rebooked (with the booking ids it lists), or null. */
+  const slotRebookedText = (e: unknown): string | null => {
+    const ids = rebookedBookingIds(e);
+    if (!ids) return null;
+    const head = fill(t('money2.err.group_slot_rebooked'), { count: ids.length || 1 });
+    return ids.length ? `${head} ${fill(t('money2.err.group_slot_rebooked_ids'), { ids: ids.join(', ') })}` : head;
+  };
+
   /** `reference`: from the member transaction-ID dialog (slice A3); recorded with the approval. */
   async function handleAction(reference?: string) {
     if (!token || !actionTarget) return;
@@ -129,6 +137,9 @@ export default function PaymentsPage() {
       setError(null);
       await load();
     } catch (e) {
+      // functions#231: a rejected session's slot was taken since; the request is unchanged, staff adjust or reject it.
+      const rebooked = slotRebookedText(e);
+      if (rebooked) { setActionTarget(null); setError(rebooked); return; }
       // A3: a transaction ID already on another pending/approved payment has its own message; else A1's flag-on errors.
       const used = actionTarget.action === 'approved' && errorCode(e) === 'reference_already_used';
       const key = used ? 'manualPay.err.referenceUsed' as const : flagOnErrorKey(e, !!actionTarget.payment.secondApproverRequired);
@@ -184,6 +195,8 @@ export default function PaymentsPage() {
       setNotice(success(updated));
       await load();
     } catch (e) {
+      const rebooked = slotRebookedText(e);
+      if (rebooked) { setDialogError(rebooked); return; }
       const expected = errorCode(e) === 'amount_mismatch' ? expectedAmount(e) : null;
       setDialogError(expected != null ? fill(t('money2.err.amount_mismatch_expected'), { amount: money(expected) }) : t(moneyErrorKey(e)));
     } finally {

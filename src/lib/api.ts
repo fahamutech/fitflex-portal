@@ -1015,7 +1015,8 @@ export const api = {
   updateAdminVendor: (token: string, id: string, patch: Partial<Pick<VendorSummary, 'approvalStatus' | 'accountStatus' | 'approvalNote' | 'commissionPct'>>) =>
     request<VendorSummary>(`/admin/vendors/${id}`, { method: 'PUT', body: JSON.stringify(patch) }, token),
   trainerBookings: (token: string) => request<TrainerBooking[]>('/admin/trainer-bookings', {}, token),
-  updateTrainerBooking: (token: string, id: string, status: 'confirmed' | 'completed' | 'cancelled') =>
+  /** `no_show` only with TRAINER_SESSION_OUTCOMES on (functions#231); flag off it is 400 invalid_status. */
+  updateTrainerBooking: (token: string, id: string, status: 'confirmed' | 'completed' | 'cancelled' | 'no_show') =>
     request<TrainerBooking>(`/admin/trainer-bookings/${id}`, { method: 'POST', body: JSON.stringify({ status }) }, token),
   paymentRequests: (token: string) => request<PaymentRequest[]>('/admin/payment-requests', {}, token),
   // Trainer and vendor payouts: weekly statements on the same path as gym statements.
@@ -2390,7 +2391,10 @@ export interface TrainerBooking {
   date: string;
   slot: string;
   amountTzs: number;
-  status: 'confirmed' | 'completed' | 'cancelled';
+  /** `payment_pending` / `payment_rejected` while its payment is open; `no_show` with TRAINER_SESSION_OUTCOMES on (functions#231). */
+  status: 'payment_pending' | 'payment_rejected' | 'confirmed' | 'completed' | 'no_show' | 'cancelled';
+  /** What the caller may do now; present only with TRAINER_SESSION_OUTCOMES on (missing = flag off). */
+  actions?: { canComplete: boolean; canMarkNoShow: boolean };
   createdAt?: string;
   member?: { email?: string | null; phone?: string | null; displayName?: string | null } | null;
   trainer?: TrainerProfile | null;
