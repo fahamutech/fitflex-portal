@@ -401,6 +401,7 @@ test.describe('payments', () => {
 
     await page.getByTestId('pay-amount').fill('60000');
     await expect(dialog).toContainText("That's more than the TSh 50,000 owed. FitFlex can't keep extra as credit.");
+    await expect(page.getByTestId('pay-over-owed')).toHaveAttribute('role', 'alert');
     await expect(page.getByTestId('pay-save')).toBeDisabled();
     await page.getByTestId('pay-all-owed').click();
     await expect(page.getByTestId('pay-amount')).toHaveValue('50000');
@@ -452,6 +453,7 @@ test.describe('payments', () => {
     await expect(page).toHaveURL(/payment=pay_1/);
     await expect(page.getByTestId('payment-allocations')).toContainText('R-000001');
     await expect(page.getByTestId('payment-still-owed')).toHaveText('TSh 25,000');
+    await expect(page.getByTestId('payment-received-by')).toHaveText('Payment received by Dar Fitness Gear.');
     await page.getByTestId('payment-copy').click();
     const text = await page.evaluate(() => (window as unknown as { __copied: string }).__copied);
     expect(text).toContain('Dar Fitness Gear');
@@ -553,6 +555,7 @@ test.describe('owed to you and statement', () => {
     await expect(page.getByTestId('owed-overdue')).toHaveText('TSh 20,000');
     await expect(page.getByTestId('owed-customers')).toHaveText('1');
     const table = page.getByTestId('owed-table');
+    await expect(page.getByRole('table', { name: 'Owed to you' })).toBeVisible();
     await expect(table.getByRole('columnheader')).toHaveCount(9);
     await expect(page.getByTestId('owed-totals-row')).toContainText('TSh 50,000');
     await expect(table.getByRole('columnheader', { name: 'Oldest due' })).toHaveAttribute('aria-sort', 'descending');
@@ -674,6 +677,25 @@ test.describe('sales page (S3) with pay later', () => {
     id = null;
     await page.reload();
     await expect(page.getByTestId('order-buyer')).toHaveText('Neema Joseph');
+    await expect(page.getByTestId('order-buyer-customer')).toHaveCount(0);
+  });
+
+  test('an order whose buyer deleted their account shows "Deleted member" in the list and the detail', async ({ page }) => {
+    await signedInAs(page, VENDOR);
+    const order = {
+      id: 'ord_9', shortRef: 'ZZ99ZZ', createdAt: NOW, status: 'delivered', orderStatus: 'delivered', nextStatuses: [], timeline: [],
+      items: [{ productId: 'p1', name: 'Whey', variant: null, qty: 1, priceTzs: 45000, image: null }], totalTzs: 45000, paymentStatus: 'paid',
+      paymentMethod: 'mpesa', deliveryMethod: 'pickup', note: null, pickupGymId: null, pickupGym: null,
+      buyer: { customerId: null, customerLinked: false, forgotten: true, displayName: null },
+    };
+    await mockApi(page, base({
+      'GET /vendor/orders': { json: { orders: [order], nextCursor: null, counts: { open: 0, delivered: 1, cancelled: 0, all: 1, waitingAccept: 0 } } },
+      'GET /vendor/orders/ord_9': { json: order },
+    }));
+    await page.goto('/vendor/orders/?status=all');
+    await expect(page.getByText('Deleted member').first()).toBeVisible();
+    await page.goto('/vendor/orders/?id=ord_9');
+    await expect(page.getByTestId('order-buyer')).toHaveText('Deleted member');
     await expect(page.getByTestId('order-buyer-customer')).toHaveCount(0);
   });
 

@@ -306,6 +306,10 @@ export function customerName(c: { name?: string | null; forgotten?: boolean } | 
   return c?.name?.trim() || t('vendor.orders.buyerUnnamed');
 }
 
+/** An order's buyer as shown: deleted account → "Deleted member"; no name → "FitFlex member" (same rule as customers). */
+export const buyerName = (order: Pick<VendorOrder, 'buyer'>, t: (k: MessageKey) => string) =>
+  customerName({ name: order.buyer?.displayName ?? null, forgotten: order.buyer?.forgotten === true }, t);
+
 /**
  * Tanzanian mobile number → +255XXXXXXXXX, as the server stores it (07…, 06…, 7…, 6…, 255…, +255…, with
  * spaces, dashes, dots or brackets). Anything else → null. The server checks again.

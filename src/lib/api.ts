@@ -1982,7 +1982,8 @@ export interface VendorOrder {
   pickupGymId: string | null;
   pickupGym: { id: string; name: string | null } | null;
   /** customerLinked (S4, being added on the backend): the buyer is an app customer of mine whose profile can open. */
-  buyer: { customerId: string | null; customerLinked?: boolean; displayName: string | null; phone?: string | null; contactVisibleUntil?: string | null };
+  /** forgotten (S4, being added on the backend): the buyer deleted their FitFlex account — show "Deleted member". */
+  buyer: { customerId: string | null; customerLinked?: boolean; forgotten?: boolean; displayName: string | null; phone?: string | null; contactVisibleUntil?: string | null };
   deliveryAddress?: string | null;
 }
 
