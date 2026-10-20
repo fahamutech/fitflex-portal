@@ -1,10 +1,13 @@
 'use client';
 // Customer statement as plain text (S4 §7.3): preview, language toggle and Copy. Never phone, email or address.
 import { useCallback, useEffect, useState } from 'react';
+import Link from 'next/link';
 import { api, type VendorCustomerPayment, type VendorCustomerProfile } from '@/lib/api';
 import { money } from '@/lib/admin-utils';
 import { t as translate, type Locale, type MessageKey } from '@/lib/i18n';
-import { addDays, eatToday, statementText } from '@/lib/vendor';
+import { addDays, documentsOn, eatToday, statementText } from '@/lib/vendor';
+import { documentHref } from '@/lib/vendor-documents';
+import { docLinkCls } from '@/components/vendor/documents/share-menu';
 import { Button, ErrorState, Segmented, SkeletonCard } from '@/components/shared';
 import { Dialog, DialogFooter } from '@/components/dialog';
 import { useVendor } from '@/components/vendor-context';
@@ -56,6 +59,9 @@ export function StatementDialog({ open, customer, onClose }: { open: boolean; cu
       </div>
       <DialogFooter className="flex-wrap">
         <Button variant="secondary" className="min-h-11" onClick={onClose}>{t('common.close')}</Button>
+        {documentsOn(vendor.me) && (
+          <Link href={documentHref('statement', customer.id)} className={docLinkCls} data-testid="statement-document">{t('vendor.documents.view')}</Link>
+        )}
         <Button className="min-h-11" onClick={copy} disabled={!payments} data-testid="statement-copy">{t('vendor.statement.copy')}</Button>
       </DialogFooter>
     </Dialog>

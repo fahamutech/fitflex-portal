@@ -2,17 +2,19 @@
 import { Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
-import { ArrowLeft, ChevronRight, ClipboardList, Copy, Phone, RefreshCw } from 'lucide-react';
+import { ArrowLeft, ChevronRight, ClipboardList, Copy, FileText, Phone, RefreshCw } from 'lucide-react';
 import { api, type VendorOrder } from '@/lib/api';
 import { money } from '@/lib/admin-utils';
 import type { MessageKey } from '@/lib/i18n';
 import {
-  buyerName, canCustomers, canonicalStatus, countsOf, eatDateTime, errorCode, fmt, inOrderTab, orderTab, isAwaitingPayment, isPaid, isRefundState, isRefusal, isTerminal,
+  buyerName, canCustomers, canonicalStatus, countsOf, documentsOn, eatDateTime, errorCode, fmt, inOrderTab, orderTab, isAwaitingPayment, isPaid, isRefundState, isRefusal, isTerminal,
   itemsKey, markStatusKey, payLabel, paymentKey, statusKey, statusTone, type OrderCounts, type OrderTab,
 } from '@/lib/vendor';
 import { Alert, Badge, Button, Card, CardContent, CardHeader, EmptyState, ErrorState, Field, Input, PageHeader, Segmented, SkeletonCard, SkeletonTable, Spinner, Table, TBody, Td, Textarea, Th, THead, Tr, useToast } from '@/components/shared';
 import { Dialog, DialogFooter } from '@/components/dialog';
 import { useVendor } from '@/components/vendor-context';
+import { docLinkCls } from '@/components/vendor/documents/share-menu';
+import { documentHref } from '@/lib/vendor-documents';
 import { useApp } from '../../providers';
 
 type Tab = OrderTab;
@@ -406,8 +408,14 @@ function OrderDetail({ id, onBack, onUpdated }: { id: string; onBack: () => void
 
       <Card>
         <CardHeader><h3 className="font-semibold">{t('vendor.orders.payment')}</h3></CardHeader>
-        <CardContent className="text-sm">
-          {t(paymentKey(o.paymentStatus))}{methodLabel ? ` · ${methodLabel}` : ''}
+        <CardContent className="space-y-3 text-sm">
+          <p>{t(paymentKey(o.paymentStatus))}{methodLabel ? ` · ${methodLabel}` : ''}</p>
+          {/* S5 (Q-15): my invoice exists once my part is paid; refunded later, it reads Cancelled. */}
+          {documentsOn(vendor.me) && ['paid', 'refund_pending', 'refunded'].includes(o.paymentStatus ?? '') && (
+            <Link href={documentHref('order', o.id)} className={docLinkCls} data-testid="order-invoice">
+              <FileText aria-hidden="true" className="h-4 w-4" />{t('vendor.documents.invoice')}
+            </Link>
+          )}
         </CardContent>
       </Card>
 

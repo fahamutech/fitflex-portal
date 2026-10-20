@@ -2,9 +2,12 @@
 // One shop sale of this customer, read-only (GET /vendor/customers/:id/sales/:saleId), for staff who hold
 // `customers` but not `sales`. No void and no copy receipt here: those stay on the Sales page (needs `sales`).
 import { useCallback, useEffect, useState } from 'react';
+import Link from 'next/link';
 import { api, type VendorSale } from '@/lib/api';
 import { money } from '@/lib/admin-utils';
-import { eatDateTime, errorCode, fmt, receiptDay, saleMethodLabel } from '@/lib/vendor';
+import { documentsOn, eatDateTime, errorCode, fmt, receiptDay, saleMethodLabel } from '@/lib/vendor';
+import { documentHref } from '@/lib/vendor-documents';
+import { docLinkCls } from '@/components/vendor/documents/share-menu';
 import { Alert, Badge, Button, ErrorState, SkeletonCard } from '@/components/shared';
 import { Dialog, DialogFooter } from '@/components/dialog';
 import { useVendor } from '@/components/vendor-context';
@@ -84,7 +87,10 @@ export function CustomerSaleDialog({ customerId, saleId, onClose }: { customerId
           </>
         )}
       </div>
-      <DialogFooter>
+      <DialogFooter className="flex-wrap">
+        {s && documentsOn(vendor.me) && (s.kind === 'credit' || vendor.can('sales')) && (
+          <Link href={documentHref('sale', s.id, customerId)} className={docLinkCls} data-testid="customer-sale-document">{t('vendor.documents.view')}</Link>
+        )}
         <Button variant="secondary" className="min-h-11" onClick={onClose} data-testid="customer-sale-close">{t('common.close')}</Button>
       </DialogFooter>
     </Dialog>

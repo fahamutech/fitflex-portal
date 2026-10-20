@@ -1919,6 +1919,10 @@ export interface VendorTools {
   canSeeCost?: boolean;
   /** Shop banners (SHOP_BANNERS): merch.banners. When absent the portal asks GET /vendor/shop-banners once. */
   merch?: { banners?: boolean };
+  /** S5 (VENDOR_DOCUMENTS): share links, PDF, the document view and order invoices. Missing = off. */
+  documents?: boolean;
+  /** S5 (VENDOR_VAT): tax details, VAT codes and VAT on documents. Missing = off. */
+  vat?: boolean;
   [tool: string]: unknown;
 }
 
