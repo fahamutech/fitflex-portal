@@ -2,9 +2,9 @@
 import { ReactNode, useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { Inbox } from 'lucide-react';
-import { api, type LowStockRow, type VendorOrder, type VendorPayments, type VendorSaleSummary, type VendorStatementList } from '@/lib/api';
+import { api, type LowStockRow, type VendorAgingPage, type VendorOrder, type VendorPayments, type VendorSaleSummary, type VendorStatementList } from '@/lib/api';
 import { money } from '@/lib/admin-utils';
-import { canWalkInSales, countsOf, eatDateTime, eatToday, fmt, isOpenOrder, itemsKey, payoutWhyKey, statusKey, statusTone, type OrderCounts } from '@/lib/vendor';
+import { canCustomers, canWalkInSales, countsOf, eatDateTime, eatToday, fmt, isOpenOrder, itemsKey, payoutWhyKey, statusKey, statusTone, type OrderCounts } from '@/lib/vendor';
 import { Badge, Button, Card, CardContent, CardHeader, EmptyState, PageHeader, Skeleton } from '@/components/shared';
 import { useVendor } from '@/components/vendor-context';
 import { useApp } from '../providers';
@@ -48,6 +48,8 @@ export default function VendorDashboardPage() {
   const canLow = vendor.can('products') && vendor.me?.tools.stockLedger === true;
   // S3: counter sales today, a card of its own (never added to the app-order figures).
   const canSales = canWalkInSales(vendor.me);
+  // S4: money customers owe on pay-later sales — its own card, never added to app or shop sales.
+  const canOwed = canCustomers(vendor.me);
 
   const [payments, retryPayments] = useLoad<VendorPayments>(!!token && canPay, () => api.vendorPayments(token!));
   const [statements, retryStatements] = useLoad<VendorStatementList>(!!token && canPay, () => api.vendorStatements(token!));
@@ -61,6 +63,8 @@ export default function VendorDashboardPage() {
     return (await api.vendorSales(token!, { from: day, to: day, limit: 1 })).summary ?? null;
   });
 
+  const [owed, retryOwed] = useLoad<VendorAgingPage['totals']>(!!token && canOwed, async () => (await api.vendorReceivablesAging(token!, { limit: 1 })).totals);
+
   const failed = (retry: () => void) => (
     <div className="space-y-2" role="alert">
       <p className="text-sm text-[var(--color-error-700)]">{t('vendor.dash.cardFailed')}</p>
@@ -70,7 +74,7 @@ export default function VendorDashboardPage() {
   const loading = <div aria-busy="true"><Skeleton className="h-8 w-24" /></div>;
   const value = (v: ReactNode, testId?: string) => <p className="text-3xl font-semibold tracking-tight tabular-nums text-[var(--color-fg-primary)]" data-testid={testId}>{v}</p>;
 
-  if (!canPay && !canOrders && !vendor.can('products') && !canSales) {
+  if (!canPay && !canOrders && !vendor.can('products') && !canSales && !canOwed) {
     return (
       <div className="space-y-6">
         <PageHeader title={vendor.me?.businessName || t('vendor.nav.dashboard')} />
@@ -110,6 +114,17 @@ export default function VendorDashboardPage() {
                 {value(shopSales.data ? money(shopSales.data.totalTzs) : '—', 'dash-shop-sales-value')}
                 <p className="mt-1 text-sm text-[var(--color-fg-quaternary)]">{t('vendor.dash.shopSalesHint')}</p>
                 <Link href="/vendor/sales/" className={linkCls}>{t('vendor.dash.viewAll')}</Link>
+              </>
+            )}
+          </Tile>
+        )}
+        {canOwed && (
+          <Tile label={t('vendor.dash.owed')} testId="dash-owed">
+            {owed.state === 'loading' ? loading : owed.state === 'failed' ? failed(retryOwed) : (
+              <>
+                {value(money(owed.data.owedTzs), 'dash-owed-value')}
+                <p className="mt-1 text-sm text-[var(--color-fg-quaternary)]" data-testid="dash-owed-hint">{fmt(t('vendor.dash.owedHint'), { n: owed.data.overdueSaleCount })}</p>
+                <Link href="/vendor/customers/?view=owed" className={linkCls}>{t('vendor.dash.viewAll')}</Link>
               </>
             )}
           </Tile>
