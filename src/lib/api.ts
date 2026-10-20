@@ -1923,6 +1923,8 @@ export interface VendorTools {
   documents?: boolean;
   /** S5 (VENDOR_VAT): tax details, VAT codes and VAT on documents. Missing = off. */
   vat?: boolean;
+  /** S5: VAT applies to this vendor's new sales now (registered, verified, certificate standing). */
+  vatInForce?: boolean;
   [tool: string]: unknown;
 }
 

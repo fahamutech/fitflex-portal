@@ -2,6 +2,7 @@
 import { Fragment, useCallback, useEffect, useState } from 'react';
 import { ChevronDown, ChevronRight, Plus, RefreshCw } from 'lucide-react';
 import type { MessageKey } from '@/lib/i18n';
+import { ApiError } from '@/lib/api';
 import { eatDateTime, errorBody, errorCode, receiptDay } from '@/lib/vendor';
 import { adminTaxApi, eatTomorrow, type TaxCode, type TaxRate, type TaxRatesPage, type TaxRateStatus } from '@/lib/vendor-documents';
 import {
@@ -41,7 +42,8 @@ export default function TaxRatesPageView() {
     try {
       setData(await adminTaxApi.rates(token)); setState('ready');
     } catch (err) {
-      if (errorCode(err) === 'feature_disabled') { forgetTaxRatesAvailability(); setState('off'); return; }
+      // Any 404 is "VAT off" (feature_disabled, or an older backend without the route).
+      if (err instanceof ApiError && err.status === 404) { forgetTaxRatesAvailability(); setState('off'); return; }
       setState('error');
     }
   }, [token]);

@@ -75,6 +75,17 @@ test.describe('tax rates', () => {
     expect(calls.outside).toEqual([]);
   });
 
+  test('an older backend without the route (plain 404) counts as off too', async ({ page }) => {
+    await signIn(page);
+    const calls = await mockApi(page, {});
+    await page.goto('/admin/payments/');
+    await expect(page.getByRole('link', { name: 'Payments', exact: true }).first()).toBeVisible();
+    await expect(page.getByRole('link', { name: 'Tax rates' })).toHaveCount(0);
+    await page.goto('/admin/tax-rates/');
+    await expect(page.getByTestId('tax-rates-off')).toBeVisible();
+    expect(calls.outside).toEqual([]);
+  });
+
   test('seeded codes: A 18% and C 0% active, E exempt, B and D not in use; history expander', async ({ page }) => {
     await signIn(page);
     const calls = await mockApi(page, { 'GET /admin/tax-rates': { json: { asOf: day(0), codes, rates: seed() } } });
@@ -319,6 +330,18 @@ test.describe('KYC: VAT registration', () => {
     await expect(page.getByTestId('kyc-vat')).toHaveCount(0);
   });
 
+  test('an older backend without the VAT route (plain 404): no section and no failure card', async ({ page }) => {
+    await signIn(page);
+    const routes = kycRoutes();
+    delete routes['GET /admin/kyc/vendors/usr_vendor/vat'];
+    const calls = await mockApi(page, routes);
+    await page.goto('/admin/kyc/?case=case_v1');
+    await expect(page.getByTestId('kyc-doc-vat_certificate')).toBeVisible();
+    await expect.poll(() => callsTo(calls, 'GET', '/admin/kyc/vendors/usr_vendor/vat').length).toBe(1);
+    await expect(page.getByTestId('kyc-vat')).toHaveCount(0);
+    await expect(page.getByText("Couldn't load the VAT registration.")).toHaveCount(0);
+  });
+
   test('Kiswahili section labels', async ({ page }) => {
     await signIn(page, ME, 'sw');
     await mockApi(page, kycRoutes());
@@ -326,7 +349,8 @@ test.describe('KYC: VAT registration', () => {
     const section = page.getByTestId('kyc-vat');
     await expect(section.getByRole('heading', { name: /Usajili wa VAT/ })).toBeVisible();
     await expect(section.getByTestId('kyc-vat-verify')).toHaveText('Thibitisha');
-    await expect(section.getByTestId('kyc-vat-reject')).toHaveText('Haikukubaliwa');
+    // The button says what it does; "Haikukubaliwa" stays the status word.
+    await expect(section.getByTestId('kyc-vat-reject')).toHaveText('Kataa');
     await expect(section.getByTestId('kyc-vat-tin-mismatch')).toContainText('TIN hii inatofautiana');
   });
 });

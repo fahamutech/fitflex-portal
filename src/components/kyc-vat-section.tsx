@@ -4,7 +4,7 @@
 // the server has VAT off (404 feature_disabled) or the vendor never submitted a tax profile. Scope `kyc`.
 import { useCallback, useEffect, useState } from 'react';
 import { Check, Eye, Landmark, X } from 'lucide-react';
-import type { KycDocument } from '@/lib/api';
+import { ApiError, type KycDocument } from '@/lib/api';
 import type { MessageKey } from '@/lib/i18n';
 import { errorCode, fmt, receiptDay } from '@/lib/vendor';
 import { adminTaxApi, VAT_REJECT_REASONS, type AdminVendorVat, type VatRejectReason } from '@/lib/vendor-documents';
@@ -33,7 +33,8 @@ export function KycVatSection({ vendorId, documents, onView }: {
     try {
       setVat(await adminTaxApi.vendorVat(token, vendorId)); setState('ready');
     } catch (err) {
-      setState(errorCode(err) === 'feature_disabled' ? 'off' : 'error');
+      // Any 404 is "VAT off": feature_disabled, or an older backend without the route (contract check).
+      setState(err instanceof ApiError && err.status === 404 ? 'off' : 'error');
     }
   }, [token, vendorId]);
   useEffect(() => { void load(); }, [load]);

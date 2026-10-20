@@ -11,12 +11,11 @@ import {
   docTitleKey, documentsApi, documentText, linkUrlFor, pdfName, sharePath, whatsappUrl,
   type DocKind, type DocLang, type DocPaper, type DocumentLink, type DocumentShare, type VendorDocument,
 } from '@/lib/vendor-documents';
-import { canCustomers, eatDateTime, errorCode, fmt } from '@/lib/vendor';
+import { canCustomers, eatDateTime, errorBody, errorCode, fmt } from '@/lib/vendor';
 import { Alert, Badge, Button, ErrorState, Segmented, SkeletonText, Spinner } from '@/components/shared';
 import { Dialog } from '@/components/dialog';
 import { useVendor } from '@/components/vendor-context';
 import { useToast } from '@/components/ui/toast';
-import { rateLimitText } from '@/components/vendor/customers/bits';
 import { useApp } from '../../../../app/providers';
 
 type Busy = 'whatsapp' | 'copy' | 'a4' | '80mm' | null;
@@ -136,8 +135,11 @@ export function ShareMenu({
       if (code === 'document_cancelled') { setCancelled(true); return null; }
       if (code === 'invoice_not_ready') { setNotReady(true); return null; }
       if (code === 'vendor_permission_forbidden') { toast.error(t('vendor.documents.noAccess')); onClose(); return null; }
-      const limited = rateLimitText(err, t);
-      if (limited) { setError(limited); return null; }
+      if (code === 'rate_limited') {
+        const n = Number(errorBody<{ retryAfterSeconds?: number }>(err)?.retryAfterSeconds) || 60;
+        setError(fmt(t('vendor.documents.rateLimited'), { n }));
+        return null;
+      }
       if (code !== 'invalid_lang' && vendor.handleError(err)) { onClose(); return null; }
       setError(t('vendor.documents.createFailed'));
       return null;

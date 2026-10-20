@@ -27,7 +27,7 @@ export interface VendorDocument {
   status: 'paid' | 'pay_later' | 'paid_in_full' | 'cancelled' | null;
   issuedAt: string;
   lang: DocLang;
-  seller: { businessName: string; logoUrl: string | null; address: string | null; contactNumber: string | null; tin?: string | null; vrn?: string | null };
+  seller: { businessName: string | null; logoUrl: string | null; address: string | null; contactNumber: string | null; tin?: string | null; vrn?: string | null };
   soldVia?: string | null;
   customer?: { name: string | null } | null;
   servedBy?: { firstName: string | null } | null;
@@ -171,7 +171,7 @@ export function documentText(doc: VendorDocument, opts: { locale: Locale; t: (k:
   const { t, locale } = opts;
   const rule = '-'.repeat(20);
   const title = t(docTitleKey(doc.docType));
-  const out: string[] = [doc.seller.businessName, doc.number ? `${title} ${doc.number}` : title];
+  const out: string[] = [doc.seller.businessName || t('vendor.shell.unnamed'), doc.number ? `${title} ${doc.number}` : title];
   if (doc.statement) out.push(fmt(t('vendor.customers.asOf'), { date: receiptDay(doc.statement.asOf, locale) }));
   else out.push(receiptDateTime(doc.issuedAt, locale));
   if (doc.saleRef) out.push(fmt(t('vendor.documents.saleRef'), { number: doc.saleRef }));
@@ -194,7 +194,11 @@ export function documentText(doc: VendorDocument, opts: { locale: Locale; t: (k:
     for (const a of doc.paidTowards) out.push(`${a.number}  ${amountOnly(a.amountTzs)}`);
   }
   if (typeof doc.stillOwedTzs === 'number') out.push(`${t('vendor.pay.stillOwed')}  ${tsh(doc.stillOwedTzs)}`);
-  if (doc.liveStatus) out.push(`${t('vendor.receipt.balanceDue')}  ${tsh(doc.liveStatus.balanceTzs)}`);
+  // The live status (credit invoice), never the "at sale" label: settled → "Paid in full on {date}".
+  if (doc.liveStatus) {
+    if (doc.liveStatus.balanceTzs <= 0 && doc.liveStatus.paidInFullAt) out.push(fmt(t('vendor.documents.paidInFull'), { date: receiptDay(doc.liveStatus.paidInFullAt, locale) }));
+    else out.push(`${t('vendor.documents.balanceDue')}  ${tsh(doc.liveStatus.balanceTzs)}`);
+  }
   if (doc.statement) {
     for (const s of doc.statement.openSales) out.push(`${s.number}  ${amountOnly(s.balanceTzs)}`);
     out.push(`${t('vendor.statement.totalOwed')}  ${tsh(doc.statement.totalOwedTzs)}`);

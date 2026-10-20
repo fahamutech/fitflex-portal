@@ -36,6 +36,8 @@ export default function VendorTaxPage() {
   const [cert, setCert] = useState<OwnKycDocument | null>(null);
   const [uploading, setUploading] = useState(false);
   const [uploadFailed, setUploadFailed] = useState(false);
+  /** 409 case_locked: the KYC case is under review, so no certificate can be added yet. */
+  const [locked, setLocked] = useState(false);
   const [errors, setErrors] = useState<FieldErrors>({});
   const [saving, setSaving] = useState(false);
   const [stopOpen, setStopOpen] = useState(false);
@@ -86,7 +88,7 @@ export default function VendorTaxPage() {
 
   async function upload(file: File) {
     if (!token) return;
-    setUploading(true); setUploadFailed(false);
+    setUploading(true); setUploadFailed(false); setLocked(false);
     try {
       const overview = await taxApi.uploadCertificate(token, file);
       const doc = currentVatCertificate(overview.documents);
@@ -94,6 +96,7 @@ export default function VendorTaxPage() {
       setCert(doc); setCertId(doc.id);
       setErrors(e => ({ ...e, cert: undefined }));
     } catch (err) {
+      if (errorCode(err) === 'case_locked') { setLocked(true); return; }
       if (!vendor.handleError(err)) setUploadFailed(true);
     } finally {
       setUploading(false);
@@ -146,6 +149,7 @@ export default function VendorTaxPage() {
       if (code === 'vrn_invalid') setErrors({ vrn: 'vendor.tax.vrnInvalid' });
       else if (code === 'tin_invalid' || code === 'tin_required' || code === 'kyc_tin_invalid') setErrors({ tin: 'vendor.tax.tinInvalid' });
       else if (code === 'certificate_required') setErrors({ cert: 'vendor.tax.certRequired' });
+      else if (code === 'case_locked') setLocked(true);
       else if (code === 'tax_profile_changed') { toast.info(t('vendor.tax.changedElsewhere')); void load(); }
       else if (code === 'owner_only') { toast.error(t('vendor.tax.ownerOnly')); void load(); }
       else if (!vendor.handleError(err)) toast.error(t('vendor.saveFailed'));
@@ -228,6 +232,7 @@ export default function VendorTaxPage() {
                 )}
                 {errors.cert && <p id="tax-cert-error" className="text-xs text-[var(--color-error-700)]">{t(errors.cert)}</p>}
                 {uploadFailed && <div data-testid="tax-upload-failed"><Alert tone="error">{t('vendor.tax.uploadFailed')}</Alert></div>}
+                {locked && <div data-testid="tax-case-locked"><Alert tone="warning">{t('vendor.tax.caseLocked')}</Alert></div>}
               </div>
             </>
           )}

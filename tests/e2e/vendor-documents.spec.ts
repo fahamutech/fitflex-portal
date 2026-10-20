@@ -369,6 +369,41 @@ test.describe('share menu', () => {
     expect(callsTo(calls, 'POST', '/vendor/sales/sal_1/share')).toHaveLength(1);
   });
 
+  test('credit invoice as text: live "Balance due", then "Paid in full on {date}" (sw) — never the "at sale" label', async ({ page }) => {
+    await signedInAs(page, VENDOR);
+    let paid = false;
+    await mockApi(page, base({
+      'POST /vendor/sales/sal_1/share': { status: 503, json: { error: 'public_url_not_configured' } },
+      'GET /vendor/documents/sale/sal_1': (_req: Request, url: URL) => (url.searchParams.get('format') === 'html' ? { body: docHtml() } : {
+        json: { doc: doc({ docType: 'invoice', number: 'INV-000001', saleRef: 'R-000123', status: paid ? 'paid_in_full' : 'pay_later', liveStatus: paid
+          ? { asOf: TODAY, balanceTzs: 0, paidInFullAt: '2026-10-19', paidWith: ['PMT-000001'] }
+          : { asOf: TODAY, balanceTzs: 45000, paidInFullAt: null, paidWith: [] } }) },
+      }),
+    }));
+    await page.goto(DOC_URL);
+    await page.getByTestId('document-share').click();
+    await page.getByRole('dialog').getByTestId('share-text').click();
+    await expect.poll(() => copied(page)).toContain('Balance due  TSh 45,000');
+    expect(await copied(page)).not.toContain('at sale');
+    await page.keyboard.press('Escape');
+    paid = true;
+    await page.getByRole('button', { name: 'Kiswahili', exact: true }).click();
+    await expect(page.frameLocator('[data-testid="document-frame"]').locator('[data-doc-marker]')).toBeVisible();
+    await page.getByTestId('document-share').click();
+    await page.getByRole('dialog').getByTestId('share-text').click();
+    await expect.poll(() => copied(page)).toContain('Imelipwa yote tarehe 19 Okt 2026');
+    expect(await copied(page)).not.toContain('Kiasi kinachodaiwa');
+  });
+
+  test('429 rate_limited on share: "Too many tries. Wait {n} seconds."', async ({ page }) => {
+    await signedInAs(page, VENDOR);
+    await mockApi(page, base({ 'POST /vendor/sales/sal_1/share': { status: 429, json: { error: 'rate_limited', retryAfterSeconds: 42 } } }));
+    await page.goto(DOC_URL);
+    await page.getByTestId('document-share').click();
+    await page.getByRole('dialog').getByTestId('share-copy').click();
+    await expect(page.getByTestId('share-error')).toHaveText('Too many tries. Wait 42 seconds.');
+  });
+
   test('a create failure shows Try again text; a 409 document_cancelled shows the cancelled note', async ({ page }) => {
     await signedInAs(page, VENDOR);
     let n = 0;
@@ -531,6 +566,16 @@ test.describe('tax details', () => {
     await page.getByTestId('tax-save').click();
     await expect(page.getByText("These details changed on another device. We've reloaded them.")).toBeVisible();
     await expect.poll(() => callsTo(calls, 'GET', '/vendor/tax-profile').length).toBe(2);
+  });
+
+  test('409 case_locked on upload: the verification is under review', async ({ page }) => {
+    await signedInAs(page, VENDOR);
+    await mockApi(page, taxBase({ 'POST /me/kyc/documents/vat_certificate/file': { status: 409, json: { error: 'case_locked', caseStatus: 'in_review' } } }));
+    await page.goto('/vendor/settings/tax/');
+    await page.getByTestId('tax-registered').check();
+    await page.getByTestId('tax-cert-input').setInputFiles({ name: 'vat.pdf', mimeType: 'application/pdf', buffer: Buffer.from('%PDF-1.4 cert') });
+    await expect(page.getByTestId('tax-case-locked')).toHaveText("Your verification is under review. You can add VAT details after it's finished.");
+    await expect(page.getByTestId('tax-upload-failed')).toHaveCount(0);
   });
 
   test('turning VAT off on a verified profile asks first', async ({ page }) => {
