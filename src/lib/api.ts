@@ -1,6 +1,8 @@
 // Thin client for the bfast-functions backend.
 
 const BASE = process.env.NEXT_PUBLIC_API_BASE || 'https://fitflex-faas.bfast.smartstock.co.tz';
+/** The API server address (for feature modules that build their own requests, e.g. src/lib/shop-banners.ts). */
+export const API_BASE = BASE;
 
 export class ApiError extends Error {
   status: number;
@@ -13,6 +15,8 @@ export class ApiError extends Error {
 }
 
 let _onUnauthorized: (() => void) | null = null;
+/** Tell the session a request came back 401 (for XHR uploads outside request()). */
+export function notifyUnauthorized() { _onUnauthorized?.(); }
 
 /** Register a callback invoked when any API call returns 401. */
 export function setOnUnauthorized(cb: (() => void) | null) {
@@ -94,7 +98,7 @@ export interface GymInvitationInput {
   paidAmount?: number;
 }
 
-async function request<T>(
+export async function request<T>(
   path: string,
   opts: RequestInit = {},
   token?: string,
@@ -121,7 +125,7 @@ async function request<T>(
 }
 
 /** "?a=1&b=2" from the set values of `params`, or "". */
-function qs(params: object): string {
+export function qs(params: object): string {
   const q = new URLSearchParams();
   for (const [k, v] of Object.entries(params)) if (v != null && v !== '') q.set(k, String(v));
   const s = q.toString();
@@ -1913,6 +1917,8 @@ export interface VendorTools {
   stockLedger?: boolean;
   buyerContact?: boolean;
   canSeeCost?: boolean;
+  /** Shop banners (SHOP_BANNERS): merch.banners. When absent the portal asks GET /vendor/shop-banners once. */
+  merch?: { banners?: boolean };
   [tool: string]: unknown;
 }
 

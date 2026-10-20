@@ -266,7 +266,7 @@ const PREVIEW_SIZE: Record<HeroPreviewKind, { w: number; h: number; label: Messa
 };
 
 /** Draws `children` at its real CSS size, scaled down (never up) to fit the column. */
-function ScaledFrame({ width, height, children }: { width: number; height: number; children: ReactNode }) {
+export function ScaledFrame({ width, height, children }: { width: number; height: number; children: ReactNode }) {
   const ref = useRef<HTMLDivElement>(null);
   const [scale, setScale] = useState(1);
   useLayoutEffect(() => {

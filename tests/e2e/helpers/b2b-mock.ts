@@ -258,6 +258,8 @@ export async function setupB2B(page_: Page, user: Json = ADMIN, extra: Array<[st
     ['GET', /^\/b2b\/organizations\/([^/]+)\/analytics\/export\/([^/]+)$/, (_c, m) => ({ filename: `${m[2]}.csv`, title: 'Beneficiaries', rows: 1, csv: 'name\nAsha Juma\n' })],
     ['GET', /^\/admin\/b2b\/analytics$/, () => ANALYTICS_OVERVIEW],
     ['GET', /^\/admin\/b2b\/analytics\/data-quality$/, () => DATA_QUALITY],
+    // The admin shell asks once whether shop banners are on (SHOP_BANNERS); off here.
+    ['GET', /^\/admin\/shop-merch$/, () => ({ status: 404, json: { error: 'feature_disabled' } })],
   ];
 
   await page_.addInitScript(([u]) => {

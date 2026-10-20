@@ -661,3 +661,50 @@ body {
   background: var(--hero-crosshair-light);
   box-shadow: 0 0 0 2px var(--hero-crosshair-dark);
 }
+
+/* ── Shop banner preview (Shop home Phase 2 S1; spec shop-home-phase2 §5.1, P1 §6.1–6.3) ──
+   The slide is an always-dark photo island, so it reuses the hero scrim and text tokens.
+   "Light" / "Dark" is the app theme around it: the accent is brand green in light and
+   Volt only in dark (never Volt on a light surface, spec §11.1). */
+.banner-frame { padding: 16px; border-radius: var(--radius-xl); background: var(--color-bg-secondary); }
+.banner-frame--dark { background: var(--color-gray-900); }
+.banner-slide {
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 10px;
+  background: var(--hero-placeholder);
+  color: var(--hero-text);
+  border-radius: var(--hero-sheet-radius);
+  --banner-accent: var(--hero-accent-light);
+  --banner-cta-bg: var(--color-brand-600);
+  --banner-cta-text: white;   /* as the primary Button (text-white) */
+}
+.banner-frame--dark .banner-slide { --banner-accent: var(--hero-accent-dark); --banner-cta-bg: var(--color-volt); --banner-cta-text: var(--color-on-volt); }
+.banner-slide--phone { width: 343px; min-height: 214px; padding: 20px; }
+.banner-slide--desktop { width: 960px; height: 320px; padding: 40px 48px; }
+.banner-slide--desktop .banner-slide__content { max-width: 55%; }
+.banner-slide__img { position: absolute; inset: 0; z-index: -2; width: 100%; height: 100%; object-fit: cover; }
+.banner-slide__scrim {
+  position: absolute; inset: 0; z-index: -1;
+  background: linear-gradient(90deg, rgb(var(--hero-scrim-rgb) / var(--hero-scrim-text)) 0%, rgb(var(--hero-scrim-rgb) / 0.35) 100%);
+}
+.banner-slide__chip {
+  position: absolute; top: 16px; left: 16px; max-width: calc(100% - 32px);
+  padding: 4px 10px; border-radius: 9999px;
+  background: rgb(var(--hero-scrim-rgb) / 0.75); color: white;   /* 9.68:1 over a white photo (spec §11.1) */
+  font-size: 12px; line-height: 16px; font-weight: 600;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+.banner-slide__headline { margin: 0; font-weight: 900; letter-spacing: var(--hero-display-tracking); font-size: 26px; line-height: 30px; color: var(--hero-text); overflow-wrap: anywhere; }
+.banner-slide--desktop .banner-slide__headline { font-size: 40px; line-height: 43px; }
+.banner-slide__accent { color: var(--banner-accent); }
+.banner-slide__sub { margin: 6px 0 0; font-size: 14px; line-height: 20px; color: var(--hero-text-body); overflow-wrap: anywhere; }
+.banner-slide__cta {
+  display: inline-flex; align-items: center; gap: 6px; align-self: flex-start;
+  min-height: 48px; padding: 0 20px; border-radius: 9999px;
+  background: var(--banner-cta-bg); color: var(--banner-cta-text); font-weight: 700; font-size: 15px;
+}
