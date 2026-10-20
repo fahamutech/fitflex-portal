@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { ArrowRight } from 'lucide-react';
 import { cn } from '@/lib/cn';
 import { messages, type Locale } from '@/lib/i18n';
@@ -75,8 +75,37 @@ export function BannerSlide({ look, lang, theme, layout }: { look: BannerLook; l
 
 /** The phone slide is drawn at its real width and grows with its text (P1 §6.1); the desktop crop is scaled down to fit. */
 function Frame({ layout, children }: { layout: 'phone' | 'desktop'; children: React.ReactNode }) {
-  if (layout === 'phone') return <div className="max-w-full overflow-x-auto">{children}</div>;
+  if (layout === 'phone') return <FitWidth width={PHONE_W}>{children}</FitWidth>;
   return <ScaledFrame width={SIZE.desktop.w} height={SIZE.desktop.h}>{children}</ScaledFrame>;
+}
+
+const PHONE_W = 343;
+/**
+ * Draws the phone slide at its real width and scales it down (never up) to fit a narrower column, keeping its
+ * own height (it grows with the text), so there is no hidden sideways scroll at 375 px (QA2 #5).
+ */
+function FitWidth({ width, children }: { width: number; children: React.ReactNode }) {
+  const outer = useRef<HTMLDivElement>(null);
+  const inner = useRef<HTMLDivElement>(null);
+  const [box, setBox] = useState<{ scale: number; height: number | null }>({ scale: 1, height: null });
+  useLayoutEffect(() => {
+    const o = outer.current; const i = inner.current;
+    if (!o || !i) return;
+    const update = () => {
+      const scale = Math.min(1, (o.clientWidth || width) / width);
+      setBox({ scale, height: i.offsetHeight * scale });
+    };
+    update();
+    if (typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(update);
+    ro.observe(o); ro.observe(i);
+    return () => ro.disconnect();
+  }, [width]);
+  return (
+    <div ref={outer} className="w-full overflow-hidden" style={box.height != null ? { height: box.height } : undefined} data-testid="banner-preview-fit" data-scale={box.scale.toFixed(3)}>
+      <div ref={inner} style={{ width, transform: `scale(${box.scale})`, transformOrigin: 'top left' }}>{children}</div>
+    </div>
+  );
 }
 
 /** Live preview with English / Kiswahili and Light / Dark toggles (spec §5.2.3 "Live preview", §5.3.2 item 1). */

@@ -10,6 +10,7 @@ import { Alert, Badge, Button, Card, CardContent, Field, Input, PageHeader, Segm
 import { Aging, Balances, InvoiceDocument, InvoiceStatus, PrintButton, StatementTable, INVOICE_KIND, PAYMENT_METHOD, day } from '@/components/b2b-finance';
 import { CollectionsPanel } from '@/components/b2b-collections';
 import { money } from '@/lib/admin-utils';
+import type { MessageKey } from '@/lib/i18n';
 
 type Tab = 'invoices' | 'payments' | 'statement' | 'agreement';
 
@@ -39,6 +40,11 @@ const ERRORS: Record<string, string> = {
   invalid_email: 'That email address doesn’t look right.',
   organization_not_active: 'The organisation is not active.',
   acl_forbidden: 'Your permissions don’t include this.',
+};
+const AGREEMENT_ERRORS: Record<string, MessageKey> = {
+  cannot_activate_own_agreement: 'b2bAgreement.activateBlockedOwn',
+  agreement_changed: 'b2bAgreement.err.agreement_changed',
+  version_required: 'b2bAgreement.err.version_required',
 };
 const said = (e: unknown, fallback: string) => {
   const code = e instanceof ApiError ? (e.body as { error?: string } | null)?.error : undefined;
@@ -176,6 +182,7 @@ export default function B2BBillingPage() {
 type Can = { bill: boolean; approve: boolean; pay: boolean };
 
 function OrganizationBilling({ token, org, can, userId, onBack }: { token: string; org: { id: string; name: string }; can: Can; userId: string; onBack: () => void }) {
+  const { t } = useApp();
   const [tab, setTab] = useState<Tab>('invoices');
   const [statement, setStatement] = useState<B2BStatement | null>(null);
   const [invoices, setInvoices] = useState<B2BSponsorInvoice[] | null>(null);
@@ -221,11 +228,18 @@ function OrganizationBilling({ token, org, can, userId, onBack }: { token: strin
       if (told) setNotice(told);
       await load();
     } catch (e) {
-      setError(said(e, fallback));
+      const code = e instanceof ApiError ? (e.body as { error?: string } | null)?.error ?? '' : '';
+      // Activation refusals (two admins, and the version check) are the only translated texts on this page.
+      const own = AGREEMENT_ERRORS[code];
+      // The agreement changed after it was shown: show it as it is now, so it is checked again (never retried).
+      if (code === 'agreement_changed') await load().catch(() => undefined);
+      setError(own ? t(own) : said(e, fallback));
     } finally {
       setBusy(false);
     }
   };
+  // Whoever drafted or ever changed a draft agreement can't put it in force; a different admin does.
+  const ownDraft = (a: B2BAgreement) => a.status === 'draft' && !!userId && (a.createdBy === userId || a.updatedBy === userId || !!a.editors?.includes(userId));
   const view = (invoiceId: string) => run(async () => {
     setTrace(null); setText(''); setAmount('');
     setOpen(await api.adminB2BInvoiceDetail(token, invoiceId));
@@ -512,12 +526,13 @@ function OrganizationBilling({ token, org, can, userId, onBack }: { token: strin
                         <span>{a.reference} · {day(a.effectiveFrom)} to {a.effectiveTo ? day(a.effectiveTo) : 'open'}{a.platformFeeTzs ? ` · fee ${money(a.platformFeeTzs)}` : ''}{ratesText(a.passRates) ? ` · pass rates: ${ratesText(a.passRates)}` : ''}</span>
                         <span className="flex items-center gap-2">
                           <Badge tone={a.status === 'active' ? 'success' : 'gray'}>{a.status === 'active' ? 'In force' : a.status === 'draft' ? 'Draft' : 'Ended'}</Badge>
-                          {a.status === 'draft' && <Button size="sm" disabled={busy || !can.bill} onClick={() => run(async () => { await api.activateB2BAgreement(token, a.id); }, 'Could not activate the agreement.')} data-testid={`agreement-activate-${a.id}`}>Activate</Button>}
+                          {a.status === 'draft' && <Button size="sm" disabled={busy || !can.bill || ownDraft(a)} title={ownDraft(a) ? t('b2bAgreement.activateBlockedOwn') : undefined} onClick={() => run(async () => { await api.activateB2BAgreement(token, a.id, a.updatedAt ?? ''); }, 'Could not activate the agreement.')} data-testid={`agreement-activate-${a.id}`}>Activate</Button>}
                           {a.status === 'active' && <Button size="sm" variant="secondary" disabled={busy || !can.bill} onClick={() => { if (window.confirm('End this agreement today? Invoices already issued keep its terms.')) run(async () => { await api.endB2BAgreement(token, a.id); }, 'Could not end the agreement.'); }}>End</Button>}
                         </span>
                       </li>
                     ))}
                   </ul>
+                  {can.bill && agreements?.agreements.some(ownDraft) && <p className="text-xs text-[var(--color-fg-tertiary)]" data-testid="agreement-activate-own">{t('b2bAgreement.activateBlockedOwn')}</p>}
                   <div className="grid gap-3 border-t border-[var(--color-border-secondary)] pt-3 sm:grid-cols-2">
                     <Field label="Starts on"><Input type="date" value={draft.effectiveFrom} onChange={e => setDraft({ ...draft, effectiveFrom: e.target.value })} data-testid="agreement-from" /></Field>
                     <Field label="Contract reference (optional)"><Input value={draft.contractReference} onChange={e => setDraft({ ...draft, contractReference: e.target.value })} /></Field>

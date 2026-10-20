@@ -598,6 +598,8 @@ test.describe('App photos (flag on)', () => {
       [404, 'feature_disabled', 'App photos are switched off on the server.'],
       [400, 'invalid_width', "The preview size isn't valid."],
       [403, 'acl_forbidden', "You don't have permission to manage app photos."],
+      [403, 'forbidden', "This account can't manage app photos. Sign in with an admin account."],
+      [403, 'account_suspended', "Your account is suspended, so you can't manage app photos. Ask a super-admin to restore it."],
       [400, 'people_not_allowed', 'Some of these photos are marked as showing people, which isn\'t allowed for now. Edit them to “No people” or choose others.'],
       [409, 'image_not_live', "This photo isn't in the apps right now."],
       [500, 'image_save_failed', "The photo couldn't be saved. Try again."],
@@ -624,6 +626,77 @@ test.describe('App photos (flag on)', () => {
     s.fail = { rollback: { status: 409, json: { error: 'image_unpublished', imageIds: ['hero_a'] } } };
     await confirm.getByRole('button', { name: 'Put back' }).click();
     await expect(confirm.getByText("Couldn't put this version back. Nothing has changed in the apps. A photo in this version was removed from the apps after it, so this version can't be put back. To show that photo again, choose it for its places and publish.")).toBeVisible();
+  });
+
+  test('History: "Put back" is off for a version holding a photo removed from the app after it', async ({ page }) => {
+    const s = seedState(); // #2 holds hero_a (live); #1 holds nothing
+    await openScreen(page, s);
+    await page.getByRole('button', { name: 'History', exact: true }).click();
+    await expect(page.getByTestId('hero-rollback-2')).toHaveCount(0); // #2 is current
+    // Take hero_a down: the new #3 is current and #2 (which holds hero_a) can no longer be put back.
+    await page.getByRole('button', { name: 'Library', exact: true }).click();
+    await page.getByTestId('hero-unpublish-hero_a').click();
+    await page.getByRole('alertdialog', { name: 'Remove this photo from the apps?' }).getByRole('button', { name: 'Remove from live' }).click();
+    await expect(page.getByText('Photo removed from the apps.')).toBeVisible();
+    await page.getByRole('button', { name: 'History', exact: true }).click();
+    const put2 = page.getByTestId('hero-rollback-2');
+    await expect(put2).toBeDisabled();
+    await expect(put2).toHaveAttribute('title', 'A photo in this version was removed from the app');
+    await expect(page.getByTestId('hero-rollback-blocked-2')).toHaveText('A photo in this version was removed from the app');
+    await expect(put2).toHaveAccessibleDescription('A photo in this version was removed from the app');
+    // #1 holds no removed photo: still offered.
+    await expect(page.getByTestId('hero-rollback-1')).toBeEnabled();
+    await expect(page.getByTestId('hero-rollback-blocked-1')).toHaveCount(0);
+    expect(s.calls.filter(c => c.path === '/admin/hero-slots/rollback')).toHaveLength(0);
+  });
+
+  test('History: blocked versions come from the loaded photos too (unpublishedInPublication), in Swahili', async ({ page }) => {
+    const s = seedState({
+      publications: [
+        { id: 3, publishedBy: 'admin-1', publishedByName: 'Local Admin', publishedAt: '2026-10-19T11:00:00.000Z', note: null, rolledBackFrom: null, slots: {} },
+        ...seedState().publications,
+      ],
+    });
+    s.images[0].unpublishedInPublication = 3; // hero_a was taken down in #3
+    await openScreen(page, s, { locale: 'sw' });
+    await page.getByRole('button', { name: 'Historia', exact: true }).click();
+    await expect(page.getByTestId('hero-rollback-2')).toBeDisabled();
+    await expect(page.getByTestId('hero-rollback-2')).toHaveAttribute('title', 'Picha moja ya toleo hili iliondolewa kwenye app');
+    await expect(page.getByTestId('hero-rollback-blocked-2')).toHaveText('Picha moja ya toleo hili iliondolewa kwenye app');
+    await expect(page.getByTestId('hero-rollback-1')).toBeEnabled();
+  });
+
+  test('sign-in refusals (403 forbidden, account_suspended) get their own messages, English and Swahili', async ({ page }) => {
+    const s = seedState({ fail: { load: { status: 403, json: { error: 'forbidden', requiredRoles: ['admin'] } } } });
+    await openScreen(page, s);
+    await expect(page.getByText("Couldn't load app photos.")).toBeVisible();
+    await expect(page.getByText("This account can't manage app photos. Sign in with an admin account.")).toBeVisible();
+    await expect(page.getByText(/Something went wrong/)).toHaveCount(0);
+
+    s.fail = { load: { status: 403, json: { error: 'account_suspended' } } };
+    await page.getByRole('button', { name: 'Try again' }).click();
+    await expect(page.getByText("Your account is suspended, so you can't manage app photos. Ask a super-admin to restore it.")).toBeVisible();
+
+    // Same codes on a write.
+    s.fail = {};
+    await page.getByRole('button', { name: 'Try again' }).click();
+    await page.getByTestId('hero-publish-open').click();
+    const dialog = page.getByRole('dialog', { name: 'Publish these changes?' });
+    s.fail = { publish: { status: 403, json: { error: 'account_suspended' } } };
+    await dialog.getByTestId('hero-publish-confirm').click();
+    await expect(dialog.getByTestId('hero-publish-error')).toHaveText("Your account is suspended, so you can't manage app photos. Ask a super-admin to restore it.");
+    s.fail = { publish: { status: 403, json: { error: 'forbidden', requiredRoles: ['admin'] } } };
+    await dialog.getByTestId('hero-publish-confirm').click();
+    await expect(dialog.getByTestId('hero-publish-error')).toHaveText("This account can't manage app photos. Sign in with an admin account.");
+  });
+
+  test('sign-in refusals in Swahili', async ({ page }) => {
+    const s = seedState({ fail: { load: { status: 403, json: { error: 'forbidden', requiredRoles: ['admin'] } } } });
+    await openScreen(page, s, { locale: 'sw' });
+    await expect(page.getByText('Akaunti hii haiwezi kusimamia picha za app. Ingia kwa akaunti ya admin.')).toBeVisible();
+    s.fail = { load: { status: 403, json: { error: 'account_suspended' } } };
+    await page.getByRole('button', { name: 'Jaribu tena' }).click();
+    await expect(page.getByText('Akaunti yako imesimamishwa, kwa hiyo huwezi kusimamia picha za app. Mwombe super-admin airejeshe.')).toBeVisible();
   });
 
   test('library: status and live badges, Retire blocked while a place uses it, Remove from live (AC-N14)', async ({ page }) => {
