@@ -33,8 +33,10 @@ const ERRORS: Record<string, string> = {
 const I18N_ERRORS: Partial<Record<string, MessageKey>> = {
   user_not_found: 'b2b.errors.userNotFound',
 };
-const message = (err: unknown, fallback: string, t: (k: MessageKey) => string) => {
+// byId: the request named the person by user ID, so user_not_found means the ID matched no account.
+const message = (err: unknown, fallback: string, t: (k: MessageKey) => string, byId = false) => {
   const code = err instanceof ApiError ? (err.body as { error?: string } | null)?.error : undefined;
+  if (code === 'user_not_found' && byId) return t('b2b.errors.userIdNotFound');
   const i18nKey = code ? I18N_ERRORS[code] : undefined;
   if (i18nKey) return t(i18nKey);
   const tierKey = tierErrorKey(err); // tier_not_available (409): fitflex-functions#189
@@ -104,14 +106,14 @@ export default function AdminB2BPage() {
     setBeneficiaries(b.status === 'fulfilled' ? b.value.items : []);
   };
 
-  const run = async (fn: () => Promise<void>, fallback: string) => {
+  const run = async (fn: () => Promise<void>, fallback: string, byId = false) => {
     setBusy(true);
     setError(null);
     setNotice(null);
     try {
       await fn();
     } catch (err) {
-      setError(message(err, fallback, t));
+      setError(message(err, fallback, t, byId));
     } finally {
       setBusy(false);
     }
@@ -152,11 +154,12 @@ export default function AdminB2BPage() {
   const addUser = (e: React.FormEvent) => {
     e.preventDefault();
     if (!token || !selected) return;
+    const contact = userContact(userForm.userId);
     return run(async () => {
-      const { organizationUser } = await api.addB2BOrganizationUser(token, selected.id, { ...userContact(userForm.userId), role: userForm.role });
+      const { organizationUser } = await api.addB2BOrganizationUser(token, selected.id, { ...contact, role: userForm.role });
       setOrgUsers(list => [...(list ?? []), organizationUser]);
       setUserForm({ userId: '', role: userForm.role });
-    }, 'Could not add the user.');
+    }, 'Could not add the user.', 'userId' in contact);
   };
 
   const changeUser = (u: B2BOrganizationUser, body: { role?: string; status?: string }) => token && selected && run(async () => {
@@ -170,12 +173,13 @@ export default function AdminB2BPage() {
     e.preventDefault();
     if (!token || !selected) return;
     const { userId: typed, ...rest } = benForm;
-    const body = { ...userContact(typed), ...Object.fromEntries(Object.entries(rest).filter(([, v]) => v !== '')) };
+    const contact = userContact(typed);
+    const body = { ...contact, ...Object.fromEntries(Object.entries(rest).filter(([, v]) => v !== '')) };
     return run(async () => {
       const { beneficiary } = await api.enrollB2BBeneficiary(token, selected.id, body);
       setBeneficiaries(list => [...(list ?? []), beneficiary]);
       setBenForm({ userId: '', beneficiaryType: benForm.beneficiaryType, externalReference: '', groupName: '' });
-    }, 'Could not enrol the member.');
+    }, 'Could not enrol the member.', 'userId' in contact);
   };
 
   const changeBeneficiary = (b: B2BBeneficiary, status: string) => token && selected && run(async () => {

@@ -2,9 +2,9 @@
 // the list import warns about email-only people while FitFlex can't send email codes, and user_not_found
 // tells staff the contact has not been confirmed in FitFlex.
 import { expect, test } from '@playwright/test';
-import { HR, orgUser, setupB2B } from './helpers/b2b-mock';
+import { ADMIN, HR, orgUser, setupB2B } from './helpers/b2b-mock';
 
-const NOT_FOUND = 'Nobody has confirmed that email or number in FitFlex. They need to sign up in the app, or confirm it under Contact details.';
+const NOT_FOUND = 'Nobody has confirmed that email or number in FitFlex. They need to sign up in the app, or confirm it under Mobile number and email.';
 const preview = (extra: Record<string, unknown>) => ({
   dryRun: true, total: 3, enrolled: 0, invited: 3, unchanged: 0, rejected: 0, withoutEmail: 1, withoutPhone: 2,
   emailConfigured: false, smsConfigured: true, problems: [], ...extra,
@@ -57,5 +57,37 @@ test.describe('company HR', () => {
     await page.getByTestId('company-staff-link-emp-2').fill('0712345678');
     await page.getByTestId('company-staff-list').getByRole('button', { name: 'Link', exact: true }).click();
     await expect(page.getByText(NOT_FOUND)).toBeVisible();
+  });
+});
+
+test.describe('admin B2B', () => {
+  const ID_NOT_FOUND = 'No FitFlex account has that ID.';
+  test('user_not_found says the ID matched no account only when the request was by ID', async ({ page }) => {
+    const mock = await setupB2B(page, ADMIN);
+    mock.on('POST', /^\/b2b\/organizations\/([^/]+)\/users$/, () => ({ status: 404, json: { error: 'user_not_found' } }));
+    mock.on('POST', /^\/b2b\/organizations\/([^/]+)\/beneficiaries$/, () => ({ status: 404, json: { error: 'user_not_found' } }));
+    await page.goto('/admin/b2b');
+    await page.getByTestId('b2b-org-org-1').click();
+
+    const userForm = page.getByTestId('b2b-user-form');
+    await userForm.getByPlaceholder('Their email, mobile number or user ID').fill('usr_missing');
+    await userForm.getByRole('button', { name: 'Add user' }).click();
+    await expect(page.getByText(ID_NOT_FOUND)).toBeVisible();
+    expect(mock.writes(/\/org-1\/users$/).at(-1)?.body).toMatchObject({ userId: 'usr_missing' });
+
+    await userForm.getByPlaceholder('Their email, mobile number or user ID').fill('zuhura@safari.test');
+    await userForm.getByRole('button', { name: 'Add user' }).click();
+    await expect(page.getByText(NOT_FOUND)).toBeVisible();
+    await expect(page.getByText(ID_NOT_FOUND)).toHaveCount(0);
+
+    const benForm = page.getByTestId('b2b-beneficiary-form');
+    await benForm.getByPlaceholder('Member’s email, mobile number or user ID').fill('usr_missing');
+    await page.getByTestId('b2b-ben-enroll').click();
+    await expect(page.getByText(ID_NOT_FOUND)).toBeVisible();
+
+    await benForm.getByPlaceholder('Member’s email, mobile number or user ID').fill('0712345678');
+    await page.getByTestId('b2b-ben-enroll').click();
+    await expect(page.getByText(NOT_FOUND)).toBeVisible();
+    await expect(page.getByText(ID_NOT_FOUND)).toHaveCount(0);
   });
 });
