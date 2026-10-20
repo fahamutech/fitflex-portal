@@ -49,6 +49,13 @@ import { BrandLogo } from './brand-logo';
 import { LanguageToggle } from './language-toggle';
 import { PhotoPanel } from './photo-panel';
 import { HERO_IMAGES_ADMIN, PHOTO_HERO_UI } from '@/lib/flags';
+import { useShopBannersAvailable } from './shop-banners-gate';
+
+/** SHOP_BANNERS as /vendor/me reports it (tools.merch.banners); undefined when the server doesn't say. */
+const vendorBannersTool = (tools: VendorTools | null | undefined) => {
+  const merch = tools?.merch as { banners?: unknown } | undefined;
+  return typeof merch?.banners === 'boolean' ? merch.banners : undefined;
+};
 
 /* ── Nav definitions ─────────────────────────────────────── */
 type NavItem = {
@@ -108,10 +115,10 @@ const OPERATOR_NAV: NavItem[] = [
 ];
 
 // A business that sells on FitFlex (vendor portal, S2): each item needs its permission.
-function vendorNav(permissions: string[], tools: VendorTools | null | undefined, lowCount: number | null, waitingCount: number | null): NavItem[] {
-  const icons: Record<string, React.ElementType> = { '/vendor': LayoutDashboard, '/vendor/products': ShoppingBag, '/vendor/orders': ClipboardList, '/vendor/sales': Receipt, '/vendor/customers': Users, '/vendor/payouts': HandCoins };
-  const labels: Record<string, string> = { '/vendor': 'vendor.nav.dashboard', '/vendor/products': 'vendor.nav.products', '/vendor/orders': 'vendor.nav.orders', '/vendor/sales': 'vendor.nav.sales', '/vendor/customers': 'vendor.nav.customers', '/vendor/payouts': 'vendor.nav.payouts' };
-  return VENDOR_AREAS.filter(a => vendorAreaOpen(a, permissions, tools)).map(a => ({
+function vendorNav(permissions: string[], tools: VendorTools | null | undefined, lowCount: number | null, waitingCount: number | null, bannersOn = false): NavItem[] {
+  const icons: Record<string, React.ElementType> = { '/vendor': LayoutDashboard, '/vendor/products': ShoppingBag, '/vendor/promotions': Megaphone, '/vendor/orders': ClipboardList, '/vendor/sales': Receipt, '/vendor/customers': Users, '/vendor/payouts': HandCoins };
+  const labels: Record<string, string> = { '/vendor': 'vendor.nav.dashboard', '/vendor/products': 'vendor.nav.products', '/vendor/promotions': 'merch.nav', '/vendor/orders': 'vendor.nav.orders', '/vendor/sales': 'vendor.nav.sales', '/vendor/customers': 'vendor.nav.customers', '/vendor/payouts': 'vendor.nav.payouts' };
+  return VENDOR_AREAS.filter(a => vendorAreaOpen(a, permissions, tools) && (a.href !== '/vendor/promotions' || bannersOn)).map(a => ({
     href: a.href, labelKey: labels[a.href], icon: icons[a.href],
     ...(a.href === '/vendor/products' && lowCount ? { count: { n: lowCount, labelKey: 'vendor.nav.productsLow' as MessageKey, tone: 'warning' as const } } : {}),
     ...(a.href === '/vendor/orders' && waitingCount ? { count: { n: waitingCount, labelKey: 'vendor.nav.ordersWaiting' as MessageKey, tone: 'fuel' as const } } : {}),
@@ -165,6 +172,8 @@ const ADMIN_NAV: NavItem[] = [
   { href: '/admin/promotion-overview', labelKey: 'admin.nav.promotionOverview', icon: LineChart, groupKey: 'nav.group.promotion', aclScope: 'promotions', aclAny: ['promotions_approve', 'campaigns'] },
   { href: '/admin/moderation',    labelKey: 'admin.nav.moderation',     icon: ShieldAlert,     groupKey: 'nav.group.promotion', aclScope: 'moderation', aclAny: ['moderation_decide'] },
   { href: '/admin/promotions',    labelKey: 'admin.nav.promotions',     icon: Megaphone,       groupKey: 'nav.group.promotion', aclScope: 'promotions', aclAny: ['promotions_approve', 'campaigns'] },
+  // Shop banners (Phase 2 S1): shown only while the server has SHOP_BANNERS on (see visibleNav).
+  { href: '/admin/shop-merch',    labelKey: 'admin.nav.shopMerch',      icon: Images,          groupKey: 'nav.group.promotion', aclScope: 'promotions', aclAny: ['promotions_approve'] },
   { href: '/admin/promotion-campaigns', labelKey: 'admin.nav.promotionCampaigns', icon: Flag,   groupKey: 'nav.group.promotion', aclScope: 'promotions', aclAny: ['promotions_approve', 'campaigns'] },
   { href: '/admin/promotion-analytics', labelKey: 'admin.nav.promotionAnalytics', icon: BarChart3, groupKey: 'nav.group.promotion', aclScope: 'promotion_analytics' },
   { href: '/admin/promotion-limits', labelKey: 'admin.nav.promotionLimits', icon: SlidersHorizontal, groupKey: 'nav.group.promotion', aclScope: 'campaigns', aclAny: ['promotions', 'promotions_approve'] },
@@ -415,13 +424,19 @@ export function Shell({ children }: { children: ReactNode }) {
   const isOrgUser     = token && user?.organizationUser === true && user?.userType !== 'admin';
   const isPortalStaff = isAdminUser && user?.portalUser === true;
   const isVendor      = !!token && VENDOR_USER_TYPES.has(user?.userType ?? '');
+  const bannersOn = useShopBannersAvailable(
+    isVendor ? 'vendor' : 'admin', token,
+    isVendor ? vendor.status === 'ready' && !!vendor.me?.permissions?.includes('products') : !!isAdminUser && (hasPermission('promotions') || hasPermission('promotions_approve')),
+    isVendor ? vendorBannersTool(vendor.me?.tools) : undefined,
+  );
 
   // Build the visible nav — portal staff only see items their ACL permits.
   // Overview (/admin) is always visible to all admin users.
   const visibleNav = isVendor
-    ? (vendor.status === 'ready' ? vendorNav(vendor.me?.permissions ?? [], vendor.me?.tools, vendor.lowCount, vendor.waitingCount) : [])
+    ? (vendor.status === 'ready' ? vendorNav(vendor.me?.permissions ?? [], vendor.me?.tools, vendor.lowCount, vendor.waitingCount, bannersOn) : [])
     : isAdminUser
     ? ADMIN_NAV.filter(item => {
+        if (item.href === '/admin/shop-merch' && !bannersOn) return false;
         if (!item.aclScope) return true;             // no scope = super-admin only (overview)
         if (!isPortalStaff) return true;             // super-admin sees everything
         return scopesOf(item).some(hasPermission);   // portal staff: check ACL

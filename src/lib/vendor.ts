@@ -158,6 +158,9 @@ export function newClientRef() {
 export const VENDOR_AREAS: ReadonlyArray<{ href: string; permission: string | null; tool?: keyof VendorTools }> = [
   { href: '/vendor', permission: null },
   { href: '/vendor/products', permission: 'products' },
+  // Shop banners (Phase 2 S1): owner + staff with `products` (spec Q-10). The nav item also waits for the
+  // server to have SHOP_BANNERS on (useShopBannersAvailable); a deep link with it off shows "isn't available yet".
+  { href: '/vendor/promotions', permission: 'products' },
   { href: '/vendor/orders', permission: 'orders' },
   // S3: walk-in sales need the tool on (fails closed: missing = off) and the `sales` permission.
   { href: '/vendor/sales', permission: 'sales', tool: 'walkInSales' },
