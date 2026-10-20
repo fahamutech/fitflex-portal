@@ -1,10 +1,13 @@
 'use client';
 // One customer payment (S4 §7.2, §6.4): the receipt, Copy text (never for a voided payment) and Void.
 import { useCallback, useEffect, useState } from 'react';
+import Link from 'next/link';
 import { api, type VendorCustomerPayment } from '@/lib/api';
 import { money } from '@/lib/admin-utils';
 import { t as translate, type Locale } from '@/lib/i18n';
-import { eatDateTime, errorBody, errorCode, fmt, isRefusal, mayVoidPayment, paymentReceiptText, receiptDay, saleMethodLabel } from '@/lib/vendor';
+import { documentsOn, eatDateTime, errorBody, errorCode, fmt, isRefusal, mayVoidPayment, paymentReceiptText, receiptDay, saleMethodLabel } from '@/lib/vendor';
+import { documentHref } from '@/lib/vendor-documents';
+import { docLinkCls } from '@/components/vendor/documents/share-menu';
 import { Alert, Badge, Button, ErrorState, Field, Segmented, SkeletonCard, Textarea } from '@/components/shared';
 import { Dialog, DialogFooter } from '@/components/dialog';
 import { useVendor } from '@/components/vendor-context';
@@ -163,6 +166,9 @@ export function PaymentDialog({
           )}
         </div>
         <DialogFooter className="flex-wrap">
+          {p && documentsOn(vendor.me) && (
+            <Link href={documentHref('payment', p.id, customerId)} className={docLinkCls} data-testid="payment-document">{t('vendor.documents.view')}</Link>
+          )}
           {canVoid && (
             <Button variant="destructive" className="min-h-11" onClick={() => { setReason(''); setReasonError(null); setVoidError(null); setVoidOpen(true); }} data-testid="payment-void">
               {t('vendor.pay.void')}

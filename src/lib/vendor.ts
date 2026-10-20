@@ -155,7 +155,7 @@ export function newClientRef() {
 }
 
 /** Permissions (and, for some, a switched-on vendor tool) a vendor user needs for each area. */
-export const VENDOR_AREAS: ReadonlyArray<{ href: string; permission: string | null; tool?: keyof VendorTools }> = [
+export const VENDOR_AREAS: ReadonlyArray<{ href: string; permission: string | null; tool?: keyof VendorTools; nav?: false }> = [
   { href: '/vendor', permission: null },
   { href: '/vendor/products', permission: 'products' },
   // Shop banners (Phase 2 S1): owner + staff with `products` (spec Q-10). The nav item also waits for the
@@ -167,6 +167,11 @@ export const VENDOR_AREAS: ReadonlyArray<{ href: string; permission: string | nu
   // S4: customers need the tool on (fails closed) and the `customers` permission.
   { href: '/vendor/customers', permission: 'customers', tool: 'customers' },
   { href: '/vendor/payouts', permission: 'payments' },
+  // S5: the document view needs documents switched on (fails closed); each kind checks its own permission on the
+  // page (sale: sales or customers · payment, statement: customers · order: orders). Not a nav item.
+  { href: '/vendor/documents', permission: null, tool: 'documents', nav: false },
+  // S5: tax details need VAT switched on and the owner (who has every permission) or staff with `payments` (read only).
+  { href: '/vendor/settings/tax', permission: 'payments', tool: 'vat' },
 ];
 /** Whether this person may open an area: its permission, and its tool switched on (=== true). */
 export function vendorAreaOpen(area: (typeof VENDOR_AREAS)[number], permissions: readonly string[], tools: VendorTools | null | undefined) {
@@ -174,6 +179,8 @@ export function vendorAreaOpen(area: (typeof VENDOR_AREAS)[number], permissions:
   if (area.tool && tools?.[area.tool] !== true) return false;
   return true;
 }
+/** Documents (links, PDF, the document view) are switched on (S5; fails closed: missing = off). */
+export const documentsOn = (me: { tools?: VendorTools } | null | undefined) => !!me && me.tools?.documents === true;
 /** Customers, balances and payments are open for this person (S4): tool on and `customers` permission. */
 export const canCustomers = (me: { permissions?: string[]; tools?: VendorTools } | null | undefined) =>
   !!me && me.tools?.customers === true && !!me.permissions?.includes('customers');
