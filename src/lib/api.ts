@@ -23,6 +23,36 @@ export function setOnUnauthorized(cb: (() => void) | null) {
   _onUnauthorized = cb;
 }
 
+let _onPasswordChangeRequired: (() => void) | null = null;
+
+/**
+ * Register a callback invoked when any API call answers 403 password_change_required:
+ * the session belongs to someone who must replace the start password an admin set.
+ */
+export function setOnPasswordChangeRequired(cb: (() => void) | null) {
+  _onPasswordChangeRequired = cb;
+}
+
+/** Fewest characters the backend accepts for a portal password (POST /auth/portal/password). */
+export const PORTAL_PASSWORD_MIN_LENGTH = 10;
+
+/**
+ * True when the session token carries `pwc: true` (must choose their own password first).
+ * Reads the JWT payload only; the server still decides, and a token that cannot be read counts as false.
+ */
+export function tokenRequiresPasswordChange(token: string | null | undefined): boolean {
+  if (!token) return false;
+  const part = token.split('.')[1];
+  if (!part) return false;
+  try {
+    const b64 = part.replace(/-/g, '+').replace(/_/g, '/');
+    const payload = JSON.parse(atob(b64 + '='.repeat((4 - (b64.length % 4)) % 4)));
+    return payload?.pwc === true;
+  } catch {
+    return false;
+  }
+}
+
 // Identity V2 (decision C3b): this build understands persons and personas.
 // The backend ignores the header unless its V2 flags are on.
 export const IDENTITY_V2_CLIENT = 'identity-v2';
@@ -118,6 +148,9 @@ export async function request<T>(
   if (!res.ok) {
     if (res.status === 401 && _onUnauthorized && !isRefusal401?.(body)) {
       _onUnauthorized();
+    }
+    if (res.status === 403 && (body as { error?: string } | null)?.error === 'password_change_required') {
+      _onPasswordChangeRequired?.();
     }
     throw new ApiError(res.status, body);
   }
@@ -370,6 +403,9 @@ export const api = {
     request<{ token: string; user: { id: string; userType: string; gymId?: string; portalUser?: boolean; aclPermissions?: string[] } }>(
       '/auth/login', { method: 'POST', body: JSON.stringify({ email, password, requestedRole: 'admin' }) }
     ),
+  /** Replace the start password an admin set (sessions with `pwc: true`). Ends every earlier session on success. */
+  changePortalPassword: (token: string, newPassword: string) =>
+    request<SessionResult>('/auth/portal/password', { method: 'POST', body: JSON.stringify({ newPassword }) }, token),
   // ─── Portal user management (admin only) ───
   listPortalUsers: (token: string) => request<PortalUser[]>('/admin/portal-users', {}, token),
   createPortalUser: (token: string, data: { email: string; password: string; displayName?: string; aclPermissions: string[] }) =>
@@ -1374,6 +1410,8 @@ export interface PortalUser {
   aclPermissions: string[];
   createdAt?: string;
   isEnvAdmin?: boolean;
+  /** Still has the start password an admin set; asked to choose their own at the next sign-in. */
+  passwordChangeRequired?: boolean;
 }
 
 export interface DashboardResponse {

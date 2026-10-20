@@ -39,6 +39,7 @@ import {
   Undo2, Receipt, KeyRound, ShieldAlert, Images
 } from 'lucide-react';
 import { useApp } from '../../app/providers';
+import { ChangePasswordGate } from './change-password-gate';
 import { cn } from '@/lib/cn';
 import { VENDOR_USER_TYPES, type VendorTools } from '@/lib/api';
 import type { MessageKey } from '@/lib/i18n';
@@ -410,7 +411,7 @@ function SidebarContent({
 
 /* ── Shell ───────────────────────────────────────────────── */
 export function Shell({ children }: { children: ReactNode }) {
-  const { ready, token, user, hasPermission, signOut, t } = useApp();
+  const { ready, token, user, hasPermission, signOut, t, passwordChangeRequired } = useApp();
   const vendor = useVendor();
   const toast = useToast();
   const pathname = usePathname();
@@ -537,6 +538,26 @@ export function Shell({ children }: { children: ReactNode }) {
             <PhotoPanel data-testid="login-photo-panel-restoring" />
           </div>
         )}
+      </div>
+    );
+  }
+
+  // Still on the start password an admin set: nothing but the step to choose their own (no nav, no
+  // page content, so no page requests). The page they were going to opens once it is done.
+  if (token && passwordChangeRequired && path !== '/login') {
+    return (
+      <div className="min-h-screen bg-[var(--color-bg-canvas)] flex flex-col">
+        <header className="h-16 flex items-center justify-between px-4 border-b border-[var(--color-border-canvas)] bg-[var(--color-bg-primary)]">
+          <div className="w-24" />
+          <div className="flex items-center gap-2.5">
+            <BrandLogo className="h-7 w-7 rounded-[var(--radius-md)]" />
+            <span className="text-sm font-semibold text-[var(--color-fg-primary)]">FitFlex Af</span>
+          </div>
+          <LanguageToggle className="justify-self-end" />
+        </header>
+        <main className="flex flex-1 items-center justify-center p-4">
+          <ChangePasswordGate />
+        </main>
       </div>
     );
   }
