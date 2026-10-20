@@ -147,7 +147,9 @@ export function RecordPaymentDialog({
         {alert && <div data-testid="pay-alert"><Alert tone={alert.tone}>{alert.text}</Alert></div>}
         {!online && <Alert tone="warning">{t('vendor.pay.offline')}</Alert>}
 
-        <Field label={t('vendor.pay.amount')} required error={over ? fmt(t('vendor.pay.overOwed'), { owed: money(owed) }) : errors.amount}>
+        {/* Over-owed is announced as soon as it appears (UAT D6). */}
+        <Field label={t('vendor.pay.amount')} required
+          error={over ? <span role="alert" data-testid="pay-over-owed">{fmt(t('vendor.pay.overOwed'), { owed: money(owed) })}</span> : errors.amount}>
           <Input inputMode="numeric" value={amount} autoComplete="off"
             onChange={e => { setAmount(e.target.value.replace(/[^\d]/g, '')); changed(); }} disabled={busy} data-testid="pay-amount" />
         </Field>

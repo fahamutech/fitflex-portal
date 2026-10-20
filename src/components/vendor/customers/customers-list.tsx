@@ -130,6 +130,7 @@ export function CustomersList({
         <>
           <div className="hidden @4xl:block">
             <Table aria-label={t('vendor.nav.customers')} data-testid="customers-table">
+              <caption className="sr-only">{t('vendor.nav.customers')}</caption>
               <THead>
                 <Tr>
                   <Th>{t('vendor.customers.name')}</Th>
