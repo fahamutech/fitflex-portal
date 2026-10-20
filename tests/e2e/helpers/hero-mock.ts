@@ -55,14 +55,16 @@ const PREVIEW_PNG = png(48, 32, { rgb: [30, 70, 110] });
 
 // ── Seed data ────────────────────────────────────────────────────────────────
 export const AREAS = ['preSignIn', 'members', 'partners', 'footers', 'portal'];
-type SlotDef = [id: string, area: string, variant: string, max?: number];
+// Mirrors fitflex-functions src/shared/hero-slots.mjs (functions#232): variant and aspectHint per slot.
+type SlotDef = [id: string, area: string, variant: string, aspect: number, max?: number];
 const SLOT_DEFS: SlotDef[] = [
-  ['language', 'preSignIn', 'full'], ['signIn', 'preSignIn', 'full'], ['signUp', 'preSignIn', 'full'], ['role', 'preSignIn', 'compact'], ['pin', 'preSignIn', 'compact'],
-  ['homeStart', 'members', 'full'], ['homePass', 'members', 'compact'], ['profile', 'members', 'compact'], ['upgrade', 'members', 'compact'],
-  ['activityToday', 'members', 'compact'], ['activityTraining', 'members', 'compact'], ['activityChallenges', 'members', 'compact'], ['activityProgress', 'members', 'compact'],
-  ['gyms', 'members', 'compact'], ['trainers', 'members', 'compact'], ['shop', 'members', 'compact'],
-  ['trainer', 'partners', 'compact'], ['vendor', 'partners', 'compact'], ['owner', 'partners', 'compact'],
-  ['footerPool', 'footers', 'band', 8], ['portalLogin', 'portal', 'panel', 1],
+  ['language', 'preSignIn', 'full', 4 / 5], ['signIn', 'preSignIn', 'full', 4 / 5], ['signUp', 'preSignIn', 'full', 4 / 5],
+  ['role', 'preSignIn', 'compact', 1080 / 1100], ['pin', 'preSignIn', 'compact', 1005 / 670],
+  ['homeStart', 'members', 'full', 4 / 5], ['homePass', 'members', 'compact', 3 / 2], ['profile', 'members', 'compact', 1], ['upgrade', 'members', 'compact', 3 / 2],
+  ['activityToday', 'members', 'compact', 3 / 2], ['activityTraining', 'members', 'compact', 800 / 533], ['activityChallenges', 'members', 'compact', 900 / 580], ['activityProgress', 'members', 'compact', 3 / 2],
+  ['gyms', 'members', 'compact', 1080 / 609], ['trainers', 'members', 'compact', 1000 / 350], ['shop', 'members', 'compact', 1080 / 691],
+  ['trainer', 'partners', 'compact', 840 / 530], ['vendor', 'partners', 'compact', 880 / 587], ['owner', 'partners', 'compact', 3 / 2],
+  ['footerPool', 'footers', 'footer', 1080 / 1000, 8], ['portalLogin', 'portal', 'panel', 3 / 4, 1],
 ];
 export const SLOT_IDS = SLOT_DEFS.map(d => d[0]);
 
@@ -100,8 +102,8 @@ export function adminState(s: HeroState): Json {
     areas: AREAS,
     images: s.images.map(i => ({ ...i, live: Object.values(live(s)).some(ids => ids.includes(i.id)) })),
     slots: [
-      ...SLOT_DEFS.map(([id, area, variant, max = 3]) => ({
-        id, area, surface: id === 'portalLogin' ? 'portal' : 'mobile', variant, aspectHint: 1.5, maxImages: max,
+      ...SLOT_DEFS.map(([id, area, variant, aspectHint, max = 3]) => ({
+        id, area, surface: id === 'portalLogin' ? 'portal' : 'mobile', variant, aspectHint, maxImages: max,
         draft: s.drafts[id] ?? [], published: live(s)[id] ?? [], brightWarning: false,
       })),
       ...(s.extraSlots ?? []),

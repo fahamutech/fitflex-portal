@@ -130,6 +130,9 @@ const ERROR_KEYS: Record<string, MessageKey> = {
   feature_disabled: 'heroImages.error.featureDisabled',
   invalid_width: 'heroImages.error.invalidWidth',
   acl_forbidden: 'heroImages.error.aclForbidden',
+  // Admin sign-in checks (requireAuth): not an admin account, or the account is suspended.
+  forbidden: 'heroImages.error.forbidden',
+  account_suspended: 'heroImages.error.accountSuspended',
 };
 /** Every code the screen maps (exported for the e2e mapping test). */
 export const HERO_ERROR_CODES = Object.keys(ERROR_KEYS);
@@ -936,7 +939,8 @@ function ChooseDialog({ slot, images, onClose, onSaved }: { slot: HeroSlot | nul
 function SlotPreviewDialog({ slot, image, onClose }: { slot: HeroSlot | null; image?: HeroImage; onClose: () => void }) {
   const { t } = useApp();
   if (!slot || !image) return null;
-  const kinds: HeroPreviewKind[] = slot.id === 'footerPool' || slot.variant === 'band' ? ['footer'] : slot.variant === 'panel' ? ['panel'] : ['phone', 'band', 'desktop'];
+  // functions#232: the full-width footer is variant 'footer' (no slot sends 'band' any more); the id is the fallback.
+  const kinds: HeroPreviewKind[] = slot.variant === 'footer' || slot.id === 'footerPool' ? ['footer'] : slot.variant === 'panel' ? ['panel'] : ['phone', 'band', 'desktop'];
   return (
     <Dialog open onClose={onClose} title={fmt(t('heroImages.preview.title'), { place: slotLabel(t, slot.id) })} description={photoAlt(t, image)} size="xl">
       <div data-testid="hero-slot-preview"><PreviewSet image={image} kinds={kinds} /></div>
@@ -1152,11 +1156,25 @@ function LibraryTab({ state, onUpload, onEdit, onRetire, onUnpublish }: {
   );
 }
 
-function HistoryTab({ state, onRollback }: { state: HeroImagesState; onRollback: (p: HeroPublication) => void }) {
+/**
+ * The server refuses to put back a snapshot holding a photo unpublished after it (409 image_unpublished,
+ * functions hero-image-service rollback): image.unpublishedInPublication > snapshot id. `takenDown` adds
+ * the unpublish answers' rollbackBlockedBefore (imageId → publication id) seen on this visit.
+ */
+export function rollbackBlocked(p: HeroPublication, images: ReadonlyMap<string, HeroImage>, takenDown: Readonly<Record<string, number>> = {}) {
+  return Object.values(p.slots ?? {}).flat()
+    .some(id => Math.max(Number(images.get(id)?.unpublishedInPublication ?? 0), Number(takenDown[id] ?? 0)) > p.id);
+}
+
+function HistoryTab({ state, takenDown, onRollback }: {
+  state: HeroImagesState; takenDown: Readonly<Record<string, number>>; onRollback: (p: HeroPublication) => void;
+}) {
   const { t, locale } = useApp();
+  const hintId = useId();
   const pubs = state.publications;
   if (!pubs.length) return <EmptyState title={t('heroImages.history.empty')} />;
   const order = state.slots.map(s => s.id);
+  const images = new Map(state.images.map(img => [img.id, img]));
   return (
     <Table aria-label={t('heroImages.history.table')} data-testid="hero-history">
       <THead>
@@ -1172,6 +1190,7 @@ function HistoryTab({ state, onRollback }: { state: HeroImagesState; onRollback:
       <TBody>
         {pubs.map((p, i) => {
           const n = diffSlots(pubs[i + 1]?.slots ?? {}, p.slots ?? {}, order).length;
+          const blocked = i > 0 && rollbackBlocked(p, images, takenDown);
           return (
             <Tr key={p.id} data-testid={`hero-version-${p.id}`}>
               <Td>
@@ -1187,9 +1206,18 @@ function HistoryTab({ state, onRollback }: { state: HeroImagesState; onRollback:
               <Td className="whitespace-nowrap">{fmt(t('heroImages.history.places'), { n })}</Td>
               <Td>
                 {i > 0 && (
-                  <Button variant="secondary" size="sm" className="min-h-11 whitespace-nowrap" onClick={() => onRollback(p)} data-testid={`hero-rollback-${p.id}`}>
-                    {t('heroImages.rollback')}
-                  </Button>
+                  <div className="flex flex-col items-start gap-1">
+                    <Button
+                      variant="secondary" size="sm" className="min-h-11 whitespace-nowrap"
+                      onClick={() => onRollback(p)} disabled={blocked}
+                      title={blocked ? t('heroImages.rollback.blocked') : undefined}
+                      aria-describedby={blocked ? `${hintId}-${p.id}` : undefined}
+                      data-testid={`hero-rollback-${p.id}`}
+                    >
+                      {t('heroImages.rollback')}
+                    </Button>
+                    {blocked && <span id={`${hintId}-${p.id}`} className="text-xs text-[var(--color-fg-tertiary)]" data-testid={`hero-rollback-blocked-${p.id}`}>{t('heroImages.rollback.blocked')}</span>}
+                  </div>
                 )}
               </Td>
             </Tr>
@@ -1221,6 +1249,8 @@ export function HeroImageManager() {
   const [unpublishing, setUnpublishing] = useState<HeroImage | null>(null);
   const [actionBusy, setActionBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  /** imageId → rollbackBlockedBefore from unpublish answers on this visit (backs up image.unpublishedInPublication). */
+  const [takenDown, setTakenDown] = useState<Record<string, number>>({});
   const publishHintId = useId();
 
   const store = useMemo(() => new ThumbStore(token), [token]);
@@ -1260,7 +1290,9 @@ export function HeroImageManager() {
         toast.success(res.inLiveSnapshot ? t('heroImages.retired.live') : t('heroImages.retired'));
         setRetiring(null);
       } else if (kind === 'unpublish' && unpublishing) {
-        await api.unpublishHeroImage(token, unpublishing.id);
+        const res = await api.unpublishHeroImage(token, unpublishing.id);
+        const before = Number(res?.rollbackBlockedBefore);
+        if (Number.isSafeInteger(before) && before > 0) setTakenDown(m => ({ ...m, [unpublishing.id]: before }));
         // Drafts are untouched: say so when a place still has it chosen (the next publish brings it back).
         const stillDrafted = state?.slots.filter(sl => sl.draft.includes(unpublishing.id)).map(sl => sl.id) ?? [];
         toast.success(stillDrafted.length
@@ -1328,7 +1360,7 @@ export function HeroImageManager() {
             onUnpublish={i => { setActionError(null); setUnpublishing(i); }}
           />
         )}
-        {tab === 'history' && <HistoryTab state={state} onRollback={p => { setActionError(null); setRollbackTo(p); }} />}
+        {tab === 'history' && <HistoryTab state={state} takenDown={takenDown} onRollback={p => { setActionError(null); setRollbackTo(p); }} />}
 
         <EditDialog image={editImage} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); void load(true); }} />
         <ChooseDialog slot={chooseSlot} images={state.images} onClose={() => setChoosing(null)} onSaved={() => { setChoosing(null); void load(true); }} />
