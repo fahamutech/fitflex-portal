@@ -22,7 +22,7 @@ const th = 'px-4 py-2.5 font-medium';
 
 /** One gym statement: its totals, the members and visits behind it, adjustments, and the next step. */
 export function SettlementStatementView({ statementId, onBack }: { statementId: string; onBack: () => void }) {
-  const { token, user, hasPermission } = useApp();
+  const { token, user, hasPermission, t } = useApp();
   const [detail, setDetail] = useState<GymSettlementDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -52,7 +52,7 @@ export function SettlementStatementView({ statementId, onBack }: { statementId: 
       setNotice(done);
     } catch (err) {
       setAsk(null);
-      setError(settlementError(err));
+      setError((err as { body?: { error?: string } })?.body?.error === 'invalid_receipt_url' ? t('settlement.err.invalid_receipt_url') : settlementError(err));
     } finally {
       setBusy(false);
       await load();
@@ -320,24 +320,41 @@ function ReasonDialog({ title, description, label, busy, onClose, onSubmit }: {
   );
 }
 
+/** What the server accepts as a receipt link: an https:// URL without credentials, at most 1000 characters. */
+function validReceiptUrl(value: string) {
+  if (!value) return true;
+  if (value.length > 1000 || !/^https:\/\//i.test(value)) return false;
+  try {
+    const url = new URL(value);
+    return url.protocol === 'https:' && !url.username && !url.password;
+  } catch {
+    return false;
+  }
+}
+
 function PayDialog({ amount, gym, busy, onClose, onSubmit }: {
   amount: string; gym: string; busy: boolean; onClose: () => void; onSubmit: (body: { paymentReference: string; receiptUrl?: string }) => void;
 }) {
   const [reference, setReference] = useState('');
   const [receiptUrl, setReceiptUrl] = useState('');
+  const { t } = useApp();
+  const receipt = receiptUrl.trim();
+  const receiptOk = validReceiptUrl(receipt);
+  // Not while it is still being typed ("h", "http", "https:/").
+  const receiptError = !receiptOk && !'https://'.startsWith(receipt.toLowerCase());
   return (
     <Dialog open onClose={onClose} title="Record payment" description={`Confirm that ${amount} was sent to ${gym}. A paid statement is final.`} size="sm">
       <div className="space-y-4">
         <Field label="Payment reference" hint="The bank or mobile money transaction reference.">
           <Input value={reference} onChange={e => setReference(e.target.value)} data-testid="settlement-pay-reference" />
         </Field>
-        <Field label="Receipt link (optional)">
-          <Input value={receiptUrl} onChange={e => setReceiptUrl(e.target.value)} placeholder="https://" />
+        <Field label="Receipt link (optional)" hint={t('settlement.receiptHint')} error={receiptError ? t('settlement.err.invalid_receipt_url') : undefined}>
+          <Input type="url" value={receiptUrl} onChange={e => setReceiptUrl(e.target.value)} placeholder="https://" data-testid="settlement-pay-receipt" />
         </Field>
       </div>
       <DialogFooter>
         <Button variant="secondary" onClick={onClose} disabled={busy}>Cancel</Button>
-        <Button onClick={() => onSubmit({ paymentReference: reference.trim(), ...(receiptUrl.trim() ? { receiptUrl: receiptUrl.trim() } : {}) })} disabled={busy || !reference.trim()} data-testid="settlement-pay-submit">Record payment</Button>
+        <Button onClick={() => onSubmit({ paymentReference: reference.trim(), ...(receipt ? { receiptUrl: receipt } : {}) })} disabled={busy || !reference.trim() || !receiptOk} data-testid="settlement-pay-submit">Record payment</Button>
       </DialogFooter>
     </Dialog>
   );
