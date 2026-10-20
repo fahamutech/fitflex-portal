@@ -3178,6 +3178,9 @@ export const messages = {
     "merchAdmin.type.banners": "Banners",
     "merch.line.byFitflex": "by FitFlex",
     "merch.line.byFitflexReason": "by FitFlex: {reason}",
+    // Verified-contact matching (unverified-contact-matching plan S1 + S4).
+    "b2b.import.emailOnlyWarning": "{n} people are listed by email only. They are matched only after confirming that email in FitFlex; add mobile numbers where you can.",
+    "b2b.errors.userNotFound": "Nobody has confirmed that email or number in FitFlex. They need to sign up in the app, or confirm it under Contact details.",
   },
   sw: {
     'app.title': 'FitFlex Af — Portal ya Waendeshaji',
@@ -6357,6 +6360,9 @@ export const messages = {
     "merchAdmin.type.banners": "Mabango",
     "merch.line.byFitflex": "limesitishwa na FitFlex",
     "merch.line.byFitflexReason": "limesitishwa na FitFlex: {reason}",
+    // Verified-contact matching (plan S1 + S4). Swahili drafted 2026-10-20: DRAFT, needs native review.
+    "b2b.import.emailOnlyWarning": "Watu {n} wameorodheshwa kwa barua pepe pekee. Wataunganishwa baada ya kuthibitisha barua pepe hiyo kwenye FitFlex; ongeza namba za simu inapowezekana.",
+    "b2b.errors.userNotFound": "Hakuna aliyethibitisha barua pepe au namba hiyo kwenye FitFlex. Wanahitaji kujisajili kwenye programu, au kuithibitisha katika Mawasiliano.",
   }
 } as const;
 
