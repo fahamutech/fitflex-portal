@@ -3,10 +3,12 @@ import { useEffect, useId, useRef, useState } from 'react';
 import { cn } from '@/lib/cn';
 import { api, heroAssetUrl } from '@/lib/api';
 
-// A photo with a slate scrim and a short, non-interactive text block
-// (design spec photo-hero-screens §3.2, §5, §9, §12). Below 1024px it is a
-// band across the top; from 1024px it is the left 55% column. The scrim and
-// sizes live in globals.css (.photo-panel, --hero-* tokens).
+// A photo with a short, non-interactive text block (design spec
+// photo-hero-screens §3.2, §5, §9, §12). Below 1024px it is a band across the
+// top; from 1024px it is the left 55% column. The photo is clear; only the
+// text block has a slate scrim (§5 decision 2026-10-20, lighter heroes). That
+// scrim is drawn from inside the text block, so it always covers the text.
+// The scrim and sizes live in globals.css (.photo-panel, --hero-* tokens).
 //
 // The photo is decorative (alt="", role="presentation"); the text is a
 // <section aria-labelledby> whose headline is a <p>, so the page keeps a single
@@ -181,8 +183,6 @@ export function PhotoPanel({
     />
   ) : null;
 
-  const scrim = <div className="photo-panel__scrim" aria-hidden="true" />;
-
   // Without text (session restoring): the navy ground only, same size, so
   // nothing jumps when the page becomes ready (AC-C7).
   if (!hasText) {
@@ -190,7 +190,6 @@ export function PhotoPanel({
       <div className={cn('photo-panel', className)} aria-hidden="true" data-testid={testId}>
         {picture}
         {remotePicture}
-        {scrim}
       </div>
     );
   }
@@ -199,8 +198,8 @@ export function PhotoPanel({
     <section className={cn('photo-panel', className)} aria-labelledby={headlineId} data-testid={testId}>
       {picture}
       {remotePicture}
-      {scrim}
-      <div className="photo-panel__content">
+      <div className="photo-panel__content" data-testid={`${testId}-content`}>
+        <div className="photo-panel__text-scrim" aria-hidden="true" data-testid={`${testId}-text-scrim`} />
         {eyebrow && <p className="photo-panel__eyebrow">{eyebrow}</p>}
         <p id={headlineId} className="photo-panel__headline">
           {headlineLead}
