@@ -634,7 +634,7 @@ test.describe('sales page (S3) with pay later', () => {
     await page.getByTestId('sale-copy').click();
     const text = await page.evaluate(() => (window as unknown as { __copied: string }).__copied);
     expect(text).toContain('Customer: Juma Mussa');
-    expect(text).toContain('Balance due');
+    expect(text).toContain('Balance due at sale');
     expect(text).toContain('Dar Fitness Gear recorded the balance due.');
     expect(text).not.toContain('Change');
 
