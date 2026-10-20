@@ -23,7 +23,7 @@ import {
 import { messages, type Locale, type MessageKey } from '@/lib/i18n';
 import { fmt } from '@/lib/vendor';
 import { cn } from '@/lib/cn';
-import { focalToObjectPosition } from './photo-panel';
+import { focalToObjectPosition, PhotoPanel } from './photo-panel';
 import {
   Alert, Badge, Button, Card, CardContent, Checkbox, EmptyState, ErrorState, Field, Input, PageHeader, Radio, Segmented, Select,
   SkeletonCard, SkeletonTable, Spinner, Table, TBody, Td, Textarea, Th, THead, Tr, useToast,
@@ -256,14 +256,21 @@ function ThumbRow({ ids, images, slot, emptyText }: { ids: string[]; images: Map
 }
 
 /* ── HeroPreview: a fixed-size frame with the real scrim (spec §36.5) ─────── */
+// Lighter rule (owner 2026-10-20; spec §5, §5.3, §33): the photo is clear and only the text has a
+// scrim, exactly as the app (mobile#199/#201) and the portal login panel draw it. The portal sign-in
+// slot ('panel') renders the login's own PhotoPanel, so the two cannot drift.
 export type HeroPreviewKind = 'phone' | 'band' | 'footer' | 'desktop' | 'panel';
-const PREVIEW_SIZE: Record<HeroPreviewKind, { w: number; h: number; label: MessageKey; scrim: 'vertical' | 'uniform' | 'horizontal' }> = {
+const PREVIEW_SIZE: Record<HeroPreviewKind, { w: number; h: number; label: MessageKey; scrim: 'vertical' | 'footer' | 'horizontal' | 'login' }> = {
   phone: { w: 390, h: 300, label: 'heroImages.preview.phone', scrim: 'vertical' },
   band: { w: 342, h: 180, label: 'heroImages.preview.band', scrim: 'vertical' },
-  footer: { w: 342, h: 160, label: 'heroImages.preview.band', scrim: 'uniform' },
+  // Full width, 48% of a 390 x 844 phone (FFPhotoFooter: 48% of the viewport, clamped 320–440).
+  footer: { w: 390, h: 405, label: 'heroImages.preview.footer', scrim: 'footer' },
   desktop: { w: 960, h: 320, label: 'heroImages.preview.desktop', scrim: 'horizontal' },
-  panel: { w: 704, h: 800, label: 'heroImages.preview.desktop', scrim: 'horizontal' },
+  // The login panel at 1280 x 800: 55% of the width, full height.
+  panel: { w: 704, h: 800, label: 'heroImages.preview.desktop', scrim: 'login' },
 };
+/** The login row the sign-in panel preview is laid out in (the panel takes its left 55%). */
+const LOGIN_ROW = { w: 1280, h: 800 };
 
 /** Draws `children` at its real CSS size, scaled down (never up) to fit the column. */
 export function ScaledFrame({ width, height, children }: { width: number; height: number; children: ReactNode }) {
@@ -291,40 +298,61 @@ export function ScaledFrame({ width, height, children }: { width: number; height
 export function HeroPreview({ kind, src, focal, textScale = 1 }: { kind: HeroPreviewKind; src?: string; focal: { x: number; y: number }; textScale?: number }) {
   const { t } = useApp();
   const spec = PREVIEW_SIZE[kind];
-  const frameRef = useRef<HTMLDivElement>(null);
   const textRef = useRef<HTMLDivElement>(null);
-  const [stop, setStop] = useState<number | null>(null);
-  // The 0.80 stop sits 24px above the top of the text block, and moves with it at 1.3× (spec §5.2).
+  const [textTop, setTextTop] = useState<number | null>(null);
+  // The ramp ends at the first text line (the footer: at the top of the mark), and moves with it at 1.3×.
   useLayoutEffect(() => {
     const text = textRef.current;
-    if (!text || spec.scrim !== 'vertical') return;
-    const measure = () => setStop(Math.max(0, text.offsetTop - 24));
+    if (!text) return;
+    const measure = () => setTextTop(text.offsetTop);
     measure();
     if (typeof ResizeObserver === 'undefined') return;
     const ro = new ResizeObserver(measure);
     ro.observe(text);
     return () => ro.disconnect();
-  }, [spec.scrim, textScale, kind]);
+  }, [textScale, kind]);
+
+  if (spec.scrim === 'login') {
+    return (
+      <div
+        className={cn('hero-preview-login flex flex-col lg:flex-row', textScale !== 1 && 'hero-preview-login--large')}
+        style={{ width: LOGIN_ROW.w, height: LOGIN_ROW.h }}
+        data-testid="hero-preview-login-row"
+      >
+        <PhotoPanel
+          previewImage={{ src, objectPosition: focalToObjectPosition(focal) }}
+          eyebrow={t('login.hero.eyebrow')}
+          headlineLead={t('login.hero.lead')}
+          headlineAccent={t('login.hero.accent')}
+          subline={t('login.hero.sub')}
+          data-testid={`hero-preview-${kind}`}
+        />
+      </div>
+    );
+  }
   return (
     <div
-      ref={frameRef}
       className={cn('hero-preview', `hero-preview--${kind}`, `hero-preview--${spec.scrim}`)}
-      style={{ '--hero-preview-scale': String(textScale), ...(stop != null ? { '--hero-preview-stop': `${stop}px` } : {}) } as React.CSSProperties}
+      style={{ '--hero-preview-scale': String(textScale), ...(textTop != null ? { '--hero-preview-text-top': `${textTop}px` } : {}) } as React.CSSProperties}
       data-testid={`hero-preview-${kind}`}
-      data-stop={stop ?? undefined}
+      data-text-top={textTop ?? undefined}
     >
       {src && (
         // eslint-disable-next-line @next/next/no-img-element
         <img src={src} alt="" role="presentation" className="hero-preview__img" style={{ objectPosition: focalToObjectPosition(focal) }} data-testid={`hero-preview-${kind}-img`} />
       )}
-      <div className="hero-preview__scrim" aria-hidden="true" />
+      <div className="hero-preview__scrim" aria-hidden="true" data-testid={`hero-preview-${kind}-scrim`} />
       {kind === 'footer' ? (
-        <div ref={textRef}>
-          <p className="hero-preview__footer-mark" aria-hidden="true">FitFlex Af</p>
-          <p className="hero-preview__footer-line">{t('heroImages.preview.footerLine')}</p>
+        <div ref={textRef} className="hero-preview__lockup" data-testid="hero-preview-footer-lockup">
+          <span className="hero-preview__plate" aria-hidden="true">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/brand/fitflex-icon.png" alt="" className="hero-preview__mark" />
+          </span>
+          <p className="hero-preview__brand">{t('heroImages.preview.footerBrand')}</p>
+          <p className="hero-preview__tagline">{t('heroImages.preview.footerTagline')}</p>
         </div>
       ) : (
-        <div ref={textRef} className="hero-preview__content">
+        <div ref={textRef} className="hero-preview__content" data-testid={`hero-preview-${kind}-text`}>
           <p className="hero-preview__eyebrow">{t('heroImages.preview.sampleEyebrow')}</p>
           <p className="hero-preview__headline">
             {t('heroImages.preview.sampleLead')} <span className="hero-preview__accent">{t('heroImages.preview.sampleAccent')}</span>

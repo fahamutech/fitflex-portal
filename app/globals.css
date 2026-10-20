@@ -351,13 +351,19 @@ body {
   --hero-scrim-panel-tail: 0.3;                   /* horizontal scrim, far edge (photo only) */
   --hero-scrim-panel-bottom: 0.85;                /* bottom layer under the horizontal scrim (§5.2) */
   /* Lighter heroes (§5 decision 2026-10-20): darken only behind the text.
-     The login panel uses these; the admin preview (.hero-preview) still uses the 0.80 tokens above. */
+     The login panel and the App photos previews (.hero-preview) use these; the
+     0.50 / 0.80 / panel tokens above are the older rule (shop banners still use 0.80). */
   --hero-scrim-zone: 0.86;                        /* minimum under any text: #F1F5F9 13.21:1, #CBD5E1 9.74:1, brand-500 5.24:1 */
   --hero-scrim-lead: 0.4;                         /* end of the soft lead-in */
   --hero-scrim-lead-in: 24px;                     /* 0 → lead, starting 48px above the first text line */
   --hero-scrim-ramp: 24px;                        /* lead → zone, over the 24px right above the first text line */
   --hero-scrim-past-text: 24px;                   /* the zone runs this far past the text column (desktop panel) */
   --hero-scrim-photo-max: 0.15;                   /* far edge of the desktop panel's text zone; elsewhere the photo is clear (0) */
+  /* The app's own rule (fitflexmobile FFTokens, mobile#199/#201), drawn by the App photos previews. */
+  --hero-scrim-bar: 0.46;                         /* FFTokens.heroScrimTop: status/app bar band, #F1F5F9 icons 3.04:1 */
+  --hero-scrim-bar-fade: 16%;                     /* FFTokens.heroScrimTopFade: the bar band is gone by 16% of the hero */
+  --hero-scrim-app-lead-in: 48px;                 /* FFTokens.heroScrimLeadInLength: 0 → lead over 48px, then the 24px ramp */
+  --hero-scrim-footer-bottom: 0.92;               /* FFTokens.footerScrimBottom: the footer lockup zone's bottom edge */
   --hero-text: #f1f5f9;                           /* headline, eyebrow: 10.63:1 on the 0.80 zone */
   --hero-text-body: #cbd5e1;                      /* subline: 7.84:1. Never gray-400 on a hero */
   --hero-accent-dark: var(--color-volt);          /* mobile dark theme only; never on the portal (light page) */
@@ -447,7 +453,7 @@ body {
 .photo-panel__eyebrow {
   margin: 0 0 8px;
   font-family: var(--hero-eyebrow-font);
-  font-size: var(--hero-eyebrow-size);
+  font-size: calc(var(--hero-eyebrow-size) * var(--hero-text-scale, 1));
   font-weight: 500;
   letter-spacing: var(--hero-eyebrow-tracking);
   text-transform: uppercase;
@@ -457,23 +463,23 @@ body {
   margin: 0;
   font-weight: 900;
   letter-spacing: var(--hero-display-tracking);
-  font-size: var(--hero-display-size-small);
-  line-height: var(--hero-display-line-small);
+  font-size: calc(var(--hero-display-size-small) * var(--hero-text-scale, 1));
+  line-height: calc(var(--hero-display-line-small) * var(--hero-text-scale, 1));
   color: var(--hero-text);
 }
 .photo-panel__accent { color: var(--hero-accent-light); }
 .photo-panel__sub {
   display: none;
   margin: 12px 0 0;
-  font-size: 1rem;
-  line-height: 1.5rem;
+  font-size: calc(1rem * var(--hero-text-scale, 1));
+  line-height: calc(1.5rem * var(--hero-text-scale, 1));
   font-weight: 400;
   color: var(--hero-text-body);
 }
 @media (min-width: 375px) {
   .photo-panel__headline {
-    font-size: var(--hero-display-size);
-    line-height: var(--hero-display-line);
+    font-size: calc(var(--hero-display-size) * var(--hero-text-scale, 1));
+    line-height: calc(var(--hero-display-line) * var(--hero-text-scale, 1));
   }
 }
 /* Tablet band (640–1023): 220px, eyebrow + headline + subline. */
@@ -522,8 +528,8 @@ body {
     );
   }
   .photo-panel__headline {
-    font-size: var(--hero-display-size-wide);
-    line-height: var(--hero-display-line-wide);
+    font-size: calc(var(--hero-display-size-wide) * var(--hero-text-scale, 1));
+    line-height: calc(var(--hero-display-line-wide) * var(--hero-text-scale, 1));
   }
 }
 /* No photo under reduced data (no band at all below 1024; navy panel above)
@@ -540,10 +546,12 @@ body {
 }
 
 /* ── App photos admin (design spec photo-hero-screens §36.5) ──
-   HeroPreview draws a photo at a fixed CSS size with the same scrim tokens as
-   the app (FFPhotoHero compact / band, footer band) and the portal panel, so
-   an admin sees the real contrast. --hero-preview-stop is set from the
-   measured top of the text block minus 24px (spec §5.2 implementation rule). */
+   HeroPreview draws a photo at a fixed CSS size with the same lighter scrim
+   as the app (owner 2026-10-20; spec §5, §5.3, §33; mobile#199/#201), so an
+   admin sees the real contrast. --hero-preview-text-top is the measured top of
+   the first text line (or of the footer lockup), in px from the frame's top.
+   The portal sign-in slot does not use these classes: it renders the login's
+   own PhotoPanel (.photo-panel), so it cannot drift from the real page. */
 .hero-preview {
   position: relative;
   overflow: hidden;
@@ -555,7 +563,7 @@ body {
   flex-direction: column;
   justify-content: flex-end;
   --hero-preview-scale: 1;
-  --hero-preview-stop: 50%;
+  --hero-preview-text-top: 50%;
 }
 .hero-preview__img {
   position: absolute;
@@ -565,36 +573,56 @@ body {
   height: 100%;
   object-fit: cover;
 }
-.hero-preview__scrim { position: absolute; inset: 0; z-index: -1; }
+.hero-preview__scrim { position: absolute; inset: 0; z-index: -1; pointer-events: none; }
+/* Phone hero / phone band (FFPhotoHero compact / band): the bar band
+   (0.46 → 0 by 16% of the height), the photo clear, then the 48px lead-in
+   (0 → 0.40) and the 24px ramp (0.40 → 0.86) ending at the first text line,
+   and >= 0.86 from there to the bottom edge (heroTopBandStops, heroRampStops,
+   heroTextZoneStops). */
 .hero-preview--vertical .hero-preview__scrim {
-  background: linear-gradient(
-    to bottom,
-    rgb(var(--hero-scrim-rgb) / var(--hero-scrim-top)) 0,
-    rgb(var(--hero-scrim-rgb) / var(--hero-scrim-text)) var(--hero-preview-stop),
-    rgb(var(--hero-scrim-rgb) / var(--hero-scrim-text)) 100%
-  );
-}
-.hero-preview--uniform .hero-preview__scrim { background: rgb(var(--hero-scrim-rgb) / var(--hero-scrim-text)); }
-.hero-preview--horizontal .hero-preview__scrim {
   background:
     linear-gradient(
-      to top,
-      rgb(var(--hero-scrim-rgb) / var(--hero-scrim-panel-bottom)) 0%,
-      rgb(var(--hero-scrim-rgb) / 0) 30%
+      to bottom,
+      rgb(var(--hero-scrim-rgb) / var(--hero-scrim-bar)) 0,
+      rgb(var(--hero-scrim-rgb) / 0) var(--hero-scrim-bar-fade)
     ),
     linear-gradient(
-      to right,
-      rgb(var(--hero-scrim-rgb) / var(--hero-scrim-panel-lead)) 0%,
-      rgb(var(--hero-scrim-rgb) / var(--hero-scrim-text)) 50%,
-      rgb(var(--hero-scrim-rgb) / var(--hero-scrim-panel-tail)) 100%
+      to bottom,
+      rgb(var(--hero-scrim-rgb) / 0) max(0px, calc(var(--hero-preview-text-top) - var(--hero-scrim-app-lead-in) - var(--hero-scrim-ramp))),
+      rgb(var(--hero-scrim-rgb) / var(--hero-scrim-lead)) calc(var(--hero-preview-text-top) - var(--hero-scrim-ramp)),
+      rgb(var(--hero-scrim-rgb) / var(--hero-scrim-zone)) var(--hero-preview-text-top),
+      rgb(var(--hero-scrim-rgb) / var(--hero-scrim-zone)) 100%
     );
 }
-.hero-preview--phone { width: 390px; height: 300px; padding: 20px; }
-.hero-preview--band { width: 342px; height: 180px; padding: 16px 20px; border-radius: var(--hero-sheet-radius); }
-.hero-preview--footer { width: 342px; height: 160px; padding: 16px 20px; border-radius: var(--hero-sheet-radius); justify-content: center; align-items: center; text-align: center; }
-.hero-preview--desktop { width: 960px; height: 320px; padding: 40px 48px; border-radius: var(--hero-sheet-radius); }
-.hero-preview--panel { width: 704px; height: 800px; padding: 64px; }
-.hero-preview--horizontal .hero-preview__content { max-width: 50%; }
+/* Page footer (FFPhotoFooter, §33 full width): no bar band; the photo clear,
+   then the same lead-in and ramp into the lockup zone, >= 0.86 from the mark
+   down and 0.92 at the bottom edge. */
+.hero-preview--footer .hero-preview__scrim {
+  background: linear-gradient(
+    to bottom,
+    rgb(var(--hero-scrim-rgb) / 0) max(0px, calc(var(--hero-preview-text-top) - var(--hero-scrim-app-lead-in) - var(--hero-scrim-ramp))),
+    rgb(var(--hero-scrim-rgb) / var(--hero-scrim-lead)) calc(var(--hero-preview-text-top) - var(--hero-scrim-ramp)),
+    rgb(var(--hero-scrim-rgb) / var(--hero-scrim-zone)) var(--hero-preview-text-top),
+    rgb(var(--hero-scrim-rgb) / var(--hero-scrim-footer-bottom)) 100%
+  );
+}
+/* Desktop banner (FFPhotoHero panel on Flutter web >= 1024, heroPanelStops):
+   left → right 0.92 at the edge, 0.86 until 24px past the text column, then
+   down to 0.15 at the far edge. The text column is 50% wide inside 32px
+   padding, so it ends at the frame's midline. */
+.hero-preview--horizontal .hero-preview__scrim {
+  background: linear-gradient(
+    to right,
+    rgb(var(--hero-scrim-rgb) / var(--hero-scrim-panel-lead)) 0,
+    rgb(var(--hero-scrim-rgb) / var(--hero-scrim-zone)) calc(50% + var(--hero-scrim-past-text)),
+    rgb(var(--hero-scrim-rgb) / var(--hero-scrim-photo-max)) 100%
+  );
+}
+.hero-preview--phone { width: 390px; height: 300px; padding: 24px; }
+.hero-preview--band { width: 342px; height: 180px; padding: 24px; border-radius: var(--hero-sheet-radius); }
+.hero-preview--footer { width: 390px; height: 405px; padding: 24px; align-items: center; text-align: center; }
+.hero-preview--desktop { width: 960px; height: 320px; padding: 32px; border-radius: var(--hero-sheet-radius); }
+.hero-preview--horizontal .hero-preview__content { width: 50%; }
 .hero-preview__eyebrow {
   margin: 0 0 8px;
   font-family: var(--hero-eyebrow-font);
@@ -621,8 +649,37 @@ body {
   line-height: calc(var(--hero-display-line-wide) * var(--hero-preview-scale));
 }
 .hero-preview__accent { color: var(--hero-accent-light); }
-.hero-preview__footer-mark { font-weight: 800; font-size: calc(20px * var(--hero-preview-scale)); color: var(--hero-text); }
-.hero-preview__footer-line { margin: 6px 0 0; font-size: calc(15px * var(--hero-preview-scale)); color: var(--hero-text-body); }
+/* Footer lockup (§33 decision 2026-10-20): the FitFlex mark at 48px on a 60px
+   light plate, 12px, "FitFlex Africa" 22/27.5 w900, 4px, "Fitness Without Limits" 15/21 w500. */
+.hero-preview__lockup { display: flex; flex-direction: column; align-items: center; }
+.hero-preview__plate {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: calc(60px * var(--hero-preview-scale));
+  height: calc(60px * var(--hero-preview-scale));
+  border-radius: 9999px;
+  background: var(--hero-text);
+}
+.hero-preview__mark { width: calc(48px * var(--hero-preview-scale)); height: calc(48px * var(--hero-preview-scale)); }
+.hero-preview__brand {
+  margin: 12px 0 0;
+  font-weight: 900;
+  font-size: calc(22px * var(--hero-preview-scale));
+  line-height: calc(27.5px * var(--hero-preview-scale));
+  color: var(--hero-text);
+}
+.hero-preview__tagline {
+  margin: 4px 0 0;
+  font-weight: 500;
+  font-size: calc(15px * var(--hero-preview-scale));
+  line-height: calc(21px * var(--hero-preview-scale));
+  color: var(--hero-text-body);
+}
+/* Portal sign-in slot: the login row (1280 x 800) holding the real PhotoPanel;
+   only the panel's 704 x 800 shows. "Show 1.3x text" sets --hero-text-scale (1 on the login). */
+.hero-preview-login { width: 1280px; height: 800px; }
+.hero-preview-login--large { --hero-text-scale: 1.3; }
 
 /* Focal-point picker: one Tab stop; the ring is white with a slate outline (spec §36.5). */
 .focal-picker {
