@@ -34,11 +34,11 @@ const NOTE_MAX = 500;
  * (the server answers 403 cannot_approve_own_submission). Uses the server's ownItem plus what the view shows.
  */
 export function workedOn(b: ShopBanner, userId: string | undefined): 'created' | 'worked' | null {
-  if (!userId) return b.ownItem ? 'created' : null;
-  if (b.ownItem || userId === b.createdBy || userId === b.submittedBy) return 'created';
-  const uploader = b.image?.uploadedBy ?? b.image?.rightsConfirmedBy;
-  if (uploader === userId || (b.editedBy ?? []).includes(userId)) return 'worked';
-  return null;
+  if (userId && (userId === b.createdBy || userId === b.submittedBy)) return 'created';
+  const img = b.image;
+  if (userId && ((b.editedBy ?? []).includes(userId) || [img?.uploadedBy, img?.rightsConfirmedBy, img?.peopleConfirmedBy].includes(userId))) return 'worked';
+  // The server's ownItem covers all of the above, whatever this view shows.
+  return b.ownItem ? 'worked' : null;
 }
 
 /**
@@ -161,6 +161,9 @@ export function ShopMerchDetail({ id, fallback, onBack, onEdit, onChanged }: {
                 {row(t('merchAdmin.col.position'), <span data-testid="merch-position">{banner.position ?? '—'}</span>)}
                 {row(t('merch.banner.people'), img?.people === 'product_models' ? t('merch.banner.peopleModels') : img?.people === 'none' ? t('merch.banner.peopleNone') : '—', 'merch-people')}
                 {row(t('merchAdmin.rightsConfirmed'), confirmedBy(img?.rightsConfirmedBy, img?.rightsConfirmedByName, img?.rightsConfirmedAt), 'merch-rights')}
+                {img?.confirmationVersion && row(t('merchAdmin.confirmationVersion'), img.confirmationVersion, 'merch-confirmation-version')}
+                {img?.people === 'product_models' && row(t('merchAdmin.consentRef'), img?.consentRef || t('merchAdmin.notRecorded'), 'merch-consent-ref')}
+                {img?.licenceRef && row(t('merchAdmin.licenceRef'), img.licenceRef, 'merch-licence-ref')}
                 {img?.people === 'product_models' && row(t('merchAdmin.peopleConfirmed'), confirmedBy(img?.peopleConfirmedBy, img?.peopleConfirmedByName, img?.peopleConfirmedAt), 'merch-people-confirmed')}
                 {row(t('merchAdmin.people'), [
                   banner.createdBy && `${t('merchAdmin.createdBy')}: ${person(banner.createdBy, banner.createdByName)}`,

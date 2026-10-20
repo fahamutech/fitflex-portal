@@ -41,6 +41,11 @@ const SMALL = { name: 'small.png', mimeType: 'image/png', buffer: png(1200, 800)
 const GIF = { name: 'anim.gif', mimeType: 'image/gif', buffer: Buffer.from('GIF89a') };
 
 const bi = (en: string, sw: string) => ({ en, sw });
+const CONFIRMATION = {
+  version: '2026-10-20.draft1', status: 'draft_pending_counsel',
+  rights: bi('SERVER: I have the right to use this image.', 'SERVER: Nina haki ya kutumia picha hii.'),
+  models: bi('SERVER: The people are models; I hold their release.', 'SERVER: Watu hawa ni wanamitindo; nina ridhaa yao.'),
+};
 function banner(over: Json = {}): Json {
   return {
     id: 'bn_1', origin: 'vendor', vendorId: 'usr_vendor', vendorName: 'Dar Fitness Gear', sellerSuspended: false,
@@ -48,11 +53,11 @@ function banner(over: Json = {}): Json {
     headlineLead: bi('Run further in', 'Kimbia mbali zaidi na'), headlineAccent: bi('new shoes', 'viatu vipya'), subline: bi('Light and strong.', 'Nyepesi na imara.'),
     ctaLabel: bi('View product', 'Tazama bidhaa'), ctaLabelCustom: false, imageAlt: bi('A pair of running shoes', 'Jozi ya viatu vya kukimbia'),
     target: { type: 'product', value: 'prd_1' }, targetName: 'Trail runner', audienceRoles: ['member', 'trainer', 'owner'],
-    startsAt: at(48), endsAt: at(24 * 9), position: null, statusReason: null, statusReasonCode: null, expiresAt: at(47),
+    startsAt: at(48), endsAt: at(24 * 9), position: null, statusReason: null, statusReasonNote: null, ctaKey: 'view_product', expiresAt: at(47),
     submittedAt: at(-2), createdAt: at(-3), createdBy: 'usr_vendor', createdByName: 'Rehema', submittedBy: 'usr_vendor', submittedByName: 'Rehema',
     approvedBy: null, ownItem: false, allowedActions: ['approve', 'reject'], revision: 3, updatedAt: '2026-10-20T08:30:00.000Z',
     image: {
-      id: 'img_1', uploadedBy: 'usr_vendor', width: 1600, height: 1000, people: 'product_models', focal: { x: 0, y: 0 },
+      id: 'img_1', uploadedBy: 'usr_vendor', uploadedByName: 'Rehema', confirmationVersion: '2026-10-20.draft1', consentRef: 'MR-2026-007', licenceRef: null, width: 1600, height: 1000, people: 'product_models', focal: { x: 0, y: 0 },
       rightsConfirmedAt: '2026-10-20T08:00:00.000Z', peopleConfirmedAt: '2026-10-20T08:00:00.000Z',
       rightsConfirmedBy: 'usr_vendor', rightsConfirmedByName: 'Rehema', peopleConfirmedBy: 'usr_vendor', peopleConfirmedByName: 'Rehema',
       previewUrl: '/admin/shop-banners/bn_1/image', public: null,
@@ -64,7 +69,7 @@ const ITEMS = () => [
   banner(),
   banner({ id: 'bn_live', status: 'approved', effectiveStatus: 'live', startsAt: at(-5), endsAt: at(48), position: 2, approvedBy: 'admin-y', approvedByName: 'Yusuf', allowedActions: ['end', 'position'], expiresAt: null, headlineLead: bi('Strong days with', 'Siku imara na'), headlineAccent: bi('FitFlex gear', 'vifaa vya FitFlex') }),
   banner({ id: 'bn_mine', origin: 'staff', vendorId: null, vendorName: null, createdBy: 'admin-x', submittedBy: 'admin-x', ownItem: true, allowedActions: ['edit', 'image', 'withdraw'], headlineLead: bi('Shop the', 'Nunua'), headlineAccent: bi('new season', 'msimu mpya') }),
-  banner({ id: 'bn_old', status: 'rejected', effectiveStatus: 'rejected', statusReasonCode: 'image', statusReasonNote: 'Blurred edges.', statusReason: 'Blurred edges.', allowedActions: [], expiresAt: null }),
+  banner({ id: 'bn_old', status: 'rejected', effectiveStatus: 'rejected', statusReason: 'image', statusReasonNote: 'Blurred edges.', allowedActions: [], expiresAt: null }),
   // Sent later but expires sooner: listed first in Requests.
   banner({ id: 'bn_soon', expiresAt: at(20), submittedAt: at(-1), headlineLead: bi('Last chance for', 'Nafasi ya mwisho kwa'), headlineAccent: bi('yoga mats', 'mikeka ya yoga') }),
 ];
@@ -112,12 +117,12 @@ function adminRoutes(items: Json[], extra: Array<[string, RegExp, Handler]> = []
   const find = (id: string) => items.find(b => b.id === id);
   return [
     ...extra,
-    ['GET', /^\/admin\/shop-merch$/, () => ({ json: { items, total: items.length, nextCursor: null } })],
+    ['GET', /^\/admin\/shop-merch$/, () => ({ json: { items, total: items.length, nextCursor: null, confirmation: CONFIRMATION } })],
     ['GET', /^\/admin\/shop-banners\/([^/]+)\/image$/, photo],
     ['GET', /^\/admin\/shop-banners\/([^/]+)$/, (_r, _c, m) => (find(m[1]) ? { json: { banner: find(m[1]), history: [{ id: 1, action: 'shop_banner.submitted', actor: 'usr_vendor', actorName: 'Rehema', at: at(-2) }] } } : { status: 404, json: { error: 'banner_not_found' } })],
     ['POST', /^\/admin\/shop-banners\/([^/]+)\/approve$/, (_r, c, m) => { Object.assign(find(m[1])!, { status: 'approved', effectiveStatus: 'approved', allowedActions: ['end', 'position'], approvedBy: 'admin-x' }); return { json: { banner: find(m[1]) } }; }],
-    ['POST', /^\/admin\/shop-banners\/([^/]+)\/reject$/, (_r, c, m) => { Object.assign(find(m[1])!, { status: 'rejected', effectiveStatus: 'rejected', statusReasonCode: c.body?.code, statusReasonNote: c.body?.note ?? null, statusReason: c.body?.note ?? null, allowedActions: [] }); return { json: { banner: find(m[1]) } }; }],
-    ['POST', /^\/admin\/shop-banners\/([^/]+)\/end$/, (_r, c, m) => { Object.assign(find(m[1])!, { status: 'ended', effectiveStatus: 'ended', statusReason: c.body?.reason, allowedActions: [] }); return { json: { banner: find(m[1]) } }; }],
+    ['POST', /^\/admin\/shop-banners\/([^/]+)\/reject$/, (_r, c, m) => { Object.assign(find(m[1])!, { status: 'rejected', effectiveStatus: 'rejected', statusReason: c.body?.code, statusReasonNote: c.body?.note ?? null, allowedActions: [] }); return { json: { banner: find(m[1]) } }; }],
+    ['POST', /^\/admin\/shop-banners\/([^/]+)\/end$/, (_r, c, m) => { Object.assign(find(m[1])!, { status: 'ended', effectiveStatus: 'ended', statusReason: 'ended_by_fitflex', statusReasonNote: c.body?.note, allowedActions: [] }); return { json: { banner: find(m[1]) } }; }],
     ['POST', /^\/admin\/shop-banners\/([^/]+)\/position$/, (_r, c, m) => { find(m[1])!.position = c.body?.position; return { json: { banner: find(m[1]) } }; }],
     ['GET', /^\/admin\/products$/, () => ({ json: [{ id: 'prd_1', vendorId: 'usr_vendor', name: 'Trail runner', priceTzs: 90000, stock: 4, status: 'active' }] })],
     ['GET', /^\/admin\/vendors$/, () => ({ json: [{ id: 'usr_vendor', displayName: 'Dar Fitness Gear', userType: 'vendor', approvalStatus: 'approved', accountStatus: 'active', productCount: 1 }] })],
@@ -172,6 +177,8 @@ test.describe('admin merch queue', () => {
     await expect(detail.getByTestId('merch-rights')).toContainText('Confirmed by Rehema');
     await expect(detail.getByTestId('merch-people-confirmed')).toContainText('Confirmed by Rehema');
     await expect(detail.getByTestId('merch-target')).toContainText('Trail runner');
+    await expect(detail.getByTestId('merch-confirmation-version')).toHaveText('2026-10-20.draft1');
+    await expect(detail.getByTestId('merch-consent-ref')).toHaveText('MR-2026-007');
     await expect(detail.getByTestId('merch-history')).toContainText('Sent for approval');
     // The private photo is fetched with the session (no public copy before approval).
     expect(only(calls, 'GET', '/admin/shop-banners/bn_1/image').length).toBeGreaterThan(0);
@@ -312,7 +319,7 @@ test.describe('admin merch queue', () => {
     await page.getByTestId('merch-end-reason').fill('The product was recalled by the maker.');
     await page.getByTestId('merch-end-confirm').click();
     await expect(page.getByTestId('merch-status')).toHaveText('Ended');
-    expect(only(calls, 'POST', '/admin/shop-banners/bn_live/end')[0].body).toEqual({ reason: 'The product was recalled by the maker.' });
+    expect(only(calls, 'POST', '/admin/shop-banners/bn_live/end')[0].body).toEqual({ note: 'The product was recalled by the maker.' });
   });
 
   test('without promotions_approve: the item shows, with the permission text and no decision buttons', async ({ page }) => {
@@ -376,6 +383,8 @@ test.describe('admin merch queue', () => {
     const upload = only(calls, 'POST', '/admin/shop-banners/bn_new/image')[0];
     expect(upload.raw).toContain('name="people"\r\n\r\nnone');
     expect(upload.raw).toContain('name="rightsConfirmed"\r\n\r\ntrue');
+    expect(upload.raw).toContain('name="confirmationVersion"\r\n\r\n2026-10-20.draft1');
+    expect(upload.raw).not.toContain('name="consentRef"');
     expect(only(calls, 'POST', '/admin/shop-banners/bn_new/submit')).toHaveLength(1);
   });
 });
@@ -402,10 +411,10 @@ function vendorRoutes(items: Json[], extra: Array<[string, RegExp, Handler]> = [
     ...extra,
     ['GET', /^\/vendor\/me$/, () => ({ json: me() })],
     ['GET', /^\/vendor\/products$/, () => ({ json: PRODUCTS })],
-    ['GET', /^\/vendor\/shop-banners$/, () => ({ json: { items, total: items.length, nextCursor: null, vendor: standing, proposalExpiryDays: 14 } })],
+    ['GET', /^\/vendor\/shop-banners$/, () => ({ json: { items, total: items.length, nextCursor: null, vendor: standing, proposalExpiryDays: 14, openProposals: { open: items.filter(b => ['draft', 'pending_approval', 'approved'].includes(b.effectiveStatus)).length, max: 10 }, confirmation: CONFIRMATION } })],
     ['GET', /^\/vendor\/shop-banners\/([^/]+)\/image$/, photo],
     ['POST', /^\/vendor\/shop-banners\/([^/]+)\/withdraw$/, (_r, _c, m) => { Object.assign(find(m[1])!, { status: 'withdrawn', effectiveStatus: 'withdrawn', allowedActions: [] }); return { json: { banner: find(m[1]) } }; }],
-    ['POST', /^\/vendor\/shop-banners\/([^/]+)\/end$/, (_r, _c, m) => { Object.assign(find(m[1])!, { status: 'ended', effectiveStatus: 'ended', statusReasonCode: 'ended_by_vendor', allowedActions: [] }); return { json: { banner: find(m[1]) } }; }],
+    ['POST', /^\/vendor\/shop-banners\/([^/]+)\/end$/, (_r, _c, m) => { Object.assign(find(m[1])!, { status: 'ended', effectiveStatus: 'ended', statusReason: 'ended_by_vendor', allowedActions: [] }); return { json: { banner: find(m[1]) } }; }],
     ['GET', /^\/vendor\/orders$/, () => ({ json: { orders: [], nextCursor: null } })],
     ['GET', /^\/vendor\/payments$/, () => ({ json: { todaySalesTzs: 0, pendingSettlementTzs: 0 } })],
     ['GET', /^\/vendor\/statements$/, () => ({ json: { statements: [], payoutReady: true, payoutBlockedBy: null } })],
@@ -416,6 +425,7 @@ async function fillVendorForm(page: Page, opts: { swAccent?: string } = {}) {
   await page.getByTestId('banner-people-models').check();
   await page.getByTestId('banner-rights').check();
   await page.getByTestId('banner-models-confirm').check();
+  await page.getByTestId('banner-consent-ref').fill('MR-2026-041');
   await page.getByTestId('banner-headlineLead-en').fill('Run further in');
   await page.getByTestId('banner-headlineLead-sw').fill('Kimbia mbali zaidi na');
   await page.getByTestId('banner-headlineAccent-en').fill('new shoes');
@@ -456,7 +466,7 @@ test.describe('vendor banners', () => {
     await nav(page).getByRole('link', { name: 'Banners & sales' }).click();
     await expect(page.getByText('No banners yet')).toBeVisible();
     await page.getByTestId('merch-propose').click();
-    await expect(page.getByTestId('banner-text-rule')).toContainText("Banners can't show prices, discounts, phone numbers or links.");
+    await expect(page.getByTestId('banner-text-rule')).toContainText('No prices, discounts, deal words (free, discount), numbers of 4 or more digits (years too), links, @handles or phone numbers.');
     await expect(page.getByTestId('banner-cta')).toHaveText('Button: View product');
     await page.getByTestId('banner-target-store').check();
     await expect(page.getByTestId('banner-cta')).toHaveText('Button: Visit store');
@@ -467,6 +477,10 @@ test.describe('vendor banners', () => {
     await expect(page.getByRole('option', { name: /Paused mat/ })).toHaveCount(0);
     await page.keyboard.press('Escape');
     await fillVendorForm(page);
+    // The confirmation wording is the server's, marked as a draft pending legal review.
+    await expect(page.getByTestId('banner-form')).toContainText('SERVER: I have the right to use this image.');
+    await expect(page.getByTestId('banner-form')).toContainText('SERVER: The people are models; I hold their release.');
+    await expect(page.getByTestId('banner-confirmations-draft')).toHaveText('Draft wording, pending legal review.');
     // Live preview: the business name chip and the typed text.
     await expect(page.getByTestId('banner-form').getByTestId('banner-preview-from')).toHaveText('From Dar Fitness Gear');
     await expect(page.getByTestId('banner-form').getByTestId('banner-preview-accent')).toHaveText('new shoes');
@@ -481,6 +495,8 @@ test.describe('vendor banners', () => {
     const upload = only(calls, 'POST', '/vendor/shop-banners/bn_v/image')[0];
     expect(upload.raw).toContain('name="people"\r\n\r\nproduct_models');
     expect(upload.raw).toContain('name="peopleConfirmed"\r\n\r\ntrue');
+    expect(upload.raw).toContain('name="confirmationVersion"\r\n\r\n2026-10-20.draft1');
+    expect(upload.raw).toContain('name="consentRef"\r\n\r\nMR-2026-041');
     expect(only(calls, 'POST', '/vendor/shop-banners/bn_v/submit')).toHaveLength(1);
     expect(calls.outside).toEqual([]);
   });
@@ -499,13 +515,13 @@ test.describe('vendor banners', () => {
     await page.getByTestId('banner-startsAt').fill(new Date(Date.now() + 30 * 60_000 + 3 * HOUR).toISOString().slice(0, 16));
     await page.getByTestId('banner-endsAt').fill(new Date(Date.now() + 3 * HOUR).toISOString().slice(0, 16));
     await page.getByTestId('banner-submit').click();
-    const msg = "Banners can't show prices or discounts. Use a flash sale for a deal.";
+    const msg = "Banners can't show prices, discounts or long numbers. Use a flash sale for a deal.";
     await expect(page.getByTestId('banner-field-headlineLead')).toContainText(msg);
     await expect(page.getByTestId('banner-field-headlineAccent')).toContainText(msg);
     await expect(page.getByTestId('banner-field-subline')).toContainText('Add the Kiswahili text too.');
     await page.getByTestId('banner-subline-sw').fill('Piga 0712 345 678 leo');
     await page.getByTestId('banner-submit').click();
-    await expect(page.getByTestId('banner-field-subline')).toContainText('Remove links and phone numbers.');
+    await expect(page.getByTestId('banner-field-subline')).toContainText('Remove links, @handles and phone numbers.');
     await expect(page.getByTestId('banner-field-headlineLead')).toContainText('This is required.');
     await expect(page.getByTestId('banner-startsAt-msg')).toHaveText('Pick a start at least an hour from now.');
     await expect(page.getByTestId('banner-endsAt-msg')).toHaveText('The end must be after the start.');
@@ -519,9 +535,9 @@ test.describe('vendor banners', () => {
     let refusal: Json = { status: 422, json: { error: 'price_claim_in_text', field: 'headlineAccent.sw' } };
     await mockApi(page, vendorRoutes([], [['POST', /^\/vendor\/shop-banners$/, () => refusal]]));
     await page.goto('/vendor/promotions/?new=banner');
-    await fillVendorForm(page, { swAccent: 'viatu elfu hamsini' });
+    await fillVendorForm(page, { swAccent: 'viatu vipya kabisa' });
     await page.getByTestId('banner-submit').click();
-    await expect(page.getByTestId('banner-field-headlineAccent')).toContainText("Banners can't show prices or discounts.");
+    await expect(page.getByTestId('banner-field-headlineAccent')).toContainText("Banners can't show prices, discounts or long numbers.");
     await expect(page.getByTestId('banner-headlineAccent-sw')).toBeFocused();
     refusal = { status: 422, json: { error: 'missing_translation', field: 'imageAlt.sw', missing: ['sw'] } };
     await page.getByTestId('banner-submit').click();
@@ -545,7 +561,7 @@ test.describe('vendor banners', () => {
     const items = [
       vendorView(),
       vendorView({ id: 'bn_live', status: 'approved', effectiveStatus: 'live', startsAt: at(-5), endsAt: at(48), allowedActions: ['edit', 'end'], expiresAt: null }),
-      vendorView({ id: 'bn_old', status: 'rejected', effectiveStatus: 'rejected', statusReasonCode: 'people', statusReasonNote: 'Remove the caption.', statusReason: 'Remove the caption.', allowedActions: ['edit', 'image'], expiresAt: null }),
+      vendorView({ id: 'bn_old', status: 'rejected', effectiveStatus: 'rejected', statusReason: 'people', statusReasonNote: 'Remove the caption.', allowedActions: ['edit', 'image'], expiresAt: null }),
     ];
     const calls = await mockApi(page, vendorRoutes(items));
     await page.goto('/vendor/promotions/');
@@ -563,6 +579,61 @@ test.describe('vendor banners', () => {
     await page.getByTestId('banner-end-confirm').click();
     await expect(page.getByTestId('banner-status-bn_live')).toHaveText('Ended');
     expect(only(calls, 'POST', '/vendor/shop-banners/bn_live/end')).toHaveLength(1);
+  });
+
+  test('revision 2 rules: consent reference, stricter text rules, open-proposal limit, wording changed', async ({ page }) => {
+    await signIn(page, VENDOR);
+    const draft = vendorView({ id: 'bn_v', status: 'draft', effectiveStatus: 'draft', image: null, allowedActions: ['edit', 'image', 'submit', 'withdraw'], expiresAt: null });
+    let uploads = 0;
+    const calls = await mockApi(page, vendorRoutes([], [
+      ['POST', /^\/vendor\/shop-banners$/, () => ({ status: 201, json: { banner: draft } })],
+      ['PATCH', /^\/vendor\/shop-banners\/bn_v$/, () => ({ json: { banner: draft } })],
+      ['POST', /^\/vendor\/shop-banners\/bn_v\/image$/, () => { uploads += 1; return { status: 400, json: { error: 'confirmation_version_mismatch', field: 'confirmationVersion', current: '2026-10-21.draft2' } }; }],
+    ]));
+    await page.goto('/vendor/promotions/');
+    await expect(page.getByTestId('merch-open-proposals')).toHaveText('0 of 10 open proposals');
+    await page.getByTestId('merch-propose').click();
+    await page.getByTestId('banner-file-input').setInputFiles(BIG);
+    await page.getByTestId('banner-people-models').check();
+    await page.getByTestId('banner-rights').check();
+    await page.getByTestId('banner-models-confirm').check();
+    await page.getByTestId('banner-headlineLead-en').fill('Since 2019 we sell');
+    await page.getByTestId('banner-headlineAccent-en').fill('@darfit gear');
+    await page.getByTestId('banner-subline-en').fill('Free delivery, half price');
+    await page.getByTestId('banner-subline-sw').fill('Bure kabisa');
+    await page.getByTestId('banner-submit').click();
+    await expect(page.getByTestId('banner-field-headlineLead')).toContainText("Banners can't show prices, discounts or long numbers.");
+    await expect(page.getByTestId('banner-field-headlineAccent')).toContainText('Remove links, @handles and phone numbers.');
+    await expect(page.getByTestId('banner-field-subline')).toContainText("Banners can't show prices, discounts or long numbers.");
+    await expect(page.getByTestId('banner-form')).toContainText('Give the model release reference.');
+    await expect(page.getByTestId('banner-text-rule')).toContainText('numbers of 4 or more digits (years too)');
+    await page.getByTestId('banner-consent-ref').fill('MR-1');
+    await page.getByTestId('banner-headlineLead-en').fill('Run further in');
+    await page.getByTestId('banner-headlineLead-sw').fill('Kimbia mbali zaidi na');
+    await page.getByTestId('banner-headlineAccent-en').fill('new shoes');
+    await page.getByTestId('banner-headlineAccent-sw').fill('viatu vipya');
+    await page.getByTestId('banner-subline-en').fill('');
+    await page.getByTestId('banner-subline-sw').fill('');
+    await page.getByTestId('banner-imageAlt-en').fill('A pair of running shoes');
+    await page.getByTestId('banner-imageAlt-sw').fill('Jozi ya viatu vya kukimbia');
+    await page.getByTestId('banner-product-picker').getByRole('button').first().click();
+    await page.getByRole('option', { name: /Trail runner/ }).click();
+    await page.getByTestId('banner-startsAt').fill(new Date(Date.now() + 2 * 24 * HOUR + 3 * HOUR).toISOString().slice(0, 16));
+    await page.getByTestId('banner-endsAt').fill(new Date(Date.now() + 9 * 24 * HOUR + 3 * HOUR).toISOString().slice(0, 16));
+    await page.getByTestId('banner-submit').click();
+    // The wording changed on the server: the boxes are unticked, the list is reloaded and the person is asked again.
+    await expect(page.getByTestId('banner-rights-error')).toHaveText('The confirmation wording changed. Read it again and tick the boxes.');
+    await expect(page.getByTestId('banner-rights')).not.toBeChecked();
+    expect(uploads).toBe(1);
+    expect(only(calls, 'GET', '/vendor/shop-banners').length).toBeGreaterThan(1);
+  });
+
+  test('at the open-proposal limit, Propose is disabled with the reason', async ({ page }) => {
+    await signIn(page, VENDOR);
+    await mockApi(page, vendorRoutes([vendorView()], [['GET', /^\/vendor\/shop-banners$/, () => ({ json: { items: [vendorView()], total: 1, nextCursor: null, vendor: { canPropose: true, reason: null }, openProposals: { open: 10, max: 10 }, confirmation: CONFIRMATION } })]]));
+    await page.goto('/vendor/promotions/');
+    await expect(page.getByTestId('merch-open-proposals')).toHaveText('You have the most open proposals allowed. Withdraw one or wait for a decision.');
+    await expect(page.getByTestId('merch-propose')).toBeDisabled();
   });
 
   test('a business not yet approved sees "Available once your business is approved"', async ({ page }) => {

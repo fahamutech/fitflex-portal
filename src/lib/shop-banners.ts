@@ -23,6 +23,11 @@ export type BannerAction = 'edit' | 'image' | 'submit' | 'withdraw' | 'end' | 'a
 export interface BannerImage {
   id?: string;
   uploadedBy?: string | null;
+  uploadedByName?: string | null;
+  confirmationVersion?: string | null;
+  /** Model release reference (required with product_models). */
+  consentRef?: string | null;
+  licenceRef?: string | null;
   width?: number;
   height?: number;
   people?: BannerPeople | null;
@@ -62,9 +67,9 @@ export interface ShopBanner {
   position: number | null;
   status: BannerStatus;
   effectiveStatus?: BannerEffectiveStatus;
+  /** A code (revision 2): image|people|text|claim|link|other (rejected), window_passed|ended_by_vendor|ended_by_fitflex (ended), not_reviewed_in_time|start_passed (expired). */
   statusReason: string | null;
-  statusReasonCode?: string | null;
-  /** Reject/end note kept apart from the code (review round; the label is rendered from the code in the reader's language). */
+  /** The text FitFlex wrote (reject note, end note). statusReason is the code (revision 2). */
   statusReasonNote?: string | null;
   /** Fixed button label key (DD-P2-1), when the server sends it. */
   ctaKey?: string | null;
@@ -113,7 +118,22 @@ export interface BannerImageFields {
   rightsConfirmed: boolean;
   /** "The people are models … never presented as FitFlex members, trainers or partners" — required with models. */
   peopleConfirmed: boolean;
+  /** The confirmation texts' version the uploader accepted (list response `confirmation.version`). */
+  confirmationVersion: string;
+  /** Model release reference; required with product_models (≤ 200). */
+  consentRef?: string;
+  /** Optional licence note, e.g. "own shoot" (≤ 200). */
+  licenceRef?: string;
 }
+/** The rights and models texts the uploader accepts, as the server sends them (show exactly as sent). */
+export type BannerConfirmation = {
+  version: string;
+  /** draft_pending_counsel: draft wording pending Tanzanian counsel and Swahili native review. */
+  status?: string | null;
+  rights: Bilingual;
+  models: Bilingual;
+};
+export const REF_MAX = 200;
 
 /** Audience roles a banner can be shown to (spec §5.2.3 field 8). */
 export const AUDIENCE_ROLES = ['member', 'trainer', 'owner'] as const;
@@ -126,8 +146,12 @@ export const REVIEW_CHECKS = ['people', 'text', 'languages'] as const;
 export const REJECT_CODES = ['image', 'people', 'text', 'claim', 'link', 'other'] as const;
 export type RejectCode = typeof REJECT_CODES[number];
 
-export type BannerList = { items: ShopBanner[]; nextCursor: number | string | null; counts?: Partial<Record<MerchTab | 'drafts', number>> | null };
-export type VendorBannerList = BannerList & { vendor?: { canPropose: boolean; reason: string | null } | null; proposalExpiryDays?: number };
+export type BannerList = { items: ShopBanner[]; nextCursor: number | string | null; counts?: Partial<Record<MerchTab | 'drafts', number>> | null; confirmation?: BannerConfirmation | null };
+export type VendorBannerList = BannerList & {
+  vendor?: { canPropose: boolean; reason: string | null } | null; proposalExpiryDays?: number;
+  /** How many proposals are open (draft, pending, scheduled) and the most allowed (409 too_many_open_proposals above it). */
+  openProposals?: { open: number; max: number } | null;
+};
 export type AuditRow = { id?: string | number; action: string; actor?: string | null; actorName?: string | null; at?: string; createdAt?: string; after?: Record<string, unknown> | null };
 
 /** Lists come back as { items } (or a bare array from an older shape). */
@@ -164,8 +188,13 @@ function uploadImage(path: string, token: string, file: File, fields: BannerImag
     const form = new FormData();
     // Text fields first, the file last, so the server has every field before it reads the file.
     form.append('people', fields.people);
+    form.append('confirmationVersion', fields.confirmationVersion);
     form.append('rightsConfirmed', fields.rightsConfirmed ? 'true' : 'false');
-    if (fields.people === 'product_models') form.append('peopleConfirmed', fields.peopleConfirmed ? 'true' : 'false');
+    if (fields.people === 'product_models') {
+      form.append('peopleConfirmed', fields.peopleConfirmed ? 'true' : 'false');
+      if (fields.consentRef?.trim()) form.append('consentRef', fields.consentRef.trim());
+    }
+    if (fields.licenceRef?.trim()) form.append('licenceRef', fields.licenceRef.trim());
     form.append('file', file, file.name);
     const xhr = new XMLHttpRequest();
     xhr.open('POST', `${API_BASE}${path}`);
@@ -211,7 +240,7 @@ export const publicPhoto = (img: BannerImage | null | undefined, wide = false): 
 
 /**
  * What the reviewer saw (H2): the server refuses a decision on a banner that changed since (409 banner_changed).
- * [MOCKED, pending the final functions#227 contract: field names revision | updatedAt, imageId.]
+ * (functions#227 revision 2: revision, or updatedAt as a fallback, and imageId; missing → 400 revision_required.)
  */
 function seenRevision(b: ShopBanner): Record<string, unknown> {
   return {
@@ -239,7 +268,7 @@ export const bannersApi = {
   /** code + note apart (review #5): the label is rendered from the code in each reader's language. */
   adminReject: async (token: string, b: ShopBanner, code: RejectCode, note: string) =>
     oneOf(await request<unknown>(`/admin/shop-banners/${enc(b.id)}/reject`, json({ code, ...(note.trim() ? { note: note.trim() } : {}), ...seenRevision(b) }), token)),
-  adminEnd: async (token: string, id: string, reason: string) => oneOf(await request<unknown>(`/admin/shop-banners/${enc(id)}/end`, json({ reason }), token)),
+  adminEnd: async (token: string, id: string, note: string) => oneOf(await request<unknown>(`/admin/shop-banners/${enc(id)}/end`, json({ note }), token)),
   adminPosition: async (token: string, id: string, position: number | null) =>
     oneOf(await request<unknown>(`/admin/shop-banners/${enc(id)}/position`, json({ position }), token)),
   adminUploadImage: (token: string, id: string, file: File, fields: BannerImageFields, opts?: { onProgress?: (f: number) => void; signal?: AbortSignal }) =>
@@ -392,26 +421,34 @@ export const SUBLINE_MAX = { en: 70, sw: 90 } as const;
 export const ALT_MAX = { en: 160, sw: 200 } as const;
 const HOUR = 3_600_000;
 
-// Prices, percentages and amounts in banner text (DD-P2-2), the same patterns as the server.
-const PRICE_PATTERNS = [
-  /%/, /\/=/,
-  /\b(?:tsh|tshs|tzs|shs?|sh)\.?\s*\d/i,
-  /\d[\d,.\s]*\s*(?:tsh|tshs|tzs|shs?|shilingi|bob)\b/i,
-  /\b(?:shilingi|asilimia)\s*\d/i,
-  /\b(?:percent|per\s*cent|asilimia)\b/i,
-  /\b(?:bei|price)\s*:?\s*\d/i,
-  /\b\d{1,3}(?:[,.]\d{3})+\b/,
-];
-// Links and phone numbers: the banner's button is the only way out.
+// Banner text rules (DD-P2-2), the same lists as the server (functions#227 revision 2, "Text rules"). Checked on
+// normalised text: NFKC (fullwidth digits and %), format characters removed, whitespace collapsed.
+const normalise = (v: string) => v.normalize('NFKC').replace(/\p{Cf}/gu, '').replace(/\s+/g, ' ').trim();
+const D = '\\p{Nd}';
+const re = (src: string) => new RegExp(src, 'iu');
+// Links, handles and phone numbers (checked first, as on the server).
+const TLDS = 'com|net|org|info|biz|shop|store|app|io|me|co|tz|ke|ug|rw|bi|africa|online|site|website|xyz|link|ly|tv|club|fit|fitness';
 const CONTACT_PATTERNS = [
-  /https?:\/\//i, /\bwww\./i,
-  /\b[a-z0-9-]+\.(?:com|co\.tz|tz|net|org|shop|store|app|io|me)\b/i,
-  /\+?\s*255[\s-]?\d{2,3}[\s-]?\d{3}[\s-]?\d{3}/,
-  /\b0[67]\d{2}[\s-]?\d{3}[\s-]?\d{3}\b/,
-  /\d(?:[\s-]?\d){8,}/,
+  /https?:\/\//iu, /\bwww\./iu,
+  re(`[\\p{L}\\p{N}-]\\.(?:${TLDS})\\b`),
+  /\b(?:dot|nukta)\s+com\b/iu,
+  /(?:^|[^\p{L}\p{N}])@[\p{L}\p{N}_.]{2,}/u,
+  re(`\\+\\s*25[45]`),
+  re(`(?:^|[^${D}])0[167]${D}{2}[\\s-]?${D}{3}[\\s-]?${D}{3}`),
+  re(`${D}(?:[\\s-]?${D}){8,}`),
 ];
-export const hasPrice = (s: string) => PRICE_PATTERNS.some(re => re.test(s));
-export const hasContact = (s: string) => CONTACT_PATTERNS.some(re => re.test(s));
+// Prices, percentages, amounts and deal words.
+const PRICE_PATTERNS = [
+  /[%٪﹪]/u, /\/=/u, re(`${D}\\s*\\/-`),
+  re(`\\b(?:tsh|tshs|tzs|ksh|shs?|sh)\\.?\\s*${D}`),
+  re(`${D}[${D},.\\s]*\\s*(?:tsh|tshs|tzs|ksh|shs?|shilingi|bob)\\b`),
+  re(`\\b(?:bei|price)\\s*:?\\s*${D}`),
+  /\b(?:shilingi|asilimia|percent|per\s*cent|pct|elfu|laki|milioni|million|punguzo|bure|nusu\s+bei|half\s+price|discount)\b/iu,
+  re(`${D}{1,3}(?:[,.]${D}{3})+`),
+  re(`${D}{4,}`),
+];
+export const hasContact = (s: string) => { const v = normalise(s); return CONTACT_PATTERNS.some(p => p.test(v)); };
+export const hasPrice = (s: string) => { const v = normalise(s); return PRICE_PATTERNS.some(p => p.test(v)); };
 
 export type BannerTextField = 'imageAlt' | 'headlineLead' | 'headlineAccent' | 'subline';
 export type FieldError = { key: MessageKey; vars?: Record<string, string | number> };
@@ -452,8 +489,8 @@ export function validateDraft(d: BannerDraft, opts: { now?: number; checkStart?:
   for (const f of ['headlineLead', 'headlineAccent', 'subline', 'imageAlt'] as const) for (const l of langs) {
     const v = d[f][l];
     if (!v.trim() || e[`${f}.${l}`]) continue;
-    if (hasPrice(v)) e[`${f}.${l}`] = { key: 'merch.banner.noPrices' };
-    else if (hasContact(v)) e[`${f}.${l}`] = { key: 'merch.banner.noLinks' };
+    if (hasContact(v)) e[`${f}.${l}`] = { key: 'merch.banner.noLinks' };
+    else if (hasPrice(v)) e[`${f}.${l}`] = { key: 'merch.banner.noPrices' };
   }
   if (d.targetType !== 'results' && !d.targetValue.trim()) e.target = { key: d.targetType === 'product' ? 'merch.banner.pickProduct' : 'merch.required' };
   if (d.audienceRoles.length === 0) e.audienceRoles = { key: 'merch.banner.pickOne' };
@@ -467,7 +504,7 @@ export function validateDraft(d: BannerDraft, opts: { now?: number; checkStart?:
 
 /** Order of the fields on the form, so focus can move to the first one in error (spec §11.3). */
 export const FIELD_ORDER = [
-  'image', 'people', 'rights', 'peopleConfirm',
+  'image', 'people', 'rights', 'peopleConfirm', 'consentRef',
   'headlineLead.en', 'headlineLead.sw', 'headlineAccent.en', 'headlineAccent.sw', 'subline.en', 'subline.sw', 'imageAlt.en', 'imageAlt.sw',
   'target', 'audienceRoles', 'startsAt', 'endsAt',
 ];
@@ -520,6 +557,15 @@ const ERROR_KEY: Record<string, MessageKey> = {
   // Admin decisions
   cannot_approve_own_submission: 'merchAdmin.ownWork',
   banner_changed: 'merchAdmin.bannerChanged',
+  revision_required: 'merchAdmin.bannerChanged',
+  reason_code_required: 'merchAdmin.reasonRequired',
+  invalid_reason_code: 'merchAdmin.reasonRequired',
+  note_required: 'merchAdmin.noteRequired',
+  invalid_note: 'merchAdmin.noteTooLong',
+  invalid_cta_key: 'merch.banner.ctaNotAllowed',
+  confirmation_version_mismatch: 'merch.banner.confirmationChanged',
+  consent_reference_required: 'merch.banner.consentRequired',
+  invalid_reference: 'merch.banner.refTooLong',
   rate_limited: 'merch.rateLimited',
   too_many_open_proposals: 'merch.tooManyOpen',
   cta_label_not_allowed: 'merch.banner.ctaNotAllowed',
@@ -571,6 +617,7 @@ export function errorKeyOf(err: unknown, fallback: MessageKey = 'merch.saveFaile
 }
 const FIELD_OF_CODE: Record<string, string> = {
   image_people_unconfirmed: 'peopleConfirm', people_confirmation_required: 'peopleConfirm', rights_confirmation_required: 'rights',
+  consent_reference_required: 'consentRef', invalid_reference: 'consentRef', confirmation_version_mismatch: 'rights',
   image_required: 'image', unsupported_file_type: 'image', image_too_small: 'image', file_too_large: 'image', no_file_provided: 'image',
   target_not_owned: 'target', target_not_eligible: 'target', target_type_not_allowed: 'target', target_required: 'target',
   audience_required: 'audienceRoles', start_too_soon: 'startsAt', start_required: 'startsAt', end_required: 'endsAt', end_before_start: 'endsAt',
@@ -599,12 +646,12 @@ export const REJECT_KEY: Record<RejectCode, MessageKey> = {
   claim: 'merchAdmin.reason.claim', link: 'merchAdmin.reason.link', other: 'merchAdmin.reason.other',
 };
 /**
- * The reason a banner was rejected, in the reader's language: the label of the code, then the note.
- * Older rows (one free-text statusReason) are shown as they are.
+ * The reason line in the reader's language (revision 2: statusReason is the code, statusReasonNote the text):
+ * rejected → the code's label, then the note; ended by FitFlex → the note. Other codes carry no text.
  */
-export function reasonText(b: Pick<ShopBanner, 'status' | 'statusReason' | 'statusReasonCode' | 'statusReasonNote'>, t: (k: MessageKey) => string): string {
-  const code = b.statusReasonCode as RejectCode | null | undefined;
-  const label = b.status === 'rejected' && code && REJECT_KEY[code] && code !== 'other' ? t(REJECT_KEY[code]) : '';
-  const note = (b.statusReasonNote ?? (label ? null : b.statusReason) ?? '').trim();
+export function reasonText(b: Pick<ShopBanner, 'status' | 'effectiveStatus' | 'statusReason' | 'statusReasonNote'>, t: (k: MessageKey) => string): string {
+  const code = b.statusReason ?? '';
+  const note = (b.statusReasonNote ?? '').trim();
+  const label = (b.effectiveStatus ?? b.status) === 'rejected' && code in REJECT_KEY && code !== 'other' ? t(REJECT_KEY[code as RejectCode]) : '';
   return label && note ? `${label}: ${note}` : label || note;
 }

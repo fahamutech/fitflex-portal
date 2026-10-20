@@ -6,7 +6,7 @@ import { api, type ShopProduct, type VendorSummary } from '@/lib/api';
 import { eatDateTime, fmt, type Category } from '@/lib/vendor';
 import {
   MERCH_EMPTY_KEY, MERCH_KINDS, MERCH_TABS, MERCH_TAB_KEY, PHASE_KEY, PHASE_TONE, bannersApi, errorCodeOf, errorKeyOf, headlineOf, phaseOf, tabOfBanner,
-  type MerchTab, type ShopBanner,
+  type BannerConfirmation, type MerchTab, type ShopBanner,
 } from '@/lib/shop-banners';
 import { Alert, Badge, Button, Card, CardContent, PageHeader, Segmented, Spinner, Table, TBody, Td, Th, THead, Tr } from '@/components/shared';
 import { ShopMerchDetail } from '@/components/shop-merch-detail';
@@ -38,6 +38,7 @@ export default function ShopMerchPage() {
   const { token, user, t, locale, hasPermission } = useApp();
   const [rows, setRows] = useState<ShopBanner[] | null>(null);
   const [serverCounts, setServerCounts] = useState<Partial<Record<MerchTab, number>> | null>(null);
+  const [confirmation, setConfirmation] = useState<BannerConfirmation | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [disabled, setDisabled] = useState(false);
   const [tab, setTab] = useState<MerchTab>('requests');
@@ -65,7 +66,7 @@ export default function ShopMerchPage() {
     setError(null);
     try {
       const list = await bannersApi.adminList(token);
-      setRows(list.items); setServerCounts(list.counts ?? null); setDisabled(false);
+      setRows(list.items); setServerCounts(list.counts ?? null); setConfirmation(list.confirmation ?? null); setDisabled(false);
     }
     catch (err) {
       if (errorCodeOf(err) === 'feature_disabled') setDisabled(true);
@@ -107,7 +108,7 @@ export default function ShopMerchPage() {
           <ArrowLeft className="h-4 w-4" />{t('merchAdmin.back')}
         </Button>
         <PageHeader title={t(editing ? 'merchAdmin.editBanner' : 'merchAdmin.createBanner')} description={t('merchAdmin.createNote')} />
-        <BannerForm mode="staff" banner={editing} products={products} vendors={vendors} categories={categories}
+        <BannerForm mode="staff" banner={editing} confirmation={confirmation} onConfirmationStale={() => void load()} products={products} vendors={vendors} categories={categories}
           onCancel={() => go(view.edit ? `item=${encodeURIComponent(view.edit)}` : '')}
           onDone={b => { void load(); go(`item=${encodeURIComponent(b.id)}`); }} />
       </div>

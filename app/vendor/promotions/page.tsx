@@ -6,7 +6,7 @@ import { api, type VendorProduct } from '@/lib/api';
 import { eatDateTime, fmt } from '@/lib/vendor';
 import {
   AUDIENCE_KEY, PHASE_KEY, PHASE_TONE, VENDOR_GROUPS, VENDOR_GROUP_KEY, bannersApi, canDo, errorCodeOf, errorKeyOf, headlineOf, isNetworkError, phaseOf,
-  reasonText, targetLabelOf, vendorGroupOf, type ShopBanner,
+  reasonText, targetLabelOf, vendorGroupOf, type BannerConfirmation, type ShopBanner,
 } from '@/lib/shop-banners';
 import { Alert, Badge, Button, Card, EmptyState, ErrorState, PageHeader, SkeletonCard } from '@/components/shared';
 import { Dialog } from '@/components/dialog';
@@ -49,12 +49,15 @@ export default function VendorPromotionsPage() {
   const [withdrawing, setWithdrawing] = useState<ShopBanner | null>(null);
   const [ending, setEnding] = useState<ShopBanner | null>(null);
   const [standing, setStanding] = useState<{ canPropose: boolean; reason: string | null } | null>(null);
+  const [confirmation, setConfirmation] = useState<BannerConfirmation | null>(null);
+  const [openProposals, setOpenProposals] = useState<{ open: number; max: number } | null>(null);
   const [busy, setBusy] = useState(false);
 
   const me = vendor.me;
   // The list's own answer wins (vendor.canPropose / reason); /vendor/me is the first guess.
   const approved = standing ? standing.reason !== 'vendor_not_approved' : !me?.approvalStatus || me.approvalStatus === 'approved';
   const suspended = standing ? standing.reason === 'vendor_suspended' : me?.accountStatus === 'suspended';
+  const full = !!openProposals && openProposals.max > 0 && openProposals.open >= openProposals.max;
 
   useEffect(() => {
     const sync = () => setView(viewOf(window.location.search));
@@ -69,7 +72,7 @@ export default function VendorPromotionsPage() {
     setState('loading');
     try {
       const list = await bannersApi.vendorList(token);
-      setRows(list.items); setStanding(list.vendor ?? null); setState('ready');
+      setRows(list.items); setStanding(list.vendor ?? null); setConfirmation(list.confirmation ?? null); setOpenProposals(list.openProposals ?? null); setState('ready');
     }
     catch (err) {
       if (errorCodeOf(err) === 'feature_disabled') { forgetBannersAvailability(); setState('off'); return; }
@@ -163,7 +166,7 @@ export default function VendorPromotionsPage() {
         </Button>
         <PageHeader title={t(editing ? 'merch.banners.edit' : 'merch.banners.propose')} />
         {suspended && <Alert tone="error">{t('merch.suspended')}</Alert>}
-        <BannerForm mode="vendor" banner={editing} template={template} vendorId={me?.vendorId} vendorName={me?.businessName} products={products}
+        <BannerForm mode="vendor" banner={editing} confirmation={confirmation} onConfirmationStale={() => void load()} template={template} vendorId={me?.vendorId} vendorName={me?.businessName} products={products}
           onCancel={() => go('')} onDone={() => { go(''); void load(); }} />
       </div>
     );
@@ -222,13 +225,18 @@ export default function VendorPromotionsPage() {
       <PageHeader
         title={t('merch.title')}
         description={t('merch.entry.subtitle')}
-        actions={<Button onClick={() => go('new=banner')} disabled={suspended || state !== 'ready'} className="min-h-11 max-sm:w-full" data-testid="merch-propose"><Plus className="h-4 w-4" />{t('merch.banners.propose')}</Button>}
+        actions={<Button onClick={() => go('new=banner')} disabled={suspended || state !== 'ready' || full} className="min-h-11 max-sm:w-full" data-testid="merch-propose"><Plus className="h-4 w-4" />{t('merch.banners.propose')}</Button>}
       />
       {/* Flash sales join as a second tab in slice 4. */}
       <div role="tablist" aria-label={t('merch.title')} className="flex w-fit gap-1 rounded-[var(--radius-lg)] bg-[var(--color-bg-secondary)] p-1">
         <button role="tab" aria-selected="true" className="flex min-h-11 items-center rounded-md bg-[var(--color-bg-primary)] px-3 text-sm font-semibold shadow-sm">{t('merch.tab.banners')}</button>
       </div>
       {suspended && <Alert tone="error">{t('merch.suspended')}</Alert>}
+      {openProposals && openProposals.max > 0 && (
+        <p className={full ? 'text-sm font-medium text-[var(--color-warning-700)]' : 'text-sm text-[var(--color-fg-tertiary)]'} data-testid="merch-open-proposals">
+          {full ? t('merch.openFull') : fmt(t('merch.openProposals'), { open: openProposals.open, max: openProposals.max })}
+        </p>
+      )}
       {itemMissing && <Alert tone="warning">{t('merch.notYours')}</Alert>}
       {state === 'loading' && <div className="space-y-3" aria-busy="true"><SkeletonCard /><SkeletonCard /><SkeletonCard /></div>}
       {state === 'failed' && <ErrorState title={t('merch.banners.error')} onRetry={() => void load()} retryLabel={t('common.tryAgain')} />}

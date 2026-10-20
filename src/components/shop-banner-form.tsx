@@ -7,8 +7,8 @@ import type { MessageKey } from '@/lib/i18n';
 import { fmt, categoryLabel, type Category } from '@/lib/vendor';
 import {
   AUDIENCE_KEY, AUDIENCE_ROLES, CTA_FOR_TARGET, CTA_KEY, FIELD_ORDER, IMAGE_MAX_BYTES, IMAGE_MIN_H, IMAGE_MIN_W, IMAGE_TYPES, TARGET_KEY,
-  bannersApi, canDo, ctaLabelOf, reasonText, draftOf, draftToInput, editResends, errorCodeOf, errorKeyOf, formFieldOf, isNetworkError, validateDraft,
-  type BannerDraft, type BannerPeople, type BannerTargetType, type FormErrors, type ShopBanner,
+  REF_MAX, bannersApi, canDo, pick as pickLang, ctaLabelOf, reasonText, draftOf, draftToInput, editResends, errorCodeOf, errorKeyOf, formFieldOf, isNetworkError, validateDraft,
+  type BannerConfirmation, type BannerDraft, type BannerPeople, type BannerTargetType, type FormErrors, type ShopBanner,
 } from '@/lib/shop-banners';
 import { Alert, Button, Card, CardContent, Checkbox, Field, Input, Radio, Select } from './shared';
 import { Dialog, DialogFooter } from './dialog';
@@ -50,7 +50,7 @@ export type BannerFormMode = 'vendor' | 'staff';
  * Vendor: saved as a draft, the photo is uploaded, then it is sent for approval. Staff: created, the photo
  * is uploaded, and another admin approves it.
  */
-export function BannerForm({ mode, banner, template, vendorId, vendorName, products, vendors, categories, onCancel, onDone }: {
+export function BannerForm({ mode, banner, template, vendorId, vendorName, products, vendors, categories, confirmation, onConfirmationStale, onCancel, onDone }: {
   mode: BannerFormMode;
   banner: ShopBanner | null;
   /** "Copy to new": a past banner's text, link and audience (no photo, no dates). */
@@ -63,10 +63,15 @@ export function BannerForm({ mode, banner, template, vendorId, vendorName, produ
   products: ShopProduct[];
   vendors?: VendorSummary[];
   categories?: Category[];
+  /** The rights and models wording the uploader accepts (list response `confirmation`); shown exactly as sent. */
+  confirmation: BannerConfirmation | null | undefined;
+  /** 400 confirmation_version_mismatch: the parent reloads the list to get the current wording. */
+  onConfirmationStale?: () => void;
   onCancel: () => void;
   onDone: (b: ShopBanner) => void;
 }) {
   const { token, t, locale } = useApp();
+  const pickText = (b: { en: string; sw: string }) => pickLang(b, locale);
   const toast = useToast();
   const uid = useId();
   const fid = (f: string) => `${uid}-${f.replace('.', '-')}`;
@@ -81,6 +86,8 @@ export function BannerForm({ mode, banner, template, vendorId, vendorName, produ
   const [people, setPeople] = useState<BannerPeople | ''>('');
   const [rights, setRights] = useState(false);
   const [modelsOk, setModelsOk] = useState(false);
+  const [consentRef, setConsentRef] = useState('');
+  const [licenceRef, setLicenceRef] = useState('');
   const [errors, setErrors] = useState<FormErrors>({});
   const [general, setGeneral] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -132,6 +139,10 @@ export function BannerForm({ mode, banner, template, vendorId, vendorName, produ
       if (!people) e.people = { key: 'merch.banner.pickPeople' };
       if (!rights) e.rights = { key: 'merch.confirmRequired' };
       if (people === 'product_models' && !modelsOk) e.peopleConfirm = { key: 'merch.confirmRequired' };
+      if (people === 'product_models' && !consentRef.trim()) e.consentRef = { key: 'merch.banner.consentRequired' };
+      if (consentRef.trim().length > REF_MAX || licenceRef.trim().length > REF_MAX) e.consentRef = { key: 'merch.banner.refTooLong' };
+      // Without the server's wording (and its version) the photo can't be sent.
+      if (!confirmation?.version) e.rights = { key: 'merch.banner.confirmationsMissing' };
     }
     return e;
   }
@@ -161,7 +172,10 @@ export function BannerForm({ mode, banner, template, vendorId, vendorName, produ
         setProgress(0);
         try {
           current = await (isVendor ? bannersApi.vendorUploadImage : bannersApi.adminUploadImage)(
-            token, current.id, image.file, { people, rightsConfirmed: rights, peopleConfirmed: people === 'product_models' && modelsOk },
+            token, current.id, image.file, {
+              people, rightsConfirmed: rights, peopleConfirmed: people === 'product_models' && modelsOk, confirmationVersion: confirmation?.version ?? '',
+              consentRef: people === 'product_models' ? consentRef : undefined, licenceRef,
+            },
             { onProgress: setProgress },
           );
           setSaved(current);
@@ -169,8 +183,13 @@ export function BannerForm({ mode, banner, template, vendorId, vendorName, produ
         } catch (err) {
           setProgress(null);
           const code = errorCodeOf(err);
-          const field = code === 'people_confirmation_required' ? 'peopleConfirm' : code === 'rights_confirmation_required' ? 'rights' : 'image';
-          const fe: FormErrors = { [field]: { key: field === 'image' ? (isNetworkError(err) ? 'merch.banner.uploadFailed' : errorKeyOf(err, 'merch.banner.uploadFailed')) : 'merch.confirmRequired' } };
+          // The wording changed since the form opened: get the new texts, untick, and ask again.
+          if (code === 'confirmation_version_mismatch') { setRights(false); setModelsOk(false); onConfirmationStale?.(); }
+          const field = code === 'people_confirmation_required' ? 'peopleConfirm' : code === 'rights_confirmation_required' || code === 'confirmation_version_mismatch' ? 'rights'
+            : code === 'consent_reference_required' || code === 'invalid_reference' ? 'consentRef' : 'image';
+          const key: MessageKey = field === 'image' ? (isNetworkError(err) ? 'merch.banner.uploadFailed' : errorKeyOf(err, 'merch.banner.uploadFailed'))
+            : field === 'consentRef' || code === 'confirmation_version_mismatch' ? errorKeyOf(err) : 'merch.confirmRequired';
+          const fe: FormErrors = { [field]: { key } };
           setErrors(fe); focusFirst(fe);
           setBusy(false);
           return;
@@ -268,15 +287,22 @@ export function BannerForm({ mode, banner, template, vendorId, vendorName, produ
               </fieldset>
               <fieldset className="space-y-1">
                 <legend className="text-sm font-medium text-[var(--color-fg-secondary)]">{t('merch.banner.confirmations')}<span aria-hidden="true" className="text-[var(--color-error-600)]"> *</span></legend>
-                <Checkbox id={fid('rights')} checked={rights} onChange={e => { setRights(e.target.checked); setErrors(x => { const { rights: _g, ...r } = x; return r; }); }} disabled={busy} label={t('merch.banner.rights')} invalid={!!errors.rights} aria-required data-testid="banner-rights" />
+                <Checkbox id={fid('rights')} checked={rights} onChange={e => { setRights(e.target.checked); setErrors(x => { const { rights: _g, ...r } = x; return r; }); }} disabled={busy} label={confirmation ? pickText(confirmation.rights) : t('merch.banner.rights')} invalid={!!errors.rights} aria-required data-testid="banner-rights" />
                 {errors.rights && <p className="text-xs text-[var(--color-error-700)]" data-testid="banner-rights-error">{err('rights')}</p>}
                 {people === 'product_models' && (
                   <>
-                    <Checkbox id={fid('peopleConfirm')} checked={modelsOk} onChange={e => { setModelsOk(e.target.checked); setErrors(x => { const { peopleConfirm: _g, ...r } = x; return r; }); }} disabled={busy} label={t('merch.banner.modelsConfirm')} invalid={!!errors.peopleConfirm} aria-required data-testid="banner-models-confirm" />
+                    <Checkbox id={fid('peopleConfirm')} checked={modelsOk} onChange={e => { setModelsOk(e.target.checked); setErrors(x => { const { peopleConfirm: _g, ...r } = x; return r; }); }} disabled={busy} label={confirmation ? pickText(confirmation.models) : t('merch.banner.modelsConfirm')} invalid={!!errors.peopleConfirm} aria-required data-testid="banner-models-confirm" />
                     {errors.peopleConfirm && <p className="text-xs text-[var(--color-error-700)]" data-testid="banner-models-error">{err('peopleConfirm')}</p>}
+                    <Field label={t('merch.banner.consentRef')} hint={t('merch.banner.consentRefHint')} error={err('consentRef')} required>
+                      <Input id={fid('consentRef')} value={consentRef} onChange={e => { setConsentRef(e.target.value); setErrors(x => { const { consentRef: _g, ...r } = x; return r; }); }} disabled={busy} maxLength={REF_MAX} data-testid="banner-consent-ref" />
+                    </Field>
                   </>
                 )}
+                {confirmation?.status === 'draft_pending_counsel' && <p className="text-xs text-[var(--color-fg-quaternary)]" data-testid="banner-confirmations-draft">{t('merch.banner.confirmationsDraft')}</p>}
               </fieldset>
+              <Field label={t('merch.banner.licenceRef')} hint={t('merch.banner.licenceRefHint')}>
+                <Input value={licenceRef} onChange={e => setLicenceRef(e.target.value)} disabled={busy} maxLength={REF_MAX} data-testid="banner-licence-ref" />
+              </Field>
             </>
           )}
         </CardContent></Card>
