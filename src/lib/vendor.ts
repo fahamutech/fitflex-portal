@@ -1,5 +1,8 @@
 // Small helpers for the vendor area (S2). No strings here: every label is an i18n key.
-import { ApiError, type ProductVariant, type VendorOrder, type VendorSale, type VendorTools } from '@/lib/api';
+import {
+  ApiError, type AgingBucket, type ProductVariant, type VendorCustomerOpenSale, type VendorCustomerPayment, type VendorCustomerProfile, type VendorOrder,
+  type VendorSale, type VendorTools,
+} from '@/lib/api';
 import type { BadgeTone } from '@/lib/admin-utils';
 import type { Locale, MessageKey } from '@/lib/i18n';
 
@@ -158,6 +161,8 @@ export const VENDOR_AREAS: ReadonlyArray<{ href: string; permission: string | nu
   { href: '/vendor/orders', permission: 'orders' },
   // S3: walk-in sales need the tool on (fails closed: missing = off) and the `sales` permission.
   { href: '/vendor/sales', permission: 'sales', tool: 'walkInSales' },
+  // S4: customers need the tool on (fails closed) and the `customers` permission.
+  { href: '/vendor/customers', permission: 'customers', tool: 'customers' },
   { href: '/vendor/payouts', permission: 'payments' },
 ];
 /** Whether this person may open an area: its permission, and its tool switched on (=== true). */
@@ -166,6 +171,9 @@ export function vendorAreaOpen(area: (typeof VENDOR_AREAS)[number], permissions:
   if (area.tool && tools?.[area.tool] !== true) return false;
   return true;
 }
+/** Customers, balances and payments are open for this person (S4): tool on and `customers` permission. */
+export const canCustomers = (me: { permissions?: string[]; tools?: VendorTools } | null | undefined) =>
+  !!me && me.tools?.customers === true && !!me.permissions?.includes('customers');
 /** Walk-in sales are open for this person (S3): tool on and `sales` permission. */
 export const canWalkInSales = (me: { permissions?: string[]; tools?: VendorTools } | null | undefined) =>
   !!me && me.tools?.walkInSales === true && !!me.permissions?.includes('sales');
@@ -243,12 +251,17 @@ export function receiptDateTime(iso: string | null | undefined, locale: Locale) 
  * details, no marketing line. `totalLabel` is the formatted total ("TSh 95,000").
  */
 export function saleReceiptText(
-  sale: Pick<VendorSale, 'number' | 'soldAt' | 'subtotalTzs' | 'lineDiscountTzs' | 'discountTzs' | 'totalTzs' | 'changeTzs' | 'createdBy' | 'lines' | 'payments'>,
+  sale: Pick<VendorSale, 'number' | 'soldAt' | 'subtotalTzs' | 'lineDiscountTzs' | 'discountTzs' | 'totalTzs' | 'changeTzs' | 'createdBy' | 'lines' | 'payments'>
+    & Partial<Pick<VendorSale, 'kind' | 'customer' | 'dueDate' | 'paidAtSaleTzs'>>,
   opts: { business: string; locale: Locale; t: (k: MessageKey) => string; totalLabel: string },
 ) {
   const { t } = opts;
   const rule = '-'.repeat(20);
-  const out: string[] = [opts.business, fmt(t('vendor.pos.receiptNo'), { number: sale.number }), receiptDateTime(sale.soldAt, opts.locale), rule];
+  const credit = sale.kind === 'credit';
+  const out: string[] = [opts.business, fmt(t('vendor.pos.receiptNo'), { number: sale.number }), receiptDateTime(sale.soldAt, opts.locale)];
+  // S4: the customer's name only, never phone, email or address.
+  if (sale.customer) out.push(fmt(t('vendor.receipt.customer'), { name: customerName(sale.customer, t) }));
+  out.push(rule);
   for (const line of sale.lines) {
     const name = `${line.qty} x ${line.nameSnapshot}${line.variant ? ` (${line.variant})` : ''}`;
     const gross = amountOnly(line.qty * line.unitPriceTzs);
@@ -267,10 +280,147 @@ export function saleReceiptText(
     const method = saleMethodLabel(p.method, t);
     out.push(receiptRow(p.reference ? `${method} (${p.reference})` : method, amountOnly(p.amountTzs)));
   }
-  if (sale.changeTzs > 0) out.push(receiptRow(t('vendor.pos.change'), amountOnly(sale.changeTzs)));
+  if (credit) {
+    // Pay later (S4 §7.1): what was paid at the counter and the balance it left; never change.
+    const paidNow = sale.paidAtSaleTzs ?? sale.payments.reduce((n, p) => n + p.amountTzs, 0);
+    out.push(
+      receiptRow(t('vendor.pos.credit.paidNow'), amountOnly(paidNow)),
+      receiptRow(t('vendor.receipt.balanceDue'), amountOnly(Math.max(0, sale.totalTzs - paidNow))),
+    );
+    if (sale.dueDate) out.push(receiptRow(t('vendor.receipt.dueBy'), receiptDay(sale.dueDate, opts.locale)));
+  } else if (sale.changeTzs > 0) out.push(receiptRow(t('vendor.pos.change'), amountOnly(sale.changeTzs)));
   out.push(rule);
   if (sale.createdBy?.name) out.push(fmt(t('vendor.pos.servedBy'), { name: sale.createdBy.name }));
+  out.push(fmt(t(credit ? 'vendor.receipt.footerCredit' : 'vendor.pos.receiptFooter'), { business: opts.business }), t('vendor.pos.notFiscal'));
+  return out.join('\n');
+}
+
+// ── Customers, pay later, payments (S4) ──
+export const AGING_BUCKETS: readonly AgingBucket[] = ['current', 'd1_30', 'd31_60', 'd61_90', 'd90plus'];
+export const agingKey = (bucket: AgingBucket) => `vendor.aging.${bucket}` as MessageKey;
+export const isAgingBucket = (v: string | null | undefined): v is AgingBucket => !!v && (AGING_BUCKETS as readonly string[]).includes(v);
+
+/** A customer's name as shown: an app buyer who deleted their account is "Deleted member"; no name → "FitFlex member". */
+export function customerName(c: { name?: string | null; forgotten?: boolean } | null | undefined, t: (k: MessageKey) => string) {
+  if (c?.forgotten) return t('vendor.customers.deletedMember');
+  return c?.name?.trim() || t('vendor.orders.buyerUnnamed');
+}
+
+/**
+ * Tanzanian mobile number → +255XXXXXXXXX, as the server stores it (07…, 06…, 7…, 6…, 255…, +255…, with
+ * spaces, dashes, dots or brackets). Anything else → null. The server checks again.
+ */
+export function normalisePhone(raw: string): string | null {
+  const s = raw.trim().replace(/[\s\-().]/g, '');
+  let local: string | null = null;
+  if (/^\+255\d{9}$/.test(s)) local = s.slice(4);
+  else if (/^255\d{9}$/.test(s)) local = s.slice(3);
+  else if (/^0\d{9}$/.test(s)) local = s.slice(1);
+  else if (/^\d{9}$/.test(s)) local = s;
+  return local && /^[67]\d{8}$/.test(local) ? `+255${local}` : null;
+}
+export const isEmail = (v: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v) && v.length <= 254;
+
+/** Walk-in payment methods in the S3 order; one per customer payment. */
+export const PAYMENT_METHODS = ['cash', 'mpesa', 'airtel_money', 'mixx', 'halopesa', 'card', 'bank', 'other'] as const;
+/** Mobile money and bank need a transaction reference (S3 rule); card and other may have one; cash none. */
+export const REFERENCE_REQUIRED = new Set(['mpesa', 'airtel_money', 'mixx', 'halopesa', 'bank']);
+
+/** Client mirror of the server's oldest-due-first allocation: `open` is already oldest due first. */
+export function allocateOldestFirst(open: readonly VendorCustomerOpenSale[], amount: number) {
+  const out: Array<{ sale: VendorCustomerOpenSale; amountTzs: number }> = [];
+  let left = amount;
+  for (const sale of open) {
+    if (left <= 0) break;
+    const take = Math.min(left, sale.balanceTzs);
+    if (take > 0) out.push({ sale, amountTzs: take });
+    left -= take;
+  }
+  return out;
+}
+
+/**
+ * Who may void a customer payment (the server decides; this only hides the button): the vendor account and
+ * admin-role staff any payment; other staff only one they recorded, on the EAT day it was received.
+ */
+export function mayVoidPayment(
+  payment: Pick<VendorCustomerPayment, 'status' | 'receivedOn' | 'recordedBy'>,
+  who: { userId: string | null | undefined; userType: string | null | undefined; vendorRole: string | null | undefined },
+  now = new Date(),
+) {
+  if (payment.status !== 'recorded') return false;
+  if (who.userType === 'vendor' || who.vendorRole === 'admin') return true;
+  return !!who.userId && payment.recordedBy?.id === who.userId && payment.receivedOn === eatToday(now);
+}
+
+/** "22 Oct 2026" / "22 Okt 2026" for a calendar day, as the app writes it on receipts. */
+export function receiptDay(day: string | null | undefined, locale: Locale) {
+  const [y, m, d] = String(day ?? '').slice(0, 10).split('-').map(Number);
+  if (!y || !m || !d) return '—';
+  return `${d} ${RECEIPT_MONTHS[locale === 'sw' ? 'sw' : 'en'][m - 1]} ${y}`;
+}
+
+/** Payment receipt (spec §7.2) in the language `t` speaks. Customer name only; voided payments are never shared. */
+export function paymentReceiptText(
+  payment: Pick<VendorCustomerPayment, 'number' | 'receivedOn' | 'method' | 'reference' | 'amountTzs' | 'allocations'>,
+  opts: { business: string; customer: string; stillOwedTzs: number | null; locale: Locale; t: (k: MessageKey) => string; money: (n: number) => string },
+) {
+  const { t } = opts;
+  const rule = '-'.repeat(20);
+  const method = saleMethodLabel(payment.method, t);
+  const out: string[] = [
+    opts.business, fmt(t('vendor.pay.receiptTitle'), { number: payment.number }), receiptDay(payment.receivedOn, opts.locale),
+    fmt(t('vendor.receipt.customer'), { name: opts.customer }), rule,
+    receiptRow(payment.reference ? `${method} (${payment.reference})` : method, amountOnly(payment.amountTzs)),
+  ];
+  if (payment.allocations.length) {
+    out.push(`${t('vendor.pay.paidTowards')}:`);
+    for (const a of payment.allocations) out.push(receiptRow(a.saleNumber, amountOnly(a.amountTzs)));
+  }
+  out.push(rule);
+  if (opts.stillOwedTzs != null) out.push(receiptRow(t('vendor.pay.stillOwed'), opts.money(opts.stillOwedTzs)));
   out.push(fmt(t('vendor.pos.receiptFooter'), { business: opts.business }), t('vendor.pos.notFiscal'));
+  return out.join('\n');
+}
+
+/**
+ * Customer statement (spec §7.3): open pay-later sales, recorded payments of the last 90 days, total owed and
+ * the overdue aging line (zero buckets left out). Never phone, email or address.
+ */
+export function statementText(
+  customer: Pick<VendorCustomerProfile, 'name' | 'forgotten' | 'owedTzs' | 'aging' | 'asOf' | 'openSales'>,
+  payments: ReadonlyArray<Pick<VendorCustomerPayment, 'number' | 'receivedOn' | 'amountTzs' | 'status'>>,
+  opts: { business: string; locale: Locale; t: (k: MessageKey) => string; money: (n: number) => string },
+) {
+  const { t, locale } = opts;
+  const rule = '-'.repeat(20);
+  const out: string[] = [
+    opts.business, fmt(t('vendor.statement.title'), { name: customerName(customer, t) }), fmt(t('vendor.customers.asOf'), { date: receiptDay(customer.asOf, locale) }), rule,
+  ];
+  if (customer.openSales.length) {
+    out.push(`${t('vendor.customers.openSales')}:`);
+    for (const s of customer.openSales) {
+      out.push(receiptRow(s.number, amountOnly(s.balanceTzs)));
+      out.push(`  ${fmt(t('vendor.statement.soldOn'), { date: receiptDay(eatDayOf(s.soldAt), locale) })} · ${fmt(t('vendor.customers.dueOn'), { date: receiptDay(s.dueDate, locale) })}`);
+      if (s.daysOverdue > 0) out.push(`  ${fmt(t('vendor.customers.daysOverdue'), { n: s.daysOverdue })}`);
+    }
+    out.push(rule);
+  }
+  const recorded = payments.filter(p => p.status === 'recorded');
+  if (recorded.length) {
+    out.push(`${t('vendor.statement.recentPayments')}:`);
+    for (const p of recorded) out.push(receiptRow(`${p.number} ${receiptDay(p.receivedOn, locale)}`, amountOnly(p.amountTzs)));
+    out.push(rule);
+  }
+  if (customer.owedTzs > 0) {
+    out.push(receiptRow(t('vendor.statement.totalOwed'), opts.money(customer.owedTzs)));
+    const overdue = AGING_BUCKETS.filter(b => b !== 'current' && customer.aging[b] > 0)
+      .map(b => `${t(agingKey(b))} ${opts.money(customer.aging[b])}`);
+    if (overdue.length) out.push(`${t('vendor.owed.overdue')}: ${overdue.join(' · ')}`);
+  } else {
+    out.push(t('vendor.statement.nothingOwed'));
+  }
+  out.push(t('vendor.pos.notFiscal'));
   return out.join('\n');
 }
 
