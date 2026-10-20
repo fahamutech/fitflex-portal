@@ -3122,6 +3122,10 @@ export const messages = {
     "merch.pendingVerification": "Open the Verification centre in the FitFlex app to finish your business details.",
     "merch.redirecting": "Opening your banners…",
     "merch.openBanners": "Open banners",
+    "merchAdmin.noMatches": "No banners match your search",
+    "merchAdmin.type.banners": "Banners",
+    "merch.line.byFitflex": "by FitFlex",
+    "merch.line.byFitflexReason": "by FitFlex: {reason}",
   },
   sw: {
     'app.title': 'FitFlex Af — Portal ya Waendeshaji',
@@ -5976,7 +5980,7 @@ export const messages = {
     "merch.group.waiting": "Yanasubiri idhini",
     "merch.group.drafts": "Bado hayajatumwa",
     "merch.group.past": "Yaliyopita",
-    "merch.status.draft": "Haijatumwa",
+    "merch.status.draft": "Halijatumwa",
     "merch.status.pending": "Inasubiri idhini",
     "merch.status.approved": "Imepangwa",
     "merch.status.live": "Inaendelea",
@@ -6245,6 +6249,10 @@ export const messages = {
     "merch.pendingVerification": "Fungua Kituo cha uthibitisho katika programu ya FitFlex ukamilishe taarifa za biashara yako.",
     "merch.redirecting": "Inafungua mabango yako…",
     "merch.openBanners": "Fungua mabango",
+    "merchAdmin.noMatches": "Hakuna mabango yanayolingana na utafutaji wako",
+    "merchAdmin.type.banners": "Mabango",
+    "merch.line.byFitflex": "limesitishwa na FitFlex",
+    "merch.line.byFitflexReason": "limesitishwa na FitFlex: {reason}",
   }
 } as const;
 

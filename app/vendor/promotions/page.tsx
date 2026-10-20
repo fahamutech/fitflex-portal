@@ -186,7 +186,14 @@ export default function VendorPromotionsPage() {
     if (p === 'rejected') return reasonText(b, t) ? fmt(t('merch.line.reason'), { reason: reasonText(b, t) }) : t('merch.status.rejected');
     if (p === 'expired') return t('merch.line.notReviewed');
     if (p === 'withdrawn') return t('merch.line.youWithdrew');
-    if (p === 'ended') return (b.endedByFitflex ?? !!b.statusReason) && reasonText(b, t) ? fmt(t('merch.line.endedByFitflex'), { reason: reasonText(b, t) }) : fmt(t('merch.line.endedOn'), { date: eatDateTime(b.endedAt ?? b.endsAt, locale) });
+    if (p === 'ended') {
+      // "Ended {date}", and when FitFlex stopped it "· by FitFlex: {reason}" (QA2 #7).
+      const on = fmt(t('merch.line.endedOn'), { date: eatDateTime(b.endedAt ?? b.endsAt, locale) });
+      const byFitflex = b.endedByFitflex ?? b.statusReason === 'ended_by_fitflex';
+      if (!byFitflex) return on;
+      const why = reasonText(b, t);
+      return `${on} · ${why ? fmt(t('merch.line.byFitflexReason'), { reason: why }) : t('merch.line.byFitflex')}`;
+    }
     return t('merch.line.draft');
   };
   const targetLine = (b: ShopBanner) => b.target?.type === 'vendor_store' ? t('merch.line.linksStore')
@@ -238,7 +245,7 @@ export default function VendorPromotionsPage() {
       </div>
       {suspended && <Alert tone="error">{t('merch.suspended')}</Alert>}
       {!approved && !suspended && pendingNotice}
-      {openProposals && openProposals.max > 0 && (
+      {approved && openProposals && openProposals.max > 0 && (
         <p className={full ? 'text-sm font-medium text-[var(--color-warning-700)]' : 'text-sm text-[var(--color-fg-tertiary)]'} data-testid="merch-open-proposals">
           {full ? t('merch.openFull') : fmt(t('merch.openProposals'), { open: openProposals.open, max: openProposals.max })}
         </p>
@@ -247,7 +254,7 @@ export default function VendorPromotionsPage() {
       {state === 'loading' && <div className="space-y-3" aria-busy="true"><SkeletonCard /><SkeletonCard /><SkeletonCard /></div>}
       {state === 'failed' && <ErrorState title={t('merch.banners.error')} onRetry={() => void load()} retryLabel={t('common.tryAgain')} />}
       {state === 'offline' && <ErrorState title={t('merch.offlineTitle')} message={t('merch.offlineBody')} onRetry={() => void load()} retryLabel={t('common.tryAgain')} />}
-      {state === 'ready' && total === 0 && (
+      {state === 'ready' && total === 0 && approved && (
         <EmptyState icon={<Megaphone className="h-6 w-6" />} title={t('merch.banners.emptyTitle')} body={t('merch.banners.emptyBody')}
           action={canPropose ? <Button onClick={() => go('new=banner')} className="min-h-11" data-testid="merch-propose-empty">{t('merch.banners.propose')}</Button> : undefined} />
       )}

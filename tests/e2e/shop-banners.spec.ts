@@ -152,14 +152,23 @@ test.describe('admin merch queue', () => {
     // Sorted by expiresAt, soonest first (review #10); under a day in hours, under 72 h in days (QA1 #5).
     await expect(page.getByTestId('merch-table').locator('tbody tr').first()).toHaveAttribute('data-testid', 'merch-row-bn_soon');
     await expect(page.getByTestId('merch-expires-bn_soon')).toHaveText('Expires in 20 hours');
-    await expect(page.getByTestId('merch-expires-bn_1')).toHaveText('Expires in 1 day');
+    // Rounded to the nearest unit (QA2 #2): ~47 h → 2 days.
+    await expect(page.getByTestId('merch-expires-bn_1')).toHaveText('Expires in 2 days');
     // Sent column, type filter and search (QA1 #6).
     await expect(page.getByTestId('merch-row-bn_soon')).toContainText('1 hour ago');
     await expect(page.getByTestId('merch-type-filter').getByRole('button', { name: 'All' })).toHaveAttribute('aria-pressed', 'true');
     await page.getByTestId('merch-search').fill('yoga');
     await expect(page.getByTestId('merch-row-bn_soon')).toBeVisible();
     await expect(page.getByTestId('merch-row-bn_1')).toHaveCount(0);
+    // The icon never covers the text (QA2 #1); no matches has its own message (QA2 #4).
+    const pad = await page.getByTestId('merch-search').evaluate(el => parseFloat(getComputedStyle(el).paddingLeft));
+    expect(pad).toBeGreaterThanOrEqual(36);
+    await page.getByTestId('merch-search').fill('zzzz-nothing');
+    await expect(page.getByTestId('merch-empty')).toHaveText('No banners match your search');
     await page.getByTestId('merch-search').fill('');
+    // Header buttons are at least 44 px tall (QA2 #3); the type filter says "Banners" (QA2 #8).
+    for (const id of ['merch-refresh', 'merch-create-banner']) expect((await page.getByTestId(id).boundingBox())!.height).toBeGreaterThanOrEqual(44);
+    await expect(page.getByTestId('merch-type-filter').getByRole('button', { name: 'Banners' })).toBeVisible();
     await expect(page.getByTestId('merch-count-live')).toHaveText('1');
     await expect(page.getByTestId('merch-count-closed')).toHaveText('1');
     await expect(page.getByTestId('merch-count-drafts')).toHaveText('0');
@@ -213,6 +222,13 @@ test.describe('admin merch queue', () => {
     }
     await expect(page.getByTestId('merch-target')).toHaveText('Duka la muuzaji: FitFlex Performance Store Dar es Salaam');
     await page.setViewportSize({ width: 375, height: 812 });
+    // The phone preview scales to the column: no sideways scroll at 375 (QA2 #5).
+    await expect(page.getByTestId('banner-preview-fit').first()).not.toHaveAttribute('data-scale', '1.000');
+    const fit = page.getByTestId('banner-preview-fit').first();
+    const fitBox = (await fit.boundingBox())!;
+    const slideBox = (await fit.locator('.banner-slide').boundingBox())!;
+    expect(slideBox.x + slideBox.width).toBeLessThanOrEqual(fitBox.x + fitBox.width + 1);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBeTruthy();
     await page.goto('/admin/shop-merch/');
     await expect(page.getByTestId('merch-cards')).toBeVisible();
     await expect(page.getByTestId('merch-table')).toBeHidden();
@@ -672,6 +688,16 @@ test.describe('vendor banners', () => {
     await expect(page.getByTestId('merch-propose')).toBeDisabled();
   });
 
+  test('QA2: a pending business with no banners sees only the notice', async ({ page }) => {
+    await signIn(page, VENDOR);
+    await mockApi(page, vendorRoutes([], [['GET', /^\/vendor\/me$/, () => ({ json: me({ approvalStatus: 'pending_approval' }) })]], { canPropose: false, reason: 'vendor_not_approved' }));
+    await page.goto('/vendor/promotions/');
+    await expect(page.getByTestId('merch-pending-vendor')).toBeVisible();
+    await expect(page.getByTestId('merch-open-proposals')).toHaveCount(0);
+    await expect(page.getByText('No banners yet')).toHaveCount(0);
+    await expect(page.getByTestId('merch-propose-empty')).toHaveCount(0);
+  });
+
   test('a business not yet approved: spec copy + Verification centre, the list without Edit/Send, no Propose', async ({ page }) => {
     await signIn(page, VENDOR);
     const items = [vendorView({ id: 'bn_d', status: 'draft', effectiveStatus: 'draft', allowedActions: ['edit', 'image', 'submit', 'withdraw'], expiresAt: null })];
@@ -701,12 +727,20 @@ test.describe('vendor banners', () => {
     const endedAt = '2026-10-21T09:00:00.000Z';
     await mockApi(page, vendorRoutes([
       vendorView({ id: 'bn_end', status: 'ended', effectiveStatus: 'ended', statusReason: 'ended_by_vendor', endedAt, endsAt: '2026-10-30T09:00:00.000Z', allowedActions: [], expiresAt: null }),
+      vendorView({ id: 'bn_fx', status: 'ended', effectiveStatus: 'ended', statusReason: 'ended_by_fitflex', statusReasonNote: 'The maker recalled it.', endedByFitflex: true, endedAt, allowedActions: [], expiresAt: null }),
+      vendorView({ id: 'bn_draft', status: 'draft', effectiveStatus: 'draft', allowedActions: ['edit', 'submit'], expiresAt: null }),
       vendorView({ id: 'bn_rej', status: 'rejected', effectiveStatus: 'rejected', statusReason: 'claim', statusReasonNote: null, allowedActions: ['edit', 'image'], expiresAt: null }),
     ]));
     await page.goto('/vendor/merch/');
     await expect(page).toHaveURL(/\/vendor\/promotions\/$/);
     await expect(page.getByTestId('banner-line-bn_end')).toHaveText('Ended 21 Oct, 12:00');
     await expect(page.getByTestId('banner-line-bn_rej')).toHaveText('Reason: Misleading claim');
+    // Ended by FitFlex: the date and who, with the reason (QA2 #7).
+    await expect(page.getByTestId('banner-line-bn_fx')).toHaveText('Ended 21 Oct, 12:00 · by FitFlex: The maker recalled it.');
+    // Swahili: a draft banner reads "Halijatumwa" (QA2 #8).
+    await page.locator('[data-testid="locale-select"]:visible').selectOption('sw');
+    await expect(page.getByTestId('banner-status-bn_draft')).toHaveText('Halijatumwa');
+    await expect(page.getByTestId('banner-line-bn_fx')).toContainText('limesitishwa na FitFlex: The maker recalled it.');
   });
 
   test('Swahili: nav, list and form read in Swahili; /vendor/merch?item= opens /vendor/promotions', async ({ page }) => {
