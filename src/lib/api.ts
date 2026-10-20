@@ -1262,7 +1262,7 @@ export interface HeroSlot {
   id: string;
   area: string;
   surface: 'mobile' | 'portal';
-  variant: 'full' | 'compact' | 'band' | 'panel' | string;
+  variant: 'full' | 'compact' | 'footer' | 'panel' | string;
   aspectHint: number;
   maxImages: number;
   /** Image ids, in order. */
