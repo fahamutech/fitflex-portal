@@ -93,6 +93,8 @@ export interface ShopBanner {
   allowedActions?: BannerAction[];
   createdAt?: string | null;
   submittedAt?: string | null;
+  /** When it actually ended (early or at its end); the "Ended {date}" line uses this, not endsAt (QA1 #3). */
+  endedAt?: string | null;
   expiresAt?: string | null;
 }
 
@@ -652,6 +654,7 @@ export const REJECT_KEY: Record<RejectCode, MessageKey> = {
 export function reasonText(b: Pick<ShopBanner, 'status' | 'effectiveStatus' | 'statusReason' | 'statusReasonNote'>, t: (k: MessageKey) => string): string {
   const code = b.statusReason ?? '';
   const note = (b.statusReasonNote ?? '').trim();
-  const label = (b.effectiveStatus ?? b.status) === 'rejected' && code in REJECT_KEY && code !== 'other' ? t(REJECT_KEY[code as RejectCode]) : '';
+  // Rejected: always the category (QA1 #4 / UAT D2), then the note when there is one.
+  const label = (b.effectiveStatus ?? b.status) === 'rejected' && code in REJECT_KEY ? t(REJECT_KEY[code as RejectCode]) : '';
   return label && note ? `${label}: ${note}` : label || note;
 }
