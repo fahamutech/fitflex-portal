@@ -105,7 +105,9 @@ export default function SettingsPage() {
       const held = tierInUse(e);
       if (held) {
         const label = settings?.subscriptionTiers.find(x => x.key === held.tier)?.label || held.tier;
-        setError(fillIn(t('tiers.err.inUse'), { tier: label, holders: held.holders ?? '—' }));
+        // Singular for one holder; no number when the server did not say how many.
+        const key = held.holders == null ? 'tiers.err.inUseSome' : held.holders === 1 ? 'tiers.err.inUseOne' : 'tiers.err.inUse';
+        setError(fillIn(t(key), { tier: label, holders: held.holders ?? '' }));
         return;
       }
       const bad = settingsTierError(e);

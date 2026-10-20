@@ -274,6 +274,22 @@ body {
   padding-right: 0.625rem;
 }
 
+/* Touch target: a small control (24px filter chip) keeps its look but answers taps over at
+   least 44×44px. The hit area is centred on the control; groups of these space their rows
+   20px apart (gap-y-5) so wrapped rows never overlap. */
+.hit-target {
+  position: relative;
+}
+.hit-target::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: max(100%, 44px);
+  height: max(100%, 44px);
+  transform: translate(-50%, -50%);
+}
+
 .ui-table tbody tr:last-child td {
   border-bottom: none;
 }
@@ -334,6 +350,14 @@ body {
   --hero-scrim-panel-lead: 0.92;                  /* horizontal scrim, leading edge */
   --hero-scrim-panel-tail: 0.3;                   /* horizontal scrim, far edge (photo only) */
   --hero-scrim-panel-bottom: 0.85;                /* bottom layer under the horizontal scrim (§5.2) */
+  /* Lighter heroes (§5 decision 2026-10-20): darken only behind the text.
+     The login panel uses these; the admin preview (.hero-preview) still uses the 0.80 tokens above. */
+  --hero-scrim-zone: 0.86;                        /* minimum under any text: #F1F5F9 13.21:1, #CBD5E1 9.74:1, brand-500 5.24:1 */
+  --hero-scrim-lead: 0.4;                         /* end of the soft lead-in */
+  --hero-scrim-lead-in: 24px;                     /* 0 → lead, starting 48px above the first text line */
+  --hero-scrim-ramp: 24px;                        /* lead → zone, over the 24px right above the first text line */
+  --hero-scrim-past-text: 24px;                   /* the zone runs this far past the text column (desktop panel) */
+  --hero-scrim-photo-max: 0.15;                   /* far edge of the desktop panel's text zone; elsewhere the photo is clear (0) */
   --hero-text: #f1f5f9;                           /* headline, eyebrow: 10.63:1 on the 0.80 zone */
   --hero-text-body: #cbd5e1;                      /* subline: 7.84:1. Never gray-400 on a hero */
   --hero-accent-dark: var(--color-volt);          /* mobile dark theme only; never on the portal (light page) */
@@ -355,23 +379,36 @@ body {
   --hero-eyebrow-size: 11px;
   --hero-eyebrow-tracking: 0.18em;
   --hero-fade: 250ms;
+  --hero-crosshair-light: #ffffff;                /* focal-point ring: white + slate outline shows on any photo */
+  --hero-crosshair-dark: var(--hero-scrim);
 }
 
-/* Login layout with the photo panel: band on top below 1024, columns from 1024. */
+/* Login layout with the photo panel: band on top below 1024, columns from 1024.
+   Lighter rule (§5 decision 2026-10-20): the photo is clear; only the text
+   block gets a scrim. .photo-panel__text-scrim is a child of the text block,
+   so its top follows the first text line at any width, zoom or line count:
+   it starts 48px above the eyebrow (0 → 0.40 over 24px, 0.40 → 0.86 over the
+   next 24px) and holds >= 0.86 from the eyebrow down to the bottom edge and
+   across the whole band. On the desktop panel it also stays >= 0.86 until
+   24px past the text column, then eases to 0.15 at the far edge. */
 .photo-panel {
   position: relative;
   overflow: hidden;
   isolation: isolate;
+  /* 100cqw = the panel's content-box width (container units ignore padding), so the
+     text scrim spans 100cqw + 2 × padding from inside the text block. */
+  container-type: inline-size;
   background: var(--hero-placeholder);
   color: var(--hero-text);
   display: flex;
   flex-direction: column;
   justify-content: flex-end;
-  /* Phone band (<640): 160px, eyebrow + headline only. The 0.80 stop sits at
-     --photo-panel-stop; text never starts less than 24px below it. */
-  --photo-panel-stop: 16px;
+  /* Phone band (<640): 160px, eyebrow + headline only. */
+  --photo-panel-pad-t: 40px;
+  --photo-panel-pad-x: 24px;
+  --photo-panel-pad-b: 20px;
   min-height: 160px;
-  padding: calc(var(--photo-panel-stop) + 24px) 24px 20px;
+  padding: var(--photo-panel-pad-t) var(--photo-panel-pad-x) var(--photo-panel-pad-b);
 }
 .photo-panel__img {
   position: absolute;
@@ -385,18 +422,28 @@ body {
   transition: opacity var(--hero-fade) ease-out;
 }
 .photo-panel__img[data-loaded="true"] { opacity: 1; }
-.photo-panel__scrim {
+.photo-panel__content {
+  position: relative;
+  max-width: 40rem;
+  overflow-wrap: break-word;
+}
+.photo-panel__text-scrim {
   position: absolute;
-  inset: 0;
   z-index: -1;
+  pointer-events: none;
+  top: calc(-1 * (var(--hero-scrim-lead-in) + var(--hero-scrim-ramp)));
+  left: calc(-1 * var(--photo-panel-pad-x));
+  /* 1px past the panel's right and bottom edges so rounding never leaves a light seam; the panel clips it. */
+  width: calc(100cqw + 2 * var(--photo-panel-pad-x) + 1px);
+  bottom: calc(-1 * var(--photo-panel-pad-b) - 1px);
   background: linear-gradient(
     to bottom,
-    rgb(var(--hero-scrim-rgb) / var(--hero-scrim-top)) 0,
-    rgb(var(--hero-scrim-rgb) / var(--hero-scrim-text)) var(--photo-panel-stop),
-    rgb(var(--hero-scrim-rgb) / var(--hero-scrim-text)) 100%
+    rgb(var(--hero-scrim-rgb) / 0) 0,
+    rgb(var(--hero-scrim-rgb) / var(--hero-scrim-lead)) var(--hero-scrim-lead-in),
+    rgb(var(--hero-scrim-rgb) / var(--hero-scrim-zone)) calc(var(--hero-scrim-lead-in) + var(--hero-scrim-ramp)),
+    rgb(var(--hero-scrim-rgb) / var(--hero-scrim-zone)) 100%
   );
 }
-.photo-panel__content { max-width: 40rem; }
 .photo-panel__eyebrow {
   margin: 0 0 8px;
   font-family: var(--hero-eyebrow-font);
@@ -432,38 +479,48 @@ body {
 /* Tablet band (640–1023): 220px, eyebrow + headline + subline. */
 @media (min-width: 640px) {
   .photo-panel {
-    --photo-panel-stop: 40px;
+    --photo-panel-pad-t: 64px;
+    --photo-panel-pad-x: 32px;
+    --photo-panel-pad-b: 24px;
     min-height: 220px;
-    padding: calc(var(--photo-panel-stop) + 24px) 32px 24px;
   }
   .photo-panel__sub { display: block; }
 }
-/* Desktop panel (>= 1024): left 55%, full height, horizontal scrim plus a
-   bottom layer. Text stays in the left 50% of the panel, where the
-   horizontal scrim alone is >= 0.80. */
+/* Desktop panel (>= 1024): left 55%, full height, 64px padding. The text
+   column is fixed at half the content box (64px + 50cqw ends at the panel's midline),
+   so the >= 0.86 zone (to the midline + 24px) always covers it. */
 @media (min-width: 1024px) {
   .photo-panel {
     width: 55%;
     flex: 0 0 55%;
     min-height: 0;
-    padding: 64px;
+    --photo-panel-pad-t: 64px;
+    --photo-panel-pad-x: 64px;
+    --photo-panel-pad-b: 64px;
   }
-  .photo-panel__scrim {
-    background:
-      linear-gradient(
-        to top,
-        rgb(var(--hero-scrim-rgb) / var(--hero-scrim-panel-bottom)) 0%,
-        rgb(var(--hero-scrim-rgb) / 0) 30%
-      ),
-      linear-gradient(
-        to right,
-        rgb(var(--hero-scrim-rgb) / var(--hero-scrim-panel-lead)) 0%,
-        rgb(var(--hero-scrim-rgb) / var(--hero-scrim-text)) 50%,
-        rgb(var(--hero-scrim-rgb) / var(--hero-scrim-panel-tail)) 100%
-      );
+  .photo-panel__content {
+    width: 50cqw;
+    max-width: none;
+    min-width: 0;
   }
-  /* 50% of the content box ends exactly at the panel's midline (64px padding each side). */
-  .photo-panel__content { max-width: 50%; min-width: 0; }
+  .photo-panel__text-scrim {
+    /* Multiplies the vertical ramp: 1 until 24px past the text column, then
+       down to 0.15 / 0.86 so the far edge (last 8px) composites to 0.15. */
+    -webkit-mask-image: linear-gradient(
+      to right,
+      #000 0,
+      #000 calc(var(--photo-panel-pad-x) + 50cqw + var(--hero-scrim-past-text)),
+      rgb(0 0 0 / calc(var(--hero-scrim-photo-max) / var(--hero-scrim-zone))) calc(100% - 9px),
+      rgb(0 0 0 / calc(var(--hero-scrim-photo-max) / var(--hero-scrim-zone))) 100%
+    );
+    mask-image: linear-gradient(
+      to right,
+      #000 0,
+      #000 calc(var(--photo-panel-pad-x) + 50cqw + var(--hero-scrim-past-text)),
+      rgb(0 0 0 / calc(var(--hero-scrim-photo-max) / var(--hero-scrim-zone))) calc(100% - 9px),
+      rgb(0 0 0 / calc(var(--hero-scrim-photo-max) / var(--hero-scrim-zone))) 100%
+    );
+  }
   .photo-panel__headline {
     font-size: var(--hero-display-size-wide);
     line-height: var(--hero-display-line-wide);
@@ -480,4 +537,174 @@ body {
 }
 @media (prefers-reduced-data: reduce) and (max-width: 1023px) {
   .photo-panel { display: none; }
+}
+
+/* ── App photos admin (design spec photo-hero-screens §36.5) ──
+   HeroPreview draws a photo at a fixed CSS size with the same scrim tokens as
+   the app (FFPhotoHero compact / band, footer band) and the portal panel, so
+   an admin sees the real contrast. --hero-preview-stop is set from the
+   measured top of the text block minus 24px (spec §5.2 implementation rule). */
+.hero-preview {
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+  flex: none;
+  background: var(--hero-placeholder);
+  color: var(--hero-text);
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  --hero-preview-scale: 1;
+  --hero-preview-stop: 50%;
+}
+.hero-preview__img {
+  position: absolute;
+  inset: 0;
+  z-index: -2;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.hero-preview__scrim { position: absolute; inset: 0; z-index: -1; }
+.hero-preview--vertical .hero-preview__scrim {
+  background: linear-gradient(
+    to bottom,
+    rgb(var(--hero-scrim-rgb) / var(--hero-scrim-top)) 0,
+    rgb(var(--hero-scrim-rgb) / var(--hero-scrim-text)) var(--hero-preview-stop),
+    rgb(var(--hero-scrim-rgb) / var(--hero-scrim-text)) 100%
+  );
+}
+.hero-preview--uniform .hero-preview__scrim { background: rgb(var(--hero-scrim-rgb) / var(--hero-scrim-text)); }
+.hero-preview--horizontal .hero-preview__scrim {
+  background:
+    linear-gradient(
+      to top,
+      rgb(var(--hero-scrim-rgb) / var(--hero-scrim-panel-bottom)) 0%,
+      rgb(var(--hero-scrim-rgb) / 0) 30%
+    ),
+    linear-gradient(
+      to right,
+      rgb(var(--hero-scrim-rgb) / var(--hero-scrim-panel-lead)) 0%,
+      rgb(var(--hero-scrim-rgb) / var(--hero-scrim-text)) 50%,
+      rgb(var(--hero-scrim-rgb) / var(--hero-scrim-panel-tail)) 100%
+    );
+}
+.hero-preview--phone { width: 390px; height: 300px; padding: 20px; }
+.hero-preview--band { width: 342px; height: 180px; padding: 16px 20px; border-radius: var(--hero-sheet-radius); }
+.hero-preview--footer { width: 342px; height: 160px; padding: 16px 20px; border-radius: var(--hero-sheet-radius); justify-content: center; align-items: center; text-align: center; }
+.hero-preview--desktop { width: 960px; height: 320px; padding: 40px 48px; border-radius: var(--hero-sheet-radius); }
+.hero-preview--panel { width: 704px; height: 800px; padding: 64px; }
+.hero-preview--horizontal .hero-preview__content { max-width: 50%; }
+.hero-preview__eyebrow {
+  margin: 0 0 8px;
+  font-family: var(--hero-eyebrow-font);
+  font-size: calc(var(--hero-eyebrow-size) * var(--hero-preview-scale));
+  font-weight: 500;
+  letter-spacing: var(--hero-eyebrow-tracking);
+  text-transform: uppercase;
+  color: var(--hero-text);
+}
+.hero-preview__headline {
+  margin: 0;
+  font-weight: 900;
+  letter-spacing: var(--hero-display-tracking);
+  font-size: calc(var(--hero-display-size) * var(--hero-preview-scale));
+  line-height: calc(var(--hero-display-line) * var(--hero-preview-scale));
+  color: var(--hero-text);
+}
+.hero-preview--band .hero-preview__headline {
+  font-size: calc(var(--hero-display-size-small) * var(--hero-preview-scale));
+  line-height: calc(var(--hero-display-line-small) * var(--hero-preview-scale));
+}
+.hero-preview--horizontal .hero-preview__headline {
+  font-size: calc(var(--hero-display-size-wide) * var(--hero-preview-scale));
+  line-height: calc(var(--hero-display-line-wide) * var(--hero-preview-scale));
+}
+.hero-preview__accent { color: var(--hero-accent-light); }
+.hero-preview__footer-mark { font-weight: 800; font-size: calc(20px * var(--hero-preview-scale)); color: var(--hero-text); }
+.hero-preview__footer-line { margin: 6px 0 0; font-size: calc(15px * var(--hero-preview-scale)); color: var(--hero-text-body); }
+
+/* Focal-point picker: one Tab stop; the ring is white with a slate outline (spec §36.5). */
+.focal-picker {
+  position: relative;
+  display: block;
+  width: 100%;
+  max-width: 640px;
+  overflow: hidden;
+  border-radius: var(--radius-lg);
+  background: var(--hero-placeholder);
+  cursor: crosshair;
+  touch-action: none;
+  user-select: none;
+}
+.focal-picker:focus-visible { outline: 2px solid var(--color-brand-600); outline-offset: 2px; }
+.focal-picker__img { display: block; width: 100%; height: auto; pointer-events: none; }
+.focal-picker__mark {
+  position: absolute;
+  width: 28px;
+  height: 28px;
+  margin: -14px 0 0 -14px;
+  border-radius: 9999px;
+  border: 2px solid var(--hero-crosshair-light);
+  box-shadow: 0 0 0 2px var(--hero-crosshair-dark), inset 0 0 0 2px var(--hero-crosshair-dark);
+  pointer-events: none;
+}
+.focal-picker__mark::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 6px;
+  height: 6px;
+  margin: -3px 0 0 -3px;
+  border-radius: 9999px;
+  background: var(--hero-crosshair-light);
+  box-shadow: 0 0 0 2px var(--hero-crosshair-dark);
+}
+
+/* ── Shop banner preview (Shop home Phase 2 S1; spec shop-home-phase2 §5.1, P1 §6.1–6.3) ──
+   The slide is an always-dark photo island, so it reuses the hero scrim and text tokens.
+   "Light" / "Dark" is the app theme around it: the accent is brand green in light and
+   Volt only in dark (never Volt on a light surface, spec §11.1). */
+.banner-frame { padding: 16px; border-radius: var(--radius-xl); background: var(--color-bg-secondary); }
+.banner-frame--dark { background: var(--color-gray-900); }
+.banner-slide {
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 10px;
+  background: var(--hero-placeholder);
+  color: var(--hero-text);
+  border-radius: var(--hero-sheet-radius);
+  --banner-accent: var(--hero-accent-light);
+  --banner-cta-bg: var(--color-brand-600);
+  --banner-cta-text: white;   /* as the primary Button (text-white) */
+}
+.banner-frame--dark .banner-slide { --banner-accent: var(--hero-accent-dark); --banner-cta-bg: var(--color-volt); --banner-cta-text: var(--color-on-volt); }
+.banner-slide--phone { width: 343px; min-height: 214px; padding: 20px; }
+.banner-slide--desktop { width: 960px; height: 320px; padding: 40px 48px; }
+.banner-slide--desktop .banner-slide__content { max-width: 55%; }
+.banner-slide__img { position: absolute; inset: 0; z-index: -2; width: 100%; height: 100%; object-fit: cover; }
+.banner-slide__scrim {
+  position: absolute; inset: 0; z-index: -1;
+  background: linear-gradient(90deg, rgb(var(--hero-scrim-rgb) / var(--hero-scrim-text)) 0%, rgb(var(--hero-scrim-rgb) / 0.35) 100%);
+}
+.banner-slide__chip {
+  position: absolute; top: 16px; left: 16px; max-width: calc(100% - 32px);
+  padding: 4px 10px; border-radius: 9999px;
+  background: rgb(var(--hero-scrim-rgb) / 0.75); color: white;   /* 9.68:1 over a white photo (spec §11.1) */
+  font-size: 12px; line-height: 16px; font-weight: 600;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+.banner-slide__headline { margin: 0; font-weight: 900; letter-spacing: var(--hero-display-tracking); font-size: 26px; line-height: 30px; color: var(--hero-text); overflow-wrap: anywhere; }
+.banner-slide--desktop .banner-slide__headline { font-size: 40px; line-height: 43px; }
+.banner-slide__accent { color: var(--banner-accent); }
+.banner-slide__sub { margin: 6px 0 0; font-size: 14px; line-height: 20px; color: var(--hero-text-body); overflow-wrap: anywhere; }
+.banner-slide__cta {
+  display: inline-flex; align-items: center; gap: 6px; align-self: flex-start;
+  min-height: 48px; padding: 0 20px; border-radius: 9999px;
+  background: var(--banner-cta-bg); color: var(--banner-cta-text); font-weight: 700; font-size: 15px;
 }

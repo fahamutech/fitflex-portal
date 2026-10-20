@@ -19,10 +19,12 @@ type SortDir = 'asc' | 'desc' | null;
 
 const PAGE_SIZES = [10, 25, 50];
 
-// Pinned actions column: opaque so scrolled cells pass underneath, with a divider on its left edge.
-const STICKY_BASE = 'sticky right-0 z-[1] shadow-[inset_1px_0_0_var(--color-border-secondary)]';
-const STICKY_HEAD = `${STICKY_BASE} bg-[var(--color-gray-50)]`;
-const STICKY_CELL = `${STICKY_BASE} bg-[var(--color-bg-primary)]`;
+// Pinned actions column (1280px and wider): opaque so scrolled cells pass underneath, with a divider on its
+// left edge. Narrower (the sidebar already takes 256px from 1024px), pinning would cover most of the row and
+// squeeze the member and status columns, so the actions scroll with the row instead.
+const STICKY_BASE = 'xl:sticky xl:right-0 xl:z-[1] xl:shadow-[inset_1px_0_0_var(--color-border-secondary)]';
+const STICKY_HEAD = `${STICKY_BASE} xl:bg-[var(--color-gray-50)]`;
+const STICKY_CELL = `${STICKY_BASE} xl:bg-[var(--color-bg-primary)]`;
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function DataTable<T extends Record<string, any>>({
@@ -104,7 +106,8 @@ export function DataTable<T extends Record<string, any>>({
   const paged      = sorted.slice((safePage - 1) * pageSize, safePage * pageSize);
 
   function toggleSort(key: string) {
-    if (sortKey !== key) { setSortKey(key); setSortDir('asc'); return; }
+    // Back to the default column from another one: start where it starts (newest first for dates).
+    if (sortKey !== key) { setSortKey(key); setSortDir(defaultSort && key === defaultSort.key ? defaultSort.dir : 'asc'); return; }
     if (sortDir === 'asc') { setSortDir('desc'); return; }
     // With a default sort, its column alternates desc/asc, and clearing another column returns to it.
     if (defaultSort && key === defaultSort.key) { setSortDir('asc'); return; }
@@ -124,8 +127,9 @@ export function DataTable<T extends Record<string, any>>({
   return (
     <div className="flex flex-col gap-4">
       {/* Toolbar */}
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="relative flex-1 max-w-xs">
+      {/* The search keeps a usable width; the filters move to a second row when both don't fit. */}
+      <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
+        <div className="relative flex-1 max-w-xs sm:min-w-[200px]">
           <Search aria-hidden="true" className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[var(--color-fg-disabled)] pointer-events-none" />
           <Input
             value={query}
@@ -135,7 +139,7 @@ export function DataTable<T extends Record<string, any>>({
             className="!pl-9"
           />
         </div>
-        {extraFilters && <div className="flex items-center gap-2 flex-wrap">{extraFilters}</div>}
+        {extraFilters && <div className="flex min-w-0 items-center gap-2 flex-wrap">{extraFilters}</div>}
       </div>
 
       {/* Table */}
@@ -143,7 +147,9 @@ export function DataTable<T extends Record<string, any>>({
         role={label ? 'region' : undefined}
         aria-label={label}
         tabIndex={0}
-        className="overflow-x-auto rounded-[var(--radius-xl)] border border-[var(--color-border-secondary)]"
+        // relative: the containing block for any absolutely positioned descendant (e.g. an sr-only label), so it
+        // stays inside this scroll box instead of widening the page.
+        className="relative overflow-x-auto rounded-[var(--radius-xl)] border border-[var(--color-border-secondary)]"
       >
         <table className={cn('ui-table min-w-full', dense && 'ui-table-dense')}>
           <thead>
@@ -167,7 +173,8 @@ export function DataTable<T extends Record<string, any>>({
                     <button
                       type="button"
                       aria-label={t('common.sortBy').replace('{column}', col.header)}
-                      className="inline-flex items-center gap-1.5 font-[inherit] text-[inherit]"
+                      // 44px tall hit area over the header's own padding: the row grows by 2px only.
+                      className="-my-3 inline-flex min-h-[44px] min-w-[44px] items-center gap-1.5 py-3 font-[inherit] text-[inherit]"
                     >
                       {col.header}
                       <SortIcon col={col} />
@@ -211,8 +218,8 @@ export function DataTable<T extends Record<string, any>>({
                     </td>
                   ))}
                   {hasActions && (
-                    <td className={cn('text-right', stickyActions && STICKY_CELL)}>
-                      <div className={cn('flex items-center justify-end', dense ? 'gap-0.5' : 'gap-2')}>
+                    <td className={cn('relative text-right', stickyActions && STICKY_CELL) /* relative below 1280 (xl:sticky above): sr-only labels stay in this cell */}>
+                      <div className={cn('flex items-center justify-end whitespace-nowrap', dense ? 'gap-0.5' : 'gap-2')}>
                         {actions!(row)}
                       </div>
                     </td>

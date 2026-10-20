@@ -1,6 +1,8 @@
 // Thin client for the bfast-functions backend.
 
 const BASE = process.env.NEXT_PUBLIC_API_BASE || 'https://fitflex-faas.bfast.smartstock.co.tz';
+/** The API server address (for feature modules that build their own requests, e.g. src/lib/shop-banners.ts). */
+export const API_BASE = BASE;
 
 export class ApiError extends Error {
   status: number;
@@ -13,6 +15,8 @@ export class ApiError extends Error {
 }
 
 let _onUnauthorized: (() => void) | null = null;
+/** Tell the session a request came back 401 (for XHR uploads outside request()). */
+export function notifyUnauthorized() { _onUnauthorized?.(); }
 
 /** Register a callback invoked when any API call returns 401. */
 export function setOnUnauthorized(cb: (() => void) | null) {
@@ -124,7 +128,7 @@ export interface GymInvitationInput {
   paidAmount?: number;
 }
 
-async function request<T>(
+export async function request<T>(
   path: string,
   opts: RequestInit = {},
   token?: string,
@@ -154,7 +158,7 @@ async function request<T>(
 }
 
 /** "?a=1&b=2" from the set values of `params`, or "". */
-function qs(params: object): string {
+export function qs(params: object): string {
   const q = new URLSearchParams();
   for (const [k, v] of Object.entries(params)) if (v != null && v !== '') q.set(k, String(v));
   const s = q.toString();
@@ -339,6 +343,39 @@ export const api = {
   vendorOrder: (token: string, id: string) => request<VendorOrder>(`/vendor/orders/${encodeURIComponent(id)}`, {}, token),
   vendorOrderStatus: (token: string, id: string, body: { status: string; reason?: string }) =>
     request<VendorOrder>(`/vendor/orders/${encodeURIComponent(id)}/status`, { method: 'POST', body: JSON.stringify(body) }, token),
+  // Walk-in (counter) sales, S3: read, detail, void. Recording happens in the app (no POS in the portal).
+  vendorSales: (token: string, query: VendorSalesQuery = {}) =>
+    request<VendorSalePage>(`/vendor/sales${qs({ ...query, limit: query.limit ?? 50 })}`, {}, token),
+  vendorSale: (token: string, id: string) => request<{ sale: VendorSale }>(`/vendor/sales/${encodeURIComponent(id)}`, {}, token),
+  vendorVoidSale: (token: string, id: string, reason: string) =>
+    request<{ sale: VendorSale }>(`/vendor/sales/${encodeURIComponent(id)}/void`, { method: 'POST', body: JSON.stringify({ reason }) }, token),
+  // ─── Vendor customers, pay-later balances, customer payments, aging (S4) ───
+  vendorCustomers: (token: string, query: VendorCustomersQuery = {}) =>
+    request<VendorCustomerPage>(`/vendor/customers${qs({ ...query, limit: query.limit ?? 50 })}`, {}, token),
+  vendorCreateCustomer: (token: string, body: VendorCustomerInput & { clientRef?: string }) =>
+    request<{ customer: VendorCustomer; phoneDuplicate: VendorPhoneDuplicate }>('/vendor/customers', { method: 'POST', body: JSON.stringify(body) }, token),
+  vendorUpdateCustomer: (token: string, id: string, body: Partial<VendorCustomerInput> & { archived?: boolean; updatedAt?: string }) =>
+    request<{ customer: VendorCustomer; phoneDuplicate: VendorPhoneDuplicate }>(`/vendor/customers/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify(body) }, token),
+  vendorCustomer: (token: string, id: string) =>
+    request<{ customer: VendorCustomerProfile }>(`/vendor/customers/${encodeURIComponent(id)}`, {}, token),
+  vendorCustomerSales: (token: string, id: string, page: { limit?: number; cursor?: string | null } = {}) =>
+    request<VendorSalePage>(`/vendor/customers/${encodeURIComponent(id)}/sales${qs({ limit: page.limit ?? 20, cursor: page.cursor })}`, {}, token),
+  /** One walk-in sale of this customer (read-only; for staff with `customers` but not `sales`). */
+  vendorCustomerSale: (token: string, id: string, saleId: string) =>
+    request<{ sale: VendorSale }>(`/vendor/customers/${encodeURIComponent(id)}/sales/${encodeURIComponent(saleId)}`, {}, token),
+  vendorCustomerOrders: (token: string, id: string, page: { limit?: number; cursor?: string | null } = {}) =>
+    request<{ orders: VendorCustomerOrder[]; nextCursor: string | null }>(`/vendor/customers/${encodeURIComponent(id)}/orders${qs({ limit: page.limit ?? 20, cursor: page.cursor })}`, {}, token),
+  vendorCustomerPayments: (token: string, id: string, page: { from?: string; limit?: number; cursor?: string | null } = {}) =>
+    request<{ payments: VendorCustomerPayment[]; nextCursor: string | null }>(`/vendor/customers/${encodeURIComponent(id)}/payments${qs({ from: page.from, limit: page.limit ?? 20, cursor: page.cursor })}`, {}, token),
+  vendorCustomerPayment: (token: string, id: string, paymentId: string) =>
+    request<{ payment: VendorCustomerPayment }>(`/vendor/customers/${encodeURIComponent(id)}/payments/${encodeURIComponent(paymentId)}`, {}, token),
+  vendorRecordCustomerPayment: (token: string, id: string, body: VendorCustomerPaymentInput) =>
+    request<{ payment: VendorCustomerPayment; customer: VendorCustomerMoney & { asOf: string } }>(`/vendor/customers/${encodeURIComponent(id)}/payments`, { method: 'POST', body: JSON.stringify(body) }, token),
+  vendorVoidCustomerPayment: (token: string, id: string, paymentId: string, reason: string) =>
+    request<{ payment: VendorCustomerPayment; customer: VendorCustomerMoney & { asOf: string } }>(
+      `/vendor/customers/${encodeURIComponent(id)}/payments/${encodeURIComponent(paymentId)}/void`, { method: 'POST', body: JSON.stringify({ reason }) }, token),
+  vendorReceivablesAging: (token: string, query: { bucket?: AgingBucket | null; sort?: 'overdue' | 'owed' | 'name'; limit?: number; cursor?: string | null } = {}) =>
+    request<VendorAgingPage>(`/vendor/receivables/aging${qs({ ...query, limit: query.limit ?? 50 })}`, {}, token),
   vendorPayments: (token: string) => request<VendorPayments>('/vendor/payments', {}, token),
   vendorStatements: (token: string) => request<VendorStatementList>('/vendor/statements', {}, token),
   vendorStatement: (token: string, id: string) =>
@@ -960,6 +997,9 @@ export const api = {
     variants?: Array<{ name: string; costTzs?: number | null; reorderLevel?: number | null }>;
   }) =>
     request<ShopProduct>(`/admin/products/${id}/listing`, { method: 'PUT', body: JSON.stringify(listing) }, token),
+  /** Works rating/reviewCount/soldCount out again from real reviews and orders; writes only with apply true. */
+  recomputeProductStats: (token: string, body: { apply?: boolean; productIds?: string[] } = {}) =>
+    request<ProductStatsRecompute>('/admin/shop/product-stats/recompute', { method: 'POST', body: JSON.stringify(body) }, token),
   adminVendors: (token: string) => request<VendorSummary[]>('/admin/vendors', {}, token),
   updateAdminVendor: (token: string, id: string, patch: Partial<Pick<VendorSummary, 'approvalStatus' | 'accountStatus' | 'approvalNote' | 'commissionPct'>>) =>
     request<VendorSummary>(`/admin/vendors/${id}`, { method: 'PUT', body: JSON.stringify(patch) }, token),
@@ -1104,6 +1144,86 @@ export const api = {
   },
   publicPasses: () => request<any[]>('/passes'),
 
+  // ─── App photos (admin, 'brand_media' scope; every route 404 feature_disabled while HERO_IMAGES_CMS is off) ───
+  adminHeroImages: (token: string) => request<HeroImagesState>('/admin/hero-images', {}, token),
+  /**
+   * Uploads the ORIGINAL photo file (no browser resize or re-encode; the server cleans it and makes
+   * the app sizes). Uses XHR for upload progress; `signal` aborts it.
+   */
+  uploadHeroImage: (
+    token: string,
+    file: File,
+    fields: HeroImageUploadFields,
+    opts: { onProgress?: (fraction: number) => void; signal?: AbortSignal } = {},
+  ): Promise<{ image: HeroImage }> => new Promise((resolve, reject) => {
+    const form = new FormData();
+    // Text fields first, the file last, so the server has every field before it reads the file.
+    form.append('source', fields.source);
+    form.append('photographer', fields.photographer);
+    form.append('licence', fields.licence);
+    if (fields.licenceRef) form.append('licenceRef', fields.licenceRef);
+    form.append('people', fields.people);
+    if (fields.consentRef) form.append('consentRef', fields.consentRef);
+    form.append('rightsConfirmed', fields.rightsConfirmed ? 'true' : 'false');
+    form.append('noFacesConfirmed', fields.noFacesConfirmed ? 'true' : 'false');
+    form.append('file', file, file.name);
+
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', `${BASE}/admin/hero-images`);
+    xhr.setRequestHeader('authorization', `Bearer ${token}`);
+    xhr.setRequestHeader('x-fitflex-client', IDENTITY_V2_CLIENT);
+    xhr.upload.onprogress = (e) => { if (e.lengthComputable) opts.onProgress?.(e.loaded / e.total); };
+    xhr.onload = () => {
+      let body: unknown = null;
+      try { body = xhr.responseText ? JSON.parse(xhr.responseText) : null; } catch { body = null; }
+      if (xhr.status >= 200 && xhr.status < 300) return resolve(body as { image: HeroImage });
+      if (xhr.status === 401 && _onUnauthorized) _onUnauthorized();
+      reject(new ApiError(xhr.status, body));
+    };
+    xhr.onerror = () => reject(new TypeError('network_error'));
+    xhr.onabort = () => reject(new DOMException('aborted', 'AbortError'));
+    if (opts.signal) {
+      if (opts.signal.aborted) { xhr.abort(); return; }
+      opts.signal.addEventListener('abort', () => xhr.abort(), { once: true });
+    }
+    xhr.send(form);
+  }),
+  /** A private (cleaned) photo, fetched with the session token: drafts have no public address. */
+  heroImagePreview: async (token: string, id: string, width?: HeroPreviewWidth, signal?: AbortSignal): Promise<Blob> => {
+    const res = await fetch(`${BASE}/admin/hero-images/${encodeURIComponent(id)}/preview${qs({ w: width })}`, {
+      headers: { authorization: `Bearer ${token}`, 'x-fitflex-client': IDENTITY_V2_CLIENT },
+      cache: 'no-store',
+      signal,
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      if (res.status === 401 && _onUnauthorized) _onUnauthorized();
+      throw new ApiError(res.status, body);
+    }
+    return res.blob();
+  },
+  updateHeroImage: (token: string, id: string, body: HeroImagePatch) =>
+    request<{ image: HeroImage; inLiveSnapshot?: boolean }>(
+      `/admin/hero-images/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(body) }, token),
+  /** Fast takedown: re-publishes the live snapshot without this photo. Drafts are untouched (the next publish brings it back). */
+  unpublishHeroImage: (token: string, id: string, note?: string) =>
+    request<{ publication: HeroPublication; removedFromSlots: string[]; rollbackBlockedBefore?: number }>(`/admin/hero-images/${encodeURIComponent(id)}/unpublish`, { method: 'POST', body: JSON.stringify(note ? { note } : {}) }, token),
+  /** Sets a slot's DRAFT photos in order ([] = the app's built-in photo). Nothing changes in the apps until publish. */
+  setHeroSlot: (token: string, slotId: string, imageIds: string[]) =>
+    request<{ slot: { id: string; draft: string[] } }>(
+      `/admin/hero-slots/${encodeURIComponent(slotId)}`, { method: 'PUT', body: JSON.stringify({ imageIds }) }, token),
+  publishHeroSlots: (token: string, note?: string) =>
+    request<{ publication: HeroPublication }>('/admin/hero-slots/publish', { method: 'POST', body: JSON.stringify(note ? { note } : {}) }, token),
+  rollbackHeroSlots: (token: string, publicationId: number) =>
+    request<{ publication: HeroPublication }>('/admin/hero-slots/rollback', { method: 'POST', body: JSON.stringify({ publicationId }) }, token),
+  /** Public, no sign-in: the published app photos. An empty `slots` means "use the built-in photos". */
+  appHeroImages: async (signal?: AbortSignal): Promise<HeroManifest> => {
+    // No custom headers: a plain GET needs no CORS preflight and stays cacheable.
+    const res = await fetch(`${BASE}/app/hero-images`, { signal });
+    if (!res.ok) throw new ApiError(res.status, await res.json().catch(() => null));
+    return res.json() as Promise<HeroManifest>;
+  },
+
   /**
    * Uploads a single file (image) to the Zebra storage service via the
    * backend's multipart proxy (`POST /storage`). Returns the persisted URL
@@ -1126,6 +1246,139 @@ export const api = {
     return { ...body, url: `${BASE}${body.url}`, thumbnailUrl: `${BASE}${body.thumbnailUrl}` } as UploadedFile;
   },
 };
+
+// ─── App photos (design spec photo-hero-screens §36–§37; backend functions#216) ───
+export type HeroPeople = 'none' | 'hands_backs' | 'unclear_faces';
+export type HeroImageStatus = 'draft' | 'published' | 'retired';
+export type HeroPreviewWidth = 240 | 480 | 960;
+export type HeroLuminance = { mean: number; maxPatch: number };
+
+export interface HeroImage {
+  id: string;
+  sourceId: string;
+  status: HeroImageStatus;
+  width: number;
+  height: number;
+  /** Each -1..1 (Flutter Alignment). */
+  focal: { x: number; y: number };
+  focalX: number;
+  focalY: number;
+  variants: Record<string, unknown> | null;
+  /** Not a scalar: per text zone. Use `brightWarning` for the badge. */
+  textZoneLuminance: { vertical: HeroLuminance; horizontal: HeroLuminance } | null;
+  /** vertical = phone layouts (bottom 55%), horizontal = the desktop panel (left 50%). */
+  brightWarning: { vertical: boolean; horizontal: boolean };
+  source: string;
+  photographer: string;
+  licence: string;
+  licenceRef: string | null;
+  people: HeroPeople;
+  consentRef: string | null;
+  rightsConfirmedBy: string;
+  rightsConfirmedByName: string | null;
+  rightsConfirmedAt: string;
+  noFacesConfirmedBy: string;
+  noFacesConfirmedByName: string | null;
+  noFacesConfirmedAt: string;
+  createdBy: string;
+  createdByName: string | null;
+  createdAt: string;
+  updatedAt: string;
+  /** Root-relative and authenticated: fetch with the token, never put it in an <img>. */
+  previewUrl: string;
+  /** Public copies exist on storage (a failed publish can make them without the photo ever going live). */
+  hasPublicFiles?: boolean;
+  /** In the current live snapshot (GET /admin/hero-images only; null elsewhere). `status: 'published'` = has been live. */
+  live?: boolean | null;
+  /** Publication id of this photo's latest unpublish; older snapshots holding it can't be put back. */
+  unpublishedInPublication?: number | null;
+}
+
+export interface HeroSlot {
+  id: string;
+  area: string;
+  surface: 'mobile' | 'portal';
+  variant: 'full' | 'compact' | 'band' | 'panel' | string;
+  aspectHint: number;
+  maxImages: number;
+  /** Image ids, in order. */
+  draft: string[];
+  published: string[];
+  brightWarning: boolean;
+}
+
+export interface HeroPublication {
+  id: number;
+  publishedBy: string;
+  publishedByName?: string | null;
+  publishedAt: string;
+  note: string | null;
+  rolledBackFrom: number | null;
+  /** slotId → image ids. */
+  slots: Record<string, string[]>;
+}
+
+export interface HeroImagesState {
+  areas: string[];
+  images: HeroImage[];
+  slots: HeroSlot[];
+  /** The last 20, newest first. */
+  publications: HeroPublication[];
+}
+
+export interface HeroImageUploadFields {
+  source: string;
+  photographer: string;
+  licence: string;
+  licenceRef?: string;
+  people: HeroPeople;
+  consentRef?: string;
+  rightsConfirmed: boolean;
+  noFacesConfirmed: boolean;
+}
+
+export type HeroImagePatch = Partial<{
+  focal: { x: number; y: number };
+  source: string;
+  photographer: string;
+  licence: string;
+  licenceRef: string | null;
+  people: HeroPeople;
+  consentRef: string | null;
+  status: 'retired';
+  /** Required again whenever source, photographer, licence, licenceRef, people or consentRef change. */
+  rightsConfirmed: boolean;
+  noFacesConfirmed: boolean;
+}>;
+
+export interface HeroManifestEntry {
+  id: string;
+  sourceId: string;
+  url: string;
+  url1x: string;
+  urlWide: string;
+  urlAvif: string | null;
+  width: number;
+  height: number;
+  bytes: number;
+  focal: { x: number; y: number };
+}
+export interface HeroManifest {
+  version: number;
+  publishedAt?: string;
+  slots: Record<string, HeroManifestEntry[]>;
+}
+
+/**
+ * A published app photo's address. The server sends root-relative `/storage/<cid>/<file>`; anything
+ * else (absolute, protocol-relative, other paths) is refused so the portal only ever loads FitFlex's files.
+ */
+export function heroAssetUrl(path: string | null | undefined): string | null {
+  // No percent-escapes (so no %2e / %2f smuggling), no "..", and no "." segment.
+  const m = typeof path === 'string' ? /^\/storage\/([A-Za-z0-9._~-]+)\/([A-Za-z0-9._~-]+)$/.exec(path) : null;
+  if (!m || [m[1], m[2]].some(seg => seg === '.' || seg.includes('..'))) return null;
+  return `${BASE}${path}`;
+}
 
 export interface UploadedFile {
   cid: string | null;
@@ -1565,6 +1818,8 @@ export interface PaymentRequest {
    */
   verifiedByName?: string | null;
   changeRequestedByName?: string | null;
+  /** The admin who decided it (the row column; the list spreads the whole row). */
+  decidedBy?: string | null;
   decidedByName?: string | null;
 }
 
@@ -1700,6 +1955,8 @@ export interface VendorTools {
   stockLedger?: boolean;
   buyerContact?: boolean;
   canSeeCost?: boolean;
+  /** Shop banners (SHOP_BANNERS): merch.banners. When absent the portal asks GET /vendor/shop-banners once. */
+  merch?: { banners?: boolean };
   [tool: string]: unknown;
 }
 
@@ -1768,8 +2025,251 @@ export interface VendorOrder {
   note: string | null;
   pickupGymId: string | null;
   pickupGym: { id: string; name: string | null } | null;
-  buyer: { customerId: string | null; displayName: string | null; phone?: string | null; contactVisibleUntil?: string | null };
+  /** customerLinked (S4, being added on the backend): the buyer is an app customer of mine whose profile can open. */
+  /** forgotten (S4, being added on the backend): the buyer deleted their FitFlex account — show "Deleted member". */
+  buyer: { customerId: string | null; customerLinked?: boolean; forgotten?: boolean; displayName: string | null; phone?: string | null; contactVisibleUntil?: string | null };
   deliveryAddress?: string | null;
+}
+
+/** GET /vendor/sales query. from/to are EAT days (YYYY-MM-DD, inclusive, on soldAt). */
+export interface VendorSalesQuery {
+  from?: string;
+  to?: string;
+  status?: 'completed' | 'voided' | 'all';
+  createdBy?: 'me';
+  /** S4: cash | credit (pay later) | all. */
+  kind?: 'cash' | 'credit';
+  /** S4: one customer's sales; only for callers who also hold `customers`. */
+  customerId?: string;
+  limit?: number;
+  cursor?: string | null;
+}
+export type VendorSalePerson = { id: string; name: string | null } | null;
+/** A row of GET /vendor/sales. */
+export interface VendorSaleRow {
+  id: string;
+  number: string;
+  soldAt: string;
+  recordedAt: string;
+  status: 'completed' | 'voided';
+  totalTzs: number;
+  itemCount: number;
+  methods: string[];
+  createdBy: VendorSalePerson;
+  /** A line was sold at another price than the shop's. (#214 always sends it; the UI still copes if absent.) */
+  hasOverride: boolean;
+  /** Line discounts + sale discount. */
+  discountTzs: number;
+  /** recordedAt − soldAt > 5 min (the UI falls back to comparing them if absent). */
+  lateRecorded: boolean;
+  /** S4: cash | credit (pay later). Older servers omit these four. */
+  kind?: 'cash' | 'credit';
+  /** Still owed now; 0 for cash. */
+  balanceTzs?: number;
+  dueDate?: string | null;
+  /** Never contact details. forgotten (being added on the backend): the app buyer deleted their account. */
+  customer?: { id: string; name: string | null; forgotten?: boolean } | null;
+}
+/** Completed sales over the whole from/to/createdBy range (not the page, not the status filter); cash net of change. */
+export interface VendorSaleSummary {
+  count: number;
+  totalTzs: number;
+  voidedCount: number;
+  byMethod: Array<{ method: string; amountTzs: number }>;
+  /** Completed: line + sale discounts. (#214 always sends these three; the UI hides a tile if one is absent.) */
+  discountTzs: number;
+  /** Completed sales with a changed price. */
+  overrideCount: number;
+  /** All sales in the range (voided too) recorded > 5 min after soldAt. */
+  lateCount: number;
+  /** S4, only for callers who also hold `customers`: what completed pay-later sales left owing at the counter (byMethod + payLaterTzs = totalTzs). */
+  payLaterTzs?: number;
+  /** S4, only for callers who also hold `customers`: completed pay-later sales in the range, still owed now. */
+  owedTzs?: number;
+}
+export interface VendorSalePage { sales: VendorSaleRow[]; nextCursor: string | null; summary?: VendorSaleSummary | null }
+/** A walk-in sale (GET /vendor/sales/:id, POST …/void). Never carries cost. */
+export interface VendorSale {
+  id: string;
+  number: string;
+  status: 'completed' | 'voided';
+  /** cash, or credit = pay later (S4). */
+  kind: 'cash' | 'credit';
+  soldAt: string;
+  recordedAt: string;
+  /** Σ qty × unitPriceTzs, before discounts. */
+  subtotalTzs: number;
+  /** Σ line discounts. */
+  lineDiscountTzs: number;
+  /** Whole-sale discount, after line discounts. */
+  discountTzs: number;
+  totalTzs: number;
+  paidTzs: number;
+  changeTzs: number;
+  note: string | null;
+  createdBy: VendorSalePerson;
+  voidedBy: VendorSalePerson;
+  voidedAt: string | null;
+  voidReason: string | null;
+  /** recordedAt − soldAt > 5 min (the UI falls back to comparing them if absent). */
+  lateRecorded: boolean;
+  lines: Array<{
+    nameSnapshot: string;
+    variant: string | null;
+    qty: number;
+    listPriceTzs: number;
+    unitPriceTzs: number;
+    priceChanged: boolean;
+    priceChangedBy: VendorSalePerson;
+    discountTzs: number;
+    lineTotalTzs: number;
+  }>;
+  payments: Array<{ method: string; amountTzs: number; reference: string | null }>;
+  /** S4 pay later. Older servers omit these. */
+  customer?: { id: string; name: string | null; forgotten?: boolean } | null;
+  dueDate?: string | null;
+  /** Still owed now; 0 for cash. */
+  balanceTzs?: number;
+  /** Paid at the counter. */
+  paidAtSaleTzs?: number;
+  /** Customer payments towards this sale; only for callers who also hold `customers`. */
+  allocations?: Array<{ paymentId: string; number: string; amountTzs: number; receivedOn: string; voided: boolean }>;
+}
+
+// ─── Vendor customers (S4) ───
+export type AgingBucket = 'current' | 'd1_30' | 'd31_60' | 'd61_90' | 'd90plus';
+export type VendorAging = Record<AgingBucket, number>;
+export type VendorCustomerFilter = 'all' | 'owes' | 'overdue' | 'manual' | 'marketplace' | 'archived';
+export type VendorCustomerSort = 'name' | 'owed' | 'overdue' | 'recent';
+export interface VendorCustomersQuery {
+  q?: string;
+  filter?: VendorCustomerFilter;
+  bucket?: AgingBucket;
+  sort?: VendorCustomerSort;
+  limit?: number;
+  cursor?: string | null;
+}
+/** Money owed by one customer, EAT days. */
+export interface VendorCustomerMoney {
+  owedTzs: number;
+  /** Balance of sales past their due date. */
+  overdueTzs: number;
+  oldestDueDate: string | null;
+  /** 0 when nothing is overdue. */
+  maxDaysOverdue: number;
+  aging: VendorAging;
+}
+/** A row of GET /vendor/customers (caller holds `customers`). */
+export interface VendorCustomerRow extends VendorCustomerMoney {
+  id: string;
+  /** manual = walk-in (the vendor's own record) · marketplace = app buyer. */
+  source: 'manual' | 'marketplace';
+  name: string | null;
+  /** Walk-in customers only (A-02: never for app customers). */
+  phone: string | null;
+  archived: boolean;
+  /** The app buyer deleted their FitFlex account: name is null, show "Deleted member". */
+  forgotten: boolean;
+  lastPurchaseAt: string | null;
+}
+export interface VendorCustomerPage { customers: VendorCustomerRow[]; nextCursor: string | null; asOf?: string }
+/** A customer record. App customers never carry phone, email, address or a user id (A-02). */
+export interface VendorCustomer {
+  id: string;
+  source: 'manual' | 'marketplace';
+  name: string | null;
+  forgotten: boolean;
+  phone: string | null;
+  email: string | null;
+  address: string | null;
+  note: string | null;
+  archived: boolean;
+  archivedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+export interface VendorCustomerOpenSale {
+  id: string;
+  number: string;
+  soldAt: string;
+  dueDate: string;
+  totalTzs: number;
+  balanceTzs: number;
+  /** 0 when not yet due. */
+  daysOverdue: number;
+  overdue: boolean;
+}
+/** GET /vendor/customers/:id. */
+export interface VendorCustomerProfile extends VendorCustomer, VendorCustomerMoney {
+  lastPurchaseAt: string | null;
+  totals: { shopSalesTzs: number; shopSalesCount: number; appOrdersTzs: number; appOrdersCount: number; lastPurchaseAt: string | null };
+  asOf: string;
+  /** Oldest due first. */
+  openSales: VendorCustomerOpenSale[];
+}
+export interface VendorCustomerInput { name: string | null; phone: string | null; email: string | null; address: string | null; note: string | null }
+export type VendorPhoneDuplicate = { id: string; name: string | null } | null;
+/** A paid app order of an app customer (own lines only; never contact details). */
+export interface VendorCustomerOrder {
+  id: string;
+  shortRef: string;
+  createdAt: string | null;
+  status: string;
+  orderStatus: string;
+  tab: 'open' | 'delivered' | 'cancelled';
+  paymentStatus: string | null;
+  totalTzs: number;
+  itemCount: number;
+}
+export interface VendorCustomerPayment {
+  id: string;
+  /** PMT-000001, continuous per vendor. */
+  number: string;
+  customerId: string;
+  status: 'recorded' | 'voided';
+  amountTzs: number;
+  method: string;
+  reference: string | null;
+  /** EAT day. */
+  receivedOn: string;
+  note: string | null;
+  clientRef: string;
+  recordedAt: string;
+  recordedBy: VendorSalePerson;
+  allocations: Array<{ saleId: string; saleNumber: string; amountTzs: number }>;
+  voidedAt: string | null;
+  voidedBy: VendorSalePerson;
+  voidReason: string | null;
+}
+export interface VendorCustomerPaymentInput {
+  clientRef: string;
+  amountTzs: number;
+  method: string;
+  reference?: string;
+  receivedOn?: string;
+  note?: string;
+  /** Manual; omitted → oldest due first. */
+  allocations?: Array<{ saleId: string; amountTzs: number }>;
+}
+export interface VendorAgingRow extends VendorAging {
+  customerId: string;
+  name: string | null;
+  /** Being added on the backend: the app buyer deleted their account ("Deleted member"). */
+  forgotten?: boolean;
+  source: 'manual' | 'marketplace';
+  owedTzs: number;
+  overdueTzs: number;
+  oldestDueDate: string | null;
+  maxDaysOverdue: number;
+  openSaleCount: number;
+  overdueSaleCount: number;
+}
+/** GET /vendor/receivables/aging: totals cover every customer who owes, not the bucket filter or the page. */
+export interface VendorAgingPage {
+  asOf: string;
+  totals: VendorAging & { owedTzs: number; overdueTzs: number; customerCount: number; overdueCustomerCount: number; openSaleCount: number; overdueSaleCount: number };
+  rows: VendorAgingRow[];
+  nextCursor: string | null;
 }
 
 export interface VendorPayments { todaySalesTzs: number; pendingSettlementTzs: number; [figure: string]: unknown }
@@ -1803,6 +2303,21 @@ export interface AdminProductDraft {
   approvalStatus?: 'pending' | 'approved' | 'rejected';
   homepageVisible?: boolean;
   homepagePriority?: number;
+}
+
+/** A product's stored marketplace stats, as POST /admin/shop/product-stats/recompute reports them (rating to 2 decimals). */
+export interface ProductStats { rating: number; reviewCount: number; soldCount: number }
+/**
+ * POST /admin/shop/product-stats/recompute (functions#220): a dry run (apply false) or the applied run.
+ * Errors: 403 non-admin; 409 recompute_in_progress (another apply running); 400 invalid_apply / invalid_product_ids / too_many_product_ids.
+ */
+export interface ProductStatsRecompute {
+  dryRun: boolean;
+  checked: number;
+  changed: Array<{ productId: string; name: string; vendorId: string; before: ProductStats; after: ProductStats }>;
+  unchanged: number;
+  appliedAt?: string;
+  runId?: string;
 }
 
 export interface VendorSummary {
