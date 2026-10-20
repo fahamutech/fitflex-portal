@@ -109,8 +109,8 @@ const OPERATOR_NAV: NavItem[] = [
 
 // A business that sells on FitFlex (vendor portal, S2): each item needs its permission.
 function vendorNav(permissions: string[], tools: VendorTools | null | undefined, lowCount: number | null, waitingCount: number | null): NavItem[] {
-  const icons: Record<string, React.ElementType> = { '/vendor': LayoutDashboard, '/vendor/products': ShoppingBag, '/vendor/orders': ClipboardList, '/vendor/sales': Receipt, '/vendor/payouts': HandCoins };
-  const labels: Record<string, string> = { '/vendor': 'vendor.nav.dashboard', '/vendor/products': 'vendor.nav.products', '/vendor/orders': 'vendor.nav.orders', '/vendor/sales': 'vendor.nav.sales', '/vendor/payouts': 'vendor.nav.payouts' };
+  const icons: Record<string, React.ElementType> = { '/vendor': LayoutDashboard, '/vendor/products': ShoppingBag, '/vendor/orders': ClipboardList, '/vendor/sales': Receipt, '/vendor/customers': Users, '/vendor/payouts': HandCoins };
+  const labels: Record<string, string> = { '/vendor': 'vendor.nav.dashboard', '/vendor/products': 'vendor.nav.products', '/vendor/orders': 'vendor.nav.orders', '/vendor/sales': 'vendor.nav.sales', '/vendor/customers': 'vendor.nav.customers', '/vendor/payouts': 'vendor.nav.payouts' };
   return VENDOR_AREAS.filter(a => vendorAreaOpen(a, permissions, tools)).map(a => ({
     href: a.href, labelKey: labels[a.href], icon: icons[a.href],
     ...(a.href === '/vendor/products' && lowCount ? { count: { n: lowCount, labelKey: 'vendor.nav.productsLow' as MessageKey, tone: 'warning' as const } } : {}),

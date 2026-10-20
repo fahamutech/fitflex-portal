@@ -7,9 +7,10 @@ import { api, type VendorSale, type VendorSaleRow, type VendorSalesQuery, type V
 import { money } from '@/lib/admin-utils';
 import type { MessageKey } from '@/lib/i18n';
 import {
-  addDays, eatDateTime, eatToday, errorBody, errorCode, fmt, isRefusal, itemsKey, mayVoidSale, recordedOffline,
-  saleMethodLabel, saleMethodsLabel, saleReceiptText,
+  addDays, canCustomers, customerName, eatDateTime, eatToday, errorBody, errorCode, fmt, isRefusal, itemsKey, mayVoidSale, receiptDay,
+  recordedOffline, saleMethodLabel, saleMethodsLabel, saleReceiptText,
 } from '@/lib/vendor';
+import { CreditBadges } from '@/components/vendor/customers/bits';
 import {
   Alert, Badge, Button, Card, CardContent, CardHeader, Checkbox, EmptyState, ErrorState, Field, Input, PageHeader, Segmented, Select,
   SkeletonCard, SkeletonTable, Spinner, Table, TBody, Td, Textarea, Th, THead, Tr, useToast,
@@ -22,13 +23,14 @@ type Range = 'today' | '7d' | '30d' | 'custom';
 const RANGES: Range[] = ['today', '7d', '30d', 'custom'];
 type StatusFilter = 'all' | 'completed' | 'voided';
 const STATUSES: StatusFilter[] = ['all', 'completed', 'voided'];
+type KindFilter = 'all' | 'credit';
 const REASON_MIN = 3;
 const REASON_MAX = 200;
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
 /** A row's tap target: at least 44px tall. */
 const refLink = 'inline-flex min-h-11 items-center whitespace-nowrap font-mono font-semibold text-[var(--color-brand-700)] underline-offset-4 hover:underline';
 
-function SaleBadges({ sale }: { sale: Pick<VendorSaleRow, 'status' | 'soldAt' | 'recordedAt' | 'lateRecorded' | 'hasOverride'> }) {
+function SaleBadges({ sale }: { sale: Pick<VendorSaleRow, 'status' | 'soldAt' | 'recordedAt' | 'lateRecorded' | 'hasOverride' | 'kind' | 'balanceTzs'> }) {
   const { t } = useApp();
   return (
     <span className="inline-flex flex-wrap gap-1">
@@ -37,6 +39,8 @@ function SaleBadges({ sale }: { sale: Pick<VendorSaleRow, 'status' | 'soldAt' | 
         : <Badge tone="success">{t('vendor.sales.filter.completed')}</Badge>}
       {recordedOffline(sale) && <Badge tone="gray">{t('vendor.sales.offlineBadge')}</Badge>}
       {sale.hasOverride === true && <Badge tone="warning">{t('vendor.sales.priceChangedBadge')}</Badge>}
+      {/* S4: "Pay later" and what is still owed (or "Paid off"). */}
+      <CreditBadges sale={sale} />
     </span>
   );
 }
@@ -74,6 +78,10 @@ function SalesInner() {
   const statusParam = params.get('status') as StatusFilter | null;
   const status: StatusFilter = statusParam && STATUSES.includes(statusParam) ? statusParam : 'all';
   const mine = params.get('mine') === '1';
+  // S4: the pay-later filter needs customers switched on; one customer's sales need the `customers` permission too.
+  const customersOn = vendor.me?.tools.customers === true;
+  const kind: KindFilter = customersOn && params.get('kind') === 'credit' ? 'credit' : 'all';
+  const customerId = canCustomers(vendor.me) ? params.get('customerId') : null;
   const fromParam = params.get('from') ?? '';
   const toParam = params.get('to') ?? '';
   const span = range === 'today' ? { from: today, to: today }
@@ -104,7 +112,9 @@ function SalesInner() {
     from: span.from, to: span.to,
     ...(status !== 'all' ? { status } : {}),
     ...(mine ? { createdBy: 'me' as const } : {}),
-  }), [span.from, span.to, status, mine]);
+    ...(kind === 'credit' ? { kind: 'credit' as const } : {}),
+    ...(customerId ? { customerId } : {}),
+  }), [span.from, span.to, status, mine, kind, customerId]);
 
   const load = useCallback(async () => {
     if (!token) return;
@@ -151,7 +161,7 @@ function SalesInner() {
 
   /** A void changes the row and the summary (voided sales leave the totals). */
   const updated = (sale: VendorSale) => {
-    setSales(current => (current ?? []).map(s => (s.id === sale.id ? { ...s, status: sale.status } : s)));
+    setSales(current => (current ?? []).map(s => (s.id === sale.id ? { ...s, status: sale.status, ...(typeof sale.balanceTzs === 'number' ? { balanceTzs: sale.balanceTzs } : {}) } : s)));
     if (!token) return;
     const id = requestId.current;
     api.vendorSales(token, { ...query(), limit: 1 }).then(p => { if (id === requestId.current) setSummary(p.summary ?? null); }).catch(() => {});
@@ -214,8 +224,22 @@ function SalesInner() {
             {STATUSES.map(s => <option key={s} value={s}>{t(`vendor.sales.filter.${s}` as MessageKey)}</option>)}
           </Select>
         </Field>
+        {customersOn && (
+          <Field label={t('vendor.sales.colKind')}>
+            <Select value={kind} onChange={e => setParams({ kind: e.target.value === 'credit' ? 'credit' : null })} data-testid="sales-kind">
+              <option value="all">{t('vendor.sales.filter.all')}</option>
+              <option value="credit">{t('vendor.sales.filter.credit')}</option>
+            </Select>
+          </Field>
+        )}
         <Checkbox label={t('vendor.sales.filter.mine')} checked={mine} onChange={e => setParams({ mine: e.target.checked ? '1' : null })} data-testid="sales-mine" />
       </div>
+      {customerId && (
+        <div className="flex flex-wrap items-center gap-2" data-testid="sales-customer-filter">
+          <Badge tone="brand">{fmt(t('vendor.sales.customerFilter'), { name: shown.find(s => s.customer)?.customer ? customerName(shown.find(s => s.customer)!.customer, t) : t('vendor.sales.oneCustomer') })}</Badge>
+          <Button variant="link" size="sm" className="min-h-11" onClick={() => setParams({ customerId: null })} data-testid="sales-customer-clear">{t('vendor.sales.clearCustomer')}</Button>
+        </div>
+      )}
 
       {summary && sales != null && !failed && (
         <section aria-label={t('vendor.sales.title')} className="space-y-3" data-testid="sales-summary">
@@ -225,6 +249,9 @@ function SalesInner() {
             {typeof summary.discountTzs === 'number' && <SummaryTile label={t('vendor.pos.discounts')} value={money(summary.discountTzs)} testId="sales-summary-discounts" />}
             {typeof summary.overrideCount === 'number' && <SummaryTile label={t('vendor.sales.overrideCount')} value={summary.overrideCount} testId="sales-summary-overrides" />}
             {typeof summary.lateCount === 'number' && <SummaryTile label={t('vendor.sales.lateCount')} value={summary.lateCount} testId="sales-summary-late" />}
+            {/* S4 (customers holders only): pay-later money; byMethod + payLater = total. */}
+            {typeof summary.payLaterTzs === 'number' && summary.payLaterTzs > 0 && <SummaryTile label={t('vendor.sales.payLaterTotal')} value={money(summary.payLaterTzs)} testId="sales-summary-paylater" />}
+            {typeof summary.owedTzs === 'number' && summary.owedTzs > 0 && <SummaryTile label={t('vendor.pay.stillOwed')} value={money(summary.owedTzs)} testId="sales-summary-owed" />}
           </div>
           {summary.byMethod?.length > 0 && (
             <div>
@@ -268,6 +295,7 @@ function SalesInner() {
                       <Link id={`sale-link-${s.id}`} href={`${pathname}?id=${encodeURIComponent(s.id)}`} onClick={e => { e.preventDefault(); e.stopPropagation(); open(s.id); }} className={refLink}>
                         {s.number}
                       </Link>
+                      {s.customer && <span className="block text-xs text-[var(--color-fg-tertiary)] [overflow-wrap:anywhere]">{customerName(s.customer, t)}</span>}
                     </Td>
                     <Td className="whitespace-nowrap">{eatDateTime(s.soldAt, locale)}</Td>
                     <Td>{fmt(t(itemsKey(s.itemCount)), { n: s.itemCount })}</Td>
@@ -291,6 +319,7 @@ function SalesInner() {
                       <SaleBadges sale={s} />
                     </span>
                     <span className="block font-semibold"><Total sale={s} /></span>
+                    {s.customer && <span className="block text-sm [overflow-wrap:anywhere]">{customerName(s.customer, t)}</span>}
                     <span className="block text-sm text-[var(--color-fg-tertiary)]">{eatDateTime(s.soldAt, locale)}</span>
                     <span className="block text-sm text-[var(--color-fg-tertiary)]">{saleMethodsLabel(s.methods, t)}</span>
                   </Link>
@@ -332,6 +361,8 @@ function SaleDetail({ id, onBack, onUpdated }: { id: string; onBack: () => void;
   const [voidError, setVoidError] = useState<string | null>(null);
   /** Why the sale is shown again after a refused void (it was reloaded); stays until another sale opens. */
   const [notice, setNotice] = useState<MessageKey | null>(null);
+  /** S4 (Q-2): customer payments still allocated to this pay-later sale; void them first. */
+  const [blockers, setBlockers] = useState<Array<{ id: string; number: string }> | null>(null);
   const [busy, setBusy] = useState(false);
   const headingRef = useRef<HTMLHeadingElement>(null);
 
@@ -359,7 +390,7 @@ function SaleDetail({ id, onBack, onUpdated }: { id: string; onBack: () => void;
     try { await navigator.clipboard.writeText(text); toast.success(t('vendor.sales.copied')); } catch { toast.error(t('vendor.saveFailed')); }
   }
 
-  const openVoid = () => { setReason(''); setReasonError(null); setVoidError(null); setVoidOpen(true); };
+  const openVoid = () => { setReason(''); setReasonError(null); setVoidError(null); setBlockers(null); setVoidOpen(true); };
   async function confirmVoid() {
     if (!token || !sale) return;
     const trimmed = reason.trim();
@@ -375,6 +406,11 @@ function SaleDetail({ id, onBack, onUpdated }: { id: string; onBack: () => void;
       if (!isRefusal(err)) { setVoidError(t('vendor.sales.voidOffline')); return; }
       const code = errorCode(err);
       if (code === 'reason_required' || code === 'reason_too_long') { setReasonError(t('vendor.sales.voidReasonMissing')); return; }
+      if (code === 'sale_has_payments') {
+        // The dialog stays and lists the payments to void first (with links when this person may open them).
+        setBlockers(errorBody<{ payments?: Array<{ id: string; number: string }> }>(err)?.payments ?? []);
+        return;
+      }
       setVoidOpen(false);
       if (code === 'already_voided') {
         // Say so in the panel too (UAT): the reload alone looks like nothing happened.
@@ -412,6 +448,9 @@ function SaleDetail({ id, onBack, onUpdated }: { id: string; onBack: () => void;
   const s = sale;
   const discounts = Number(s.lineDiscountTzs || 0) + Number(s.discountTzs || 0);
   const canVoid = mayVoidSale(s, { userId: user?.id, userType: user?.userType, vendorRole: vendor.me?.vendorRole });
+  const credit = s.kind === 'credit';
+  const seesCustomers = canCustomers(vendor.me);
+  const customerHref = (extra = '') => (s.customer ? `/vendor/customers/?id=${encodeURIComponent(s.customer.id)}${extra}` : null);
   const row = 'flex justify-between gap-2';
 
   return (
@@ -427,6 +466,13 @@ function SaleDetail({ id, onBack, onUpdated }: { id: string; onBack: () => void;
           <p className="text-sm text-[var(--color-fg-tertiary)]">{eatDateTime(s.soldAt, locale)}</p>
           {recordedOffline(s) && <p className="text-sm text-[var(--color-fg-tertiary)]">{fmt(t('vendor.sales.recordedAt'), { time: eatDateTime(s.recordedAt, locale) })}</p>}
           {s.createdBy?.name && <p className="text-sm text-[var(--color-fg-tertiary)]">{fmt(t('vendor.pos.servedBy'), { name: s.createdBy.name })}</p>}
+          {s.customer && (
+            <p className="text-sm" data-testid="sale-customer">
+              {seesCustomers && customerHref()
+                ? <Link href={customerHref()!} className="inline-flex min-h-11 items-center font-semibold text-[var(--color-brand-700)] underline-offset-4 hover:underline">{fmt(t('vendor.receipt.customer'), { name: customerName(s.customer, t) })}</Link>
+                : fmt(t('vendor.receipt.customer'), { name: customerName(s.customer, t) })}
+            </p>
+          )}
         </CardContent>
       </Card>
 
@@ -482,8 +528,34 @@ function SaleDetail({ id, onBack, onUpdated }: { id: string; onBack: () => void;
               <span className="whitespace-nowrap tabular-nums">{money(p.amountTzs)}</span>
             </div>
           ))}
-          {s.changeTzs > 0 && <div className={row}><span>{t('vendor.pos.change')}</span><span className="whitespace-nowrap tabular-nums" data-testid="sale-change">{money(s.changeTzs)}</span></div>}
-          <p className="pt-2 text-[var(--color-fg-tertiary)]">{fmt(t('vendor.pos.receiptFooter'), { business })}</p>
+          {!credit && s.changeTzs > 0 && <div className={row}><span>{t('vendor.pos.change')}</span><span className="whitespace-nowrap tabular-nums" data-testid="sale-change">{money(s.changeTzs)}</span></div>}
+          {credit && (
+            <div className="space-y-1 border-t border-[var(--color-border-secondary)] pt-2" data-testid="sale-credit">
+              <div className={row}><span>{t('vendor.pos.credit.paidNow')}</span><span className="whitespace-nowrap tabular-nums">{money(s.paidAtSaleTzs ?? s.payments.reduce((n, p) => n + p.amountTzs, 0))}</span></div>
+              {s.dueDate && <div className={row}><span>{t('vendor.receipt.dueBy')}</span><span className="whitespace-nowrap">{receiptDay(s.dueDate, locale)}</span></div>}
+              {s.status === 'completed' && (Number(s.balanceTzs) > 0
+                ? <div className={`${row} font-semibold`}><span>{t('vendor.pay.stillOwed')}</span><span className="whitespace-nowrap tabular-nums" data-testid="sale-balance">{money(s.balanceTzs)}</span></div>
+                : <p><Badge tone="success">{t('vendor.sales.paidOffBadge')}</Badge></p>)}
+              {(s.allocations ?? []).length > 0 && (
+                <div className="space-y-1 pt-1" data-testid="sale-allocations">
+                  <p className="font-medium">{t('vendor.sales.customerPayments')}</p>
+                  {s.allocations!.map(a => (
+                    <div key={a.paymentId} className={row}>
+                      <span className="flex flex-wrap items-center gap-2">
+                        {customerHref()
+                          ? <Link href={customerHref(`&tab=payments&payment=${encodeURIComponent(a.paymentId)}`)!} className="inline-flex min-h-11 items-center font-mono font-semibold text-[var(--color-brand-700)] underline-offset-4 hover:underline">{a.number}</Link>
+                          : <span className="font-mono">{a.number}</span>}
+                        <span className="text-[var(--color-fg-tertiary)]">{receiptDay(a.receivedOn, locale)}</span>
+                        {a.voided && <Badge tone="gray">{t('vendor.sales.voidedBadge')}</Badge>}
+                      </span>
+                      <span className={`whitespace-nowrap tabular-nums ${a.voided ? 'line-through text-[var(--color-fg-quaternary)]' : ''}`}>{money(a.amountTzs)}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+          <p className="pt-2 text-[var(--color-fg-tertiary)]">{fmt(t(credit ? 'vendor.receipt.footerCredit' : 'vendor.pos.receiptFooter'), { business })}</p>
           <p className="text-xs text-[var(--color-fg-quaternary)]" data-testid="sale-not-fiscal">{t('vendor.pos.notFiscal')}</p>
         </CardContent>
       </Card>
@@ -515,6 +587,19 @@ function SaleDetail({ id, onBack, onUpdated }: { id: string; onBack: () => void;
         description={t('vendor.sales.voidBody')}
       >
         <div className="space-y-3">
+          {credit && <p className="text-sm text-[var(--color-fg-tertiary)]" data-testid="sale-void-credit">{t('vendor.sales.voidCreditBody')}</p>}
+          {blockers && (
+            <div data-testid="sale-void-blocked">
+              <Alert tone="warning">
+                <span>{fmt(t('vendor.sales.voidHasPayments'), { numbers: '' }).replace(/[:\s]+$/, '')}:</span>
+                <span className="mt-1 flex flex-wrap gap-x-3">
+                  {blockers.map(b => (seesCustomers && customerHref()
+                    ? <Link key={b.id} href={customerHref(`&tab=payments&payment=${encodeURIComponent(b.id)}`)!} className="inline-flex min-h-11 items-center font-mono font-semibold underline underline-offset-4">{b.number}</Link>
+                    : <span key={b.id} className="font-mono font-semibold">{b.number}</span>))}
+                </span>
+              </Alert>
+            </div>
+          )}
           {voidError && <Alert tone="error">{voidError}</Alert>}
           <Field label={t('vendor.sales.voidReason')} required error={reasonError ?? undefined} hint={`${reason.length}/${REASON_MAX}`}>
             <Textarea value={reason} maxLength={REASON_MAX} rows={3} onChange={e => { setReason(e.target.value); setReasonError(null); }} disabled={busy} data-testid="sale-void-reason" />
@@ -522,7 +607,7 @@ function SaleDetail({ id, onBack, onUpdated }: { id: string; onBack: () => void;
         </div>
         <DialogFooter className="flex-wrap">
           <Button variant="secondary" onClick={() => setVoidOpen(false)} disabled={busy} className="min-h-11">{t('common.cancel')}</Button>
-          <Button variant="destructive" onClick={confirmVoid} loading={busy} disabled={!reason.trim()} className="min-h-11" data-testid="sale-void-confirm">
+          <Button variant="destructive" onClick={confirmVoid} loading={busy} disabled={!reason.trim() || !!blockers} className="min-h-11" data-testid="sale-void-confirm">
             {voidError ? t('common.tryAgain') : t('vendor.sales.void')}
           </Button>
         </DialogFooter>

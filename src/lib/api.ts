@@ -312,6 +312,33 @@ export const api = {
   vendorSale: (token: string, id: string) => request<{ sale: VendorSale }>(`/vendor/sales/${encodeURIComponent(id)}`, {}, token),
   vendorVoidSale: (token: string, id: string, reason: string) =>
     request<{ sale: VendorSale }>(`/vendor/sales/${encodeURIComponent(id)}/void`, { method: 'POST', body: JSON.stringify({ reason }) }, token),
+  // ─── Vendor customers, pay-later balances, customer payments, aging (S4) ───
+  vendorCustomers: (token: string, query: VendorCustomersQuery = {}) =>
+    request<VendorCustomerPage>(`/vendor/customers${qs({ ...query, limit: query.limit ?? 50 })}`, {}, token),
+  vendorCreateCustomer: (token: string, body: VendorCustomerInput & { clientRef?: string }) =>
+    request<{ customer: VendorCustomer; phoneDuplicate: VendorPhoneDuplicate }>('/vendor/customers', { method: 'POST', body: JSON.stringify(body) }, token),
+  vendorUpdateCustomer: (token: string, id: string, body: Partial<VendorCustomerInput> & { archived?: boolean; updatedAt?: string }) =>
+    request<{ customer: VendorCustomer; phoneDuplicate: VendorPhoneDuplicate }>(`/vendor/customers/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify(body) }, token),
+  vendorCustomer: (token: string, id: string) =>
+    request<{ customer: VendorCustomerProfile }>(`/vendor/customers/${encodeURIComponent(id)}`, {}, token),
+  vendorCustomerSales: (token: string, id: string, page: { limit?: number; cursor?: string | null } = {}) =>
+    request<VendorSalePage>(`/vendor/customers/${encodeURIComponent(id)}/sales${qs({ limit: page.limit ?? 20, cursor: page.cursor })}`, {}, token),
+  /** One walk-in sale of this customer (read-only; for staff with `customers` but not `sales`). */
+  vendorCustomerSale: (token: string, id: string, saleId: string) =>
+    request<{ sale: VendorSale }>(`/vendor/customers/${encodeURIComponent(id)}/sales/${encodeURIComponent(saleId)}`, {}, token),
+  vendorCustomerOrders: (token: string, id: string, page: { limit?: number; cursor?: string | null } = {}) =>
+    request<{ orders: VendorCustomerOrder[]; nextCursor: string | null }>(`/vendor/customers/${encodeURIComponent(id)}/orders${qs({ limit: page.limit ?? 20, cursor: page.cursor })}`, {}, token),
+  vendorCustomerPayments: (token: string, id: string, page: { from?: string; limit?: number; cursor?: string | null } = {}) =>
+    request<{ payments: VendorCustomerPayment[]; nextCursor: string | null }>(`/vendor/customers/${encodeURIComponent(id)}/payments${qs({ from: page.from, limit: page.limit ?? 20, cursor: page.cursor })}`, {}, token),
+  vendorCustomerPayment: (token: string, id: string, paymentId: string) =>
+    request<{ payment: VendorCustomerPayment }>(`/vendor/customers/${encodeURIComponent(id)}/payments/${encodeURIComponent(paymentId)}`, {}, token),
+  vendorRecordCustomerPayment: (token: string, id: string, body: VendorCustomerPaymentInput) =>
+    request<{ payment: VendorCustomerPayment; customer: VendorCustomerMoney & { asOf: string } }>(`/vendor/customers/${encodeURIComponent(id)}/payments`, { method: 'POST', body: JSON.stringify(body) }, token),
+  vendorVoidCustomerPayment: (token: string, id: string, paymentId: string, reason: string) =>
+    request<{ payment: VendorCustomerPayment; customer: VendorCustomerMoney & { asOf: string } }>(
+      `/vendor/customers/${encodeURIComponent(id)}/payments/${encodeURIComponent(paymentId)}/void`, { method: 'POST', body: JSON.stringify({ reason }) }, token),
+  vendorReceivablesAging: (token: string, query: { bucket?: AgingBucket | null; sort?: 'overdue' | 'owed' | 'name'; limit?: number; cursor?: string | null } = {}) =>
+    request<VendorAgingPage>(`/vendor/receivables/aging${qs({ ...query, limit: query.limit ?? 50 })}`, {}, token),
   vendorPayments: (token: string) => request<VendorPayments>('/vendor/payments', {}, token),
   vendorStatements: (token: string) => request<VendorStatementList>('/vendor/statements', {}, token),
   vendorStatement: (token: string, id: string) =>
@@ -1954,7 +1981,8 @@ export interface VendorOrder {
   note: string | null;
   pickupGymId: string | null;
   pickupGym: { id: string; name: string | null } | null;
-  buyer: { customerId: string | null; displayName: string | null; phone?: string | null; contactVisibleUntil?: string | null };
+  /** customerLinked (S4, being added on the backend): the buyer is an app customer of mine whose profile can open. */
+  buyer: { customerId: string | null; customerLinked?: boolean; displayName: string | null; phone?: string | null; contactVisibleUntil?: string | null };
   deliveryAddress?: string | null;
 }
 
@@ -1964,6 +1992,10 @@ export interface VendorSalesQuery {
   to?: string;
   status?: 'completed' | 'voided' | 'all';
   createdBy?: 'me';
+  /** S4: cash | credit (pay later) | all. */
+  kind?: 'cash' | 'credit';
+  /** S4: one customer's sales; only for callers who also hold `customers`. */
+  customerId?: string;
   limit?: number;
   cursor?: string | null;
 }
@@ -1985,6 +2017,13 @@ export interface VendorSaleRow {
   discountTzs: number;
   /** recordedAt − soldAt > 5 min (the UI falls back to comparing them if absent). */
   lateRecorded: boolean;
+  /** S4: cash | credit (pay later). Older servers omit these four. */
+  kind?: 'cash' | 'credit';
+  /** Still owed now; 0 for cash. */
+  balanceTzs?: number;
+  dueDate?: string | null;
+  /** Never contact details. forgotten (being added on the backend): the app buyer deleted their account. */
+  customer?: { id: string; name: string | null; forgotten?: boolean } | null;
 }
 /** Completed sales over the whole from/to/createdBy range (not the page, not the status filter); cash net of change. */
 export interface VendorSaleSummary {
@@ -1998,6 +2037,10 @@ export interface VendorSaleSummary {
   overrideCount: number;
   /** All sales in the range (voided too) recorded > 5 min after soldAt. */
   lateCount: number;
+  /** S4, only for callers who also hold `customers`: what completed pay-later sales left owing at the counter (byMethod + payLaterTzs = totalTzs). */
+  payLaterTzs?: number;
+  /** S4, only for callers who also hold `customers`: completed pay-later sales in the range, still owed now. */
+  owedTzs?: number;
 }
 export interface VendorSalePage { sales: VendorSaleRow[]; nextCursor: string | null; summary?: VendorSaleSummary | null }
 /** A walk-in sale (GET /vendor/sales/:id, POST …/void). Never carries cost. */
@@ -2005,7 +2048,8 @@ export interface VendorSale {
   id: string;
   number: string;
   status: 'completed' | 'voided';
-  kind: string;
+  /** cash, or credit = pay later (S4). */
+  kind: 'cash' | 'credit';
   soldAt: string;
   recordedAt: string;
   /** Σ qty × unitPriceTzs, before discounts. */
@@ -2036,6 +2080,151 @@ export interface VendorSale {
     lineTotalTzs: number;
   }>;
   payments: Array<{ method: string; amountTzs: number; reference: string | null }>;
+  /** S4 pay later. Older servers omit these. */
+  customer?: { id: string; name: string | null; forgotten?: boolean } | null;
+  dueDate?: string | null;
+  /** Still owed now; 0 for cash. */
+  balanceTzs?: number;
+  /** Paid at the counter. */
+  paidAtSaleTzs?: number;
+  /** Customer payments towards this sale; only for callers who also hold `customers`. */
+  allocations?: Array<{ paymentId: string; number: string; amountTzs: number; receivedOn: string; voided: boolean }>;
+}
+
+// ─── Vendor customers (S4) ───
+export type AgingBucket = 'current' | 'd1_30' | 'd31_60' | 'd61_90' | 'd90plus';
+export type VendorAging = Record<AgingBucket, number>;
+export type VendorCustomerFilter = 'all' | 'owes' | 'overdue' | 'manual' | 'marketplace' | 'archived';
+export type VendorCustomerSort = 'name' | 'owed' | 'overdue' | 'recent';
+export interface VendorCustomersQuery {
+  q?: string;
+  filter?: VendorCustomerFilter;
+  bucket?: AgingBucket;
+  sort?: VendorCustomerSort;
+  limit?: number;
+  cursor?: string | null;
+}
+/** Money owed by one customer, EAT days. */
+export interface VendorCustomerMoney {
+  owedTzs: number;
+  /** Balance of sales past their due date. */
+  overdueTzs: number;
+  oldestDueDate: string | null;
+  /** 0 when nothing is overdue. */
+  maxDaysOverdue: number;
+  aging: VendorAging;
+}
+/** A row of GET /vendor/customers (caller holds `customers`). */
+export interface VendorCustomerRow extends VendorCustomerMoney {
+  id: string;
+  /** manual = walk-in (the vendor's own record) · marketplace = app buyer. */
+  source: 'manual' | 'marketplace';
+  name: string | null;
+  /** Walk-in customers only (A-02: never for app customers). */
+  phone: string | null;
+  archived: boolean;
+  /** The app buyer deleted their FitFlex account: name is null, show "Deleted member". */
+  forgotten: boolean;
+  lastPurchaseAt: string | null;
+}
+export interface VendorCustomerPage { customers: VendorCustomerRow[]; nextCursor: string | null; asOf?: string }
+/** A customer record. App customers never carry phone, email, address or a user id (A-02). */
+export interface VendorCustomer {
+  id: string;
+  source: 'manual' | 'marketplace';
+  name: string | null;
+  forgotten: boolean;
+  phone: string | null;
+  email: string | null;
+  address: string | null;
+  note: string | null;
+  archived: boolean;
+  archivedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+export interface VendorCustomerOpenSale {
+  id: string;
+  number: string;
+  soldAt: string;
+  dueDate: string;
+  totalTzs: number;
+  balanceTzs: number;
+  /** 0 when not yet due. */
+  daysOverdue: number;
+  overdue: boolean;
+}
+/** GET /vendor/customers/:id. */
+export interface VendorCustomerProfile extends VendorCustomer, VendorCustomerMoney {
+  lastPurchaseAt: string | null;
+  totals: { shopSalesTzs: number; shopSalesCount: number; appOrdersTzs: number; appOrdersCount: number; lastPurchaseAt: string | null };
+  asOf: string;
+  /** Oldest due first. */
+  openSales: VendorCustomerOpenSale[];
+}
+export interface VendorCustomerInput { name: string | null; phone: string | null; email: string | null; address: string | null; note: string | null }
+export type VendorPhoneDuplicate = { id: string; name: string | null } | null;
+/** A paid app order of an app customer (own lines only; never contact details). */
+export interface VendorCustomerOrder {
+  id: string;
+  shortRef: string;
+  createdAt: string | null;
+  status: string;
+  orderStatus: string;
+  tab: 'open' | 'delivered' | 'cancelled';
+  paymentStatus: string | null;
+  totalTzs: number;
+  itemCount: number;
+}
+export interface VendorCustomerPayment {
+  id: string;
+  /** PMT-000001, continuous per vendor. */
+  number: string;
+  customerId: string;
+  status: 'recorded' | 'voided';
+  amountTzs: number;
+  method: string;
+  reference: string | null;
+  /** EAT day. */
+  receivedOn: string;
+  note: string | null;
+  clientRef: string;
+  recordedAt: string;
+  recordedBy: VendorSalePerson;
+  allocations: Array<{ saleId: string; saleNumber: string; amountTzs: number }>;
+  voidedAt: string | null;
+  voidedBy: VendorSalePerson;
+  voidReason: string | null;
+}
+export interface VendorCustomerPaymentInput {
+  clientRef: string;
+  amountTzs: number;
+  method: string;
+  reference?: string;
+  receivedOn?: string;
+  note?: string;
+  /** Manual; omitted → oldest due first. */
+  allocations?: Array<{ saleId: string; amountTzs: number }>;
+}
+export interface VendorAgingRow extends VendorAging {
+  customerId: string;
+  name: string | null;
+  /** Being added on the backend: the app buyer deleted their account ("Deleted member"). */
+  forgotten?: boolean;
+  source: 'manual' | 'marketplace';
+  owedTzs: number;
+  overdueTzs: number;
+  oldestDueDate: string | null;
+  maxDaysOverdue: number;
+  openSaleCount: number;
+  overdueSaleCount: number;
+}
+/** GET /vendor/receivables/aging: totals cover every customer who owes, not the bucket filter or the page. */
+export interface VendorAgingPage {
+  asOf: string;
+  totals: VendorAging & { owedTzs: number; overdueTzs: number; customerCount: number; overdueCustomerCount: number; openSaleCount: number; overdueSaleCount: number };
+  rows: VendorAgingRow[];
+  nextCursor: string | null;
 }
 
 export interface VendorPayments { todaySalesTzs: number; pendingSettlementTzs: number; [figure: string]: unknown }
