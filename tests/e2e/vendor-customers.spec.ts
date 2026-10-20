@@ -121,6 +121,7 @@ const base = (extra: Routes = {}): Routes => ({
   'GET /vendor/receivables/aging': { json: aging() },
   ...extra,
 });
+// Every page in this file installs the guard in mockApi(); a request outside localhost is aborted and recorded.
 const callsTo = (calls: Call[], method: string, path: string) => calls.filter(c => c.method === method && c.path === path);
 
 test.describe('gating', () => {
@@ -255,6 +256,9 @@ test.describe('add and edit', () => {
     await expect(page.getByTestId('customer-consent')).toHaveText('Only save details the customer agreed to give you.');
     await page.getByTestId('customer-save').click();
     await expect(page.getByText("Enter the customer's name.")).toBeVisible();
+    await page.getByTestId('customer-name').fill('A');
+    await page.getByTestId('customer-save').click();
+    await expect(page.getByText('Name must be 2–80 characters.')).toBeVisible();
     await page.getByTestId('customer-name').fill('Asha Said');
     await page.getByTestId('customer-phone').fill('12345');
     await page.getByTestId('customer-save').click();
@@ -499,6 +503,31 @@ test.describe('payments', () => {
     expect(callsTo(calls, 'POST', '/vendor/customers/cus_juma/payments/pay_1/void')[0].body).toEqual({ reason: 'Wrong customer' });
   });
 
+  test('staff with `customers` but not `sales` open a sale read-only: no void, no copy receipt', async ({ page }) => {
+    await signedInAs(page, STAFF);
+    const calls = await mockApi(page, base({
+      'GET /vendor/me': { json: me({ userType: 'vendor_staff', vendorRole: 'cashier', permissions: ['customers'] }) },
+      'GET /vendor/customers/cus_juma/sales/sale_r1': { json: { sale: {
+        id: 'sale_r1', number: 'R-000001', status: 'completed', kind: 'credit', soldAt: NOW, recordedAt: NOW, subtotalTzs: 20000, lineDiscountTzs: 0, discountTzs: 0,
+        totalTzs: 20000, paidTzs: 0, changeTzs: 0, note: null, createdBy: { id: 'usr_vendor', name: 'Asha' }, voidedBy: null, voidedAt: null, voidReason: null, lateRecorded: false,
+        lines: [{ nameSnapshot: 'Whey 1kg', variant: null, qty: 1, listPriceTzs: 20000, unitPriceTzs: 20000, priceChanged: false, priceChangedBy: null, discountTzs: 0, lineTotalTzs: 20000 }],
+        payments: [], customer: { id: 'cus_juma', name: 'Juma Mussa' }, dueDate: addDays(TODAY, -5), balanceTzs: 20000, paidAtSaleTzs: 0,
+      } } },
+    }));
+    await page.goto('/vendor/customers/?id=cus_juma');
+    await expect(page.getByTestId('customer-open-sales').getByRole('link', { name: 'R-000001' })).toHaveCount(0);
+    await page.getByTestId('customer-open-sales').getByTestId('customer-sale-open-sale_r1').click();
+    const detail = page.getByTestId('customer-sale-detail');
+    await expect(detail).toContainText('Whey 1kg');
+    await expect(page.getByTestId('customer-sale-balance')).toHaveText('TSh 20,000');
+    await expect(page.getByTestId('sale-void')).toHaveCount(0);
+    await expect(page.getByTestId('sale-copy')).toHaveCount(0);
+    await expect(page.getByRole('dialog').getByRole('button', { name: /void|copy/i })).toHaveCount(0);
+    expect(callsTo(calls, 'GET', '/vendor/customers/cus_juma/sales/sale_r1')).toHaveLength(1);
+    expect(callsTo(calls, 'GET', '/vendor/sales/sale_r1')).toHaveLength(0);
+    expect(calls.outside).toEqual([]);
+  });
+
   test('staff may not void another person\'s payment: no Void button; 403 void_not_allowed explains', async ({ page }) => {
     await signedInAs(page, STAFF);
     await mockApi(page, base({
@@ -646,6 +675,40 @@ test.describe('sales page (S3) with pay later', () => {
     await page.reload();
     await expect(page.getByTestId('order-buyer')).toHaveText('Neema Joseph');
     await expect(page.getByTestId('order-buyer-customer')).toHaveCount(0);
+  });
+
+  test('order buyer link follows buyer.customerLinked; without it, paid orders only', async ({ page }) => {
+    await signedInAs(page, VENDOR);
+    const order = (buyer: Record<string, unknown>, paymentStatus = 'paid') => ({
+      id: 'ord_1', shortRef: 'AB12CD', createdAt: NOW, status: 'pending', orderStatus: 'pending', nextStatuses: [], timeline: [],
+      items: [{ productId: 'p1', name: 'Whey', variant: null, qty: 1, priceTzs: 45000, image: null }], totalTzs: 45000, paymentStatus,
+      paymentMethod: 'mpesa', deliveryMethod: 'pickup', note: null, pickupGymId: null, pickupGym: null, buyer: { customerId: 'cus_app', displayName: 'Neema Joseph', ...buyer },
+    });
+    let reply = order({ customerLinked: false });
+    await mockApi(page, base({ 'GET /vendor/orders/ord_1': () => ({ json: reply }) }));
+    await page.goto('/vendor/orders/?id=ord_1');
+    await expect(page.getByTestId('order-buyer')).toHaveText('Neema Joseph');
+    await expect(page.getByTestId('order-buyer-customer')).toHaveCount(0);
+    reply = order({ customerLinked: true }, 'pending');
+    await page.reload();
+    await expect(page.getByTestId('order-buyer-customer')).toBeVisible();
+    reply = order({}, 'pending');
+    await page.reload();
+    await expect(page.getByTestId('order-buyer')).toHaveText('Neema Joseph');
+    await expect(page.getByTestId('order-buyer-customer')).toHaveCount(0);
+  });
+
+  test('a forgotten customer on aging rows and sale rows reads "Deleted member"', async ({ page }) => {
+    await signedInAs(page, VENDOR);
+    const a = aging();
+    await mockApi(page, base({
+      'GET /vendor/receivables/aging': { json: { ...a, rows: [{ ...a.rows[0], customerId: 'cus_gone', name: null, source: 'marketplace', forgotten: true }] } },
+      'GET /vendor/sales': { json: { sales: [creditRow({ customer: { id: 'cus_gone', name: null, forgotten: true } })], nextCursor: null, summary: { count: 1, totalTzs: 20000, voidedCount: 0, byMethod: [] } } },
+    }));
+    await page.goto('/vendor/customers/?view=owed');
+    await expect(page.getByTestId('owed-row-cus_gone')).toContainText('Deleted member');
+    await page.goto('/vendor/sales/');
+    await expect(page.getByTestId('sale-row-sale_r1')).toContainText('Deleted member');
   });
 });
 

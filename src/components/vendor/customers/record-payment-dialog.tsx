@@ -96,7 +96,7 @@ export function RecordPaymentDialog({
       // No answer: nothing may have been recorded; Try again re-sends the same reference (never two payments).
       if (!isRefusal(err)) { setAlert({ tone: 'error', text: t('vendor.pay.failed') }); return; }
       const code = errorCode(err);
-      const body = errorBody<{ owedTzs?: number; earliest?: string; latest?: string }>(err);
+      const body = errorBody<{ owedTzs?: number }>(err);
       if (code === 'overpayment') {
         if (typeof body?.owedTzs === 'number') setOwedOverride(body.owedTzs);
         onStale();
@@ -107,7 +107,7 @@ export function RecordPaymentDialog({
       } else if (code === 'reference_required') {
         setErrors({ reference: t('vendor.pos.referenceRequired') });
       } else if (code === 'received_on_invalid') {
-        setErrors({ date: fmt(t('vendor.pay.dateInvalid'), { earliest: receiptDay(body?.earliest ?? earliest, locale), latest: receiptDay(body?.latest ?? today, locale) }) });
+        setErrors({ date: t('vendor.pay.dateInvalid') });
       } else if (code === 'invalid_payment' || code === 'note_too_long') {
         setAlert({ tone: 'error', text: t('vendor.pay.invalid') });
       } else if (code === 'customer_archived') {

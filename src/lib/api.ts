@@ -323,6 +323,9 @@ export const api = {
     request<{ customer: VendorCustomerProfile }>(`/vendor/customers/${encodeURIComponent(id)}`, {}, token),
   vendorCustomerSales: (token: string, id: string, page: { limit?: number; cursor?: string | null } = {}) =>
     request<VendorSalePage>(`/vendor/customers/${encodeURIComponent(id)}/sales${qs({ limit: page.limit ?? 20, cursor: page.cursor })}`, {}, token),
+  /** One walk-in sale of this customer (read-only; for staff with `customers` but not `sales`). */
+  vendorCustomerSale: (token: string, id: string, saleId: string) =>
+    request<{ sale: VendorSale }>(`/vendor/customers/${encodeURIComponent(id)}/sales/${encodeURIComponent(saleId)}`, {}, token),
   vendorCustomerOrders: (token: string, id: string, page: { limit?: number; cursor?: string | null } = {}) =>
     request<{ orders: VendorCustomerOrder[]; nextCursor: string | null }>(`/vendor/customers/${encodeURIComponent(id)}/orders${qs({ limit: page.limit ?? 20, cursor: page.cursor })}`, {}, token),
   vendorCustomerPayments: (token: string, id: string, page: { from?: string; limit?: number; cursor?: string | null } = {}) =>
@@ -1978,7 +1981,8 @@ export interface VendorOrder {
   note: string | null;
   pickupGymId: string | null;
   pickupGym: { id: string; name: string | null } | null;
-  buyer: { customerId: string | null; displayName: string | null; phone?: string | null; contactVisibleUntil?: string | null };
+  /** customerLinked (S4, being added on the backend): the buyer is an app customer of mine whose profile can open. */
+  buyer: { customerId: string | null; customerLinked?: boolean; displayName: string | null; phone?: string | null; contactVisibleUntil?: string | null };
   deliveryAddress?: string | null;
 }
 
@@ -2018,8 +2022,8 @@ export interface VendorSaleRow {
   /** Still owed now; 0 for cash. */
   balanceTzs?: number;
   dueDate?: string | null;
-  /** Never contact details. */
-  customer?: { id: string; name: string | null } | null;
+  /** Never contact details. forgotten (being added on the backend): the app buyer deleted their account. */
+  customer?: { id: string; name: string | null; forgotten?: boolean } | null;
 }
 /** Completed sales over the whole from/to/createdBy range (not the page, not the status filter); cash net of change. */
 export interface VendorSaleSummary {
@@ -2077,7 +2081,7 @@ export interface VendorSale {
   }>;
   payments: Array<{ method: string; amountTzs: number; reference: string | null }>;
   /** S4 pay later. Older servers omit these. */
-  customer?: { id: string; name: string | null } | null;
+  customer?: { id: string; name: string | null; forgotten?: boolean } | null;
   dueDate?: string | null;
   /** Still owed now; 0 for cash. */
   balanceTzs?: number;
@@ -2205,6 +2209,8 @@ export interface VendorCustomerPaymentInput {
 export interface VendorAgingRow extends VendorAging {
   customerId: string;
   name: string | null;
+  /** Being added on the backend: the app buyer deleted their account ("Deleted member"). */
+  forgotten?: boolean;
   source: 'manual' | 'marketplace';
   owedTzs: number;
   overdueTzs: number;

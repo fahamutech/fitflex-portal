@@ -17,7 +17,7 @@ const MAX_NOTE = 500;
 type FieldName = 'name' | 'phone' | 'email' | 'address' | 'note';
 type Errors = Partial<Record<FieldName, string>>;
 const FIELD_ERRORS: Record<string, [FieldName, MessageKey]> = {
-  name_invalid: ['name', 'vendor.customers.nameRequired'],
+  name_invalid: ['name', 'vendor.customers.nameLength'],
   phone_invalid: ['phone', 'vendor.customers.phoneInvalid'],
   email_invalid: ['email', 'vendor.customers.emailInvalid'],
   address_too_long: ['address', 'vendor.customers.addressTooLong'],
@@ -66,7 +66,8 @@ export function CustomerFormDialog({
     const e: Errors = {};
     if (!app) {
       const name = form.name.trim();
-      if (name.length < NAME.min || name.length > NAME.max) e.name = t('vendor.customers.nameRequired');
+      if (!name) e.name = t('vendor.customers.nameRequired');
+      else if (name.length < NAME.min || name.length > NAME.max) e.name = t('vendor.customers.nameLength');
       if (form.phone.trim() && !normalisePhone(form.phone)) e.phone = t('vendor.customers.phoneInvalid');
       if (form.email.trim() && !isEmail(form.email.trim())) e.email = t('vendor.customers.emailInvalid');
       if (form.address.trim().length > MAX_ADDRESS) e.address = t('vendor.customers.addressTooLong');

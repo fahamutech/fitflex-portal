@@ -416,8 +416,9 @@ function OrderDetail({ id, onBack, onUpdated }: { id: string; onBack: () => void
         <CardContent className="space-y-3 text-sm">
           <p data-testid="order-buyer">
             {/* S4: the app customer's profile, when customers are on for this person and the order still names one
-                (a deleted buyer's old orders have customerId null: plain text). */}
-            {canCustomers(vendor.me) && o.buyer?.customerId
+                (a deleted buyer's old orders have customerId null: plain text). Linked = buyer.customerLinked; servers that
+                don't send it yet: paid orders only, the ones that make someone an app customer. */}
+            {canCustomers(vendor.me) && o.buyer?.customerId && (o.buyer.customerLinked ?? o.paymentStatus === 'paid')
               ? <Link href={`/vendor/customers/?id=${encodeURIComponent(o.buyer.customerId)}`} className="inline-flex min-h-11 items-center font-semibold text-[var(--color-brand-700)] underline-offset-4 hover:underline" data-testid="order-buyer-customer">{o.buyer?.displayName || t('vendor.orders.buyerUnnamed')}</Link>
               : (o.buyer?.displayName || t('vendor.orders.buyerUnnamed'))}
           </p>

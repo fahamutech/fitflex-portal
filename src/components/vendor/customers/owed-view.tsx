@@ -138,7 +138,7 @@ export function OwedView({
                   <Tr key={r.customerId} className="cursor-pointer hover:bg-[var(--color-bg-secondary)]" onClick={() => onOpen(r.customerId)} data-testid={`owed-row-${r.customerId}`}>
                     <Td>
                       <Link href={`?id=${encodeURIComponent(r.customerId)}`} onClick={e => { e.preventDefault(); e.stopPropagation(); onOpen(r.customerId); }} className={`${linkCls} [overflow-wrap:anywhere]`}>
-                        {customerName({ name: r.name }, t)}
+                        {customerName(r, t)}
                       </Link>
                     </Td>
                     {AGING_BUCKETS.map(b => <Td key={b} className={`whitespace-nowrap text-right tabular-nums ${r[b] ? '' : 'text-[var(--color-fg-quaternary)]'}`}>{r[b] ? money(r[b]) : '—'}</Td>)}
@@ -169,7 +169,7 @@ export function OwedView({
                 <Card className="p-0">
                   <Link href={`?id=${encodeURIComponent(r.customerId)}`} onClick={e => { e.preventDefault(); onOpen(r.customerId); }} className="block min-h-16 space-y-1 p-4" data-testid={`owed-card-${r.customerId}`}>
                     <span className="flex items-start justify-between gap-3">
-                      <span className="min-w-0 truncate font-semibold">{customerName({ name: r.name }, t)}</span>
+                      <span className="min-w-0 truncate font-semibold">{customerName(r, t)}</span>
                       <span className="shrink-0 whitespace-nowrap font-semibold tabular-nums">{money(r.owedTzs)}</span>
                     </span>
                     <span className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-[var(--color-fg-tertiary)]">

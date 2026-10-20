@@ -20,6 +20,7 @@ import { useToast } from '@/components/ui/toast';
 import { useApp } from '../../../../app/providers';
 import { AgingTiles, CreditBadges, linkCls, MoneyTile, OverdueBadge, rateLimitText, SourceBadge, TILE_GRID, useOnline } from './bits';
 import { CustomerFormDialog } from './customer-form-dialog';
+import { CustomerSaleDialog } from './customer-sale-dialog';
 import { PaymentDialog } from './payment-dialog';
 import { RecordPaymentDialog } from './record-payment-dialog';
 import { StatementDialog } from './statement-dialog';
@@ -62,6 +63,8 @@ export function CustomerProfile({
   const [duplicate, setDuplicate] = useState<VendorPhoneDuplicate>(initialDuplicate);
   /** The balance right after a payment was saved (shown on its receipt). */
   const [owedAfter, setOwedAfter] = useState<number | null>(null);
+  /** A sale opened read-only here (staff with `customers` but not `sales`). */
+  const [saleOpen, setSaleOpen] = useState<string | null>(null);
   const headingRef = useRef<HTMLHeadingElement>(null);
   const focused = useRef<string | null>(null);
   const cursors = useRef<Record<Tab, string | null>>({ sales: null, orders: null, payments: null });
@@ -184,9 +187,10 @@ export function CustomerProfile({
   const salesLinks = canWalkInSales(vendor.me);
   const ordersLinks = vendor.can('orders');
   const payDisabledWhy = c.archived ? t('vendor.pay.archived') : c.owedTzs <= 0 ? t('vendor.pay.nothingOwed') : !online ? t('vendor.pay.offline') : null;
+  // With `sales`: the Sales page (void, copy receipt). Without: a read-only view of this customer's sale.
   const saleRef = (saleId: string, number: string) => (salesLinks
     ? <Link href={`/vendor/sales/?id=${encodeURIComponent(saleId)}`} className={`${linkCls} font-mono`}>{number}</Link>
-    : <span className="whitespace-nowrap font-mono font-semibold">{number}</span>);
+    : <button type="button" className={`${linkCls} font-mono`} onClick={() => setSaleOpen(saleId)} data-testid={`customer-sale-open-${saleId}`}>{number}</button>);
 
   const listState = (p: Paged<unknown>, which: Tab, empty: string, body: ReactNode) => (
     p.rows == null ? <div className="p-6" aria-busy="true"><Spinner /></div>
@@ -433,6 +437,7 @@ export function CustomerProfile({
           onPayment(payment.id);
         }}
       />
+      <CustomerSaleDialog customerId={c.id} saleId={saleOpen} onClose={() => setSaleOpen(null)} />
       <StatementDialog open={statementOpen} customer={c} onClose={() => setStatementOpen(false)} />
       <PaymentDialog
         customerId={c.id}
