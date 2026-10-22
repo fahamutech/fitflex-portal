@@ -9,6 +9,7 @@ import { Alert, Badge, Button, Card, CardContent, Field, Input, PageHeader, Sele
 import { money } from '@/lib/admin-utils';
 import { ChallengeManager } from '@/components/challenge-manager';
 import { PeopleImport } from '@/components/b2b-people-import';
+import { CompanyPeopleOr } from '@/components/b2b-company-people';
 import { RewardQueue } from '@/components/reward-queue';
 import { GroupManager } from '@/components/group-manager';
 import type { MessageKey } from '@/lib/i18n';
@@ -114,10 +115,11 @@ export function OrgPeoplePage() {
       {(mine, token) => {
         if (!mine.permissions.includes('beneficiaries.read')) return <Alert tone="info">Your role doesn’t include the list of people. Ask your organisation’s owner or admin.</Alert>;
         // A company set up under Companies keeps its staff list there; its HR login manages it.
+        // B5b: while the server has ORG_ONLY_SPONSORS on, the staff list is managed here for every role that may.
         if (mine.organization.legacyCorporateId) {
-          return user?.userType === 'corporate_hr' || user?.userType === 'admin'
+          return <CompanyPeopleOr token={token} mine={mine}>{user?.userType === 'corporate_hr' || user?.userType === 'admin'
             ? <CompanyStaff token={token} />
-            : <Beneficiaries token={token} mine={mine} readOnlyNote="Your company’s staff list is managed by its HR login." />;
+            : <Beneficiaries token={token} mine={mine} readOnlyNote="Your company’s staff list is managed by its HR login." />}</CompanyPeopleOr>;
         }
         return <Beneficiaries token={token} mine={mine} />;
       }}

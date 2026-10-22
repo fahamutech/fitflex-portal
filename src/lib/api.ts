@@ -57,7 +57,7 @@ export function tokenRequiresPasswordChange(token: string | null | undefined): b
 // The backend ignores the header unless its V2 flags are on.
 export const IDENTITY_V2_CLIENT = 'identity-v2';
 
-type SessionResult = { token: string; user: { id: string; userType: string; gymId?: string; email?: string; portalUser?: boolean; aclPermissions?: string[]; organizationUser?: boolean; organizationRoles?: string[] } };
+type SessionResult = { token: string; user: { id: string; userType: string; gymId?: string; email?: string; portalUser?: boolean; aclPermissions?: string[]; organizationUser?: boolean; organizationRoles?: string[]; organizationIds?: string[] } };
 
 // The portal never registers anyone. It asks for an admin profile first (as it
 // always has), then for an existing gym owner profile, then an existing gym
@@ -78,6 +78,8 @@ const NO_SUCH_PROFILE = new Set(['admin_self_registration_not_allowed', 'profile
 export const ORG_BILLING_ROLES = new Set(['owner', 'admin', 'finance']);
 /** Roles that see the organisation's people (beneficiaries). Everyone sees its programmes. */
 export const ORG_PEOPLE_ROLES = new Set(['owner', 'admin', 'manager', 'hr', 'analyst']);
+/** An id no beneficiary can have (server ids are prefixed, e.g. b2bb_/cemp_): see api.orgOnlySponsors. */
+const ORG_FLAG_PROBE_ID = '__flag_probe__';
 
 /** How a person is named when adding them: the email or mobile number of their FitFlex account, or their user id. */
 export type UserContact = { userId?: string; email?: string; phone?: string };
@@ -759,7 +761,8 @@ export const api = {
     request<{ employee: CorporateEmployee }>(`/corporate/staff/${encodeURIComponent(employeeId)}/link`, { method: 'POST', body: JSON.stringify(contact ?? { userId: null }) }, token),
   /** HR sign-in: email + password (not Firebase). */
   hrLogin: (email: string, password: string) =>
-    request<{ token: string; user: { id: string; userType: string; email?: string; displayName?: string; corporateId?: string } }>(
+    // B5a (ORG_ONLY_SPONSORS on): a company HR login that reaches its organisation also gets the organisation marks.
+    request<{ token: string; user: { id: string; userType: string; email?: string; displayName?: string; corporateId?: string; organizationUser?: boolean; organizationRoles?: string[]; organizationIds?: string[] } }>(
       '/auth/login', { method: 'POST', body: JSON.stringify({ email, password, requestedRole: 'corporate_hr' }) }
     ),
   // ── Companies and their HR logins (admin) ──
@@ -808,8 +811,30 @@ export const api = {
     request<{ invite: B2BBeneficiaryInvite }>(`/b2b/organizations/${encodeURIComponent(id)}/beneficiary-invites/${encodeURIComponent(inviteId)}/cancel`, { method: 'POST', body: '{}' }, token),
   resendB2BBeneficiaryInvite: (token: string, id: string, inviteId: string) =>
     request<{ invite: B2BBeneficiaryInvite; sent: { email: boolean; sms: boolean }; emailConfigured: boolean; smsConfigured: boolean }>(`/b2b/organizations/${encodeURIComponent(id)}/beneficiary-invites/${encodeURIComponent(inviteId)}/resend`, { method: 'POST', body: '{}' }, token),
-  enrollB2BBeneficiary: (token: string, id: string, body: UserContact & { beneficiaryType?: string; externalReference?: string; groupName?: string; status?: string }) =>
-    request<{ beneficiary: B2BBeneficiary }>(`/b2b/organizations/${encodeURIComponent(id)}/beneficiaries`, { method: 'POST', body: JSON.stringify(body) }, token),
+  // A company's organisation with ORG_ONLY_SPONSORS on (B5a): written through to its staff list; `pin` is shown once.
+  // By contact, displayName is required and the reply carries no userId/linked (it doesn't say who is a member).
+  enrollB2BBeneficiary: (token: string, id: string, body: UserContact & { displayName?: string; beneficiaryType?: string; externalReference?: string; groupName?: string; status?: string }) =>
+    request<{ beneficiary: B2BBeneficiary; pin?: string | null; writtenThrough?: 'corporate_staff' }>(`/b2b/organizations/${encodeURIComponent(id)}/beneficiaries`, { method: 'POST', body: JSON.stringify(body) }, token),
+  /** B5a: link a company employee to their FitFlex member account; `{}` unlinks. 404 not_found while ORG_ONLY_SPONSORS is off. */
+  linkB2BBeneficiary: (token: string, id: string, beneficiaryId: string, contact: UserContact | Record<string, never>) =>
+    request<{ beneficiary: B2BBeneficiary; writtenThrough?: 'corporate_staff' }>(`/b2b/organizations/${encodeURIComponent(id)}/beneficiaries/${encodeURIComponent(beneficiaryId)}/link`, { method: 'POST', body: JSON.stringify(contact) }, token),
+  /**
+   * B5a: is ORG_ONLY_SPONSORS on? The server has no flag endpoint, so this asks the link route about an id
+   * that cannot exist: it answers 404 `not_found` while the flag is off, and (flag on) `beneficiary_not_found`,
+   * or `forbidden` for a role without beneficiaries.manage. Nothing is changed either way. Anything else
+   * (network, 5xx, an organisation the caller can't reach) is `unknown`, which callers treat as off.
+   */
+  orgOnlySponsors: async (token: string, orgId: string): Promise<'on' | 'off' | 'unknown'> => {
+    try {
+      await request(`/b2b/organizations/${encodeURIComponent(orgId)}/beneficiaries/${ORG_FLAG_PROBE_ID}/link`, { method: 'POST', body: '{}' }, token);
+      return 'unknown';
+    } catch (err) {
+      const code = err instanceof ApiError ? (err.body as { error?: string } | null)?.error : undefined;
+      if (err instanceof ApiError && err.status === 404 && code === 'not_found') return 'off';
+      if (code === 'beneficiary_not_found' || code === 'forbidden') return 'on';
+      return 'unknown';
+    }
+  },
   setB2BBeneficiaryStatus: (token: string, id: string, beneficiaryId: string, status: string) =>
     request<{ beneficiary: B2BBeneficiary }>(`/b2b/organizations/${encodeURIComponent(id)}/beneficiaries/${encodeURIComponent(beneficiaryId)}/status`, { method: 'POST', body: JSON.stringify({ status }) }, token),
   // ── B2B wellness programmes and benefits ──
@@ -2734,6 +2759,12 @@ export interface B2BBeneficiary {
   enrolledAt: string | null;
   source: 'b2b' | 'corporate_employee';
   readOnly: boolean;
+  // B5a, a company's employee with ORG_ONLY_SPONSORS on: the staff-list status, whether a FitFlex
+  // account is linked, and (only for beneficiaries.manage) the contact details.
+  employeeStatus?: 'pending' | 'active' | 'suspended' | 'exited';
+  linked?: boolean;
+  email?: string | null;
+  phone?: string | null;
 }
 export type B2BProgramStatus = 'draft' | 'pending' | 'active' | 'paused' | 'expired' | 'cancelled';
 export interface B2BProgramReference {
@@ -3554,6 +3585,12 @@ export interface B2BImportResult {
   /** False when FitFlex can't send email codes, so email-only people can't confirm their email. Absent on older backends. */
   emailCodesAvailable?: boolean;
   problems: Array<{ line: number; name: string | null; contact: string | null; problem: string }>;
+  // B5a, a company's organisation with ORG_ONLY_SPONSORS on: added to its staff list, nobody invited.
+  companyStaff?: boolean;
+  /** Free seats before this list; null = no seat limit. */
+  seatsAvailable?: number | null;
+  /** Activation PINs, one for every person added (linked or not): shown once, never stored. */
+  credentials?: Array<{ line: number; employeeId: string; displayName: string | null; pin: string }>;
 }
 export interface B2BBeneficiaryInvite {
   id: string; organizationId: string; email: string | null; phone: string | null; displayName: string | null; externalReference: string | null; groupName: string | null;

@@ -32,6 +32,8 @@ const ERRORS: Record<string, string> = {
 // Codes whose text lives in i18n (English + Swahili).
 const I18N_ERRORS: Partial<Record<string, MessageKey>> = {
   user_not_found: 'b2b.errors.userNotFound',
+  // B5a (ORG_ONLY_SPONSORS on): a company HR login can only be a user of its own company's organisation.
+  hr_login_other_company: 'b2b.hrOrg.err.hr_login_other_company',
 };
 // byId: the request named the person by user ID, so user_not_found means the ID matched no account.
 const message = (err: unknown, fallback: string, t: (k: MessageKey) => string, byId = false) => {

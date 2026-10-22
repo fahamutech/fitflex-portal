@@ -160,7 +160,8 @@ export type B2BMock = {
   on: (method: string, path: RegExp, handler: Handler) => void;
 };
 
-export async function setupB2B(page_: Page, user: Json = ADMIN, extra: Array<[string, RegExp, Handler]> = []): Promise<B2BMock> {
+/** `user: null` starts signed out (nothing stored), e.g. to drive the sign-in page. */
+export async function setupB2B(page_: Page, user: Json | null = ADMIN, extra: Array<[string, RegExp, Handler]> = []): Promise<B2BMock> {
   const calls: Call[] = [];
   const unmatched: Call[] = [];
   const routes: Array<[string, RegExp, Handler]> = [...extra];
@@ -195,6 +196,9 @@ export async function setupB2B(page_: Page, user: Json = ADMIN, extra: Array<[st
     ['GET', /^\/b2b\/organizations\/([^/]+)\/beneficiary-invites$/, () => ({ items: [], invited: 0, emailConfigured: false, smsConfigured: false })],
     ['GET', /^\/b2b\/organizations\/([^/]+)\/program-lifecycle$/, () => ({ today: '2026-10-12', items: [] })],
     ['POST', /^\/b2b\/organizations\/([^/]+)\/beneficiaries$/, c => ({ beneficiary: { ...BENEFICIARIES[0], id: 'ben-new', displayName: 'New Person', beneficiaryType: c.body?.beneficiaryType ?? 'member' } })],
+    // B5b: the portal asks the link route about an id that can't exist to learn whether ORG_ONLY_SPONSORS is on.
+    // Off here (404 not_found), as on a server without the flag; a spec answers beneficiary_not_found for on.
+    ['POST', /^\/b2b\/organizations\/([^/]+)\/beneficiaries\/__flag_probe__\/link$/, () => ({ status: 404, json: { error: 'not_found' } })],
     ['POST', /^\/b2b\/organizations\/([^/]+)\/beneficiaries\/([^/]+)\/status$/, (c, m) => ({ beneficiary: { ...BENEFICIARIES.find(b => b.id === m[2]), status: c.body?.status } })],
     // Programmes and benefits
     ['GET', /^\/b2b\/organizations\/([^/]+)\/programs$/, () => page([PROGRAM, PROGRAM_PENDING])],
@@ -211,14 +215,14 @@ export async function setupB2B(page_: Page, user: Json = ADMIN, extra: Array<[st
     ['GET', /^\/admin\/b2b\/collections$/, () => COLLECTIONS],
     ['GET', /^\/admin\/b2b\/payment-instructions$/, () => details()],
     ['PUT', /^\/admin\/b2b\/payment-instructions$/, c => {
-      pendingChange = { changeId: `pic_${String(c.body?.bankName ?? 'x').replace(/\W/g, '').toLowerCase()}`, instructions: { ...instructions, ...c.body }, requestedBy: user.id, requestedAt: '2026-10-19T09:30:00.000Z' };
+      pendingChange = { changeId: `pic_${String(c.body?.bankName ?? 'x').replace(/\W/g, '').toLowerCase()}`, instructions: { ...instructions, ...c.body }, requestedBy: user?.id, requestedAt: '2026-10-19T09:30:00.000Z' };
       return { status: 202, json: details() };
     }],
     ['POST', /^\/admin\/b2b\/payment-instructions\/confirm$/, c => {
       if (!c.body?.changeId) return { status: 400, json: { error: 'change_id_required' } };
       if (!pendingChange) return { status: 409, json: { error: 'no_pending_change' } };
       if (pendingChange.changeId !== c.body.changeId) return { status: 409, json: { error: 'change_superseded', changeId: pendingChange.changeId } };
-      if (pendingChange.requestedBy === user.id) return { status: 403, json: { error: 'cannot_confirm_own_request' } };
+      if (pendingChange.requestedBy === user?.id) return { status: 403, json: { error: 'cannot_confirm_own_request' } };
       instructions = { ...pendingChange.instructions }; pendingChange = null;
       return { status: 200, json: details() };
     }],
@@ -284,9 +288,11 @@ export async function setupB2B(page_: Page, user: Json = ADMIN, extra: Array<[st
     ['GET', /^\/admin\/shop-merch$/, () => ({ status: 404, json: { error: 'feature_disabled' } })],
   ];
 
-  await page_.addInitScript(([u]) => {
-    localStorage.setItem('token', 'b2b-e2e-token'); localStorage.setItem('user', JSON.stringify(u)); localStorage.setItem('locale', 'en');
-  }, [user]);
+  if (user) {
+    await page_.addInitScript(([u]) => {
+      localStorage.setItem('token', 'b2b-e2e-token'); localStorage.setItem('user', JSON.stringify(u)); localStorage.setItem('locale', 'en');
+    }, [user]);
+  }
 
   await page_.route(`${API}/**`, async route => {
     const req = route.request();

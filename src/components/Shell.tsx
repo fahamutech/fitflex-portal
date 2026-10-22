@@ -52,6 +52,8 @@ import { PhotoPanel } from './photo-panel';
 import { HERO_IMAGES_ADMIN, PHOTO_HERO_UI } from '@/lib/flags';
 import { useShopBannersAvailable } from './shop-banners-gate';
 import { useTaxRatesAvailable } from './tax-rates-gate';
+import { useHrToOrgRefresh } from './hr-to-org-refresh';
+import { isHrInOrg, orgHome, orgPathForHr } from '@/lib/hr-to-org';
 
 /** SHOP_BANNERS as /vendor/me reports it (tools.merch.banners); undefined when the server doesn't say. */
 const vendorBannersTool = (tools: VendorTools | null | undefined) => {
@@ -130,10 +132,12 @@ function vendorNav(permissions: string[], tools: VendorTools | null | undefined,
 }
 
 /** Where each kind of session lives. */
-export function homeFor(user: { userType?: string } | null | undefined) {
+export function homeFor(user: { userType?: string; organizationUser?: boolean; organizationRoles?: string[] } | null | undefined) {
   if (!user) return '/login';
   if (VENDOR_USER_TYPES.has(user.userType ?? '')) return '/vendor';
   if (user.userType === 'admin') return '/admin';
+  // B5b: a company HR login the server marked for the organisation area (ORG_ONLY_SPONSORS) opens /org.
+  if (isHrInOrg(user)) return orgHome(user.organizationRoles);
   if (user.userType === 'corporate_hr') return '/hr';
   return '/dashboard';
 }
@@ -437,6 +441,8 @@ export function Shell({ children }: { children: ReactNode }) {
   );
 
   const taxRatesOn = useTaxRatesAvailable(token, !!isAdminUser && hasPermission('payments'));
+  // B5b: an HR session stored before ORG_ONLY_SPONSORS went on picks up the organisation marks.
+  useHrToOrgRefresh();
 
   // Build the visible nav — portal staff only see items their ACL permits.
   // Overview (/admin) is always visible to all admin users.
@@ -472,12 +478,14 @@ export function Shell({ children }: { children: ReactNode }) {
     if (isVendor) return !inVendorArea || vendorPermissionMissing ? '/vendor/' : null;
     if (inVendorArea) return homeFor(user);
 
+    // B5b: company HR in the organisation area: an old /hr page opens the /org page of the same name.
+    if (isOrgUser && isHrInOrg(user)) { const to = orgPathForHr(path); if (to) return to; }
     // Someone signed in for an organisation's billing only ever sees /org; nobody else does.
     if (isOrgUser && !path.startsWith('/org')) return orgNav(user?.organizationRoles)[0].href;
     if (!isOrgUser && path.startsWith('/org')) return user?.userType === 'admin' ? '/admin' : user?.userType === 'corporate_hr' ? '/hr' : '/dashboard';
 
     // Company HR only ever sees /hr; nobody else does.
-    if (user?.userType === 'corporate_hr' && !path.startsWith('/hr')) return '/hr';
+    if (user?.userType === 'corporate_hr' && !isOrgUser && !path.startsWith('/hr')) return '/hr';
     if (user?.userType !== 'corporate_hr' && path.startsWith('/hr')) return user?.userType === 'admin' ? '/admin' : '/dashboard';
 
     // Block non-admin users from admin routes

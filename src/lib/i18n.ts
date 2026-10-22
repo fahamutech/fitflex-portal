@@ -3403,6 +3403,8 @@ export const messages = {
     "b2b.import.emailOnlyWarning": "{n} people are listed by email only. They are matched only after confirming that email in FitFlex; add mobile numbers where you can.",
     "b2b.errors.userNotFound": "Nobody has confirmed that email or number in FitFlex. They need to sign up in the app, or confirm it under Mobile number and email.",
     "b2b.errors.userIdNotFound": "No FitFlex account has that ID.",
+    // Phase B · B5b: company HR in the organisation area (src/lib/i18n-hr-org.ts).
+    ...hrOrgMessages.en,
   },
   sw: {
     'app.title': 'FitFlex Af — Portal ya Waendeshaji',
@@ -6811,8 +6813,13 @@ export const messages = {
     "b2b.import.emailOnlyWarning": "Watu {n} wameorodheshwa kwa barua pepe pekee. Wataunganishwa baada ya kuthibitisha barua pepe hiyo kwenye FitFlex; ongeza namba za simu inapowezekana.",
     "b2b.errors.userNotFound": "Hakuna aliyethibitisha barua pepe au namba hiyo kwenye FitFlex. Wanahitaji kujisajili kwenye programu, au kuithibitisha katika Namba ya simu na barua pepe.",
     "b2b.errors.userIdNotFound": "Hakuna akaunti ya FitFlex yenye kitambulisho hicho.",
+    ...hrOrgMessages.sw,
   }
 } as const;
+
+// Imported here, not at the top, so it doesn't overlap other open i18n changes (portal#52).
+// ES imports are hoisted, so this is the same as importing at the top.
+import { hrOrgMessages } from './i18n-hr-org';
 
 export type MessageKey = keyof typeof messages['en'];
 
