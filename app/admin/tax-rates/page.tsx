@@ -3,8 +3,8 @@ import { Fragment, useCallback, useEffect, useState } from 'react';
 import { ChevronDown, ChevronRight, Plus, RefreshCw } from 'lucide-react';
 import type { MessageKey } from '@/lib/i18n';
 import { ApiError } from '@/lib/api';
-import { eatDateTime, errorBody, errorCode, receiptDay } from '@/lib/vendor';
-import { adminTaxApi, eatTomorrow, type TaxCode, type TaxRate, type TaxRatesPage, type TaxRateStatus } from '@/lib/vendor-documents';
+import { eatDateTime, errorBody, errorCode, fmt, receiptDay } from '@/lib/vendor';
+import { actorId, actorName, adminTaxApi, eatTomorrow, type TaxActor, type TaxCode, type TaxRate, type TaxRatesPage, type TaxRateStatus } from '@/lib/vendor-documents';
 import {
   Alert, Badge, Button, Card, Checkbox, EmptyState, ErrorState, Field, Input, PageHeader, Select, SkeletonTable, Table, TBody, Td, Textarea, Th, THead, Tr, useToast,
 } from '@/components/shared';
@@ -50,7 +50,15 @@ export default function TaxRatesPageView() {
   useEffect(() => { void load(); }, [load]);
 
   const statusLabel = (s: TaxRateStatus) => t(`admin.taxRates.st.${s}` as MessageKey);
-  const who = (id: string | null | undefined) => (!id ? '—' : id === user?.id ? t('admin.taxRates.you') : id);
+  /** "You", the person's name, "System" for the seed, else the id (older backends send ids only). */
+  const who = (a: TaxActor) => {
+    const id = actorId(a);
+    const name = actorName(a);
+    if (!id && !name) return '—';
+    if (id && id === user?.id) return t('admin.taxRates.you');
+    if (id === 'system' || name === 'System') return t('admin.taxRates.system');
+    return name || id || '—';
+  };
   const nameOf = (r: { nameEn: string | null; nameSw: string | null }) => (locale === 'sw' ? r.nameSw || r.nameEn : r.nameEn || r.nameSw) || '—';
 
   /** One refusal → its message; null when unknown (the caller shows a generic error). */
@@ -136,7 +144,7 @@ export default function TaxRatesPageView() {
                   );
                 }
                 return rows.map(r => {
-                  const mine = r.proposedBy === user?.id;
+                  const mine = !!user?.id && actorId(r.proposedBy) === user.id;
                   const pending = r.status === 'pending';
                   const expanded = !!open[r.id];
                   const helpId = `tax-same-admin-${r.id}`;
@@ -184,6 +192,9 @@ export default function TaxRatesPageView() {
                       {expanded && (
                         <Tr id={`tax-history-${r.id}`} data-testid={`tax-history-${r.id}`}>
                           <Td colSpan={8} className="bg-[var(--color-bg-secondary)]">
+                            {actorId(r.decidedBy) || actorName(r.decidedBy) ? (
+                              <p className="mb-2 text-sm" data-testid={`tax-decided-by-${r.id}`}>{fmt(t('admin.taxRates.decidedBy'), { name: who(r.decidedBy) })}{r.decidedAt ? ` · ${eatDateTime(r.decidedAt, locale)}` : ''}</p>
+                            ) : null}
                             {r.reason && <p className="mb-2 text-sm"><span className="font-medium">{t('admin.taxRates.reason')}:</span> <span className="[overflow-wrap:anywhere]">{r.reason}</span></p>}
                             {r.history.length === 0 ? <p className="text-sm text-[var(--color-fg-tertiary)]">{t('admin.taxRates.historyEmpty')}</p> : (
                               <ul className="space-y-1 text-sm">
