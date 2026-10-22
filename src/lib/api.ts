@@ -3531,6 +3531,8 @@ export interface B2BProgramLifecycle {
 }
 export interface B2BImportResult {
   dryRun?: boolean; importId?: string; total: number; enrolled: number; invited: number; unchanged: number; rejected: number; withoutEmail: number; withoutPhone: number; emailConfigured: boolean; smsConfigured: boolean;
+  /** False when FitFlex can't send email codes, so email-only people can't confirm their email. Absent on older backends. */
+  emailCodesAvailable?: boolean;
   problems: Array<{ line: number; name: string | null; contact: string | null; problem: string }>;
 }
 export interface B2BBeneficiaryInvite {
