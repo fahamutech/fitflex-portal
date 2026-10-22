@@ -409,7 +409,7 @@ export default function MembersPage() {
             <Field
               label={t('admin.member.dateOfBirth')}
               error={formErrors.dateOfBirth}
-              hint={storedDobUntouched() ? t('admin.member.dobStoredInvalid').replace('{value}', String(editing?.memberProfile?.dateOfBirth ?? '')) : undefined}
+              hint={storedDobUntouched() ? t('admin.member.dobStoredInvalid').replace('{value}', () => String(editing?.memberProfile?.dateOfBirth ?? '')) : undefined}
             >
               <Input
                 type="date"
@@ -500,7 +500,7 @@ export default function MembersPage() {
         <DialogFooter>
           <Button variant="secondary" size="md" onClick={() => setDialogOpen(false)} disabled={busy}>Cancel</Button>
           <Button variant="primary" size="md" onClick={handleSave} disabled={busy}>
-            {busy ? 'Saving...' : editing ? 'Update' : 'Create'}
+            {busy ? 'Saving...' : editing ? t('admin.member.update') : 'Create'}
           </Button>
         </DialogFooter>
       </Dialog>

@@ -94,7 +94,7 @@ test('Swahili: the refusal reads in Swahili', async ({ page }) => {
   await page.getByTitle('Edit member').click();
   const dialog = page.getByRole('dialog');
   await page.getByTestId('member-dob').fill('2000-01-31');
-  await dialog.getByRole('button', { name: 'Update' }).click();
+  await dialog.getByRole('button', { name: 'Sasisha' }).click();
   await expect(dialog.getByText('Weka tarehe sahihi ya kuzaliwa.')).toBeVisible();
 });
 
@@ -110,4 +110,13 @@ test('a saved date in an old format is kept (sent as null) when the admin leaves
   await dialog.getByRole('button', { name: 'Update' }).click();
   await expect.poll(() => posts.length).toBe(1);
   expect(posts[0]).toMatchObject({ id: legacy.id, displayName: 'Dob Member Renamed', memberProfile: { dateOfBirth: null } });
+});
+
+test('a saved value with $ patterns is shown as written', async ({ page }) => {
+  await signIn(page);
+  const legacy = { ...member, memberProfile: { dateOfBirth: "$&$'1990" } };
+  await mockApi(page, [legacy], (body) => ({ status: 200, json: { ...legacy, ...body } }));
+  await page.goto('/admin/members');
+  await page.getByTitle('Edit member').click();
+  await expect(page.getByRole('dialog').getByText(`The saved date of birth "$&$'1990" is not a real date. Pick a new one, or press Update without changing it to keep it as it is.`)).toBeVisible();
 });
