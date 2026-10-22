@@ -4,6 +4,15 @@ const BASE = process.env.NEXT_PUBLIC_API_BASE || 'https://fitflex-faas.bfast.sma
 /** The API server address (for feature modules that build their own requests, e.g. src/lib/shop-banners.ts). */
 export const API_BASE = BASE;
 
+/** Admin view-only read of a partner's declared details (GET /admin/{trainers|gym-owners}/:id/personal-details). */
+export interface PartnerPersonalDetails {
+  dateOfBirth: string | null;
+  age: number | null;
+  gender: 'male' | 'female' | 'other' | null;
+  genderFrom: 'trainer_profile' | 'person' | null;
+  source: 'person' | 'member' | null;
+}
+
 export class ApiError extends Error {
   status: number;
   body: unknown;
@@ -995,6 +1004,9 @@ export const api = {
   deleteGym: (token: string, id: string) =>
     request<{ ok: boolean; gym: Gym }>(`/admin/gyms/${id}`, { method: 'DELETE' }, token),
   gymOwners: (token: string) => request<GymOwner[]>('/admin/gym-owners', {}, token),
+  /** View only, audited server-side: call only when an admin opens this owner's personal details. `id` is the owner user id. */
+  adminGymOwnerPersonalDetails: (token: string, id: string) =>
+    request<{ ownerId: string; personalDetails: PartnerPersonalDetails }>(`/admin/gym-owners/${encodeURIComponent(id)}/personal-details`, {}, token),
   /** Lightweight owner refs (id/displayName/email/gymIds) — use for owner-name lookups instead of the full gymOwners() list. */
   gymOwnerRefs: (token: string) => request<GymOwnerRef[]>('/admin/gym-owners?refs=true', {}, token),
   saveGymOwner: (token: string, owner: Partial<GymOwner>) =>
@@ -1002,6 +1014,9 @@ export const api = {
   deleteGymOwner: (token: string, id: string) =>
     request<{ ok: boolean; owner: GymOwner }>(`/admin/gym-owners/${id}`, { method: 'DELETE' }, token),
   adminTrainers: (token: string) => request<TrainerProfile[]>('/admin/trainers', {}, token),
+  /** View only, audited server-side: call only when an admin opens this trainer's personal details. `id` is the trainer profile id. */
+  adminTrainerPersonalDetails: (token: string, id: string) =>
+    request<{ trainerId: string; userId: string | null; personalDetails: PartnerPersonalDetails }>(`/admin/trainers/${encodeURIComponent(id)}/personal-details`, {}, token),
   /** Lightweight trainer refs (id/displayName/email/gymIds) — use for trainer-name/assignment lookups instead of the full adminTrainers() list. */
   adminTrainerRefs: (token: string) => request<TrainerRef[]>('/admin/trainers?refs=true', {}, token),
   saveTrainer: (token: string, trainer: Partial<TrainerProfile>) =>

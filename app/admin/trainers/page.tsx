@@ -12,6 +12,7 @@ import { statusTone, statusLabel, money, currencyLabel, trainerNames } from '@/l
 import { GymCreateForm, GymDraft, BLANK_GYM_DRAFT, validateGymDraft } from '@/components/gym-create-form';
 import { OwnerInlineForm, OwnerFormDraft, BLANK_OWNER_DRAFT, validateOwnerDraft } from '@/components/owner-inline-form';
 import { SOCIAL_PLATFORMS, cleanSocialLinks } from '@/lib/social-handles';
+import { PartnerPersonalDetails } from '@/components/partner-personal-details';
 
 export default function TrainersPage() {
   const { token, user, t } = useApp();
@@ -393,6 +394,13 @@ export default function TrainersPage() {
           <Field label="Email" error={formErrors.email}>
             <Input type="email" value={draft.email || ''} onChange={e => { setDraft({ ...draft, email: e.target.value }); setFormErrors(prev => { const { email, ...rest } = prev; return rest; }); }} />
           </Field>
+          {editing && (
+            <PartnerPersonalDetails
+              subjectId={editing.id}
+              testId="trainer-personal-details"
+              load={() => api.adminTrainerPersonalDetails(token, editing.id)}
+            />
+          )}
           <Field label="Trainer images" hint="Upload up to five profile and portfolio photos. PNG, JPG, or WEBP.">
             <ImageUpload
               token={token}
