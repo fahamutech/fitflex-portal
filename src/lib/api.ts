@@ -70,9 +70,14 @@ const PORTAL_SIGN_IN_ROLES = [
   // A business that sells on FitFlex, and its staff (vendor portal, S2). Never created here.
   { requestedRole: 'vendor', existingOnly: true },
   { requestedRole: 'vendor_staff', existingOnly: true },
+  // Running-event organizers and their staff (events S2, decision D3). Never created here: POST /me/organizer does.
+  { requestedRole: 'event_organizer', existingOnly: true },
+  { requestedRole: 'organizer_staff', existingOnly: true },
 ];
 /** Session user types that open the vendor area (/vendor). */
 export const VENDOR_USER_TYPES = new Set(['vendor', 'vendor_staff']);
+/** Session user types that open the organizer area (/organizer) — events S2 (D3). */
+export const ORGANIZER_USER_TYPES = new Set(['event_organizer', 'organizer_staff']);
 const NO_SUCH_PROFILE = new Set(['admin_self_registration_not_allowed', 'profile_not_found']);
 /** Roles in a B2B organisation that see its billing (invoices, payments, statement). */
 export const ORG_BILLING_ROLES = new Set(['owner', 'admin', 'finance']);
@@ -1264,6 +1269,76 @@ export const api = {
     // the portal domain.
     return { ...body, url: `${BASE}${body.url}`, thumbnailUrl: `${BASE}${body.thumbnailUrl}` } as UploadedFile;
   },
+
+  // ─── Events S2: public options, organizer self-service, partner KYC self-service, admin moderation (spec §14) ───
+  /** Public, no auth; answers with the server flag off too (`discovery: false`). */
+  eventsOptions: () => request<EventsOptions>('/events/options'),
+
+  /** 404 `no_organizer` when this person has none; 404 `feature_disabled` with the server flag off. */
+  organizerMe: (token: string) => request<OrganizerMe>('/organizer/me', {}, token),
+  /** Creates the organizer (draft), its owner staff row and the KYC case. Auth-touching (rule 6, D3). */
+  createOrganizer: (token: string, body: { name: string; timezone: string; contactPhone: string; contactEmail?: string }) =>
+    request<{ organizer: OrganizerMe['organizer']; kycCaseId: string; personaId: string }>('/me/organizer', { method: 'POST', body: JSON.stringify(body) }, token),
+  organizerSummary: (token: string) => request<OrganizerSummary>('/organizer/summary', {}, token),
+  organizerEvents: (token: string, query: { status?: string; type?: string; cursor?: string | null; limit?: number } = {}) =>
+    request<EventsPage<OrganizerEventRow>>(`/organizer/events${qs(query)}`, {}, token),
+  createOrganizerEvent: (token: string, body: { title: string }) =>
+    request<{ id: string; version: number }>('/organizer/events', { method: 'POST', body: JSON.stringify(body) }, token),
+  organizerEvent: (token: string, id: string) => request<EventDocument>(`/organizer/events/${encodeURIComponent(id)}`, {}, token),
+  patchOrganizerEvent: (token: string, id: string, body: EventPatch) =>
+    request<{ version: number; updatedAt: string; material: boolean }>(`/organizer/events/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(body) }, token),
+  /** submit · withdraw · cancel {reason, note{en,sw}} · complete · archive → { status }. */
+  organizerEventAction: (token: string, id: string, action: EventOrganizerAction, body?: { reason?: string; note?: Bilingual }) =>
+    request<{ status: EventStatus }>(`/organizer/events/${encodeURIComponent(id)}/${action}`, { method: 'POST', body: JSON.stringify(body ?? {}) }, token),
+  deleteOrganizerEvent: (token: string, id: string) => request<null>(`/organizer/events/${encodeURIComponent(id)}`, { method: 'DELETE' }, token),
+  organizerEventChanges: (token: string, id: string, cursor?: string | null) =>
+    request<EventsPage<EventChange>>(`/organizer/events/${encodeURIComponent(id)}/changes${qs({ cursor })}`, {}, token),
+  organizerStaff: (token: string) => request<{ items: OrganizerStaffRow[] }>('/organizer/staff', {}, token),
+  /** Phone or email only (no userId): 400 `invalid_contact` otherwise. */
+  inviteOrganizerStaff: (token: string, body: { email?: string; phone?: string; role: OrganizerRole }) =>
+    request<{ invitation: OrganizerStaffRow }>('/organizer/staff', { method: 'POST', body: JSON.stringify(body) }, token),
+  changeOrganizerStaffRole: (token: string, id: string, role: OrganizerRole) =>
+    request<OrganizerStaffRow>(`/organizer/staff/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify({ role }) }, token),
+  removeOrganizerStaff: (token: string, id: string) => request<null>(`/organizer/staff/${encodeURIComponent(id)}`, { method: 'DELETE' }, token),
+
+  // Partner KYC self-service (existing functions/partner-kyc.mjs routes; the organizer onboarding checklist sits on them).
+  myKyc: (token: string) => request<MyKyc>('/me/kyc', {}, token),
+  myKycBusiness: (token: string, body: Record<string, unknown>) => request<MyKyc>('/me/kyc/business', { method: 'PUT', body: JSON.stringify(body) }, token),
+  myKycPerson: (token: string, role: string, body: Record<string, unknown>) =>
+    request<MyKyc>(`/me/kyc/people/${encodeURIComponent(role)}`, { method: 'PUT', body: JSON.stringify(body) }, token),
+  /** multipart/form-data, field "file" (PDF, JPEG, PNG or WebP, up to 10 MB). */
+  myKycUploadDocument: async (token: string, requirementKey: string, file: File): Promise<MyKyc> => {
+    const form = new FormData();
+    form.append('file', file, file.name);
+    const res = await fetch(`${BASE}/me/kyc/documents/${encodeURIComponent(requirementKey)}/file`, {
+      method: 'POST', headers: { authorization: `Bearer ${token}`, 'x-fitflex-client': IDENTITY_V2_CLIENT }, body: form,
+    });
+    const body = await res.json().catch(() => null);
+    if (res.status === 401) notifyUnauthorized();
+    if (!res.ok) throw new ApiError(res.status, body);
+    return body as MyKyc;
+  },
+  myKycAddSettlementAccount: (token: string, body: { method: 'bank' | 'mobile_money'; provider: string; accountName: string; accountNumber: string; branch?: string }) =>
+    request<MyKyc>('/me/kyc/settlement-accounts', { method: 'POST', body: JSON.stringify(body) }, token),
+  myKycAgreements: (token: string, lang: 'en' | 'sw') => request<{ agreements: MyKycAgreement[] }>(`/me/kyc/agreements${qs({ lang })}`, {}, token),
+  myKycAcceptAgreement: (token: string, body: { agreementType: string; version: string }) =>
+    request<MyKyc>('/me/kyc/agreements', { method: 'POST', body: JSON.stringify(body) }, token),
+  /** 409 `kyc_incomplete { missing }` until the checklist is ready. */
+  myKycSubmit: (token: string) => request<MyKyc>('/me/kyc/submit', { method: 'POST' }, token),
+  myKycWithdraw: (token: string) => request<MyKyc>('/me/kyc/withdraw', { method: 'POST' }, token),
+
+  // Admin, scope `events`.
+  adminEvents: (token: string, query: { status?: string; cursor?: string | null; limit?: number } = {}) =>
+    request<EventsPage<AdminEventRow>>(`/admin/events${qs(query)}`, {}, token),
+  adminEventsSummary: (token: string) => request<{ submitted: number }>('/admin/events/summary', {}, token),
+  adminEvent: (token: string, id: string) => request<AdminEventDetail>(`/admin/events/${encodeURIComponent(id)}`, {}, token),
+  adminEventDecision: (token: string, id: string, body: { decision: 'approve' | 'reject'; reason?: string; note?: string }) =>
+    request<{ status: EventStatus }>(`/admin/events/${encodeURIComponent(id)}/decision`, { method: 'POST', body: JSON.stringify(body) }, token),
+  adminEventAction: (token: string, id: string, action: 'cancel' | 'archive' | 'complete', body?: { reason?: string; note?: Bilingual }) =>
+    request<{ status: EventStatus }>(`/admin/events/${encodeURIComponent(id)}/${action}`, { method: 'POST', body: JSON.stringify(body ?? {}) }, token),
+  adminEventAudit: (token: string, id: string) => request<EventsPage<EventAuditRow>>(`/admin/events/${encodeURIComponent(id)}/audit`, {}, token),
+  adminEventsAudit: (token: string, query: { action?: string; cursor?: string | null } = {}) =>
+    request<EventsPage<EventAuditRow>>(`/admin/events/audit${qs(query)}`, {}, token),
 };
 
 // ─── App photos (design spec photo-hero-screens §36–§37; backend functions#216) ───
@@ -3779,4 +3854,97 @@ export interface ExerciseOptions {
   equipment: string[];
   environments: string[];
   goals: string[];
+}
+
+// ─── Events S2 (design spec events-s2-organizer-and-discovery §14; decisions D3, D4, D5) ───
+export type Bilingual = { en: string; sw: string };
+export type OrganizerStatus = 'draft' | 'pending_review' | 'active' | 'rejected' | 'suspended';
+export type OrganizerRole = 'owner' | 'admin' | 'ops' | 'finance' | 'timing';
+export type EventType = 'road' | 'trail' | 'fun' | 'charity' | 'virtual';
+export type EventStatus = 'draft' | 'submitted' | 'published' | 'registration_closed' | 'in_progress' | 'completed' | 'cancelled' | 'archived';
+export type EventAvailability = 'open' | 'closing_soon' | 'sold_out' | 'closed' | 'not_yet_open' | 'cancelled' | 'in_progress' | 'completed';
+export type RefundPolicyPreset = 'no_refund' | 'refund_until_close' | 'custom';
+/** POST /organizer/events/:id/<action> (§7.2); approve/reject are the admin's decision route. */
+export type EventOrganizerAction = 'submit' | 'withdraw' | 'cancel' | 'complete' | 'archive';
+/** `allowedActions` vocabulary on organizer and admin event documents (§7.2, §16.5). */
+export type EventAllowedAction = EventOrganizerAction | 'delete' | 'edit' | 'approve' | 'reject';
+export type EventsPage<T> = { items: T[]; nextCursor: string | null; total?: number };
+
+export interface EventsOptions {
+  discovery: boolean; favourites: boolean; registration: boolean; currency: string; closingSoonHours: number;
+  regions: Array<{ code: string; name: Bilingual }>; timezones: string[];
+}
+export interface OrganizerMe {
+  organizer: { id: string; name: string; status: OrganizerStatus; timezone: string; kycCaseId: string | null; kycStatus: KycCaseStatus | null; statusReason: string | null };
+  role: OrganizerRole;
+  permissions: string[];
+}
+export interface EventSummary {
+  id: string; slug: string; title: string; type: EventType; status: EventStatus;
+  startsAt: string; endsAt: string; timezone: string; utcOffsetMinutes: number; timezoneAbbr: string;
+  registrationOpensAt: string | null; registrationClosesAt: string | null; availability: EventAvailability | null;
+  venue: { name: string | null; city: string | null; region: string | null };
+  heroThumbUrl: string | null; heroImageAlt: string | null; distancesM: number[]; fromPriceTzs: number | null; currency: string;
+  organizer: { id: string; name: string; verified: boolean }; isSaved?: boolean; updatedAt: string;
+}
+export interface OrganizerEventRow extends EventSummary { categoriesCount: number; allowedActions: EventAllowedAction[] }
+export interface OrganizerSummary {
+  eventsTotal: number; publishedTotal: number; registrationsTotal: number; awaitingPaymentTotal: number; confirmedTotal: number;
+  nextEvents: OrganizerEventRow[];
+}
+export interface EventTicketType {
+  id?: string; name: string; priceTzs: number; currency: string; capacity: number | null;
+  saleOpensAt: string | null; saleClosesAt: string | null; minPerOrder: number; maxPerOrder: number; availability?: EventAvailability;
+}
+export interface EventCategory {
+  id?: string; name: string; distanceM: number; startsAt: string | null; capacity: number | null; availability?: EventAvailability;
+  remaining?: number | null; eligibility: Bilingual | null; minAge: number | null; ticketTypes: EventTicketType[];
+}
+export interface EventCollectionPoint {
+  id?: string; name: string; address: string; lat: number | null; lng: number | null;
+  windows: Array<{ opensAt: string; closesAt: string }>; instructions: Bilingual;
+}
+export interface EventScheduleItem { id?: string; at: string; label: Bilingual }
+export interface EventSponsor { id?: string; name: string; logoUrl: string | null; url: string | null }
+/** The organizer's full editable document (GET /organizer/events/:id), both languages always. */
+export interface EventDocument extends EventSummary {
+  description: Bilingual; heroImageUrl: string | null; coverAlt: string | null;
+  routeUrl: string | null; routeImageUrl: string | null; routeImageAlt: string | null;
+  venue: { name: string | null; address: string | null; city: string | null; region: string | null; lat: number | null; lng: number | null };
+  accessibility: Bilingual | null; inclusions: Bilingual | null;
+  /** Whether a race kit is handed out (the submit rule keys on it); collection points are required when true. */
+  kitProvided: boolean;
+  categories: EventCategory[]; collectionPoints: EventCollectionPoint[]; schedule: EventScheduleItem[]; sponsors: EventSponsor[];
+  contact: { email: string | null; phone: string | null; whatsapp: string | null };
+  terms: Bilingual; refundPolicy: { preset: RefundPolicyPreset | null; text: Bilingual | null };
+  cancellation: { reason: string; note: Bilingual } | null;
+  shareUrl: string | null; publishedAt: string | null; version: number; allowedActions: EventAllowedAction[];
+  submittedAt: string | null; rejection: { reason: string; note: string; at: string } | null; changeLogCount: number;
+}
+/** PATCH /organizer/events/:id: the current version plus the fields that changed (nested lists carry ids for upsert). */
+export type EventPatch = { version: number; changeNote?: Bilingual } & Partial<Omit<EventDocument, 'id' | 'slug' | 'status' | 'version' | 'allowedActions' | 'organizer' | 'updatedAt'>>;
+export interface EventChange {
+  id: string; at: string; actor: { name: string | null; role: string }; fields: string[]; material: boolean; note: Bilingual | null;
+  before: Record<string, unknown> | null; after: Record<string, unknown> | null;
+}
+export interface OrganizerStaffRow {
+  id: string; userId: string | null; displayName: string | null; maskedContact: string | null; role: OrganizerRole;
+  status: 'invited' | 'active' | 'removed'; addedAt: string;
+}
+export interface AdminEventRow extends OrganizerEventRow {
+  organizer: EventSummary['organizer'] & { status: OrganizerStatus; kycCaseId: string | null }; permitOnFile: boolean; submittedAt: string | null;
+}
+export interface AdminEventDetail extends EventDocument {
+  organizer: EventSummary['organizer'] & { status: OrganizerStatus; kycCaseId: string | null }; permitOnFile: boolean;
+}
+export interface EventAuditRow { id?: string; at: string; actor: { id: string; name: string | null }; action: string; target: string | null; reason: string | null; note: string | null }
+
+/** GET /me/kyc: the partner's own case, details and checklist (functions partner-kyc-service overview()). */
+export interface MyKyc {
+  partnerType: string; case: KycCase | null; people: KycPerson[]; documents: KycDocument[];
+  settlementAccounts: KycSettlementAccount[]; checklist: KycChecklist;
+}
+export interface MyKycAgreement {
+  agreementType: string; version: string; reference: string; title: string; lang: 'en' | 'sw';
+  sections: Array<{ heading: string; text: string }>; acceptedAt: string | null;
 }
