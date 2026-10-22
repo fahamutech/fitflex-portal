@@ -180,8 +180,8 @@ test('saving an owner that leaves a shared gym without a payout owner shows a wa
 test('Swahili: badge, filter and reason are translated', async ({ page }) => {
   await setup(page, { locale: 'sw' });
   await page.goto('/admin/gyms');
-  await expect(page.getByTestId('payout-owner-cell-gym-1')).toContainText('Inahitaji mmiliki anayelipwa');
-  await expect(page.getByTestId('filter-needs-payout-owner')).toHaveText(/Inahitaji mmiliki anayelipwa \(1\)/);
+  await expect(page.getByTestId('payout-owner-cell-gym-1')).toContainText('Inahitaji mpokeaji wa malipo');
+  await expect(page.getByTestId('filter-needs-payout-owner')).toHaveText(/Inahitaji mpokeaji wa malipo \(1\)/);
   await page.getByTestId('payout-owner-cell-gym-1').click();
   await expect(page.getByTestId('payout-owner-reason')).toContainText('mmiliki zaidi ya mmoja');
 });
