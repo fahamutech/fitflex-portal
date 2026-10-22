@@ -4,6 +4,15 @@ const BASE = process.env.NEXT_PUBLIC_API_BASE || 'https://fitflex-faas.bfast.sma
 /** The API server address (for feature modules that build their own requests, e.g. src/lib/shop-banners.ts). */
 export const API_BASE = BASE;
 
+/** Admin view-only read of a partner's declared details (GET /admin/{trainers|gym-owners}/:id/personal-details). */
+export interface PartnerPersonalDetails {
+  dateOfBirth: string | null;
+  age: number | null;
+  gender: 'male' | 'female' | 'other' | null;
+  genderFrom: 'trainer_profile' | 'person' | null;
+  source: 'person' | 'member' | null;
+}
+
 export class ApiError extends Error {
   status: number;
   body: unknown;
@@ -276,7 +285,10 @@ export type CampaignAnalytics = {
   campaign: { id: string; name: string; status: string; startsAt: string; endsAt: string }; range: PromotionAnalyticsRange;
   totals: PromotionMetrics; items: PromotionAnalyticsItem[]; notTracked: string[]; unverifiedEvents?: number;
 };
-export type GeoArea = { id: string; level: 'country' | 'region' | 'city' | 'district'; name: string; parentId: string | null };
+export type GeoArea = { id: string; level: 'country' | 'region' | 'city' | 'district'; name: string; parentId: string | null; active?: boolean;
+  /** /shop/areas: place name per language (sw = nameSw or name). */ names?: { en?: string | null; sw?: string | null } | null;
+  /** /admin/geo-areas (raw row): Swahili place name, null = same as name. */ nameSw?: string | null;
+  /** /shop/areas: can stand for "where you are"; vendors may still pick any area. */ locatable?: boolean };
 export type EntityMatch = {
   entityType: ModerationEntityType; id: string; name: string; subtitle: string | null; status: string; moderationStatus: ModerationStatus;
   promotable: boolean; reasons: string[]; placements: PromotionPlacement[];
@@ -655,6 +667,8 @@ export const api = {
   searchPromotionPartners: (token: string, q: string) =>
     request<{ items: PartnerMatch[]; total: number }>(`/admin/promotion-partners?q=${encodeURIComponent(q)}`, {}, token),
   geoAreas: (token: string) => request<{ areas: GeoArea[] }>('/admin/geo-areas', {}, token),
+  /** Usable areas for any signed-in role (docs/shop-near-you-api.md); 404 feature_disabled while SHOP_NEAR_YOU is off. */
+  shopAreas: (token: string) => request<{ areas: GeoArea[] }>('/shop/areas', {}, token),
   placementLimits: (token: string) => request<{ limits: PlacementLimit[] }>('/admin/promotion-limits', {}, token),
   setPlacementLimit: (token: string, placement: PromotionPlacement, type: PromotionType, body: { maxSlots: number; maxBoostFraction?: number | null; rotationMode?: 'none' | 'time_slice'; rotationWindowMinutes?: number }) =>
     request<{ limit: PlacementLimit }>(`/admin/promotion-limits/${placement}/${type}`, { method: 'PUT', body: JSON.stringify(body) }, token),
@@ -990,6 +1004,9 @@ export const api = {
   deleteGym: (token: string, id: string) =>
     request<{ ok: boolean; gym: Gym }>(`/admin/gyms/${id}`, { method: 'DELETE' }, token),
   gymOwners: (token: string) => request<GymOwner[]>('/admin/gym-owners', {}, token),
+  /** View only, audited server-side: call only when an admin opens this owner's personal details. `id` is the owner user id. */
+  adminGymOwnerPersonalDetails: (token: string, id: string) =>
+    request<{ ownerId: string; personalDetails: PartnerPersonalDetails }>(`/admin/gym-owners/${encodeURIComponent(id)}/personal-details`, {}, token),
   /** Lightweight owner refs (id/displayName/email/gymIds) — use for owner-name lookups instead of the full gymOwners() list. */
   gymOwnerRefs: (token: string) => request<GymOwnerRef[]>('/admin/gym-owners?refs=true', {}, token),
   saveGymOwner: (token: string, owner: Partial<GymOwner>) =>
@@ -997,6 +1014,9 @@ export const api = {
   deleteGymOwner: (token: string, id: string) =>
     request<{ ok: boolean; owner: GymOwner }>(`/admin/gym-owners/${id}`, { method: 'DELETE' }, token),
   adminTrainers: (token: string) => request<TrainerProfile[]>('/admin/trainers', {}, token),
+  /** View only, audited server-side: call only when an admin opens this trainer's personal details. `id` is the trainer profile id. */
+  adminTrainerPersonalDetails: (token: string, id: string) =>
+    request<{ trainerId: string; userId: string | null; personalDetails: PartnerPersonalDetails }>(`/admin/trainers/${encodeURIComponent(id)}/personal-details`, {}, token),
   /** Lightweight trainer refs (id/displayName/email/gymIds) — use for trainer-name/assignment lookups instead of the full adminTrainers() list. */
   adminTrainerRefs: (token: string) => request<TrainerRef[]>('/admin/trainers?refs=true', {}, token),
   saveTrainer: (token: string, trainer: Partial<TrainerProfile>) =>
@@ -1024,7 +1044,7 @@ export const api = {
   recomputeProductStats: (token: string, body: { apply?: boolean; productIds?: string[] } = {}) =>
     request<ProductStatsRecompute>('/admin/shop/product-stats/recompute', { method: 'POST', body: JSON.stringify(body) }, token),
   adminVendors: (token: string) => request<VendorSummary[]>('/admin/vendors', {}, token),
-  updateAdminVendor: (token: string, id: string, patch: Partial<Pick<VendorSummary, 'approvalStatus' | 'accountStatus' | 'approvalNote' | 'commissionPct'>>) =>
+  updateAdminVendor: (token: string, id: string, patch: Partial<Pick<VendorSummary, 'approvalStatus' | 'accountStatus' | 'approvalNote' | 'commissionPct'>> & VendorAreasPatch) =>
     request<VendorSummary>(`/admin/vendors/${id}`, { method: 'PUT', body: JSON.stringify(patch) }, token),
   trainerBookings: (token: string) => request<TrainerBooking[]>('/admin/trainer-bookings', {}, token),
   /** `no_show` only with TRAINER_SESSION_OUTCOMES on (functions#231); flag off it is 400 invalid_status. */
@@ -2456,8 +2476,21 @@ export interface VendorSummary {
     businessCategory?: string | null;
     address?: string | null;
     status?: string | null;
+    /** Free text the vendor typed (list or comma text); shown so admins can map it to areas. */
+    deliveryRegions?: string[] | string | null;
+    /** "Based in": a city or district GeoArea id (docs/shop-near-you-api.md). Absent when not set. */
+    cityId?: string | null;
+    /** The region the vendor is based in; the server fills it from cityId. */
+    regionId?: string | null;
+    /** "Delivers to": GeoArea ids of any level; the country id = nationwide; [] = doesn't deliver. */
+    deliveryAreaIds?: string[] | null;
+    /** Read-only: who set the area fields last. */
+    areasSource?: 'vendor' | 'admin' | 'backfill' | null;
   } | null;
 }
+
+/** Admin vendor area mapping (PUT /admin/vendors/:id): null clears cityId/regionId, [] clears deliveryAreaIds. */
+export type VendorAreasPatch = { cityId?: string | null; regionId?: string | null; deliveryAreaIds?: string[] };
 
 /** Lightweight owner projection (id/displayName/email/gymIds) for pages that only need owner names, e.g. the gyms table's owner column and owner-select dropdown. */
 export interface GymOwnerRef {
