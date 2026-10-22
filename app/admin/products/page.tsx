@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { Calculator, ChevronDown, ChevronRight, Plus, RefreshCw, Save } from 'lucide-react';
 import { useApp } from '../../providers';
-import { api, AdminProductDraft, ApiError, ProductStats, ProductStatsRecompute, ShopProduct, VendorSummary } from '@/lib/api';
+import { AdminProductFilters, api, AdminProductDraft, ApiError, PRODUCT_AGE_BANDS, ProductAgeBand, ProductStats, ProductStatsRecompute, ShopProduct, VendorSummary } from '@/lib/api';
 import { formatDateTime, formatNumber, money } from '@/lib/admin-utils';
 import { variantsOf } from '@/lib/vendor';
 import { Alert, Badge, Button, Card, Checkbox, Field, Input, PageHeader, Select, Spinner, Table, TBody, Td, Textarea, Th, THead, Tr } from '@/components/shared';
@@ -25,6 +25,12 @@ function draftOf(p: ShopProduct): PrivateDraft {
     variants: Object.fromEntries(variantsOf(p).map(v => [v.name, { cost: asText(v.costTzs), reorder: asText(v.reorderLevel) }])),
   };
 }
+
+/** Shop personalisation (S2): the server sends the target keys at all only when it knows them. */
+const hasTargets = (p: ShopProduct) => 'targetGender' in p || 'targetAgeBands' in p;
+const BAND_KEY = { '18_29': 'products.target.band.18_29', '30_44': 'products.target.band.30_44', '45_59': 'products.target.band.45_59', '60_plus': 'products.target.band.60_plus' } as const;
+const BAND_A11Y = { '18_29': 'products.target.a11y.18_29', '30_44': 'products.target.a11y.30_44', '45_59': 'products.target.a11y.45_59', '60_plus': 'products.target.a11y.60_plus' } as const;
+const NO_FILTERS: AdminProductFilters = {};
 
 /** Ratings to two places, counts whole. */
 const statText = (key: keyof ProductStats, v: number | null | undefined) => formatNumber(v, key === 'rating' ? 2 : 0);
@@ -53,6 +59,10 @@ export default function ProductsPage() {
   const [openVariants, setOpenVariants] = useState<Set<string>>(new Set());
   const [checkingStats, setCheckingStats] = useState(false);
   const [recompute, setRecompute] = useState<Recompute | null>(null);
+  const [filters, setFilters] = useState<AdminProductFilters>(NO_FILTERS);
+  // Sticky: once the server has sent target fields, keep the filters even when a filter matches nothing.
+  const [targetsShown, setTargetsShown] = useState(false);
+  const filtering = Boolean(filters.targetGender || filters.targetAgeBand);
   const vendorName = (id: string) => {
     const v = vendors.find(x => x.id === id);
     return v?.vendorProfile?.businessName || v?.displayName || id;
@@ -63,15 +73,16 @@ export default function ProductsPage() {
     setFieldErrors(cur => Object.fromEntries(Object.entries(cur).filter(([k]) => !k.startsWith(`${p.id}:`))));
   };
 
-  async function load() {
+  async function load(nextFilters: AdminProductFilters = filters) {
     if (!token) return;
     setLoading(true);
     try {
       const [productRows, vendorRows] = await Promise.all([
-        api.adminProducts(token),
+        api.adminProducts(token, nextFilters),
         api.adminVendors(token),
       ]);
       setProducts(productRows);
+      if (productRows.some(hasTargets)) setTargetsShown(true);
       setVendors(vendorRows);
       setPrivates({});
       setFieldErrors({});
@@ -204,6 +215,19 @@ export default function ProductsPage() {
 
   const closeRecompute = () => { if (!recompute?.applying) setRecompute(null); };
 
+  function applyFilters(next: AdminProductFilters) {
+    setFilters(next);
+    setSuccess(null);
+    void load(next);
+  }
+
+  const bandsText = (bands: ProductAgeBand[] | undefined) =>
+    bands && bands.length ? bands.map(b => t(BAND_KEY[b])).join(', ') : t('products.target.allAges');
+  const bandsA11y = (bands: ProductAgeBand[] | undefined) =>
+    bands && bands.length ? bands.map(b => t(BAND_A11Y[b])).join(', ') : t('products.target.allAges');
+  const genderText = (g: ShopProduct['targetGender']) =>
+    g === 'women' ? t('products.target.women') : g === 'men' ? t('products.target.men') : t('products.target.everyone');
+
   if (!token || user?.userType !== 'admin') return null;
 
   return (
@@ -212,7 +236,7 @@ export default function ProductsPage() {
         title={t('products.title')}
         description={t('products.description')}
         actions={<div className="flex gap-2">
-          <Button variant="secondary" size="sm" onClick={load} disabled={loading}>
+          <Button variant="secondary" size="sm" onClick={() => load()} disabled={loading}>
             <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
             {t('admin.action.refresh')}
           </Button>
@@ -229,10 +253,40 @@ export default function ProductsPage() {
       {error && <Alert tone="error">{error}</Alert>}
       {success && <Alert tone="success">{success}</Alert>}
 
+      {targetsShown && (
+        <Card>
+          <div className="grid gap-4 sm:grid-cols-[12rem_12rem_auto] sm:items-end" data-testid="product-target-filters">
+            <Field label={t('products.target.madeFor')}>
+              <Select aria-label={t('products.target.filterMadeFor')} value={filters.targetGender ?? ''}
+                onChange={e => applyFilters({ ...filters, targetGender: (e.target.value || undefined) as AdminProductFilters['targetGender'] })}>
+                <option value="">{t('products.target.filterAny')}</option>
+                <option value="everyone">{t('products.target.everyone')}</option>
+                <option value="women">{t('products.target.women')}</option>
+                <option value="men">{t('products.target.men')}</option>
+              </Select>
+            </Field>
+            <Field label={t('products.target.ageGroup')}>
+              <Select aria-label={t('products.target.filterAgeGroup')} value={filters.targetAgeBand ?? ''}
+                onChange={e => applyFilters({ ...filters, targetAgeBand: (e.target.value || undefined) as AdminProductFilters['targetAgeBand'] })}>
+                <option value="">{t('products.target.filterAny')}</option>
+                <option value="all">{t('products.target.allAges')}</option>
+                {PRODUCT_AGE_BANDS.map(b => <option key={b} value={b}>{t(BAND_KEY[b])}</option>)}
+              </Select>
+            </Field>
+            {filtering && (
+              <div className="pb-1">
+                <Button variant="ghost" size="sm" className="min-h-11" onClick={() => applyFilters(NO_FILTERS)}>{t('products.target.clearFilters')}</Button>
+              </div>
+            )}
+          </div>
+          <p className="mt-3 text-sm text-[var(--color-fg-secondary)]" data-testid="product-target-note">{t('products.target.note')}</p>
+        </Card>
+      )}
+
       {loading ? (
         <div className="flex justify-center py-16"><Spinner /></div>
       ) : products.length === 0 ? (
-        <Card><p className="py-8 text-center text-sm text-[var(--color-fg-tertiary)]">{t('products.empty')}</p></Card>
+        <Card><p className="py-8 text-center text-sm text-[var(--color-fg-tertiary)]">{t(filtering ? 'products.target.noMatch' : 'products.empty')}</p></Card>
       ) : (
         <div className="space-y-3">
           {products.map((product) => (
@@ -247,6 +301,11 @@ export default function ProductsPage() {
                     {t('products.vendor')}: {vendorName(product.vendorId)} · {t('products.stock')}: {product.stock}
                     {hasPrivate(product) && <> · {t('vendor.stock.reorderLevel')}: {product.reorderLevel ?? '—'} · {t('vendor.costPrice')}: {product.costTzs == null ? '—' : money(product.costTzs)}</>}
                   </p>
+                  {hasTargets(product) && (
+                    <p className="mt-1 text-xs text-[var(--color-fg-tertiary)]" data-testid={`product-targets-${product.id}`}>
+                      {t('products.target.madeFor')}: {genderText(product.targetGender)} · {t('products.target.ageGroup')}: <span aria-hidden="true">{bandsText(product.targetAgeBands)}</span><span className="sr-only">{bandsA11y(product.targetAgeBands)}</span>
+                    </p>
+                  )}
                   {hasPrivate(product) && product.reorderLevel != null && product.stock <= product.reorderLevel && (
                     <div className="mt-1"><Badge tone="warning">{t('vendor.stock.lowBadge')}</Badge></div>
                   )}
