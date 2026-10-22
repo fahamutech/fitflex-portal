@@ -998,7 +998,14 @@ export const api = {
     request<TrainerProfile>('/admin/trainers', { method: 'POST', body: JSON.stringify(trainer) }, token),
   deleteTrainer: (token: string, id: string) =>
     request<{ ok: boolean; trainer: TrainerProfile }>(`/admin/trainers/${id}`, { method: 'DELETE' }, token),
-  adminProducts: (token: string) => request<ShopProduct[]>('/admin/products', {}, token),
+  /** Target filters (S2) are sent only when set; older backends ignore them. */
+  adminProducts: (token: string, filters: AdminProductFilters = {}) => {
+    const q = new URLSearchParams();
+    if (filters.targetGender) q.set('targetGender', filters.targetGender);
+    if (filters.targetAgeBand) q.set('targetAgeBand', filters.targetAgeBand);
+    const qs = q.toString();
+    return request<ShopProduct[]>(`/admin/products${qs ? `?${qs}` : ''}`, {}, token);
+  },
   createAdminProduct: (token: string, product: AdminProductDraft) =>
     request<ShopProduct>('/admin/products', { method: 'POST', body: JSON.stringify(product) }, token),
   /** With the stock ledger on the server also takes the private fields (null clears one). */
@@ -1935,7 +1942,20 @@ export interface ShopProduct {
   /** Private, stock ledger on only (absent otherwise). */
   reorderLevel?: number | null;
   variants?: ProductVariant[] | unknown;
+  /** Shop personalisation (S2), set by the vendor in the app. Absent on older backends. null = everyone. */
+  targetGender?: ProductTargetGender | null;
+  /** Shop personalisation (S2). Absent on older backends. Empty = all ages. */
+  targetAgeBands?: ProductAgeBand[];
 }
+
+export type ProductTargetGender = 'women' | 'men';
+export type ProductAgeBand = '18_29' | '30_44' | '45_59' | '60_plus';
+/** GET /admin/products filters (S2). 'everyone' = untagged gender, 'all' = no age bands. */
+export interface AdminProductFilters {
+  targetGender?: ProductTargetGender | 'everyone';
+  targetAgeBand?: ProductAgeBand | 'all';
+}
+export const PRODUCT_AGE_BANDS: ProductAgeBand[] = ['18_29', '30_44', '45_59', '60_plus'];
 
 /** A product option ("variant"). Private and effective fields come only with the stock ledger on. */
 export interface ProductVariant {
@@ -3531,6 +3551,8 @@ export interface B2BProgramLifecycle {
 }
 export interface B2BImportResult {
   dryRun?: boolean; importId?: string; total: number; enrolled: number; invited: number; unchanged: number; rejected: number; withoutEmail: number; withoutPhone: number; emailConfigured: boolean; smsConfigured: boolean;
+  /** False when FitFlex can't send email codes, so email-only people can't confirm their email. Absent on older backends. */
+  emailCodesAvailable?: boolean;
   problems: Array<{ line: number; name: string | null; contact: string | null; problem: string }>;
 }
 export interface B2BBeneficiaryInvite {

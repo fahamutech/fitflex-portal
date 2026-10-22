@@ -2,8 +2,8 @@
 
 No row, no ship (design spec `docs/design/photo-hero-screens.md` §8.1). Every photo in this folder has one row below.
 
-These are interim, people-free stock photos (owner decision 2026-10-19). They are not Tanzanian and are never presented as a FitFlex partner gym. Metadata (EXIF, ICC, XMP, GPS) is stripped from every file.
+The login photo is a FitFlex-owned, AI-generated image with no people (owner approval 2026-10-22). It replaces the interim Pexels stand-in (4716814). Metadata (EXIF, ICC, XMP, GPS) is stripped from every file.
 
 | Files | Source | Author | Licence | Obtained | People | Location / gym consent | Permitted use | Expiry |
 |---|---|---|---|---|---|---|---|---|
-| `login-panel.avif`, `login-panel.webp`, `login-panel.jpg` (3:4 crop, 750×1000); `login-band.avif`, `login-band.webp`, `login-band.jpg` (16:5 crop, 1440×450) | https://www.pexels.com/photo/4716814/ ("Black and Gray Exercise Equipment"); copy kept in the parent repo at `social/brand/photos/pexels-4716814.jpg` | Denys Gromov | Pexels licence (https://www.pexels.com/license/): free to use and modify, no attribution required; do not sell unaltered copies | Downloaded 2026-10-11; licence label "Free" checked 2026-10-16 (parent `social/brand/photos/README.md`) | None (equipment only); no model release needed | Not a FitFlex partner gym; not presented as one | Portal login photo panel (`/login`, behind `NEXT_PUBLIC_PHOTO_HERO_UI`) | None |
+| `login-panel.avif`, `login-panel.webp`, `login-panel.jpg` (3:4, full frame 0,0,960,1280 → 960×1280); `login-band.avif`, `login-band.webp`, `login-band.jpg` (16:5 crop 0,250,960,550 → 960×300; the "FitFlex Africa" sign is in the upper right) | FitFlex Africa, AI-generated via Figma AI (gpt-image-2.5), 2026-10-22, no people (lounge scene, made in the owner's Figma file); source kept in the parent repo at `docs/design/generated/gen-20-portal-lounge.png` (960×1280) | FitFlex Africa | FitFlex-owned (AI-generated, 2026-10-22) | Generated 2026-10-22 | None (no people) | Not a real place or partner gym; the sign is FitFlex's own name | Portal login photo panel (`/login`, behind `NEXT_PUBLIC_PHOTO_HERO_UI`) | None |

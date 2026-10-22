@@ -20,7 +20,6 @@ const ERRORS: Record<string, string> = {
   tax_number_in_use: 'Another organisation already has that TIN.',
   managed_by_corporate: 'This organisation is a company from Companies. Change it there.',
   invalid_transition: 'That status change isn’t allowed from the current status.',
-  user_not_found: 'Nobody has a FitFlex account with that email, number or ID. They need to sign up in the app first.',
   ambiguous_user: 'Several accounts share that email or number and none is a member account. Use the user ID of the one you mean.',
   user_contact_required: 'Enter their email, mobile number or user ID.',
   already_organization_user: 'That user is already on this organisation.',
@@ -30,7 +29,16 @@ const ERRORS: Record<string, string> = {
   organization_not_active: 'Activate the organisation first.',
   last_owner: 'The organisation must keep at least one owner.',
 };
-const message = (err: unknown, fallback: string, t: (k: MessageKey) => string) => {
+// Codes whose text lives in i18n (English + Swahili).
+const I18N_ERRORS: Partial<Record<string, MessageKey>> = {
+  user_not_found: 'b2b.errors.userNotFound',
+};
+// byId: the request named the person by user ID, so user_not_found means the ID matched no account.
+const message = (err: unknown, fallback: string, t: (k: MessageKey) => string, byId = false) => {
+  const code = err instanceof ApiError ? (err.body as { error?: string } | null)?.error : undefined;
+  if (code === 'user_not_found' && byId) return t('b2b.errors.userIdNotFound');
+  const i18nKey = code ? I18N_ERRORS[code] : undefined;
+  if (i18nKey) return t(i18nKey);
   const tierKey = tierErrorKey(err); // tier_not_available (409): fitflex-functions#189
   if (tierKey) return t(tierKey);
   return err instanceof ApiError ? ERRORS[(err.body as { error?: string })?.error ?? ''] ?? fallback : fallback;
@@ -98,14 +106,14 @@ export default function AdminB2BPage() {
     setBeneficiaries(b.status === 'fulfilled' ? b.value.items : []);
   };
 
-  const run = async (fn: () => Promise<void>, fallback: string) => {
+  const run = async (fn: () => Promise<void>, fallback: string, byId = false) => {
     setBusy(true);
     setError(null);
     setNotice(null);
     try {
       await fn();
     } catch (err) {
-      setError(message(err, fallback, t));
+      setError(message(err, fallback, t, byId));
     } finally {
       setBusy(false);
     }
@@ -146,11 +154,12 @@ export default function AdminB2BPage() {
   const addUser = (e: React.FormEvent) => {
     e.preventDefault();
     if (!token || !selected) return;
+    const contact = userContact(userForm.userId);
     return run(async () => {
-      const { organizationUser } = await api.addB2BOrganizationUser(token, selected.id, { ...userContact(userForm.userId), role: userForm.role });
+      const { organizationUser } = await api.addB2BOrganizationUser(token, selected.id, { ...contact, role: userForm.role });
       setOrgUsers(list => [...(list ?? []), organizationUser]);
       setUserForm({ userId: '', role: userForm.role });
-    }, 'Could not add the user.');
+    }, 'Could not add the user.', 'userId' in contact);
   };
 
   const changeUser = (u: B2BOrganizationUser, body: { role?: string; status?: string }) => token && selected && run(async () => {
@@ -164,12 +173,13 @@ export default function AdminB2BPage() {
     e.preventDefault();
     if (!token || !selected) return;
     const { userId: typed, ...rest } = benForm;
-    const body = { ...userContact(typed), ...Object.fromEntries(Object.entries(rest).filter(([, v]) => v !== '')) };
+    const contact = userContact(typed);
+    const body = { ...contact, ...Object.fromEntries(Object.entries(rest).filter(([, v]) => v !== '')) };
     return run(async () => {
       const { beneficiary } = await api.enrollB2BBeneficiary(token, selected.id, body);
       setBeneficiaries(list => [...(list ?? []), beneficiary]);
       setBenForm({ userId: '', beneficiaryType: benForm.beneficiaryType, externalReference: '', groupName: '' });
-    }, 'Could not enrol the member.');
+    }, 'Could not enrol the member.', 'userId' in contact);
   };
 
   const changeBeneficiary = (b: B2BBeneficiary, status: string) => token && selected && run(async () => {

@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { Upload } from 'lucide-react';
 import { api, ApiError, B2BBeneficiaryInvite, B2BImportResult } from '@/lib/api';
 import { Alert, Badge, Button, Card, CardContent, Field, Spinner } from '@/components/shared';
+import { useApp } from '../../app/providers';
 
 const PROBLEMS: Record<string, string> = {
   email_or_phone_required: 'No email address or mobile number',
@@ -47,6 +48,7 @@ export function PeopleImport({ token, orgId, canManage, onChanged }: { token: st
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const { t } = useApp();
 
   const loadInvites = () => api.b2bBeneficiaryInvites(token, orgId).then((r) => { setInvites(r.items); setEmailConfigured(r.emailConfigured); setSmsConfigured(r.smsConfigured); }).catch(() => setInvites([]));
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -89,6 +91,11 @@ export function PeopleImport({ token, orgId, canManage, onChanged }: { token: st
           {!r.smsConfigured && r.withoutEmail > 0 && ' People listed with a mobile number only get no message from FitFlex: tell them to join the app with that number.'}
           {!r.emailConfigured && ' FitFlex can’t send email at the moment.'}
         </p>
+      )}
+      {/* People listed by email only are matched only once they confirm that email in FitFlex, and FitFlex
+          can't send email codes yet. An older backend leaves emailCodesAvailable out: no warning then. */}
+      {r.emailCodesAvailable === false && r.withoutPhone > 0 && (
+        <div data-testid="import-email-only-warning"><Alert tone="warning">{t('b2b.import.emailOnlyWarning').replace('{n}', String(r.withoutPhone))}</Alert></div>
       )}
       {r.problems.length > 0 && (
         <table className="w-full text-sm" data-testid="import-problems">

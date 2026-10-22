@@ -808,7 +808,7 @@ test.describe('App photos (flag on)', () => {
   test('screenshots of the lighter previews for the design record', async ({ page }) => {
     test.skip(!process.env.HERO_SCREENSHOTS_DIR, 'set HERO_SCREENSHOTS_DIR to write screenshots');
     const dir = process.env.HERO_SCREENSHOTS_DIR!;
-    // A real bundled photo (Pexels, people-free; public/photos/hero/LICENSES.md) instead of a flat test colour.
+    // A real bundled photo (FitFlex Africa lounge, AI-generated, people-free; public/photos/hero/LICENSES.md) instead of a flat test colour.
     const photo = readFileSync(join(__dirname, '../../public/photos/hero/login-band.jpg'));
     await page.emulateMedia({ reducedMotion: 'reduce' });
     await openScreen(page, seedState({ previewPng: photo, drafts: { gyms: ['hero_a'], portalLogin: ['hero_b'], footerPool: ['hero_a'] } }));
