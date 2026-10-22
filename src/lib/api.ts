@@ -1,6 +1,8 @@
 // Thin client for the bfast-functions backend.
 
 const BASE = process.env.NEXT_PUBLIC_API_BASE || 'https://fitflex-faas.bfast.smartstock.co.tz';
+/** The API server address (for feature modules that build their own requests, e.g. src/lib/shop-banners.ts). */
+export const API_BASE = BASE;
 
 export class ApiError extends Error {
   status: number;
@@ -13,10 +15,42 @@ export class ApiError extends Error {
 }
 
 let _onUnauthorized: (() => void) | null = null;
+/** Tell the session a request came back 401 (for XHR uploads outside request()). */
+export function notifyUnauthorized() { _onUnauthorized?.(); }
 
 /** Register a callback invoked when any API call returns 401. */
 export function setOnUnauthorized(cb: (() => void) | null) {
   _onUnauthorized = cb;
+}
+
+let _onPasswordChangeRequired: (() => void) | null = null;
+
+/**
+ * Register a callback invoked when any API call answers 403 password_change_required:
+ * the session belongs to someone who must replace the start password an admin set.
+ */
+export function setOnPasswordChangeRequired(cb: (() => void) | null) {
+  _onPasswordChangeRequired = cb;
+}
+
+/** Fewest characters the backend accepts for a portal password (POST /auth/portal/password). */
+export const PORTAL_PASSWORD_MIN_LENGTH = 10;
+
+/**
+ * True when the session token carries `pwc: true` (must choose their own password first).
+ * Reads the JWT payload only; the server still decides, and a token that cannot be read counts as false.
+ */
+export function tokenRequiresPasswordChange(token: string | null | undefined): boolean {
+  if (!token) return false;
+  const part = token.split('.')[1];
+  if (!part) return false;
+  try {
+    const b64 = part.replace(/-/g, '+').replace(/_/g, '/');
+    const payload = JSON.parse(atob(b64 + '='.repeat((4 - (b64.length % 4)) % 4)));
+    return payload?.pwc === true;
+  } catch {
+    return false;
+  }
 }
 
 // Identity V2 (decision C3b): this build understands persons and personas.
@@ -94,7 +128,7 @@ export interface GymInvitationInput {
   paidAmount?: number;
 }
 
-async function request<T>(
+export async function request<T>(
   path: string,
   opts: RequestInit = {},
   token?: string,
@@ -115,13 +149,16 @@ async function request<T>(
     if (res.status === 401 && _onUnauthorized && !isRefusal401?.(body)) {
       _onUnauthorized();
     }
+    if (res.status === 403 && (body as { error?: string } | null)?.error === 'password_change_required') {
+      _onPasswordChangeRequired?.();
+    }
     throw new ApiError(res.status, body);
   }
   return body as T;
 }
 
 /** "?a=1&b=2" from the set values of `params`, or "". */
-function qs(params: object): string {
+export function qs(params: object): string {
   const q = new URLSearchParams();
   for (const [k, v] of Object.entries(params)) if (v != null && v !== '') q.set(k, String(v));
   const s = q.toString();
@@ -366,6 +403,9 @@ export const api = {
     request<{ token: string; user: { id: string; userType: string; gymId?: string; portalUser?: boolean; aclPermissions?: string[] } }>(
       '/auth/login', { method: 'POST', body: JSON.stringify({ email, password, requestedRole: 'admin' }) }
     ),
+  /** Replace the start password an admin set (sessions with `pwc: true`). Ends every earlier session on success. */
+  changePortalPassword: (token: string, newPassword: string) =>
+    request<SessionResult>('/auth/portal/password', { method: 'POST', body: JSON.stringify({ newPassword }) }, token),
   // ─── Portal user management (admin only) ───
   listPortalUsers: (token: string) => request<PortalUser[]>('/admin/portal-users', {}, token),
   createPortalUser: (token: string, data: { email: string; password: string; displayName?: string; aclPermissions: string[] }) =>
@@ -809,8 +849,9 @@ export const api = {
     request<{ agreements: B2BAgreement[]; inForce: B2BAgreement | null }>(`/admin/b2b/organizations/${encodeURIComponent(orgId)}/agreements`, {}, token),
   createB2BAgreement: (token: string, orgId: string, body: B2BAgreementInput) =>
     request<{ agreement: B2BAgreement }>(`/admin/b2b/organizations/${encodeURIComponent(orgId)}/agreements`, { method: 'POST', body: JSON.stringify(body) }, token),
-  activateB2BAgreement: (token: string, id: string) =>
-    request<{ agreement: B2BAgreement }>(`/admin/b2b/agreements/${encodeURIComponent(id)}/activate`, { method: 'POST', body: '{}' }, token),
+  /** `version` is the agreement's `updatedAt` as the admin saw it: 409 agreement_changed if it has changed since. */
+  activateB2BAgreement: (token: string, id: string, version: string) =>
+    request<{ agreement: B2BAgreement }>(`/admin/b2b/agreements/${encodeURIComponent(id)}/activate`, { method: 'POST', body: JSON.stringify({ version }) }, token),
   endB2BAgreement: (token: string, id: string, effectiveTo?: string) =>
     request<{ agreement: B2BAgreement }>(`/admin/b2b/agreements/${encodeURIComponent(id)}/end`, { method: 'POST', body: JSON.stringify({ effectiveTo }) }, token),
   adminB2BBillingAccount: (token: string, orgId: string) =>
@@ -892,9 +933,19 @@ export const api = {
     request<{ exception: B2BOpsException; run: { outcome?: 'ok' | 'failed'; failure?: string | null; skipped?: string } }>(`/admin/b2b/ops/exceptions/${encodeURIComponent(id)}/retry`, { method: 'POST', body: '{}' }, token),
   // Collections (FitFlex staff).
   adminB2BCollections: (token: string) => request<B2BCollectionsQueue>('/admin/b2b/collections', {}, token),
-  adminB2BPaymentInstructions: (token: string) => request<{ instructions: B2BPaymentInstructions; configured: boolean }>('/admin/b2b/payment-instructions', {}, token),
+  adminB2BPaymentInstructions: (token: string) => request<B2BAdminPaymentInstructions>('/admin/b2b/payment-instructions', {}, token),
+  /** Only REQUESTS the change (202): `instructions` stay the ones in force, the request is in `pendingChange`. */
   setB2BPaymentInstructions: (token: string, body: Partial<B2BPaymentInstructions>) =>
-    request<{ instructions: B2BPaymentInstructions; configured: boolean }>('/admin/b2b/payment-instructions', { method: 'PUT', body: JSON.stringify(body) }, token),
+    request<B2BAdminPaymentInstructions>('/admin/b2b/payment-instructions', { method: 'PUT', body: JSON.stringify(body) }, token),
+  /**
+   * A different admin from the requester puts the waiting change in force. `changeId` is the change the
+   * admin is looking at: 409 change_superseded (with the current changeId) if another request replaced it.
+   */
+  confirmB2BPaymentInstructions: (token: string, changeId: string) =>
+    request<B2BAdminPaymentInstructions>('/admin/b2b/payment-instructions/confirm', { method: 'POST', body: JSON.stringify({ changeId }) }, token),
+  /** Drops the waiting change (the requester withdraws it, or another admin declines it); same `changeId` rule as confirm. */
+  cancelB2BPaymentInstructions: (token: string, changeId: string, reason?: string) =>
+    request<B2BAdminPaymentInstructions>('/admin/b2b/payment-instructions/cancel', { method: 'POST', body: JSON.stringify(reason ? { changeId, reason } : { changeId }) }, token),
   confirmB2BPaymentNotice: (token: string, noticeId: string, body: { amountTzs?: number; note?: string } = {}) =>
     request<{ notice: B2BPaymentNotice; payment?: B2BPayment; skipped?: Array<{ invoiceId: string; reason: string }> }>(
       `/admin/b2b/payment-notices/${encodeURIComponent(noticeId)}/confirm`, { method: 'POST', body: JSON.stringify(body) }, token),
@@ -964,7 +1015,8 @@ export const api = {
   updateAdminVendor: (token: string, id: string, patch: Partial<Pick<VendorSummary, 'approvalStatus' | 'accountStatus' | 'approvalNote' | 'commissionPct'>>) =>
     request<VendorSummary>(`/admin/vendors/${id}`, { method: 'PUT', body: JSON.stringify(patch) }, token),
   trainerBookings: (token: string) => request<TrainerBooking[]>('/admin/trainer-bookings', {}, token),
-  updateTrainerBooking: (token: string, id: string, status: 'confirmed' | 'completed' | 'cancelled') =>
+  /** `no_show` only with TRAINER_SESSION_OUTCOMES on (functions#231); flag off it is 400 invalid_status. */
+  updateTrainerBooking: (token: string, id: string, status: 'confirmed' | 'completed' | 'cancelled' | 'no_show') =>
     request<TrainerBooking>(`/admin/trainer-bookings/${id}`, { method: 'POST', body: JSON.stringify({ status }) }, token),
   paymentRequests: (token: string) => request<PaymentRequest[]>('/admin/payment-requests', {}, token),
   // Trainer and vendor payouts: weekly statements on the same path as gym statements.
@@ -1258,7 +1310,7 @@ export interface HeroSlot {
   id: string;
   area: string;
   surface: 'mobile' | 'portal';
-  variant: 'full' | 'compact' | 'band' | 'panel' | string;
+  variant: 'full' | 'compact' | 'footer' | 'panel' | string;
   aspectHint: number;
   maxImages: number;
   /** Image ids, in order. */
@@ -1359,6 +1411,8 @@ export interface PortalUser {
   aclPermissions: string[];
   createdAt?: string;
   isEnvAdmin?: boolean;
+  /** Still has the start password an admin set; asked to choose their own at the next sign-in. */
+  passwordChangeRequired?: boolean;
 }
 
 export interface DashboardResponse {
@@ -1913,6 +1967,14 @@ export interface VendorTools {
   stockLedger?: boolean;
   buyerContact?: boolean;
   canSeeCost?: boolean;
+  /** Shop banners (SHOP_BANNERS): merch.banners. When absent the portal asks GET /vendor/shop-banners once. */
+  merch?: { banners?: boolean };
+  /** S5 (VENDOR_DOCUMENTS): share links, PDF, the document view and order invoices. Missing = off. */
+  documents?: boolean;
+  /** S5 (VENDOR_VAT): tax details, VAT codes and VAT on documents. Missing = off. */
+  vat?: boolean;
+  /** S5: VAT applies to this vendor's new sales now (registered, verified, certificate standing). */
+  vatInForce?: boolean;
   [tool: string]: unknown;
 }
 
@@ -2329,7 +2391,10 @@ export interface TrainerBooking {
   date: string;
   slot: string;
   amountTzs: number;
-  status: 'confirmed' | 'completed' | 'cancelled';
+  /** `payment_pending` / `payment_rejected` while its payment is open; `no_show` with TRAINER_SESSION_OUTCOMES on (functions#231). */
+  status: 'payment_pending' | 'payment_rejected' | 'confirmed' | 'completed' | 'no_show' | 'cancelled';
+  /** What the caller may do now; present only with TRAINER_SESSION_OUTCOMES on (missing = flag off). */
+  actions?: { canComplete: boolean; canMarkNoShow: boolean };
   createdAt?: string;
   member?: { email?: string | null; phone?: string | null; displayName?: string | null } | null;
   trainer?: TrainerProfile | null;
@@ -3378,6 +3443,10 @@ export interface B2BAgreement {
   platformFeeTzs: number | null; vatRateBps: number | null; notes: string | null;
   /** The organisation's agreed fee per person per month for a sponsored pass, by tier. */
   passRates?: Record<string, number> | null;
+  /** Who drafted it, who last changed it and everyone who ever edited it: none of them can activate it. */
+  createdBy?: string | null; updatedBy?: string | null; editors?: string[] | null;
+  /** Sent back as `version` when activating. */
+  updatedAt?: string | null;
 }
 export interface B2BAgreementInput {
   effectiveFrom: string; effectiveTo?: string | null; prepaidTermsDays?: number; usageTermsDays?: number;
@@ -3501,6 +3570,16 @@ export interface B2BDataQuality { checkedAt: string; issues: number; checks: Arr
 export interface B2BPaymentInstructions {
   bankName: string | null; accountName: string | null; accountNumber: string | null; branch: string | null; swiftCode: string | null;
   lipaNamba: string | null; lipaNambaName: string | null; notes: string | null; updatedAt?: string | null;
+}
+/** A change to the payment details asked for by one admin, waiting for a different admin to confirm it. */
+export interface B2BPaymentInstructionsChange {
+  /** Names this request; confirm and cancel send it back. */
+  changeId: string;
+  instructions: Pick<B2BPaymentInstructions, 'bankName' | 'accountName' | 'accountNumber' | 'branch' | 'swiftCode' | 'lipaNamba' | 'lipaNambaName' | 'notes'>;
+  requestedBy: string; requestedAt: string;
+}
+export interface B2BAdminPaymentInstructions {
+  instructions: B2BPaymentInstructions; configured: boolean; pendingChange: B2BPaymentInstructionsChange | null;
 }
 export interface B2BPaymentNotice {
   id: string; organizationId: string; organizationName?: string | null; amountTzs: number; method: string; reference: string; paidOn: string;

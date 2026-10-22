@@ -11,6 +11,7 @@ import {
 } from '@/lib/kyc';
 import { Alert, Badge, Button, Card, CardContent, CardHeader, Field, Spinner } from '@/components/shared';
 import { Dialog } from '@/components/dialog';
+import { KycVatSection } from '@/components/kyc-vat-section';
 
 type Pending =
   | { kind: 'decision'; decision: KycDecision }
@@ -21,7 +22,7 @@ type Pending =
 
 /** One KYC case: what the partner provided, what's left, and the reviewer's actions. */
 export function KycCaseView({ caseId, partnerName, onBack }: { caseId: string; partnerName: string | null; onBack: () => void }) {
-  const { token, user } = useApp();
+  const { token, user, t } = useApp();
   const [data, setData] = useState<KycCaseDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -129,7 +130,7 @@ export function KycCaseView({ caseId, partnerName, onBack }: { caseId: string; p
                     <li key={d.id} className="flex flex-wrap items-start justify-between gap-3 px-5 py-4" data-testid={`kyc-doc-${d.requirementKey}`}>
                       <div className="min-w-0 flex-1 space-y-1 text-sm">
                         <p className="flex flex-wrap items-center gap-2 font-medium">
-                          {REQUIREMENT_LABEL[d.requirementKey] ?? d.requirementKey}
+                          {REQUIREMENT_LABEL[d.requirementKey] ?? (d.requirementKey === 'vat_certificate' ? t('admin.kyc.vatCert') : d.requirementKey)}
                           <Badge tone={d.status === 'accepted' ? 'success' : d.status === 'rejected' || d.status === 'expired' ? 'danger' : d.hasFile ? 'brand' : 'warning'}>
                             {d.status === 'pending' ? (d.hasFile ? 'To review' : 'File missing') : d.status[0].toUpperCase() + d.status.slice(1)}
                           </Badge>
@@ -154,6 +155,11 @@ export function KycCaseView({ caseId, partnerName, onBack }: { caseId: string; p
               )}
             </CardContent>
           </Card>
+
+          {/* S5: the vendor's VAT registration (optional; its own decision, not the case's). */}
+          {c.partnerType === 'vendor' && c.userId && (
+            <KycVatSection vendorId={c.userId} documents={data.documents} onView={doc => setPending({ kind: 'view', doc })} />
+          )}
 
           {data.settlementAccounts.length > 0 && (
             <Card>
@@ -258,7 +264,7 @@ export function KycCaseView({ caseId, partnerName, onBack }: { caseId: string; p
       )}
       {pending?.kind === 'document' && (
         <NoteDialog title={pending.decision === 'accept' ? 'Accept document' : 'Reject document'}
-          description={REQUIREMENT_LABEL[pending.doc.requirementKey] ?? pending.doc.requirementKey}
+          description={REQUIREMENT_LABEL[pending.doc.requirementKey] ?? (pending.doc.requirementKey === 'vat_certificate' ? t('admin.kyc.vatCert') : pending.doc.requirementKey)}
           noteRequired={pending.decision === 'reject'} action={pending.decision === 'accept' ? 'Accept' : 'Reject'}
           onClose={() => setPending(null)}
           onSubmit={note => api.reviewKycDocument(token!, caseId, pending.doc.id, { decision: pending.decision, note })}
@@ -596,7 +602,7 @@ function SiteVisitDialog({ gymId, gymName, gymTier, onClose, onDone }: {
 
 /** Opens a document from private storage. The file is fetched with the session, never by a public link. */
 function DocumentViewer({ caseId, doc, onClose }: { caseId: string; doc: KycDocument; onClose: () => void }) {
-  const { token } = useApp();
+  const { token, t } = useApp();
   const [url, setUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -612,7 +618,7 @@ function DocumentViewer({ caseId, doc, onClose }: { caseId: string; doc: KycDocu
 
   const isPdf = doc.mimeType === 'application/pdf';
   return (
-    <Dialog open onClose={onClose} title={REQUIREMENT_LABEL[doc.requirementKey] ?? doc.requirementKey} description={doc.fileName ?? undefined} size="xl">
+    <Dialog open onClose={onClose} title={REQUIREMENT_LABEL[doc.requirementKey] ?? (doc.requirementKey === 'vat_certificate' ? t('admin.kyc.vatCert') : doc.requirementKey)} description={doc.fileName ?? undefined} size="xl">
       <div className="space-y-3" data-testid="kyc-viewer">
         {error ? <Alert tone="error">{error}</Alert> : !url ? <Spinner className="h-6 w-6" /> : isPdf ? (
           <iframe src={url} title={doc.fileName ?? 'Document'} className="h-[70vh] w-full rounded-[var(--radius-md)] border border-[var(--color-border-secondary)]" />

@@ -122,6 +122,8 @@ export default function LoginPage() {
         return t('login.adminRequired');
       if (body?.error === 'vendor_staff_inactive')
         return t('login.vendorStaffDisabled');
+      if (body?.error === 'session_ended')
+        return t('login.sessionEnded');
       if (body?.error === 'vendor_account_suspended')
         return t('login.suspendedBusiness');
       if (body?.error === 'account_suspended')
@@ -158,6 +160,7 @@ export default function LoginPage() {
       handleSuccess(token, user);
     } catch (err) {
       if (needsEmailVerification(err)) return startVerification();
+      await endStaleFirebaseSession(err);
       setError(mapError(err));
     } finally {
       setBusy(false);
@@ -174,9 +177,21 @@ export default function LoginPage() {
       handleSuccess(token, user);
     } catch (err) {
       if (needsEmailVerification(err)) return startVerification();
+      await endStaleFirebaseSession(err);
       setError(mapError(err));
     } finally {
       setBusy(false);
+    }
+  }
+
+  // 401 session_ended: this Firebase sign-in is older than the account's last password change (for
+  // example a Firebase session cached in this browser). Drop it so the next try signs in afresh.
+  async function endStaleFirebaseSession(err: unknown) {
+    if (err instanceof ApiError && (err.body as { error?: string } | null)?.error === 'session_ended') {
+      await signOutFirebase().catch(() => undefined);
+      setPassword('');
+      setMethod(m => (m === 'verify' ? 'choose' : m));
+      setNotice(null);
     }
   }
 
@@ -216,7 +231,7 @@ export default function LoginPage() {
       handleSuccess(token, user);
     } catch (err) {
       if (needsEmailVerification(err)) setNotice(t('login.verifyNotYet'));
-      else setError(mapError(err));
+      else { await endStaleFirebaseSession(err); setError(mapError(err)); }
     } finally {
       setBusy(false);
     }

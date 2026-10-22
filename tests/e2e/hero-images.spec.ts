@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
 import { API, GIF, mockHeroApi, png, seedState, signInAs, staff, SUPER_ADMIN, type HeroState } from './helpers/hero-mock';
 
@@ -20,6 +22,75 @@ async function openScreen(page: Page, s: HeroState, opts: { user?: Record<string
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.goto('/admin/hero-images/');
 }
+
+// ── Pixel checks over a pure-white photo (lighter scrim, spec §5 / §33) ──────
+const WHITE = png(64, 48, { rgb: [255, 255, 255] });
+type Box = { x: number; y: number; w: number; h: number };
+/** Hides the sample text (layout unchanged) so the pixels read the scrim alone. */
+const hideText = (page: Page) => page.addStyleTag({
+  content: '.hero-preview__content > *, .hero-preview__lockup, .photo-panel__content > p { visibility: hidden !important; }',
+});
+/** Points on a 6 × 6 grid over a rectangle (frame CSS px). */
+function grid(x1: number, y1: number, x2: number, y2: number): Array<[number, number]> {
+  const out: Array<[number, number]> = [];
+  if (x2 < x1 || y2 < y1) return out;
+  for (let i = 0; i <= 5; i++) for (let j = 0; j <= 5; j++) out.push([x1 + ((x2 - x1) * i) / 5, y1 + ((y2 - y1) * j) / 5]);
+  return out;
+}
+/**
+ * Screenshots one preview frame and reads the scrim's alpha at points given in the frame's own CSS px
+ * (the frame may be drawn scaled down to fit the dialog). Over white, the scrim #020617 at alpha a
+ * gives R = 255 - 253a.
+ */
+async function measure(page: Page, testId: string, frameWidth: number) {
+  const el = page.getByTestId(testId);
+  await el.scrollIntoViewIfNeeded();
+  await expect.poll(() => el.evaluate(n => {
+    const img = n.querySelector('img');
+    return !!img && (img as HTMLImageElement).complete && (img as HTMLImageElement).naturalWidth > 0;
+  })).toBe(true);
+  const box = (await el.boundingBox())!;
+  const scale = box.width / frameWidth;
+  const textTop = Number((await el.getAttribute('data-text-top')) ?? 0);
+  const shot = (await el.screenshot({ animations: 'disabled' })).toString('base64');
+  return {
+    textTop,
+    rel: (b: { x: number; y: number; width: number; height: number } | null): Box => ({
+      x: (b!.x - box.x) / scale, y: (b!.y - box.y) / scale, w: b!.width / scale, h: b!.height / scale,
+    }),
+    alphaAt: (pts: Array<[number, number]>) => page.evaluate(async ({ shot, pts, scale }) => {
+      const img = new Image();
+      img.src = `data:image/png;base64,${shot}`;
+      await img.decode();
+      const c = document.createElement('canvas');
+      c.width = img.naturalWidth; c.height = img.naturalHeight;
+      const ctx = c.getContext('2d')!;
+      ctx.drawImage(img, 0, 0);
+      const k = window.devicePixelRatio || 1; // device px per CSS px
+      return pts.map(([x, y]) => {
+        const px = Math.min(c.width - 1, Math.max(0, Math.floor(x * scale * k)));
+        const py = Math.min(c.height - 1, Math.max(0, Math.floor(y * scale * k)));
+        const r = ctx.getImageData(px, py, 1, 1).data[0];
+        return Math.round(((255 - r) / 253) * 1000) / 1000;
+      });
+    }, { shot, pts, scale }),
+  };
+}
+/** The class names in a photo panel (in DOM order) and its computed geometry and scrim. */
+const panelShape = (panel: ReturnType<Page['getByTestId']>) => panel.evaluate(el => {
+  const classes = [el, ...Array.from(el.querySelectorAll('*'))]
+    .flatMap(n => Array.from(n.classList).filter(c => c.startsWith('photo-panel')));
+  const scrim = el.querySelector('.photo-panel__text-scrim')!;
+  const cs = getComputedStyle(scrim);
+  const ps = getComputedStyle(el);
+  return {
+    classes,
+    scrim: cs.backgroundImage,
+    mask: cs.maskImage || cs.getPropertyValue('-webkit-mask-image'),
+    padding: ps.padding,
+    width: (el as HTMLElement).offsetWidth, // layout width, before the preview's scale-to-fit
+  };
+});
 
 const nav = (page: Page) => page.getByRole('navigation', { name: /main navigation|menyu kuu/i });
 
@@ -258,23 +329,136 @@ test.describe('App photos (flag on)', () => {
     expect(patch.body).toEqual({ focal: { x: -0.1, y: 0.1 } }); // focal only: no re-confirmation needed
   });
 
-  test('previews use the real scrim: the 0.80 stop sits 24px above the text, and 1.3× text moves it (AC-N9)', async ({ page }) => {
+  test('previews use the lighter scrim: 0.46 bar band, clear photo, ramp to 0.86 at the first text line; 1.3× text moves it (AC-N9)', async ({ page }) => {
     await openScreen(page, seedState());
     await page.getByRole('button', { name: 'Library', exact: true }).click();
     await page.getByTestId('hero-edit-hero_b').click();
     const dialog = page.getByRole('dialog', { name: 'Edit photo' });
     await expect(dialog.getByText('This photo is bright where the text sits. It will still be readable but will look darker.')).toBeVisible();
     const phone = dialog.getByTestId('hero-preview-phone');
-    const stop1 = Number(await phone.getAttribute('data-stop'));
-    expect(stop1).toBeGreaterThan(0);
-    const scrim = await phone.locator('.hero-preview__scrim').evaluate(el => getComputedStyle(el).backgroundImage);
-    expect(scrim).toContain('rgba(2, 6, 23, 0.5)');
-    expect(scrim).toContain('rgba(2, 6, 23, 0.8)');
+    await expect(phone).toHaveAttribute('data-text-top', /^\d+$/);
+    const top1 = Number(await phone.getAttribute('data-text-top'));
+    expect(top1).toBeGreaterThan(0);
+    const scrim = await dialog.getByTestId('hero-preview-phone-scrim').evaluate(el => getComputedStyle(el).backgroundImage);
+    expect(scrim).toContain('rgba(2, 6, 23, 0.46)');
+    expect(scrim).toContain('rgba(2, 6, 23, 0.4)');
+    expect(scrim).toContain('rgba(2, 6, 23, 0.86)');
+    expect(scrim).not.toContain('rgba(2, 6, 23, 0.8)');
     await dialog.getByTestId('hero-preview-card-phone').getByText('Show 1.3× text').click();
-    await expect.poll(async () => Number(await phone.getAttribute('data-stop'))).toBeLessThan(stop1);
-    const desktopScrim = await dialog.getByTestId('hero-preview-desktop').locator('.hero-preview__scrim').evaluate(el => getComputedStyle(el).backgroundImage);
+    await expect.poll(async () => Number(await phone.getAttribute('data-text-top'))).toBeLessThan(top1);
+    const desktopScrim = await dialog.getByTestId('hero-preview-desktop-scrim').evaluate(el => getComputedStyle(el).backgroundImage);
     expect(desktopScrim).toContain('rgba(2, 6, 23, 0.92)');
-    expect(desktopScrim).toContain('rgba(2, 6, 23, 0.3)');
+    expect(desktopScrim).toContain('rgba(2, 6, 23, 0.86)');
+    expect(desktopScrim).toContain('rgba(2, 6, 23, 0.15)');
+  });
+
+  test('previews over a pure-white photo: >= 0.86 under the text, clear above it, bar band 0.46 (phone, band, desktop)', async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await openScreen(page, seedState({ previewPng: WHITE }));
+    await page.getByRole('button', { name: 'Library', exact: true }).click();
+    await page.getByTestId('hero-edit-hero_a').click();
+    const dialog = page.getByRole('dialog', { name: 'Edit photo' });
+    await hideText(page);
+
+    // Phone hero (FFPhotoHero compact, 390 × 300).
+    const phone = await measure(page, 'hero-preview-phone', 390);
+    const T = phone.textTop;
+    const text = phone.rel(await dialog.getByTestId('hero-preview-phone-text').boundingBox());
+    expect(T).toBeGreaterThan(0.16 * 300 + 72); // room for clear photo between the bar band and the lead-in
+    const under = await phone.alphaAt(grid(text.x + 4, T + 1, text.x + text.w - 4, 300 - 2));
+    for (const a of under) expect(a).toBeGreaterThanOrEqual(0.855);
+    const [bar] = await phone.alphaAt([[195, 1]]);
+    expect(bar).toBeCloseTo(0.46, 1);
+    const clear = await phone.alphaAt(grid(4, 0.16 * 300 + 2, 386, T - 72 - 2));
+    for (const a of clear) expect(a).toBeLessThanOrEqual(0.012);
+    const [lead] = await phone.alphaAt([[195, T - 24]]);
+    expect(lead).toBeGreaterThan(0.36);
+    expect(lead).toBeLessThan(0.46);
+
+    // Phone band (FFPhotoHero band, 342 × 180): the same rule.
+    const band = await measure(page, 'hero-preview-band', 342);
+    const bText = band.rel(await dialog.getByTestId('hero-preview-band-text').boundingBox());
+    for (const a of await band.alphaAt(grid(bText.x + 4, band.textTop + 1, bText.x + bText.w - 4, 180 - 2))) expect(a).toBeGreaterThanOrEqual(0.855);
+    const [bBar] = await band.alphaAt([[171, 1]]);
+    expect(bBar).toBeCloseTo(0.46, 1);
+
+    // Desktop banner (FFPhotoHero panel, 960 × 320): 0.92 at the edge, >= 0.86 to 24px past the text column, 0.15 far edge.
+    const desk = await measure(page, 'hero-preview-desktop', 960);
+    const dText = desk.rel(await dialog.getByTestId('hero-preview-desktop-text').boundingBox());
+    expect(dText.x + dText.w).toBeLessThanOrEqual(480 + 1);
+    // (inside the 24px rounded corners)
+    for (const a of await desk.alphaAt(grid(8, 30, 480 + 24 - 2, 290))) expect(a).toBeGreaterThanOrEqual(0.855);
+    const [edge] = await desk.alphaAt([[1, 160]]);
+    expect(edge).toBeGreaterThan(0.9);
+    const [far] = await desk.alphaAt([[958, 160]]);
+    expect(far).toBeLessThan(0.2);
+  });
+
+  test('footer preview: full width, clear top, >= 0.86 behind the lockup (icon on a light plate, "FitFlex Africa", "Fitness Without Limits")', async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await openScreen(page, seedState({ previewPng: WHITE, drafts: { gyms: ['hero_a'], portalLogin: ['hero_b'], footerPool: ['hero_a'] } }));
+    await page.getByTestId('hero-preview-btn-footerPool').click();
+    const dialog = page.getByTestId('hero-slot-preview');
+    const lockup = dialog.getByTestId('hero-preview-footer-lockup');
+    await expect(lockup.getByText('FitFlex Africa', { exact: true })).toBeVisible();
+    await expect(lockup.getByText('Fitness Without Limits', { exact: true })).toBeVisible();
+    await expect(lockup.locator('.hero-preview__plate img')).toHaveAttribute('src', '/brand/fitflex-icon.png');
+    await expect(dialog.getByText("That's all for now.")).toHaveCount(0);
+    await expect(dialog.getByText('Page footer (phone) · 390 × 405')).toBeVisible();
+    await expect.poll(() => lockup.locator('img').evaluate(i => (i as HTMLImageElement).naturalWidth)).toBeGreaterThan(0);
+    const plateBg = await lockup.locator('.hero-preview__plate').evaluate(el => getComputedStyle(el).backgroundColor);
+    expect(plateBg).toBe('rgb(241, 245, 249)');
+    await hideText(page);
+
+    const foot = await measure(page, 'hero-preview-footer', 390);
+    const T = foot.textTop;
+    expect(T).toBeGreaterThan(72);
+    for (const a of await foot.alphaAt(grid(2, T + 1, 388, 405 - 2))) expect(a).toBeGreaterThanOrEqual(0.855);
+    const [bottom] = await foot.alphaAt([[195, 404]]);
+    expect(bottom).toBeGreaterThan(0.9);
+    for (const a of await foot.alphaAt(grid(2, 2, 388, T - 72 - 2))) expect(a).toBeLessThanOrEqual(0.012);
+  });
+
+  test('portal sign-in preview is the login PhotoPanel: same classes and scrim as /login, >= 0.86 under the text, clear above', async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await openScreen(page, seedState({ previewPng: WHITE }));
+    await page.getByTestId('hero-preview-btn-portalLogin').click();
+    const dialog = page.getByTestId('hero-slot-preview');
+    const panel = dialog.getByTestId('hero-preview-panel');
+    await expect(panel).toHaveClass(/(^|\s)photo-panel(\s|$)/);
+    await expect(dialog.getByTestId('hero-preview-panel-img')).toHaveAttribute('data-loaded', 'true');
+    await expect(panel.getByText('Run it all from', { exact: false })).toBeVisible();
+    const preview = await panelShape(panel);
+    expect(preview.classes).toEqual([
+      'photo-panel', 'photo-panel__img', 'photo-panel__content', 'photo-panel__text-scrim',
+      'photo-panel__eyebrow', 'photo-panel__headline', 'photo-panel__accent', 'photo-panel__sub',
+    ]);
+    expect(preview.width).toBe(704);
+    expect(preview.scrim).toContain('rgba(2, 6, 23, 0.86)');
+
+    if (process.env.NEXT_PUBLIC_PHOTO_HERO_UI === 'true') {
+      // The same structure and computed scrim as the real login panel at 1280 × 800.
+      const login = await page.context().newPage();
+      await login.route(`${API}/**`, route => route.fulfill({ status: 404, json: { error: 'not_found' } }));
+      await login.setViewportSize({ width: 1280, height: 800 });
+      await login.goto('/login');
+      const real = await panelShape(login.getByTestId('login-photo-panel'));
+      expect(preview.classes).toEqual(real.classes);
+      expect(preview.scrim).toBe(real.scrim);
+      expect(preview.mask).toBe(real.mask);
+      expect(preview.padding).toBe(real.padding);
+      expect(preview.width).toBe(real.width);
+      await login.close();
+    }
+
+    // Same 1280 width (the same desktop layout), but tall enough that the 800px frame is not
+    // covered by the dialog header when it is captured.
+    await page.setViewportSize({ width: 1280, height: 1400 });
+    await hideText(page);
+    const p = await measure(page, 'hero-preview-panel', 704);
+    const content = p.rel(await panel.getByTestId('hero-preview-panel-content').boundingBox());
+    for (const a of await p.alphaAt(grid(content.x + 2, content.y + 1, content.x + content.w - 2, 800 - 2))) expect(a).toBeGreaterThanOrEqual(0.855);
+    for (const a of await p.alphaAt(grid(4, 4, 700, content.y - 48 - 4))) expect(a).toBeLessThanOrEqual(0.012);
   });
 
   test('editing licence or people needs both boxes again and sends them', async ({ page }) => {
@@ -414,6 +598,8 @@ test.describe('App photos (flag on)', () => {
       [404, 'feature_disabled', 'App photos are switched off on the server.'],
       [400, 'invalid_width', "The preview size isn't valid."],
       [403, 'acl_forbidden', "You don't have permission to manage app photos."],
+      [403, 'forbidden', "This account can't manage app photos. Sign in with an admin account."],
+      [403, 'account_suspended', "Your account is suspended, so you can't manage app photos. Ask a super-admin to restore it."],
       [400, 'people_not_allowed', 'Some of these photos are marked as showing people, which isn\'t allowed for now. Edit them to “No people” or choose others.'],
       [409, 'image_not_live', "This photo isn't in the apps right now."],
       [500, 'image_save_failed', "The photo couldn't be saved. Try again."],
@@ -440,6 +626,77 @@ test.describe('App photos (flag on)', () => {
     s.fail = { rollback: { status: 409, json: { error: 'image_unpublished', imageIds: ['hero_a'] } } };
     await confirm.getByRole('button', { name: 'Put back' }).click();
     await expect(confirm.getByText("Couldn't put this version back. Nothing has changed in the apps. A photo in this version was removed from the apps after it, so this version can't be put back. To show that photo again, choose it for its places and publish.")).toBeVisible();
+  });
+
+  test('History: "Put back" is off for a version holding a photo removed from the app after it', async ({ page }) => {
+    const s = seedState(); // #2 holds hero_a (live); #1 holds nothing
+    await openScreen(page, s);
+    await page.getByRole('button', { name: 'History', exact: true }).click();
+    await expect(page.getByTestId('hero-rollback-2')).toHaveCount(0); // #2 is current
+    // Take hero_a down: the new #3 is current and #2 (which holds hero_a) can no longer be put back.
+    await page.getByRole('button', { name: 'Library', exact: true }).click();
+    await page.getByTestId('hero-unpublish-hero_a').click();
+    await page.getByRole('alertdialog', { name: 'Remove this photo from the apps?' }).getByRole('button', { name: 'Remove from live' }).click();
+    await expect(page.getByText('Photo removed from the apps.')).toBeVisible();
+    await page.getByRole('button', { name: 'History', exact: true }).click();
+    const put2 = page.getByTestId('hero-rollback-2');
+    await expect(put2).toBeDisabled();
+    await expect(put2).toHaveAttribute('title', 'A photo in this version was removed from the app');
+    await expect(page.getByTestId('hero-rollback-blocked-2')).toHaveText('A photo in this version was removed from the app');
+    await expect(put2).toHaveAccessibleDescription('A photo in this version was removed from the app');
+    // #1 holds no removed photo: still offered.
+    await expect(page.getByTestId('hero-rollback-1')).toBeEnabled();
+    await expect(page.getByTestId('hero-rollback-blocked-1')).toHaveCount(0);
+    expect(s.calls.filter(c => c.path === '/admin/hero-slots/rollback')).toHaveLength(0);
+  });
+
+  test('History: blocked versions come from the loaded photos too (unpublishedInPublication), in Swahili', async ({ page }) => {
+    const s = seedState({
+      publications: [
+        { id: 3, publishedBy: 'admin-1', publishedByName: 'Local Admin', publishedAt: '2026-10-19T11:00:00.000Z', note: null, rolledBackFrom: null, slots: {} },
+        ...seedState().publications,
+      ],
+    });
+    s.images[0].unpublishedInPublication = 3; // hero_a was taken down in #3
+    await openScreen(page, s, { locale: 'sw' });
+    await page.getByRole('button', { name: 'Historia', exact: true }).click();
+    await expect(page.getByTestId('hero-rollback-2')).toBeDisabled();
+    await expect(page.getByTestId('hero-rollback-2')).toHaveAttribute('title', 'Picha moja ya toleo hili iliondolewa kwenye app');
+    await expect(page.getByTestId('hero-rollback-blocked-2')).toHaveText('Picha moja ya toleo hili iliondolewa kwenye app');
+    await expect(page.getByTestId('hero-rollback-1')).toBeEnabled();
+  });
+
+  test('sign-in refusals (403 forbidden, account_suspended) get their own messages, English and Swahili', async ({ page }) => {
+    const s = seedState({ fail: { load: { status: 403, json: { error: 'forbidden', requiredRoles: ['admin'] } } } });
+    await openScreen(page, s);
+    await expect(page.getByText("Couldn't load app photos.")).toBeVisible();
+    await expect(page.getByText("This account can't manage app photos. Sign in with an admin account.")).toBeVisible();
+    await expect(page.getByText(/Something went wrong/)).toHaveCount(0);
+
+    s.fail = { load: { status: 403, json: { error: 'account_suspended' } } };
+    await page.getByRole('button', { name: 'Try again' }).click();
+    await expect(page.getByText("Your account is suspended, so you can't manage app photos. Ask a super-admin to restore it.")).toBeVisible();
+
+    // Same codes on a write.
+    s.fail = {};
+    await page.getByRole('button', { name: 'Try again' }).click();
+    await page.getByTestId('hero-publish-open').click();
+    const dialog = page.getByRole('dialog', { name: 'Publish these changes?' });
+    s.fail = { publish: { status: 403, json: { error: 'account_suspended' } } };
+    await dialog.getByTestId('hero-publish-confirm').click();
+    await expect(dialog.getByTestId('hero-publish-error')).toHaveText("Your account is suspended, so you can't manage app photos. Ask a super-admin to restore it.");
+    s.fail = { publish: { status: 403, json: { error: 'forbidden', requiredRoles: ['admin'] } } };
+    await dialog.getByTestId('hero-publish-confirm').click();
+    await expect(dialog.getByTestId('hero-publish-error')).toHaveText("This account can't manage app photos. Sign in with an admin account.");
+  });
+
+  test('sign-in refusals in Swahili', async ({ page }) => {
+    const s = seedState({ fail: { load: { status: 403, json: { error: 'forbidden', requiredRoles: ['admin'] } } } });
+    await openScreen(page, s, { locale: 'sw' });
+    await expect(page.getByText('Akaunti hii haiwezi kusimamia picha za app. Ingia kwa akaunti ya admin.')).toBeVisible();
+    s.fail = { load: { status: 403, json: { error: 'account_suspended' } } };
+    await page.getByRole('button', { name: 'Jaribu tena' }).click();
+    await expect(page.getByText('Akaunti yako imesimamishwa, kwa hiyo huwezi kusimamia picha za app. Mwombe super-admin airejeshe.')).toBeVisible();
   });
 
   test('library: status and live badges, Retire blocked while a place uses it, Remove from live (AC-N14)', async ({ page }) => {
@@ -546,6 +803,35 @@ test.describe('App photos (flag on)', () => {
 
     await page.getByRole('button', { name: 'History', exact: true }).click();
     await page.screenshot({ path: `${dir}/portal-app-photos-history.png` });
+  });
+
+  test('screenshots of the lighter previews for the design record', async ({ page }) => {
+    test.skip(!process.env.HERO_SCREENSHOTS_DIR, 'set HERO_SCREENSHOTS_DIR to write screenshots');
+    const dir = process.env.HERO_SCREENSHOTS_DIR!;
+    // A real bundled photo (Pexels, people-free; public/photos/hero/LICENSES.md) instead of a flat test colour.
+    const photo = readFileSync(join(__dirname, '../../public/photos/hero/login-band.jpg'));
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await openScreen(page, seedState({ previewPng: photo, drafts: { gyms: ['hero_a'], portalLogin: ['hero_b'], footerPool: ['hero_a'] } }));
+    await page.getByRole('button', { name: 'Library', exact: true }).click();
+    await page.getByTestId('hero-edit-hero_a').click();
+    const edit = page.getByRole('dialog', { name: 'Edit photo' });
+    await expect(edit.getByTestId('hero-preview-phone-img')).toHaveAttribute('src', /^blob:/);
+    await expect.poll(() => edit.getByTestId('hero-preview-phone-img').evaluate(i => (i as HTMLImageElement).naturalWidth)).toBeGreaterThan(0);
+    await page.waitForTimeout(300);
+    await page.screenshot({ path: `${dir}/portal-app-photos-preview-lighter.png` });
+    await edit.getByRole('button', { name: 'Cancel' }).click();
+
+    await page.getByRole('button', { name: 'Places', exact: true }).click();
+    await page.getByTestId('hero-preview-btn-footerPool').click();
+    await expect(page.getByTestId('hero-preview-footer-img')).toHaveAttribute('src', /^blob:/);
+    await page.waitForTimeout(300);
+    await page.screenshot({ path: `${dir}/portal-app-photos-preview-lighter-footer.png` });
+    await page.getByRole('button', { name: 'Close', exact: true }).last().click();
+
+    await page.getByTestId('hero-preview-btn-portalLogin').click();
+    await expect(page.getByTestId('hero-preview-panel-img')).toHaveAttribute('data-loaded', 'true');
+    await page.waitForTimeout(300);
+    await page.screenshot({ path: `${dir}/portal-app-photos-preview-lighter-login.png` });
   });
 });
 

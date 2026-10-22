@@ -23,7 +23,7 @@ import {
 import { messages, type Locale, type MessageKey } from '@/lib/i18n';
 import { fmt } from '@/lib/vendor';
 import { cn } from '@/lib/cn';
-import { focalToObjectPosition } from './photo-panel';
+import { focalToObjectPosition, PhotoPanel } from './photo-panel';
 import {
   Alert, Badge, Button, Card, CardContent, Checkbox, EmptyState, ErrorState, Field, Input, PageHeader, Radio, Segmented, Select,
   SkeletonCard, SkeletonTable, Spinner, Table, TBody, Td, Textarea, Th, THead, Tr, useToast,
@@ -130,6 +130,9 @@ const ERROR_KEYS: Record<string, MessageKey> = {
   feature_disabled: 'heroImages.error.featureDisabled',
   invalid_width: 'heroImages.error.invalidWidth',
   acl_forbidden: 'heroImages.error.aclForbidden',
+  // Admin sign-in checks (requireAuth): not an admin account, or the account is suspended.
+  forbidden: 'heroImages.error.forbidden',
+  account_suspended: 'heroImages.error.accountSuspended',
 };
 /** Every code the screen maps (exported for the e2e mapping test). */
 export const HERO_ERROR_CODES = Object.keys(ERROR_KEYS);
@@ -256,17 +259,24 @@ function ThumbRow({ ids, images, slot, emptyText }: { ids: string[]; images: Map
 }
 
 /* ── HeroPreview: a fixed-size frame with the real scrim (spec §36.5) ─────── */
+// Lighter rule (owner 2026-10-20; spec §5, §5.3, §33): the photo is clear and only the text has a
+// scrim, exactly as the app (mobile#199/#201) and the portal login panel draw it. The portal sign-in
+// slot ('panel') renders the login's own PhotoPanel, so the two cannot drift.
 export type HeroPreviewKind = 'phone' | 'band' | 'footer' | 'desktop' | 'panel';
-const PREVIEW_SIZE: Record<HeroPreviewKind, { w: number; h: number; label: MessageKey; scrim: 'vertical' | 'uniform' | 'horizontal' }> = {
+const PREVIEW_SIZE: Record<HeroPreviewKind, { w: number; h: number; label: MessageKey; scrim: 'vertical' | 'footer' | 'horizontal' | 'login' }> = {
   phone: { w: 390, h: 300, label: 'heroImages.preview.phone', scrim: 'vertical' },
   band: { w: 342, h: 180, label: 'heroImages.preview.band', scrim: 'vertical' },
-  footer: { w: 342, h: 160, label: 'heroImages.preview.band', scrim: 'uniform' },
+  // Full width, 48% of a 390 x 844 phone (FFPhotoFooter: 48% of the viewport, clamped 320–440).
+  footer: { w: 390, h: 405, label: 'heroImages.preview.footer', scrim: 'footer' },
   desktop: { w: 960, h: 320, label: 'heroImages.preview.desktop', scrim: 'horizontal' },
-  panel: { w: 704, h: 800, label: 'heroImages.preview.desktop', scrim: 'horizontal' },
+  // The login panel at 1280 x 800: 55% of the width, full height.
+  panel: { w: 704, h: 800, label: 'heroImages.preview.desktop', scrim: 'login' },
 };
+/** The login row the sign-in panel preview is laid out in (the panel takes its left 55%). */
+const LOGIN_ROW = { w: 1280, h: 800 };
 
 /** Draws `children` at its real CSS size, scaled down (never up) to fit the column. */
-function ScaledFrame({ width, height, children }: { width: number; height: number; children: ReactNode }) {
+export function ScaledFrame({ width, height, children }: { width: number; height: number; children: ReactNode }) {
   const ref = useRef<HTMLDivElement>(null);
   const [scale, setScale] = useState(1);
   useLayoutEffect(() => {
@@ -291,40 +301,61 @@ function ScaledFrame({ width, height, children }: { width: number; height: numbe
 export function HeroPreview({ kind, src, focal, textScale = 1 }: { kind: HeroPreviewKind; src?: string; focal: { x: number; y: number }; textScale?: number }) {
   const { t } = useApp();
   const spec = PREVIEW_SIZE[kind];
-  const frameRef = useRef<HTMLDivElement>(null);
   const textRef = useRef<HTMLDivElement>(null);
-  const [stop, setStop] = useState<number | null>(null);
-  // The 0.80 stop sits 24px above the top of the text block, and moves with it at 1.3× (spec §5.2).
+  const [textTop, setTextTop] = useState<number | null>(null);
+  // The ramp ends at the first text line (the footer: at the top of the mark), and moves with it at 1.3×.
   useLayoutEffect(() => {
     const text = textRef.current;
-    if (!text || spec.scrim !== 'vertical') return;
-    const measure = () => setStop(Math.max(0, text.offsetTop - 24));
+    if (!text) return;
+    const measure = () => setTextTop(text.offsetTop);
     measure();
     if (typeof ResizeObserver === 'undefined') return;
     const ro = new ResizeObserver(measure);
     ro.observe(text);
     return () => ro.disconnect();
-  }, [spec.scrim, textScale, kind]);
+  }, [textScale, kind]);
+
+  if (spec.scrim === 'login') {
+    return (
+      <div
+        className={cn('hero-preview-login flex flex-col lg:flex-row', textScale !== 1 && 'hero-preview-login--large')}
+        style={{ width: LOGIN_ROW.w, height: LOGIN_ROW.h }}
+        data-testid="hero-preview-login-row"
+      >
+        <PhotoPanel
+          previewImage={{ src, objectPosition: focalToObjectPosition(focal) }}
+          eyebrow={t('login.hero.eyebrow')}
+          headlineLead={t('login.hero.lead')}
+          headlineAccent={t('login.hero.accent')}
+          subline={t('login.hero.sub')}
+          data-testid={`hero-preview-${kind}`}
+        />
+      </div>
+    );
+  }
   return (
     <div
-      ref={frameRef}
       className={cn('hero-preview', `hero-preview--${kind}`, `hero-preview--${spec.scrim}`)}
-      style={{ '--hero-preview-scale': String(textScale), ...(stop != null ? { '--hero-preview-stop': `${stop}px` } : {}) } as React.CSSProperties}
+      style={{ '--hero-preview-scale': String(textScale), ...(textTop != null ? { '--hero-preview-text-top': `${textTop}px` } : {}) } as React.CSSProperties}
       data-testid={`hero-preview-${kind}`}
-      data-stop={stop ?? undefined}
+      data-text-top={textTop ?? undefined}
     >
       {src && (
         // eslint-disable-next-line @next/next/no-img-element
         <img src={src} alt="" role="presentation" className="hero-preview__img" style={{ objectPosition: focalToObjectPosition(focal) }} data-testid={`hero-preview-${kind}-img`} />
       )}
-      <div className="hero-preview__scrim" aria-hidden="true" />
+      <div className="hero-preview__scrim" aria-hidden="true" data-testid={`hero-preview-${kind}-scrim`} />
       {kind === 'footer' ? (
-        <div ref={textRef}>
-          <p className="hero-preview__footer-mark" aria-hidden="true">FitFlex Af</p>
-          <p className="hero-preview__footer-line">{t('heroImages.preview.footerLine')}</p>
+        <div ref={textRef} className="hero-preview__lockup" data-testid="hero-preview-footer-lockup">
+          <span className="hero-preview__plate" aria-hidden="true">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/brand/fitflex-icon.png" alt="" className="hero-preview__mark" />
+          </span>
+          <p className="hero-preview__brand">{t('heroImages.preview.footerBrand')}</p>
+          <p className="hero-preview__tagline">{t('heroImages.preview.footerTagline')}</p>
         </div>
       ) : (
-        <div ref={textRef} className="hero-preview__content">
+        <div ref={textRef} className="hero-preview__content" data-testid={`hero-preview-${kind}-text`}>
           <p className="hero-preview__eyebrow">{t('heroImages.preview.sampleEyebrow')}</p>
           <p className="hero-preview__headline">
             {t('heroImages.preview.sampleLead')} <span className="hero-preview__accent">{t('heroImages.preview.sampleAccent')}</span>
@@ -908,7 +939,8 @@ function ChooseDialog({ slot, images, onClose, onSaved }: { slot: HeroSlot | nul
 function SlotPreviewDialog({ slot, image, onClose }: { slot: HeroSlot | null; image?: HeroImage; onClose: () => void }) {
   const { t } = useApp();
   if (!slot || !image) return null;
-  const kinds: HeroPreviewKind[] = slot.id === 'footerPool' || slot.variant === 'band' ? ['footer'] : slot.variant === 'panel' ? ['panel'] : ['phone', 'band', 'desktop'];
+  // functions#232: the full-width footer is variant 'footer' (no slot sends 'band' any more); the id is the fallback.
+  const kinds: HeroPreviewKind[] = slot.variant === 'footer' || slot.id === 'footerPool' ? ['footer'] : slot.variant === 'panel' ? ['panel'] : ['phone', 'band', 'desktop'];
   return (
     <Dialog open onClose={onClose} title={fmt(t('heroImages.preview.title'), { place: slotLabel(t, slot.id) })} description={photoAlt(t, image)} size="xl">
       <div data-testid="hero-slot-preview"><PreviewSet image={image} kinds={kinds} /></div>
@@ -1124,11 +1156,25 @@ function LibraryTab({ state, onUpload, onEdit, onRetire, onUnpublish }: {
   );
 }
 
-function HistoryTab({ state, onRollback }: { state: HeroImagesState; onRollback: (p: HeroPublication) => void }) {
+/**
+ * The server refuses to put back a snapshot holding a photo unpublished after it (409 image_unpublished,
+ * functions hero-image-service rollback): image.unpublishedInPublication > snapshot id. `takenDown` adds
+ * the unpublish answers' rollbackBlockedBefore (imageId → publication id) seen on this visit.
+ */
+export function rollbackBlocked(p: HeroPublication, images: ReadonlyMap<string, HeroImage>, takenDown: Readonly<Record<string, number>> = {}) {
+  return Object.values(p.slots ?? {}).flat()
+    .some(id => Math.max(Number(images.get(id)?.unpublishedInPublication ?? 0), Number(takenDown[id] ?? 0)) > p.id);
+}
+
+function HistoryTab({ state, takenDown, onRollback }: {
+  state: HeroImagesState; takenDown: Readonly<Record<string, number>>; onRollback: (p: HeroPublication) => void;
+}) {
   const { t, locale } = useApp();
+  const hintId = useId();
   const pubs = state.publications;
   if (!pubs.length) return <EmptyState title={t('heroImages.history.empty')} />;
   const order = state.slots.map(s => s.id);
+  const images = new Map(state.images.map(img => [img.id, img]));
   return (
     <Table aria-label={t('heroImages.history.table')} data-testid="hero-history">
       <THead>
@@ -1144,6 +1190,7 @@ function HistoryTab({ state, onRollback }: { state: HeroImagesState; onRollback:
       <TBody>
         {pubs.map((p, i) => {
           const n = diffSlots(pubs[i + 1]?.slots ?? {}, p.slots ?? {}, order).length;
+          const blocked = i > 0 && rollbackBlocked(p, images, takenDown);
           return (
             <Tr key={p.id} data-testid={`hero-version-${p.id}`}>
               <Td>
@@ -1159,9 +1206,18 @@ function HistoryTab({ state, onRollback }: { state: HeroImagesState; onRollback:
               <Td className="whitespace-nowrap">{fmt(t('heroImages.history.places'), { n })}</Td>
               <Td>
                 {i > 0 && (
-                  <Button variant="secondary" size="sm" className="min-h-11 whitespace-nowrap" onClick={() => onRollback(p)} data-testid={`hero-rollback-${p.id}`}>
-                    {t('heroImages.rollback')}
-                  </Button>
+                  <div className="flex flex-col items-start gap-1">
+                    <Button
+                      variant="secondary" size="sm" className="min-h-11 whitespace-nowrap"
+                      onClick={() => onRollback(p)} disabled={blocked}
+                      title={blocked ? t('heroImages.rollback.blocked') : undefined}
+                      aria-describedby={blocked ? `${hintId}-${p.id}` : undefined}
+                      data-testid={`hero-rollback-${p.id}`}
+                    >
+                      {t('heroImages.rollback')}
+                    </Button>
+                    {blocked && <span id={`${hintId}-${p.id}`} className="text-xs text-[var(--color-fg-tertiary)]" data-testid={`hero-rollback-blocked-${p.id}`}>{t('heroImages.rollback.blocked')}</span>}
+                  </div>
                 )}
               </Td>
             </Tr>
@@ -1193,6 +1249,8 @@ export function HeroImageManager() {
   const [unpublishing, setUnpublishing] = useState<HeroImage | null>(null);
   const [actionBusy, setActionBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  /** imageId → rollbackBlockedBefore from unpublish answers on this visit (backs up image.unpublishedInPublication). */
+  const [takenDown, setTakenDown] = useState<Record<string, number>>({});
   const publishHintId = useId();
 
   const store = useMemo(() => new ThumbStore(token), [token]);
@@ -1232,7 +1290,9 @@ export function HeroImageManager() {
         toast.success(res.inLiveSnapshot ? t('heroImages.retired.live') : t('heroImages.retired'));
         setRetiring(null);
       } else if (kind === 'unpublish' && unpublishing) {
-        await api.unpublishHeroImage(token, unpublishing.id);
+        const res = await api.unpublishHeroImage(token, unpublishing.id);
+        const before = Number(res?.rollbackBlockedBefore);
+        if (Number.isSafeInteger(before) && before > 0) setTakenDown(m => ({ ...m, [unpublishing.id]: before }));
         // Drafts are untouched: say so when a place still has it chosen (the next publish brings it back).
         const stillDrafted = state?.slots.filter(sl => sl.draft.includes(unpublishing.id)).map(sl => sl.id) ?? [];
         toast.success(stillDrafted.length
@@ -1300,7 +1360,7 @@ export function HeroImageManager() {
             onUnpublish={i => { setActionError(null); setUnpublishing(i); }}
           />
         )}
-        {tab === 'history' && <HistoryTab state={state} onRollback={p => { setActionError(null); setRollbackTo(p); }} />}
+        {tab === 'history' && <HistoryTab state={state} takenDown={takenDown} onRollback={p => { setActionError(null); setRollbackTo(p); }} />}
 
         <EditDialog image={editImage} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); void load(true); }} />
         <ChooseDialog slot={chooseSlot} images={state.images} onClose={() => setChoosing(null)} onSaved={() => { setChoosing(null); void load(true); }} />

@@ -2,15 +2,17 @@
 import { type ReactNode, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
-import { ArrowLeft, ChevronRight, Copy, Receipt, RefreshCw } from 'lucide-react';
+import { ArrowLeft, ChevronRight, Copy, FileText, Receipt, RefreshCw } from 'lucide-react';
 import { api, type VendorSale, type VendorSaleRow, type VendorSalesQuery, type VendorSaleSummary } from '@/lib/api';
 import { money } from '@/lib/admin-utils';
 import type { MessageKey } from '@/lib/i18n';
 import {
-  addDays, canCustomers, customerName, eatDateTime, eatToday, errorBody, errorCode, fmt, isRefusal, itemsKey, mayVoidSale, receiptDay,
+  addDays, canCustomers, customerName, documentsOn, eatDateTime, eatToday, errorBody, errorCode, fmt, isRefusal, itemsKey, mayVoidSale, receiptDay,
   recordedOffline, saleMethodLabel, saleMethodsLabel, saleReceiptText,
 } from '@/lib/vendor';
 import { CreditBadges } from '@/components/vendor/customers/bits';
+import { docLinkCls } from '@/components/vendor/documents/share-menu';
+import { documentHref } from '@/lib/vendor-documents';
 import {
   Alert, Badge, Button, Card, CardContent, CardHeader, Checkbox, EmptyState, ErrorState, Field, Input, PageHeader, Segmented, Select,
   SkeletonCard, SkeletonTable, Spinner, Table, TBody, Td, Textarea, Th, THead, Tr, useToast,
@@ -569,6 +571,14 @@ function SaleDetail({ id, onBack, onUpdated }: { id: string; onBack: () => void;
         </Card>
       )}
 
+      {/* S5: the receipt or invoice as a document (view, print, PDF, share links); a voided one too (its links). */}
+      {documentsOn(vendor.me) && (
+        <div className="flex flex-wrap gap-2">
+          <Link href={documentHref('sale', s.id, s.customer?.id)} className={docLinkCls} data-testid="sale-document">
+            <FileText aria-hidden="true" className="h-4 w-4" />{t('vendor.documents.view')}
+          </Link>
+        </div>
+      )}
       {s.status === 'completed' && (
         <div className="flex flex-wrap gap-2">
           <Button variant="secondary" className="min-h-11" onClick={copyText} data-testid="sale-copy">
