@@ -98,12 +98,15 @@ export function MetricCard({
   sub,
   icon,
   trend,
+  wrapLabel = false,
 }: {
   label: string;
   value: ReactNode;
   sub?: ReactNode;
   icon?: ReactNode;
   trend?: { direction: 'up' | 'down' | 'neutral'; label: string };
+  /** Let the label and sub wrap to two lines instead of truncating (longer Swahili labels). */
+  wrapLabel?: boolean;
 }) {
   const trendColors = {
     up:      'text-[var(--color-success-700)] bg-[var(--color-success-50)]',
@@ -115,11 +118,11 @@ export function MetricCard({
       <div className="p-5 sm:p-6">
         <div className="flex items-start justify-between gap-4">
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium text-[var(--color-fg-quaternary)] truncate">{label}</p>
+            <p className={cn('text-sm font-medium text-[var(--color-fg-quaternary)]', wrapLabel ? 'line-clamp-2' : 'truncate')} title={label}>{label}</p>
             <p className="mt-2 text-3xl font-semibold tracking-tight text-[var(--color-fg-primary)] tabular-nums">
               {value}
             </p>
-            {sub && <p className="mt-1 text-sm text-[var(--color-fg-quaternary)] truncate">{sub}</p>}
+            {sub && <p className={cn('mt-1 text-sm text-[var(--color-fg-quaternary)]', wrapLabel ? 'line-clamp-2' : 'truncate')}>{sub}</p>}
             {trend && (
               <span className={cn('mt-3 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium', trendColors[trend.direction])}>
                 {trend.direction === 'up' ? '↑' : trend.direction === 'down' ? '↓' : '—'}

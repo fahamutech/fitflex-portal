@@ -36,7 +36,7 @@ export const SKIP_REASONS = new Set([
   'whatsapp_transactional_off', 'no_device', 'no_phone', 'push_disabled', 'whatsapp_not_configured', 'marketing_cap',
   'whatsapp_disabled', 'whatsapp_template_not_approved', 'invalid_phone',
   'sms_marketing_not_opted_in', 'sms_opted_out', 'sms_transactional_off', 'sms_not_configured',
-  'account_suspended', 'member_not_found', 'not_gym_member',
+  'account_suspended', 'member_not_found', 'not_gym_member', 'vendor_unavailable', 'not_vendor_admin',
 ]);
 export const skipLabel = (t: T, reason: string) => (SKIP_REASONS.has(reason) ? t(`comms.skip.${reason}`) : reason);
 
@@ -54,6 +54,7 @@ export function errorText(t: T, err: unknown): string {
     account_suspended: 'comms.error.accountSuspended',
     not_your_gym: 'comms.error.notYourGym',
     invalid_audience: 'comms.error.invalidAudience',
+    vendor_marketing_not_available: 'comms.vendor.marketingUnavailable',
   };
   return code && known[code] ? t(known[code]) : `${t('comms.error.generic')}${code ? ` (${code})` : ''}`;
 }

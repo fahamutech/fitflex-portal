@@ -10,6 +10,7 @@ import { SearchableSelect, SelectOption } from '@/components/searchable-select';
 import { statusTone, statusLabel, trainerNames } from '@/lib/admin-utils';
 import { GymCreateForm, GymDraft, BLANK_GYM_DRAFT, validateGymDraft } from '@/components/gym-create-form';
 import { TrainerInlineForm, TrainerFormDraft, BLANK_TRAINER_DRAFT, validateTrainerDraft } from '@/components/trainer-inline-form';
+import { PartnerPersonalDetails } from '@/components/partner-personal-details';
 
 export default function OwnersPage() {
   const { token, user } = useApp();
@@ -346,6 +347,13 @@ export default function OwnersPage() {
           <Field label="Email" error={formErrors.email}>
             <input className="ui-input" type="email" value={draft.email || ''} onChange={e => { setDraft({ ...draft, email: e.target.value }); setFormErrors(prev => { const { email, ...rest } = prev; return rest; }); }} />
           </Field>
+          {editing && (
+            <PartnerPersonalDetails
+              subjectId={editing.id}
+              testId="owner-personal-details"
+              load={() => api.adminGymOwnerPersonalDetails(token, editing.id)}
+            />
+          )}
           <Field label="Gyms" hint="Owner can manage multiple gyms." error={formErrors.gyms}>
             <SearchableSelect
               options={gymOptions}
