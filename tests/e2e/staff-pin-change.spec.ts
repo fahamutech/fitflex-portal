@@ -166,6 +166,7 @@ test('each refusal of the PIN route reads plainly, and the session is kept', asy
     { status: 409, json: { error: 'pin_change_in_progress' } },
     { status: 502, json: { error: 'firebase_update_failed' } },
     { status: 404, json: { error: 'feature_disabled' } },
+    { status: 503, json: { error: 'pin_check_unavailable' } },
     { status: 500, json: { error: 'boom' } },
   ];
   await blockOutside(page);
@@ -187,8 +188,10 @@ test('each refusal of the PIN route reads plainly, and the session is kept', asy
   await submitPin(page, CHOSEN_PIN);
   await expect(page.getByText('Changing your PIN is not available right now. Your PIN has not changed. Sign out, then sign in again.')).toBeVisible();
   await submitPin(page, CHOSEN_PIN);
+  await expect(page.getByText("We couldn't check your new PIN right now. Nothing was changed — try again later.")).toBeVisible();
+  await submitPin(page, CHOSEN_PIN);
   await expect(page.getByText('Something went wrong. Your PIN has not changed. Try again.')).toBeVisible();
-  expect(calls.changes).toHaveLength(7);
+  expect(calls.changes).toHaveLength(8);
   await expect(pinGate(page)).toBeVisible();
   expect(await page.evaluate(() => localStorage.getItem('token'))).toBe('opaque-session-token');
 });
@@ -211,7 +214,8 @@ test('Swahili: the PIN step and its refusals read in Swahili; sign out ends the 
   const calls: Calls = { paths: [], changes: [], adminChanges: 0 };
   await blockOutside(page);
   await restoreStaffSession(page, { locale: 'sw' });
-  await mockBackend(page, calls, () => ({ status: 400, json: { error: 'pin_unchanged' } }));
+  const swAnswers: Reply[] = [{ status: 400, json: { error: 'pin_unchanged' } }, { status: 503, json: { error: 'pin_check_unavailable' } }];
+  await mockBackend(page, calls, () => swAnswers.shift()!);
 
   await page.goto('/checkins');
   await expect(pinGate(page)).toBeVisible();
@@ -224,6 +228,8 @@ test('Swahili: the PIN step and its refusals read in Swahili; sign out ends the 
   await expect(page.getByText('PIN mbili hazifanani.')).toBeVisible();
   await submitPin(page, CHOSEN_PIN);
   await expect(page.getByText('Chagua PIN tofauti na ile ya kuanzia.')).toBeVisible();
+  await submitPin(page, CHOSEN_PIN);
+  await expect(page.getByText('Hatukuweza kukagua PIN yako mpya sasa hivi. Hakuna kilichobadilishwa — jaribu tena baadaye.')).toBeVisible();
   await page.getByTestId('pinc-signout').click();
   await expect(page).toHaveURL(/\/login/);
   expect(await page.evaluate(() => localStorage.getItem('token'))).toBeNull();
@@ -341,7 +347,7 @@ test('each refusal of the owner reset reads plainly and keeps the dialog open', 
   await send();
   await expect(dialog.getByText('This staff member is no longer at your gym. Reload the page.')).toBeVisible();
   await send();
-  await expect(dialog.getByText('This staff member is no longer at your gym. Reload the page.')).toBeVisible();
+  await expect(dialog.getByText("This staff member also works at a gym you don't own, so only FitFlex can reset their PIN.")).toBeVisible();
   await send();
   await expect(dialog.getByText("We couldn't set the new PIN. Reception One has been signed out and their old PIN still works. Try again.")).toBeVisible();
   await send();
@@ -366,7 +372,8 @@ test('Swahili: owner badge, reset dialog and a refusal', async ({ page }) => {
   const resets: Array<{ id: string; body: any }> = [];
   await blockOutside(page);
   await asOwner(page, 'sw');
-  await mockOwner(page, ROWS, () => ({ status: 409, json: { error: 'staff_identity_shared' } }), resets);
+  const swResets: Reply[] = [{ status: 409, json: { error: 'staff_identity_shared' } }, { status: 403, json: { error: 'staff_not_at_your_gym' } }];
+  await mockOwner(page, ROWS, () => swResets.shift()!, resets);
 
   await page.goto('/owner/manage');
   await expect(page.getByTestId('owner-staff-staff-1').getByText('Lazima abadilishe PIN')).toBeVisible();
@@ -376,4 +383,7 @@ test('Swahili: owner badge, reset dialog and a refusal', async ({ page }) => {
   await page.getByTestId('owner-staff-reset-pin').fill('7777');
   await page.getByTestId('owner-staff-reset-submit').click();
   await expect(dialog.getByText('Reception One anaingia kwa akaunti yake mwenyewe ya FitFlex, kwa hiyo huwezi kuweka PIN yake upya. Mwombe atumie Forgot PIN kwenye programu ya FitFlex.')).toBeVisible();
+  await page.getByTestId('owner-staff-reset-pin').fill('7777');
+  await page.getByTestId('owner-staff-reset-submit').click();
+  await expect(dialog.getByText('Mfanyakazi huyu anafanya kazi pia kwenye gym ambayo si yako, kwa hiyo ni FitFlex pekee wanaoweza kuweka PIN yake upya.')).toBeVisible();
 });

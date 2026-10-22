@@ -26,7 +26,7 @@ const RESET_PIN_ERROR_KEYS: Record<string, MessageKey> = {
   credentials_not_accepted: 'ownerStaff.err.credentialsNotAccepted',
   feature_disabled: 'ownerStaff.err.unavailable',
   staff_not_found: 'ownerStaff.err.notFound',
-  staff_not_at_your_gym: 'ownerStaff.err.notFound',
+  staff_not_at_your_gym: 'ownerStaff.err.otherGym',
   firebase_update_failed: 'ownerStaff.err.saveFailed',
 };
 

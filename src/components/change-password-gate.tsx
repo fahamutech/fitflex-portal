@@ -27,6 +27,7 @@ const PIN_ERROR_KEYS: Record<string, MessageKey> = {
   pin_change_in_progress: 'pinc.err.inProgress',
   firebase_update_failed: 'pinc.err.saveFailed',
   feature_disabled: 'pinc.err.unavailable',
+  pin_check_unavailable: 'pinc.err.checkUnavailable',
 };
 
 /** Session types whose start credential is a 4-digit PIN their gym owner chose (POST /auth/pin/change only takes gym_staff). */
