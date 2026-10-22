@@ -66,7 +66,7 @@ export function tokenRequiresPasswordChange(token: string | null | undefined): b
 // The backend ignores the header unless its V2 flags are on.
 export const IDENTITY_V2_CLIENT = 'identity-v2';
 
-type SessionResult = { token: string; user: { id: string; userType: string; gymId?: string; email?: string; portalUser?: boolean; aclPermissions?: string[]; organizationUser?: boolean; organizationRoles?: string[] } };
+type SessionResult = { token: string; user: { id: string; userType: string; gymId?: string; email?: string; portalUser?: boolean; aclPermissions?: string[]; organizationUser?: boolean; organizationRoles?: string[]; passwordChangeRequired?: boolean } };
 
 // The portal never registers anyone. It asks for an admin profile first (as it
 // always has), then for an existing gym owner profile, then an existing gym
@@ -423,6 +423,14 @@ export const api = {
   /** Replace the start password an admin set (sessions with `pwc: true`). Ends every earlier session on success. */
   changePortalPassword: (token: string, newPassword: string) =>
     request<SessionResult>('/auth/portal/password', { method: 'POST', body: JSON.stringify({ newPassword }) }, token),
+  /**
+   * Gym staff replace the start PIN their owner chose (sessions with `pwc: true`; B3a, STAFF_PIN_CHANGE_REQUIRED).
+   * Exactly 4 digits. Ends every earlier session of the person on success; store the returned token.
+   */
+  changeStaffPin: (token: string, newPin: string) =>
+    request<SessionResult & { pendingApproval?: boolean; partnerVerified?: boolean }>(
+      '/auth/pin/change', { method: 'POST', body: JSON.stringify({ newPin }) }, token
+    ),
   // ─── Portal user management (admin only) ───
   listPortalUsers: (token: string) => request<PortalUser[]>('/admin/portal-users', {}, token),
   createPortalUser: (token: string, data: { email: string; password: string; displayName?: string; aclPermissions: string[] }) =>
@@ -1150,6 +1158,12 @@ export const api = {
   ownerStaff: (token: string) => request<any[]>('/owner/staff', {}, token),
   ownerCreateStaff: (token: string, data: { displayName: string; email: string; password: string; gymIds: string[]; aclPermissions: string[] }) =>
     request<any>('/owner/staff', { method: 'POST', body: JSON.stringify(data) }, token),
+  /**
+   * Owner gives a staff member a new start PIN (B3a). The staff member is signed out everywhere and must choose
+   * their own PIN at the next sign-in; returns the staff row with passwordChangeRequired: true.
+   */
+  ownerResetStaffPin: (token: string, staffId: string, pin: string) =>
+    request<any>(`/owner/staff/${encodeURIComponent(staffId)}/pin`, { method: 'POST', body: JSON.stringify({ pin }) }, token),
   ownerTrainers: (token: string, gymId?: string) =>
     request<TrainerProfile[]>(`/owner/trainers${gymId ? `?gymId=${encodeURIComponent(gymId)}` : ''}`, {}, token),
   ownerPendingTrainers: (token: string) => request<TrainerProfile[]>('/owner/trainers/pending', {}, token),
