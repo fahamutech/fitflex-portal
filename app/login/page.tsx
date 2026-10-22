@@ -1,4 +1,5 @@
 'use client';
+import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useApp } from '../providers';
@@ -14,7 +15,7 @@ import {
 } from '@/lib/firebase';
 import { Button, Card, CardContent, Alert, Spinner, Field } from '@/components/shared';
 import { PhotoPanel, LOGIN_HERO_PHOTO } from '@/components/photo-panel';
-import { HERO_IMAGES_REMOTE, PHOTO_HERO_UI } from '@/lib/flags';
+import { EVENTS_MODULE, HERO_IMAGES_REMOTE, PHOTO_HERO_UI } from '@/lib/flags';
 
 export default function LoginPage() {
   const { t, signIn } = useApp();
@@ -499,6 +500,14 @@ export default function LoginPage() {
         <p className="mt-6 text-center text-xs text-[var(--color-fg-quaternary)]">
           {t('login.noSelfRegistration')}
         </p>
+        {/* Events S2 (spec §4.2): organizers request access after signing in with the account they already have. */}
+        {EVENTS_MODULE && (
+          <p className="mt-3 text-center text-sm">
+            <Link href="/organizer/onboarding" className="text-[var(--color-brand-700)] underline-offset-4 hover:underline" data-testid="login-organizer-link">
+              {t('login.organizerLink')}
+            </Link>
+          </p>
+        )}
       </div>
   );
 
