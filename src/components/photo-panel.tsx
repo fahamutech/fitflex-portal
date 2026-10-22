@@ -21,6 +21,11 @@ export type PhotoPanelSources = {
   panel: { avif: string; webp: string; jpeg: string; width: number; height: number };
   /** 16:5 crop for the tablet / phone band (< 1024px). */
   band: { avif: string; webp: string; jpeg: string; width: number; height: number };
+  /**
+   * CSS object-position for the bundled photo when object-fit: cover crops it
+   * (default centre). Lets a photo keep its subject in view on narrow panels.
+   */
+  objectPosition?: string;
 };
 
 type PhotoPanelProps = {
@@ -102,21 +107,26 @@ function useRemoteHeroPhoto(slot: string | undefined): RemotePhoto | null {
   return remote;
 }
 
+// FitFlex Africa lounge (AI-generated, FitFlex-owned, no people; LICENSES.md).
+// The "FitFlex Africa" sign is in the upper right of both crops, so the photo
+// is anchored right: narrow panels and phone bands crop the left side (where
+// the text and its scrim sit), never the sign.
 export const LOGIN_HERO_PHOTO: PhotoPanelSources = {
   panel: {
     avif: '/photos/hero/login-panel.avif',
     webp: '/photos/hero/login-panel.webp',
     jpeg: '/photos/hero/login-panel.jpg',
-    width: 750,
-    height: 1000,
+    width: 960,
+    height: 1280,
   },
   band: {
     avif: '/photos/hero/login-band.avif',
     webp: '/photos/hero/login-band.webp',
     jpeg: '/photos/hero/login-band.jpg',
-    width: 1440,
-    height: 450,
+    width: 960,
+    height: 300,
   },
+  objectPosition: '100% 50%',
 };
 
 export function PhotoPanel({
@@ -184,6 +194,7 @@ export function PhotoPanel({
         decoding="async"
         fetchPriority="high"
         className="photo-panel__img"
+        style={photo.objectPosition ? { objectPosition: photo.objectPosition } : undefined}
         data-loaded={loaded ? 'true' : 'false'}
         onLoad={() => setLoaded(true)}
         data-testid={`${testId}-img`}
