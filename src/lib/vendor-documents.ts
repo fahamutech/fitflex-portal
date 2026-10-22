@@ -298,6 +298,14 @@ export const taxApi = {
 
 // ── Admin: tax rates (scope `payments`, maker ≠ checker) and the KYC VAT section (scope `kyc`) ──
 
+/**
+ * Who proposed or decided a rate (S5 UAT D3): the backend is adding { id, name } ("System" for the seed);
+ * older answers send the id alone. Both are read here.
+ */
+export type TaxActor = string | { id: string; name?: string | null } | null | undefined;
+export const actorId = (a: TaxActor) => (typeof a === 'string' ? a : a?.id ?? null);
+export const actorName = (a: TaxActor) => (typeof a === 'string' ? null : a?.name?.trim() || null);
+
 export type TaxRateStatus = 'active' | 'scheduled' | 'ended' | 'pending' | 'rejected' | 'withdrawn';
 export interface TaxRate {
   id: string;
@@ -310,12 +318,12 @@ export interface TaxRate {
   effectiveTo: string | null;
   status: TaxRateStatus;
   reason: string | null;
-  proposedBy: string;
+  proposedBy: TaxActor;
   proposedAt: string | null;
-  decidedBy: string | null;
+  decidedBy: TaxActor;
   decidedAt: string | null;
   decisionNote: string | null;
-  history: Array<{ action: string; actor: string; at: string; before: Record<string, unknown> | null; after: Record<string, unknown> | null }>;
+  history: Array<{ action: string; actor: TaxActor; at: string; before: Record<string, unknown> | null; after: Record<string, unknown> | null }>;
 }
 export interface TaxCode { code: string; nameEn: string; nameSw: string; exempt: boolean; inUse: boolean; status: 'active' | 'no_rate' | 'unused' }
 export interface TaxRatesPage { asOf: string; codes: TaxCode[]; rates: TaxRate[] }
