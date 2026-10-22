@@ -11,6 +11,7 @@ import { ChallengeManager } from '@/components/challenge-manager';
 import { PeopleImport } from '@/components/b2b-people-import';
 import { RewardQueue } from '@/components/reward-queue';
 import { GroupManager } from '@/components/group-manager';
+import type { MessageKey } from '@/lib/i18n';
 
 /**
  * The organisation's own screens for the people it covers and its
@@ -22,7 +23,6 @@ import { GroupManager } from '@/components/group-manager';
 export type Mine = { organization: B2BOrganization; role: string; permissions: string[] };
 
 const ERRORS: Record<string, string> = {
-  user_not_found: 'Nobody has a FitFlex account with that email or number. They need to sign up in the app first.',
   invalid_email: 'That email address doesn’t look right.',
   invalid_phone: 'That number doesn’t look right. Try 0712 345 678 or +255712345678.',
   user_contact_required: 'Enter their email address or mobile number.',
@@ -37,8 +37,14 @@ const ERRORS: Record<string, string> = {
   forbidden: 'Your role doesn’t include this.',
   invalid_transition: 'That change isn’t possible now.',
 };
-const said = (e: unknown, fallback: string) => {
+// Codes whose text lives in i18n (English + Swahili).
+const I18N_ERRORS: Partial<Record<string, MessageKey>> = {
+  user_not_found: 'b2b.errors.userNotFound',
+};
+const said = (e: unknown, fallback: string, t: (k: MessageKey) => string) => {
   const code = e instanceof ApiError ? (e.body as { error?: string } | null)?.error : undefined;
+  const i18nKey = code ? I18N_ERRORS[code] : undefined;
+  if (i18nKey) return t(i18nKey);
   return (code && ERRORS[code]) || fallback;
 };
 const TONE: Record<string, 'success' | 'warning' | 'gray' | 'danger' | 'brand'> = {
@@ -120,6 +126,7 @@ export function OrgPeoplePage() {
 }
 
 function Beneficiaries({ token, mine, readOnlyNote }: { token: string; mine: Mine; readOnlyNote?: string }) {
+  const { t } = useApp();
   const orgId = mine.organization.id;
   const canManage = mine.permissions.includes('beneficiaries.manage') && !readOnlyNote;
   const [people, setPeople] = useState<B2BBeneficiary[] | null>(null);
@@ -148,7 +155,7 @@ function Beneficiaries({ token, mine, readOnlyNote }: { token: string; mine: Min
       if (told) setNotice(told);
       await load();
     } catch (e) {
-      setError(said(e, fallback));
+      setError(said(e, fallback, t));
     } finally {
       setBusy(false);
     }
@@ -239,6 +246,7 @@ function Beneficiaries({ token, mine, readOnlyNote }: { token: string; mine: Min
 
 /** A company's staff list (the Companies side): add an employee, link them to their FitFlex account, change their status. */
 function CompanyStaff({ token }: { token: string }) {
+  const { t } = useApp();
   const [staff, setStaff] = useState<CorporateEmployee[] | null>(null);
   const [form, setForm] = useState({ displayName: '', contact: '', department: '' });
   const [link, setLink] = useState<Record<string, string>>({});
@@ -258,7 +266,7 @@ function CompanyStaff({ token }: { token: string }) {
       if (told) setNotice(told);
       await load();
     } catch (e) {
-      setError(said(e, fallback));
+      setError(said(e, fallback, t));
     } finally {
       setBusy(false);
     }
@@ -279,7 +287,7 @@ function CompanyStaff({ token }: { token: string }) {
         await api.linkCorporateStaff(token, employee.id, contact);
         return `${employee.displayName} added and linked to their FitFlex account.`;
       } catch (err) {
-        return `${employee.displayName} added, but not linked yet: ${said(err, 'their FitFlex account wasn’t found.')}`;
+        return `${employee.displayName} added, but not linked yet: ${said(err, 'their FitFlex account wasn’t found.', t)}`;
       }
     }, 'Could not add the employee.');
   };
@@ -368,6 +376,7 @@ export function OrgProgrammesPage() {
 }
 
 function Programmes({ token, mine }: { token: string; mine: Mine }) {
+  const { t } = useApp();
   const orgId = mine.organization.id;
   const [programmes, setProgrammes] = useState<B2BProgram[] | null>(null);
   const [open, setOpen] = useState<string | null>(null);
@@ -397,7 +406,7 @@ function Programmes({ token, mine }: { token: string; mine: Mine }) {
       setNotice(`${r.existing ? 'A renewal is already prepared' : 'Renewal prepared'} for ${day(r.program.startDate)} to ${r.program.endDate ? day(r.program.endDate) : 'open'}. FitFlex will review it with you before it starts; nothing changes until then.${skipped}${r.discountNotCarriedOver ? ' The current price concession is not carried over automatically; FitFlex will confirm the price.' : ''}`);
       load();
     } catch (e) {
-      setError(said(e, 'Could not prepare the renewal.'));
+      setError(said(e, 'Could not prepare the renewal.', t));
     } finally {
       setBusy(false);
     }

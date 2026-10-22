@@ -2,17 +2,19 @@
 import { Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
-import { ArrowLeft, ChevronRight, ClipboardList, Copy, Phone, RefreshCw } from 'lucide-react';
+import { ArrowLeft, ChevronRight, ClipboardList, Copy, FileText, Phone, RefreshCw } from 'lucide-react';
 import { api, type VendorOrder } from '@/lib/api';
 import { money } from '@/lib/admin-utils';
 import type { MessageKey } from '@/lib/i18n';
 import {
-  canonicalStatus, countsOf, eatDateTime, errorCode, fmt, inOrderTab, orderTab, isAwaitingPayment, isPaid, isRefundState, isRefusal, isTerminal,
+  buyerName, canCustomers, canonicalStatus, countsOf, documentsOn, eatDateTime, errorCode, fmt, inOrderTab, orderTab, isAwaitingPayment, isPaid, isRefundState, isRefusal, isTerminal,
   itemsKey, markStatusKey, payLabel, paymentKey, statusKey, statusTone, type OrderCounts, type OrderTab,
 } from '@/lib/vendor';
 import { Alert, Badge, Button, Card, CardContent, CardHeader, EmptyState, ErrorState, Field, Input, PageHeader, Segmented, SkeletonCard, SkeletonTable, Spinner, Table, TBody, Td, Textarea, Th, THead, Tr, useToast } from '@/components/shared';
 import { Dialog, DialogFooter } from '@/components/dialog';
 import { useVendor } from '@/components/vendor-context';
+import { docLinkCls } from '@/components/vendor/documents/share-menu';
+import { documentHref } from '@/lib/vendor-documents';
 import { useApp } from '../../providers';
 
 type Tab = OrderTab;
@@ -126,7 +128,11 @@ function OrdersInner() {
       const links = [document.getElementById(`order-link-${id}`), document.getElementById(`order-mlink-${id}`)];
       const el = links.find(x => x && x.offsetParent !== null);
       if (el) { el.focus(); focusRowOnClose.current = null; return; }
-      if (++tries < 20) requestAnimationFrame(tryFocus);
+      if (++tries < 20) { requestAnimationFrame(tryFocus); return; }
+      // The order was opened from a link, not from this list (or its row is not loaded): the list's heading.
+      const heading = document.querySelector<HTMLElement>('[data-testid="orders-list"] h1');
+      if (heading) { heading.tabIndex = -1; heading.focus(); }
+      focusRowOnClose.current = null;
     };
     requestAnimationFrame(tryFocus);
   }, [openId, orders]);
@@ -139,7 +145,7 @@ function OrdersInner() {
   const emptyKey: Record<Tab, MessageKey> = { open: 'vendor.orders.emptyOpen', delivered: 'vendor.orders.emptyDelivered', cancelled: 'vendor.orders.emptyCancelled', all: 'vendor.orders.emptyAll' };
 
   const list = (
-    <div className="space-y-4">
+    <div className="space-y-4" data-testid="orders-list">
       <PageHeader
         title={t('vendor.nav.orders')}
         actions={<Button variant="secondary" size="sm" className="min-h-11" onClick={load}><RefreshCw aria-hidden="true" className="h-4 w-4" />{t('admin.action.refresh')}</Button>}
@@ -187,7 +193,7 @@ function OrdersInner() {
                       </Link>
                     </Td>
                     <Td className="whitespace-nowrap">{eatDateTime(o.createdAt, locale)}</Td>
-                    <Td>{o.buyer?.displayName || t('vendor.orders.buyerUnnamed')}</Td>
+                    <Td>{buyerName(o, t)}</Td>
                     <Td>{fmt(t(itemsKey(itemCount(o))), { n: itemCount(o) })}{o.items[0]?.name ? <span className="block text-xs text-[var(--color-fg-quaternary)]">{o.items[0].name}</span> : null}</Td>
                     <Td className="whitespace-nowrap text-right tabular-nums">{money(o.totalTzs)}</Td>
                     <Td>{deliveryLine(o, t)}</Td>
@@ -207,7 +213,7 @@ function OrdersInner() {
                       <span className="font-mono font-semibold">{o.shortRef}</span>
                       <OrderBadge order={o} />
                     </span>
-                    <span className="block text-sm">{o.buyer?.displayName || t('vendor.orders.buyerUnnamed')}</span>
+                    <span className="block text-sm">{buyerName(o, t)}</span>
                     <span className="block text-sm text-[var(--color-fg-tertiary)]">{fmt(t(itemsKey(itemCount(o))), { n: itemCount(o) })} · {money(o.totalTzs)}</span>
                     <span className="block text-sm text-[var(--color-fg-tertiary)]">{deliveryLine(o, t)}</span>
                     <span className="block text-xs text-[var(--color-fg-quaternary)]">{eatDateTime(o.createdAt, locale)}</span>
@@ -325,7 +331,8 @@ function OrderDetail({ id, onBack, onUpdated }: { id: string; onBack: () => void
   const o = order;
   const paid = isPaid(o);
   const suspended = vendor.me?.accountStatus === 'suspended';
-  const showMoney = o.items.some(i => 'commissionTzs' in i);
+  // Commission and "you receive" mean nothing on a cancelled or refunded order.
+  const showMoney = o.items.some(i => 'commissionTzs' in i) && orderTab(o) !== 'cancelled';
   const sum = (key: 'commissionTzs' | 'vendorPayoutTzs') => o.items.reduce((n, i) => n + Number(i[key] ?? 0), 0);
   const contactOn = vendor.me?.tools.buyerContact === true;
   const phone = o.buyer?.phone || null;
@@ -401,15 +408,28 @@ function OrderDetail({ id, onBack, onUpdated }: { id: string; onBack: () => void
 
       <Card>
         <CardHeader><h3 className="font-semibold">{t('vendor.orders.payment')}</h3></CardHeader>
-        <CardContent className="text-sm">
-          {t(paymentKey(o.paymentStatus))}{methodLabel ? ` · ${methodLabel}` : ''}
+        <CardContent className="space-y-3 text-sm">
+          <p>{t(paymentKey(o.paymentStatus))}{methodLabel ? ` · ${methodLabel}` : ''}</p>
+          {/* S5 (Q-15): my invoice exists once my part is paid; refunded later, it reads Cancelled. */}
+          {documentsOn(vendor.me) && ['paid', 'refund_pending', 'refunded'].includes(o.paymentStatus ?? '') && (
+            <Link href={documentHref('order', o.id)} className={docLinkCls} data-testid="order-invoice">
+              <FileText aria-hidden="true" className="h-4 w-4" />{t('vendor.documents.invoice')}
+            </Link>
+          )}
         </CardContent>
       </Card>
 
       <Card>
         <CardHeader><h3 className="font-semibold">{t('vendor.orders.buyerDelivery')}</h3></CardHeader>
         <CardContent className="space-y-3 text-sm">
-          <p data-testid="order-buyer">{o.buyer?.displayName || t('vendor.orders.buyerUnnamed')}</p>
+          <p data-testid="order-buyer">
+            {/* S4: the app customer's profile, when customers are on for this person and the order still names one
+                (a deleted buyer's old orders have customerId null: plain text). Linked = buyer.customerLinked; servers that
+                don't send it yet: paid orders only, the ones that make someone an app customer. */}
+            {canCustomers(vendor.me) && o.buyer?.customerId && (o.buyer.customerLinked ?? o.paymentStatus === 'paid')
+              ? <Link href={`/vendor/customers/?id=${encodeURIComponent(o.buyer.customerId)}`} className="inline-flex min-h-11 items-center font-semibold text-[var(--color-brand-700)] underline-offset-4 hover:underline" data-testid="order-buyer-customer">{buyerName(o, t)}</Link>
+              : (buyerName(o, t))}
+          </p>
           <p>{deliveryLine(o, t)}</p>
           {phone && (
             <a href={`tel:${phone.replace(/\s+/g, '')}`} aria-label={fmt(t('vendor.orders.callBuyer'), { phone })}
@@ -431,7 +451,8 @@ function OrderDetail({ id, onBack, onUpdated }: { id: string; onBack: () => void
           {(phone || address) && o.buyer?.contactVisibleUntil && (
             <p className="text-xs text-[var(--color-fg-tertiary)]">{fmt(t('vendor.orders.contactUntil'), { date: eatDateTime(o.buyer.contactVisibleUntil, locale) })}</p>
           )}
-          {contactOn && !phone && !address && isTerminal(o.status) && (
+          {/* Only a delivered order hides contact after 7 days; a cancelled one never had the window. */}
+          {contactOn && !phone && !address && orderTab(o) === 'delivered' && (
             <p className="text-xs text-[var(--color-fg-tertiary)]" data-testid="order-contact-hidden">{t('vendor.orders.contactHidden')}</p>
           )}
           {o.note && (

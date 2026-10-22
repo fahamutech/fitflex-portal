@@ -104,7 +104,8 @@ export function VendorProvider({ children }: { children: ReactNode }) {
   const handleError = useCallback((err: unknown) => {
     const code = errorCode(err);
     // A business suspended while signed in keeps its area with the suspended banner (§2.4); moves are disabled.
-    if ((code === 'account_suspended' || code === 'vendor_suspended') && user?.userType === 'vendor' && statusRef.current === 'ready') {
+    // S3: staff of a suspended business get vendor_suspended (e.g. on /vendor/sales): the same banner.
+    if (((code === 'account_suspended' && user?.userType === 'vendor') || code === 'vendor_suspended') && statusRef.current === 'ready') {
       setMe(current => (current ? { ...current, accountStatus: 'suspended' } : current));
       return true;
     }

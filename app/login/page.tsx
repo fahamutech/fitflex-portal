@@ -1,4 +1,5 @@
 'use client';
+import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useApp } from '../providers';
@@ -14,7 +15,7 @@ import {
 } from '@/lib/firebase';
 import { Button, Card, CardContent, Alert, Spinner, Field } from '@/components/shared';
 import { PhotoPanel, LOGIN_HERO_PHOTO } from '@/components/photo-panel';
-import { PHOTO_HERO_UI } from '@/lib/flags';
+import { EVENTS_MODULE, HERO_IMAGES_REMOTE, PHOTO_HERO_UI } from '@/lib/flags';
 
 export default function LoginPage() {
   const { t, signIn } = useApp();
@@ -122,6 +123,8 @@ export default function LoginPage() {
         return t('login.adminRequired');
       if (body?.error === 'vendor_staff_inactive')
         return t('login.vendorStaffDisabled');
+      if (body?.error === 'session_ended')
+        return t('login.sessionEnded');
       if (body?.error === 'vendor_account_suspended')
         return t('login.suspendedBusiness');
       if (body?.error === 'account_suspended')
@@ -158,6 +161,7 @@ export default function LoginPage() {
       handleSuccess(token, user);
     } catch (err) {
       if (needsEmailVerification(err)) return startVerification();
+      await endStaleFirebaseSession(err);
       setError(mapError(err));
     } finally {
       setBusy(false);
@@ -174,9 +178,21 @@ export default function LoginPage() {
       handleSuccess(token, user);
     } catch (err) {
       if (needsEmailVerification(err)) return startVerification();
+      await endStaleFirebaseSession(err);
       setError(mapError(err));
     } finally {
       setBusy(false);
+    }
+  }
+
+  // 401 session_ended: this Firebase sign-in is older than the account's last password change (for
+  // example a Firebase session cached in this browser). Drop it so the next try signs in afresh.
+  async function endStaleFirebaseSession(err: unknown) {
+    if (err instanceof ApiError && (err.body as { error?: string } | null)?.error === 'session_ended') {
+      await signOutFirebase().catch(() => undefined);
+      setPassword('');
+      setMethod(m => (m === 'verify' ? 'choose' : m));
+      setNotice(null);
     }
   }
 
@@ -216,7 +232,7 @@ export default function LoginPage() {
       handleSuccess(token, user);
     } catch (err) {
       if (needsEmailVerification(err)) setNotice(t('login.verifyNotYet'));
-      else setError(mapError(err));
+      else { await endStaleFirebaseSession(err); setError(mapError(err)); }
     } finally {
       setBusy(false);
     }
@@ -484,6 +500,14 @@ export default function LoginPage() {
         <p className="mt-6 text-center text-xs text-[var(--color-fg-quaternary)]">
           {t('login.noSelfRegistration')}
         </p>
+        {/* Events S2 (spec §4.2): organizers request access after signing in with the account they already have. */}
+        {EVENTS_MODULE && (
+          <p className="mt-3 text-center text-sm">
+            <Link href="/organizer/onboarding" className="text-[var(--color-brand-700)] underline-offset-4 hover:underline" data-testid="login-organizer-link">
+              {t('login.organizerLink')}
+            </Link>
+          </p>
+        )}
       </div>
   );
 
@@ -498,6 +522,7 @@ export default function LoginPage() {
           headlineLead={t('login.hero.lead')}
           headlineAccent={t('login.hero.accent')}
           subline={t('login.hero.sub')}
+          remoteSlot={HERO_IMAGES_REMOTE ? 'portalLogin' : undefined}
           data-testid="login-photo-panel"
         />
         <div className="flex flex-1 items-center justify-center p-4 lg:p-8">{signInColumn}</div>

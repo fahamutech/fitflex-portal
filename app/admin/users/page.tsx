@@ -7,8 +7,10 @@ import { useApp } from '../../providers';
 import { api, PortalUser, ApiError } from '@/lib/api';
 import { Button, PageHeader, Alert, Spinner, Card, Badge, Field, Table, TBody, Td, Th, THead, Tr } from '@/components/shared';
 import { ConfirmDialog } from '@/components/dialog';
+import { EVENTS_MODULE, HERO_IMAGES_ADMIN } from '@/lib/flags';
+import { fmt } from '@/lib/vendor';
 
-const ACL_SCOPES = [
+const ALL_ACL_SCOPES = [
   { key: 'gyms',      label: 'Gyms' },
   { key: 'owners',    label: 'Owners' },
   { key: 'trainers',  label: 'Trainers' },
@@ -32,6 +34,8 @@ const ACL_SCOPES = [
   { key: 'kyc',       label: 'Partner verification' },
   { key: 'account_recovery', label: 'Account recovery' },
   { key: 'exercises', label: 'Exercises' },
+  // Events S2: the moderation queue (/admin/events). Only offered in builds with NEXT_PUBLIC_EVENTS_MODULE=true.
+  { key: 'events',    label: 'Events' },
   { key: 'settings',  label: 'Settings' },
   { key: 'users',     label: 'Portal Users' },
   { key: 'communications', label: 'Messages' },
@@ -41,9 +45,13 @@ const ACL_SCOPES = [
   { key: 'promotions_approve', label: 'Promotions: approve and activate' },
   { key: 'campaigns', label: 'Campaigns and placement limits' },
   { key: 'promotion_analytics', label: 'Promotion analytics' },
+  // App photos (spec photo-hero-screens §36). Offered only in builds with NEXT_PUBLIC_HERO_IMAGES_ADMIN=true;
+  // its label is translated (admin.nav.heroImages) where it is drawn.
+  { key: 'brand_media', label: 'App photos' },
 ] as const;
 
-type AclScope = typeof ACL_SCOPES[number]['key'];
+type AclScope = typeof ALL_ACL_SCOPES[number]['key'];
+const ACL_SCOPES = ALL_ACL_SCOPES.filter(s => (s.key !== 'brand_media' || HERO_IMAGES_ADMIN) && (s.key !== 'events' || EVENTS_MODULE));
 
 const ROLE_PRESETS = [
   { key: 'custom',      label: 'Custom',      scopes: [] as AclScope[] },
@@ -64,7 +72,8 @@ interface CreateForm {
 const EMPTY_FORM: CreateForm = { email: '', password: '', displayName: '', aclPermissions: [] };
 
 export default function PortalUsersPage() {
-  const { token, user } = useApp();
+  const { token, user, t, hasPermission } = useApp();
+  const scopeLabel = (s: typeof ALL_ACL_SCOPES[number]) => (s.key === 'brand_media' ? t('admin.nav.heroImages') : s.label);
   const [users, setUsers]           = useState<PortalUser[]>([]);
   const [loading, setLoading]       = useState(true);
   const [error, setError]           = useState<string | null>(null);
@@ -83,6 +92,26 @@ export default function PortalUsersPage() {
   const [deleting, setDeleting]         = useState(false);
 
   const isSuperAdmin = user?.userType === 'admin' && !user?.portalUser;
+  // Staff may only give or take away scopes they hold themselves (functions#217); super-admins any.
+  const canGrant = (scope: string) => isSuperAdmin || hasPermission(scope);
+  const notHeldTitle = t('users.scope.notHeld');
+  /** Refusals from the portal-users routes in the reader's language; anything else as before. */
+  function accessRefusal(err: unknown): string | null {
+    const body = err instanceof ApiError ? (err.body as { error?: string; exceeding?: string[] } | null) : null;
+    switch (body?.error) {
+      case 'cannot_change_own_access': return t('users.error.cannotChangeOwnAccess');
+      case 'super_admin_required': return t('users.error.superAdminRequired');
+      case 'actor_not_found': return t('users.error.actorNotFound');
+      case 'acl_grant_exceeds_own': {
+        const names = (body.exceeding ?? []).map(k => {
+          const s = ALL_ACL_SCOPES.find(x => x.key === k);
+          return s ? scopeLabel(s) : k;
+        });
+        return fmt(t('users.error.aclGrantExceedsOwn'), { scopes: names.join(', ') });
+      }
+      default: return null;
+    }
+  }
 
   async function load() {
     if (!token) return;
@@ -111,14 +140,15 @@ export default function PortalUsersPage() {
     if (!preset) return;
     if (target === 'create') {
       setRolePreset(key);
-      if (key !== 'custom') setForm(f => ({ ...f, aclPermissions: [...preset.scopes] as AclScope[] }));
+      if (key !== 'custom') setForm(f => ({ ...f, aclPermissions: [...f.aclPermissions.filter(p => !canGrant(p)), ...preset.scopes.filter(canGrant)] as AclScope[] }));
     } else {
       setEditRolePreset(key);
-      if (key !== 'custom') setEditPerms([...preset.scopes] as AclScope[]);
+      if (key !== 'custom') setEditPerms(prev => [...prev.filter(p => !canGrant(p)), ...preset.scopes.filter(canGrant)] as AclScope[]);
     }
   }
 
   function toggleFormPerm(scope: AclScope) {
+    if (!canGrant(scope)) return;
     setRolePreset('custom');
     setForm(f => ({
       ...f,
@@ -129,6 +159,7 @@ export default function PortalUsersPage() {
   }
 
   function toggleEditPerm(scope: AclScope) {
+    if (!canGrant(scope)) return;
     setEditRolePreset('custom');
     setEditPerms(prev =>
       prev.includes(scope) ? prev.filter(p => p !== scope) : [...prev, scope]
@@ -150,14 +181,16 @@ export default function PortalUsersPage() {
       setUsers(prev => [...prev, created]);
       setForm(EMPTY_FORM);
       setShowCreate(false);
-      flash(`Portal user ${created.email} created successfully.`);
+      flash(`Portal user ${created.email} created successfully. ${t('users.startPassword.hint')}`);
     } catch (err) {
       const body = err instanceof ApiError ? (err.body as any) : null;
-      setError(body?.error === 'email_already_exists'
+      setError(accessRefusal(err) ?? (body?.error === 'email_already_exists'
         ? 'A user with this email already exists.'
+        : body?.error === 'start_password_not_configured'
+          ? t('users.startPassword.notConfigured')
         : body?.error === 'firebase_user_creation_failed'
           ? `Firebase error: ${body?.detail}`
-          : (err instanceof Error ? err.message : 'Failed to create user'));
+          : (err instanceof Error ? err.message : 'Failed to create user')));
     } finally {
       setCreating(false);
     }
@@ -185,7 +218,7 @@ export default function PortalUsersPage() {
       setEditTarget(null);
       flash('Permissions updated.');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to update user');
+      setError(accessRefusal(err) ?? (err instanceof Error ? err.message : 'Failed to update user'));
     } finally {
       setSaving(false);
     }
@@ -250,7 +283,7 @@ export default function PortalUsersPage() {
                     required
                   />
                 </Field>
-                <Field label="Temporary password" hint="User should change after first login">
+                <Field label={t('users.startPassword.label')} hint={t('users.startPassword.hint')}>
                   <input
                     type="password"
                     className="ui-input"
@@ -296,7 +329,11 @@ export default function PortalUsersPage() {
                         key={s.key}
                         type="button"
                         onClick={() => toggleFormPerm(s.key)}
-                        className={`flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
+                        disabled={!canGrant(s.key)}
+                        title={!canGrant(s.key) ? notHeldTitle : undefined}
+                        aria-pressed={form.aclPermissions.includes(s.key)}
+                        data-testid={`scope-toggle-${s.key}`}
+                        className={`flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
                           form.aclPermissions.includes(s.key)
                             ? 'bg-[var(--color-brand-600)] border-[var(--color-brand-600)] text-white'
                             : 'border-[var(--color-border-secondary)] text-[var(--color-fg-tertiary)] hover:border-[var(--color-brand-400)]'
@@ -305,7 +342,7 @@ export default function PortalUsersPage() {
                         {form.aclPermissions.includes(s.key)
                           ? <ShieldCheck className="h-3 w-3" />
                           : <ShieldOff className="h-3 w-3" />}
-                        {s.label}
+                        {scopeLabel(s)}
                       </button>
                     ))}
                   </div>
@@ -364,7 +401,11 @@ export default function PortalUsersPage() {
                     key={s.key}
                     type="button"
                     onClick={() => toggleEditPerm(s.key)}
-                    className={`flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
+                        disabled={!canGrant(s.key)}
+                        title={!canGrant(s.key) ? notHeldTitle : undefined}
+                        aria-pressed={editPerms.includes(s.key)}
+                        data-testid={`scope-toggle-${s.key}`}
+                    className={`flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
                       editPerms.includes(s.key)
                         ? 'bg-[var(--color-brand-600)] border-[var(--color-brand-600)] text-white'
                         : 'border-[var(--color-border-secondary)] text-[var(--color-fg-tertiary)] hover:border-[var(--color-brand-400)]'
@@ -373,7 +414,7 @@ export default function PortalUsersPage() {
                     {editPerms.includes(s.key)
                       ? <ShieldCheck className="h-3 w-3" />
                       : <ShieldOff className="h-3 w-3" />}
-                    {s.label}
+                    {scopeLabel(s)}
                   </button>
                 ))}
               </div>
@@ -455,9 +496,14 @@ export default function PortalUsersPage() {
                         </Badge>
                       </Td>
                       <Td>
-                        <Badge tone={u.accountStatus === 'active' ? 'success' : 'danger'}>
-                          {u.accountStatus}
-                        </Badge>
+                        <div className="flex flex-wrap gap-1.5">
+                          <Badge tone={u.accountStatus === 'active' ? 'success' : 'danger'}>
+                            {u.accountStatus}
+                          </Badge>
+                          {u.passwordChangeRequired && (
+                            <Badge tone="warning">{t('users.mustChangePassword')}</Badge>
+                          )}
+                        </div>
                       </Td>
                       <Td>
                         {!u.portalUser ? (

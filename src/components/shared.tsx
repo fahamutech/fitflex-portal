@@ -98,12 +98,15 @@ export function MetricCard({
   sub,
   icon,
   trend,
+  wrapLabel = false,
 }: {
   label: string;
   value: ReactNode;
   sub?: ReactNode;
   icon?: ReactNode;
   trend?: { direction: 'up' | 'down' | 'neutral'; label: string };
+  /** Let the label and sub wrap to two lines instead of truncating (longer Swahili labels). */
+  wrapLabel?: boolean;
 }) {
   const trendColors = {
     up:      'text-[var(--color-success-700)] bg-[var(--color-success-50)]',
@@ -115,11 +118,11 @@ export function MetricCard({
       <div className="p-5 sm:p-6">
         <div className="flex items-start justify-between gap-4">
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium text-[var(--color-fg-quaternary)] truncate">{label}</p>
+            <p className={cn('text-sm font-medium text-[var(--color-fg-quaternary)]', wrapLabel ? 'line-clamp-2' : 'truncate')} title={label}>{label}</p>
             <p className="mt-2 text-3xl font-semibold tracking-tight text-[var(--color-fg-primary)] tabular-nums">
               {value}
             </p>
-            {sub && <p className="mt-1 text-sm text-[var(--color-fg-quaternary)] truncate">{sub}</p>}
+            {sub && <p className={cn('mt-1 text-sm text-[var(--color-fg-quaternary)]', wrapLabel ? 'line-clamp-2' : 'truncate')}>{sub}</p>}
             {trend && (
               <span className={cn('mt-3 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium', trendColors[trend.direction])}>
                 {trend.direction === 'up' ? '↑' : trend.direction === 'down' ? '↓' : '—'}
@@ -141,7 +144,7 @@ export function MetricCard({
 /* ─────────────────────────────────────────────
    Badge  —  Untitled UI badge pill
    ───────────────────────────────────────────── */
-type BadgeTone = 'default' | 'success' | 'danger' | 'warning' | 'brand' | 'gray';
+type BadgeTone = 'default' | 'success' | 'danger' | 'warning' | 'brand' | 'gray' | 'info';
 
 const badgeTones: Record<BadgeTone, string> = {
   default: 'bg-[var(--color-bg-tertiary)]   text-[var(--color-fg-tertiary)]   ring-[var(--color-border-secondary)]',
@@ -150,6 +153,7 @@ const badgeTones: Record<BadgeTone, string> = {
   success: 'bg-[var(--color-success-50)]    text-[var(--color-success-700)]   ring-[var(--color-success-200)]',
   danger:  'bg-[var(--color-error-50)]      text-[var(--color-error-700)]     ring-[var(--color-error-200)]',
   warning: 'bg-[var(--color-warning-50)]    text-[var(--color-warning-700)]   ring-[var(--color-warning-200)]',
+  info:    'bg-[var(--color-info-50)]       text-[var(--color-info-700)]      ring-[var(--color-info-200)]',
 };
 
 export function Badge({
@@ -168,6 +172,7 @@ export function Badge({
     success: 'bg-[var(--color-success-500)]',
     danger:  'bg-[var(--color-error-500)]',
     warning: 'bg-[var(--color-warning-500)]',
+    info:    'bg-[var(--color-info-500)]',
   };
   return (
     <span className={cn(
@@ -339,7 +344,7 @@ export function Table({ className, wrapperClassName, children, 'aria-label': ari
       role={ariaLabel ? 'region' : undefined}
       aria-label={ariaLabel}
       tabIndex={0}
-      className={cn('overflow-x-auto rounded-[var(--radius-xl)] border border-[var(--color-border-secondary)]', wrapperClassName)}
+      className={cn('relative overflow-x-auto rounded-[var(--radius-xl)] border border-[var(--color-border-secondary)]', wrapperClassName)}
     >
       <table {...rest} className={cn('ui-table min-w-full', className)}>{children}</table>
     </div>

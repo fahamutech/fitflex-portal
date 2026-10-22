@@ -36,19 +36,30 @@ import {
   Star,
   HandCoins,
   SlidersHorizontal,
-  Undo2, Receipt, KeyRound, ShieldAlert
+  Undo2, Receipt, KeyRound, ShieldAlert, Images, Landmark, Percent, CalendarCheck
 } from 'lucide-react';
 import { useApp } from '../../app/providers';
+import { ChangePasswordGate } from './change-password-gate';
 import { cn } from '@/lib/cn';
-import { VENDOR_USER_TYPES } from '@/lib/api';
+import { ORGANIZER_USER_TYPES, VENDOR_USER_TYPES, type OrganizerRole, type OrganizerStatus, type VendorTools } from '@/lib/api';
 import type { MessageKey } from '@/lib/i18n';
-import { fmt, VENDOR_AREAS } from '@/lib/vendor';
+import { fmt, VENDOR_AREAS, vendorAreaOpen } from '@/lib/vendor';
 import { Alert, Avatar, Badge, Button, Card, CardContent, SkeletonCard, useToast } from './shared';
 import { useVendor } from './vendor-context';
 import { BrandLogo } from './brand-logo';
 import { LanguageToggle } from './language-toggle';
 import { PhotoPanel } from './photo-panel';
-import { PHOTO_HERO_UI } from '@/lib/flags';
+import { EVENTS_MODULE, HERO_IMAGES_ADMIN, PHOTO_HERO_UI } from '@/lib/flags';
+import { eventsAreaOpen, staffAreaOpen } from '@/lib/events';
+import { useAdminEventsSummary, useOrganizer } from './organizer-context';
+import { useShopBannersAvailable } from './shop-banners-gate';
+import { useTaxRatesAvailable } from './tax-rates-gate';
+
+/** SHOP_BANNERS as /vendor/me reports it (tools.merch.banners); undefined when the server doesn't say. */
+const vendorBannersTool = (tools: VendorTools | null | undefined) => {
+  const merch = tools?.merch as { banners?: unknown } | undefined;
+  return typeof merch?.banners === 'boolean' ? merch.banners : undefined;
+};
 
 /* ── Nav definitions ─────────────────────────────────────── */
 type NavItem = {
@@ -64,7 +75,7 @@ type NavItem = {
 const scopesOf = (item: NavItem) => [item.aclScope, ...(item.aclAny ?? [])].filter(Boolean) as string[];
 
 // Section roots highlight only on themselves, not on their sub-pages.
-const ROOTS = new Set(['/admin', '/hr', '/org', '/vendor']);
+const ROOTS = new Set(['/admin', '/hr', '/org', '/vendor', '/organizer']);
 
 // Someone who looks after a B2B organisation's billing: that, and nothing else.
 // What each role is offered; the server decides what each page shows.
@@ -108,20 +119,33 @@ const OPERATOR_NAV: NavItem[] = [
 ];
 
 // A business that sells on FitFlex (vendor portal, S2): each item needs its permission.
-function vendorNav(permissions: string[], lowCount: number | null, waitingCount: number | null): NavItem[] {
-  const icons: Record<string, React.ElementType> = { '/vendor': LayoutDashboard, '/vendor/products': ShoppingBag, '/vendor/orders': ClipboardList, '/vendor/payouts': HandCoins };
-  const labels: Record<string, string> = { '/vendor': 'vendor.nav.dashboard', '/vendor/products': 'vendor.nav.products', '/vendor/orders': 'vendor.nav.orders', '/vendor/payouts': 'vendor.nav.payouts' };
-  return VENDOR_AREAS.filter(a => !a.permission || permissions.includes(a.permission)).map(a => ({
-    href: a.href, labelKey: labels[a.href], icon: icons[a.href],
+function vendorNav(permissions: string[], tools: VendorTools | null | undefined, lowCount: number | null, waitingCount: number | null, bannersOn = false): NavItem[] {
+  const icons: Record<string, React.ElementType> = { '/vendor': LayoutDashboard, '/vendor/products': ShoppingBag, '/vendor/promotions': Megaphone, '/vendor/orders': ClipboardList, '/vendor/sales': Receipt, '/vendor/customers': Users, '/vendor/payouts': HandCoins, '/vendor/settings/tax': Landmark };
+  const labels: Record<string, string> = { '/vendor': 'vendor.nav.dashboard', '/vendor/products': 'vendor.nav.products', '/vendor/promotions': 'merch.nav', '/vendor/orders': 'vendor.nav.orders', '/vendor/sales': 'vendor.nav.sales', '/vendor/customers': 'vendor.nav.customers', '/vendor/payouts': 'vendor.nav.payouts', '/vendor/settings/tax': 'vendor.tax.title' };
+  // S5: Settings → Tax details (VAT on; owner or staff with `payments`).
+  const groups: Record<string, string> = { '/vendor/settings/tax': 'vendor.nav.group.settings' };
+  return VENDOR_AREAS.filter(a => a.nav !== false && vendorAreaOpen(a, permissions, tools) && (a.href !== '/vendor/promotions' || bannersOn)).map(a => ({
+    href: a.href, labelKey: labels[a.href], icon: icons[a.href], ...(groups[a.href] ? { groupKey: groups[a.href] } : {}),
     ...(a.href === '/vendor/products' && lowCount ? { count: { n: lowCount, labelKey: 'vendor.nav.productsLow' as MessageKey, tone: 'warning' as const } } : {}),
     ...(a.href === '/vendor/orders' && waitingCount ? { count: { n: waitingCount, labelKey: 'vendor.nav.ordersWaiting' as MessageKey, tone: 'fuel' as const } } : {}),
   }));
+}
+
+// Events S2 (spec §3): a running-event organizer and their staff. Items open by organizer status and role.
+function organizerNav(status: OrganizerStatus | null, role: OrganizerRole | null): NavItem[] {
+  return [
+    { href: '/organizer', labelKey: 'nav.organizer.overview', icon: LayoutDashboard },
+    { href: '/organizer/onboarding', labelKey: 'nav.organizer.onboarding', icon: ShieldCheck },
+    ...(eventsAreaOpen(status) ? [{ href: '/organizer/events', labelKey: 'nav.organizer.events', icon: Flag }] : []),
+    ...(staffAreaOpen(status, role) ? [{ href: '/organizer/staff', labelKey: 'nav.organizer.staff', icon: Users }] : []),
+  ];
 }
 
 /** Where each kind of session lives. */
 export function homeFor(user: { userType?: string } | null | undefined) {
   if (!user) return '/login';
   if (VENDOR_USER_TYPES.has(user.userType ?? '')) return '/vendor';
+  if (ORGANIZER_USER_TYPES.has(user.userType ?? '')) return '/organizer';
   if (user.userType === 'admin') return '/admin';
   if (user.userType === 'corporate_hr') return '/hr';
   return '/dashboard';
@@ -132,6 +156,8 @@ function roleLabel(t: (key: MessageKey) => string, user: { userType?: string; po
   const type = user?.userType ?? '';
   const base = type === 'vendor' ? t('vendor.role.owner')
     : type === 'vendor_staff' ? t('vendor.role.staff')
+    : type === 'event_organizer' ? t('organizer.role.owner')
+    : type === 'organizer_staff' ? t('nav.organizer.staff')
     : type === 'admin' ? t('shell.role.admin')
     : type === 'corporate_hr' ? t('nav.personaHr')
     : user?.organizationUser ? t('shell.role.organization')
@@ -148,8 +174,13 @@ const ADMIN_NAV: NavItem[] = [
   { href: '/admin/members',       labelKey: 'admin.nav.members',        icon: Users,           groupKey: 'nav.group.platform', aclScope: 'members' },
   { href: '/admin/analytics',     labelKey: 'admin.nav.analytics',      icon: LineChart,       groupKey: 'nav.group.platform', aclScope: 'analytics' },
   { href: '/admin/challenges',    labelKey: 'admin.nav.challenges',     icon: Trophy,          groupKey: 'nav.group.platform', aclScope: 'challenges' },
+  // Events S2 (spec §3): the moderation queue; only in builds with NEXT_PUBLIC_EVENTS_MODULE=true, and only while the
+  // server answers GET /admin/events/summary (see visibleNav). The count is the number of submitted events.
+  ...(EVENTS_MODULE ? [{ href: '/admin/events', labelKey: 'admin.nav.events', icon: Flag, groupKey: 'nav.group.platform', aclScope: 'events' }] : []),
   { href: '/admin/rewards',       labelKey: 'admin.nav.rewards',        icon: Gift,            groupKey: 'nav.group.platform', aclScope: 'rewards' },
   { href: '/admin/exercises',     labelKey: 'admin.nav.exercises',      icon: Dumbbell,        groupKey: 'nav.group.platform', aclScope: 'exercises' },
+  // App photos (spec photo-hero-screens §36): only in builds with NEXT_PUBLIC_HERO_IMAGES_ADMIN=true.
+  ...(HERO_IMAGES_ADMIN ? [{ href: '/admin/hero-images', labelKey: 'admin.nav.heroImages', icon: Images, groupKey: 'nav.group.platform', aclScope: 'brand_media' }] : []),
   { href: '/admin/social',        labelKey: 'admin.nav.social',         icon: Flag,            groupKey: 'nav.group.platform', aclScope: 'social' },
   { href: '/admin/reviews',       labelKey: 'admin.nav.reviews',        icon: Star,            groupKey: 'nav.group.platform', aclScope: 'social' },
   { href: '/admin/communications', labelKey: 'admin.nav.communications', icon: Megaphone,     groupKey: 'nav.group.platform', aclScope: 'communications' },
@@ -158,11 +189,14 @@ const ADMIN_NAV: NavItem[] = [
   { href: '/admin/b2b-analytics', labelKey: 'admin.nav.b2bAnalytics',   icon: LineChart,       groupKey: 'nav.group.platform', aclScope: 'b2b' },
   { href: '/admin/b2b-ops',       labelKey: 'admin.nav.b2bOps',         icon: Activity,        groupKey: 'nav.group.platform', aclScope: 'b2b', aclAny: ['b2b_billing', 'b2b_billing_approve', 'b2b_payments'] },
   { href: '/admin/trainers',      labelKey: 'admin.nav.trainers',       icon: Dumbbell,        groupKey: 'nav.group.platform', aclScope: 'trainers' },
+  { href: '/admin/trainer-sessions', labelKey: 'admin.nav.trainerSessions', icon: CalendarCheck, groupKey: 'nav.group.platform', aclScope: 'trainers' },
   { href: '/admin/products',      labelKey: 'admin.nav.products',       icon: ShoppingBag,     groupKey: 'nav.group.platform', aclScope: 'shop' },
   { href: '/admin/vendors',       labelKey: 'admin.nav.vendors',        icon: Store,           groupKey: 'nav.group.platform', aclScope: 'shop' },
   { href: '/admin/promotion-overview', labelKey: 'admin.nav.promotionOverview', icon: LineChart, groupKey: 'nav.group.promotion', aclScope: 'promotions', aclAny: ['promotions_approve', 'campaigns'] },
   { href: '/admin/moderation',    labelKey: 'admin.nav.moderation',     icon: ShieldAlert,     groupKey: 'nav.group.promotion', aclScope: 'moderation', aclAny: ['moderation_decide'] },
   { href: '/admin/promotions',    labelKey: 'admin.nav.promotions',     icon: Megaphone,       groupKey: 'nav.group.promotion', aclScope: 'promotions', aclAny: ['promotions_approve', 'campaigns'] },
+  // Shop banners (Phase 2 S1): shown only while the server has SHOP_BANNERS on (see visibleNav).
+  { href: '/admin/shop-merch',    labelKey: 'admin.nav.shopMerch',      icon: Images,          groupKey: 'nav.group.promotion', aclScope: 'promotions', aclAny: ['promotions_approve'] },
   { href: '/admin/promotion-campaigns', labelKey: 'admin.nav.promotionCampaigns', icon: Flag,   groupKey: 'nav.group.promotion', aclScope: 'promotions', aclAny: ['promotions_approve', 'campaigns'] },
   { href: '/admin/promotion-analytics', labelKey: 'admin.nav.promotionAnalytics', icon: BarChart3, groupKey: 'nav.group.promotion', aclScope: 'promotion_analytics' },
   { href: '/admin/promotion-limits', labelKey: 'admin.nav.promotionLimits', icon: SlidersHorizontal, groupKey: 'nav.group.promotion', aclScope: 'campaigns', aclAny: ['promotions', 'promotions_approve'] },
@@ -172,6 +206,8 @@ const ADMIN_NAV: NavItem[] = [
   { href: '/admin/vendor-settlements', labelKey: 'admin.nav.vendorSettlements', icon: Store, groupKey: 'nav.group.finance', aclScope: 'payments' },
   { href: '/admin/settlement-config', labelKey: 'admin.nav.settlementConfig', icon: SlidersHorizontal, groupKey: 'nav.group.finance', aclScope: 'payments' },
   { href: '/admin/b2b-billing',   labelKey: 'admin.nav.b2bBilling',     icon: Receipt,         groupKey: 'nav.group.finance',  aclScope: 'b2b_billing', aclAny: ['b2b', 'b2b_billing_approve', 'b2b_payments'] },
+  // S5: VAT rates with maker ≠ checker; shown only while the server has VAT on (useTaxRatesAvailable).
+  { href: '/admin/tax-rates',     labelKey: 'admin.nav.taxRates',       icon: Percent,         groupKey: 'nav.group.finance',  aclScope: 'payments' },
   { href: '/admin/book-keeping',  labelKey: 'admin.nav.bookkeeping',    icon: BookOpen,        groupKey: 'nav.group.finance',  aclScope: 'payments' },
   { href: '/admin/payments',      labelKey: 'admin.nav.payments',       icon: CreditCard,      groupKey: 'nav.group.operations', aclScope: 'payments' },
   { href: '/admin/refunds',       labelKey: 'admin.nav.refunds',        icon: Undo2,           groupKey: 'nav.group.operations', aclScope: 'payments' },
@@ -248,8 +284,11 @@ function SidebarContent({
   const router = useRouter();
   const { t, user, signOut, locale, setLocale, switchablePersonas, switchPersona } = useApp();
   const vendor = useVendor();
+  const organizer = useOrganizer();
   const isVendor = VENDOR_USER_TYPES.has(user?.userType ?? '');
+  const isOrganizer = ORGANIZER_USER_TYPES.has(user?.userType ?? '');
   const businessName = vendor.me?.businessName || t('vendor.shell.unnamed');
+  const organizerName = organizer.organizer?.name || t('organizer.shell.unnamed');
   const [switching, setSwitching] = useState(false);
   const [switchError, setSwitchError] = useState<string | null>(null);
 
@@ -277,6 +316,11 @@ function SidebarContent({
             <>
               <p className="truncate text-sm font-semibold text-white" title={businessName} data-testid="vendor-business-name">{businessName}</p>
               <p className="truncate text-xs text-[var(--color-gray-400)]">{t('vendor.shell.subtitle')}</p>
+            </>
+          ) : isOrganizer ? (
+            <>
+              <p className="truncate text-sm font-semibold text-white" title={organizerName} data-testid="organizer-name">{organizerName}</p>
+              <p className="truncate text-xs text-[var(--color-gray-400)]">{t('organizer.shell.subtitle')}</p>
             </>
           ) : (
             <>
@@ -319,6 +363,7 @@ function SidebarContent({
                       icon={item.icon}
                       active={ROOTS.has(item.href) ? pathname.replace(/\/$/, '') === item.href : (pathname === item.href || pathname.startsWith(item.href + '/'))}
                       onClick={onLinkClick}
+                      count={item.count ? { n: item.count.n, tone: item.count.tone, label: fmt(t(item.count.labelKey), { n: item.count.n }) } : undefined}
                     />
                   ))}
                 </div>
@@ -338,7 +383,7 @@ function SidebarContent({
             aria-label={t('common.language')}
             value={locale}
             onChange={e => setLocale(e.target.value as 'en' | 'sw')}
-            className="flex-1 bg-transparent text-xs text-[var(--color-gray-400)] border-none outline-none cursor-pointer"
+            className="min-h-11 flex-1 bg-transparent text-xs text-[var(--color-gray-400)] border-none outline-none cursor-pointer"
           >
             <option value="en">English</option>
             <option value="sw">Kiswahili</option>
@@ -399,8 +444,9 @@ function SidebarContent({
 
 /* ── Shell ───────────────────────────────────────────────── */
 export function Shell({ children }: { children: ReactNode }) {
-  const { ready, token, user, hasPermission, signOut, t } = useApp();
+  const { ready, token, user, hasPermission, signOut, t, passwordChangeRequired } = useApp();
   const vendor = useVendor();
+  const organizer = useOrganizer();
   const toast = useToast();
   const pathname = usePathname();
   const router = useRouter();
@@ -413,17 +459,33 @@ export function Shell({ children }: { children: ReactNode }) {
   const isOrgUser     = token && user?.organizationUser === true && user?.userType !== 'admin';
   const isPortalStaff = isAdminUser && user?.portalUser === true;
   const isVendor      = !!token && VENDOR_USER_TYPES.has(user?.userType ?? '');
+  const isOrganizer   = !!token && ORGANIZER_USER_TYPES.has(user?.userType ?? '');
+  const adminEvents = useAdminEventsSummary(token, !!isAdminUser && hasPermission('events'));
+  const bannersOn = useShopBannersAvailable(
+    isVendor ? 'vendor' : 'admin', token,
+    isVendor ? vendor.status === 'ready' && !!vendor.me?.permissions?.includes('products') : !!isAdminUser && (hasPermission('promotions') || hasPermission('promotions_approve')),
+    isVendor ? vendorBannersTool(vendor.me?.tools) : undefined,
+  );
+
+  const taxRatesOn = useTaxRatesAvailable(token, !!isAdminUser && hasPermission('payments'));
 
   // Build the visible nav — portal staff only see items their ACL permits.
   // Overview (/admin) is always visible to all admin users.
   const visibleNav = isVendor
-    ? (vendor.status === 'ready' ? vendorNav(vendor.me?.permissions ?? [], vendor.lowCount, vendor.waitingCount) : [])
+    ? (vendor.status === 'ready' ? vendorNav(vendor.me?.permissions ?? [], vendor.me?.tools, vendor.lowCount, vendor.waitingCount, bannersOn) : [])
+    : isOrganizer
+    ? (!EVENTS_MODULE ? [] : organizer.status === 'ready' ? organizerNav(organizer.organizer?.status ?? null, organizer.role) : organizerNav(null, null))
     : isAdminUser
     ? ADMIN_NAV.filter(item => {
+        if (item.href === '/admin/shop-merch' && !bannersOn) return false;
+        if (item.href === '/admin/tax-rates' && !taxRatesOn) return false;
+        if (item.href === '/admin/events' && !adminEvents.available) return false;
         if (!item.aclScope) return true;             // no scope = super-admin only (overview)
         if (!isPortalStaff) return true;             // super-admin sees everything
         return scopesOf(item).some(hasPermission);   // portal staff: check ACL
-      })
+      }).map(item => (item.href === '/admin/events' && adminEvents.submitted > 0
+        ? { ...item, count: { n: adminEvents.submitted, labelKey: 'admin.nav.eventsCount' as MessageKey, tone: 'warning' as const } }
+        : item))
     : isOrgUser ? orgNav(user?.organizationRoles)
     : isHr ? HR_NAV
     : OPERATOR_NAV.filter(item => !item.aclScope || user?.userType !== 'gym_staff' || hasPermission(item.aclScope));
@@ -434,7 +496,8 @@ export function Shell({ children }: { children: ReactNode }) {
   const vendorPermissionMissing = (() => {
     if (!isVendor || vendor.status !== 'ready') return false;
     const area = [...VENDOR_AREAS].reverse().find(a => path === a.href || path.startsWith(`${a.href}/`));
-    return !!area?.permission && !vendor.can(area.permission);
+    // Its permission and, where it has one, its tool (S3 sales: walkInSales) — both fail closed.
+    return !!area && !vendorAreaOpen(area, vendor.me?.permissions ?? [], vendor.me?.tools);
   })();
   const redirectTo = ((): string | null => {
     if (!ready) return null;
@@ -445,9 +508,17 @@ export function Shell({ children }: { children: ReactNode }) {
     if (isVendor) return !inVendorArea || vendorPermissionMissing ? '/vendor/' : null;
     if (inVendorArea) return homeFor(user);
 
+    // Events S2 (spec §3): an organizer or organizer staff only ever sees /organizer. Anyone else signed in may open
+    // /organizer/onboarding to request the capability (state A); the other organizer pages send them home.
+    const inOrganizerArea = path === '/organizer' || path.startsWith('/organizer/');
+    if (isOrganizer) return inOrganizerArea ? null : '/organizer/';
+    if (inOrganizerArea && path !== '/organizer/onboarding') return homeFor(user);
+
     // Someone signed in for an organisation's billing only ever sees /org; nobody else does.
-    if (isOrgUser && !path.startsWith('/org')) return orgNav(user?.organizationRoles)[0].href;
-    if (!isOrgUser && path.startsWith('/org')) return user?.userType === 'admin' ? '/admin' : user?.userType === 'corporate_hr' ? '/hr' : '/dashboard';
+    // Exact area match: /organizer (events S2) is not the /org area.
+    const inOrgArea = path === '/org' || path.startsWith('/org/');
+    if (isOrgUser && !inOrgArea) return orgNav(user?.organizationRoles)[0].href;
+    if (!isOrgUser && inOrgArea) return user?.userType === 'admin' ? '/admin' : user?.userType === 'corporate_hr' ? '/hr' : '/dashboard';
 
     // Company HR only ever sees /hr; nobody else does.
     if (user?.userType === 'corporate_hr' && !path.startsWith('/hr')) return '/hr';
@@ -523,6 +594,26 @@ export function Shell({ children }: { children: ReactNode }) {
     );
   }
 
+  // Still on the start password an admin set: nothing but the step to choose their own (no nav, no
+  // page content, so no page requests). The page they were going to opens once it is done.
+  if (token && passwordChangeRequired && path !== '/login') {
+    return (
+      <div className="min-h-screen bg-[var(--color-bg-canvas)] flex flex-col">
+        <header className="h-16 flex items-center justify-between px-4 border-b border-[var(--color-border-canvas)] bg-[var(--color-bg-primary)]">
+          <div className="w-24" />
+          <div className="flex items-center gap-2.5">
+            <BrandLogo className="h-7 w-7 rounded-[var(--radius-md)]" />
+            <span className="text-sm font-semibold text-[var(--color-fg-primary)]">FitFlex Af</span>
+          </div>
+          <LanguageToggle className="justify-self-end" />
+        </header>
+        <main className="flex flex-1 items-center justify-center p-4">
+          <ChangePasswordGate />
+        </main>
+      </div>
+    );
+  }
+
   const isLoginPage = path === '/login' || !token;
 
   /* Public / login layout — no sidebar */
@@ -577,6 +668,12 @@ export function Shell({ children }: { children: ReactNode }) {
   // sign-in) would drop the navigation to /vendor/ that is under way.
   const inVendorPath = pathname === '/vendor' || pathname.startsWith('/vendor/');
   const vendorLoading = isVendor && inVendorPath && (vendor.status === 'loading' || vendor.status === 'none');
+  // Organizer area: the context loads before any organizer page renders; suspended organizers see the banner everywhere (§5.1).
+  const inOrganizerPath = pathname === '/organizer' || pathname.startsWith('/organizer/');
+  const organizerLoading = inOrganizerPath && EVENTS_MODULE && (organizer.status === 'loading' || (isOrganizer && organizer.status === 'none'));
+  const organizerBanner = inOrganizerPath && organizer.status === 'ready' && organizer.organizer?.status === 'suspended'
+    ? <div data-testid="organizer-suspended-banner"><Alert tone="error" className="mb-4">{fmt(t('organizer.suspendedBanner'), { reason: organizer.organizer.statusReason || t('organizer.status.noReason') })}</Alert></div>
+    : null;
   const vendorBanner = isVendor && vendor.status === 'ready' && vendor.me
     ? vendor.me.accountStatus === 'suspended'
       ? <Alert tone="error" className="mb-4">{t('vendor.suspended.banner')}</Alert>
@@ -642,9 +739,14 @@ export function Shell({ children }: { children: ReactNode }) {
             <div className="space-y-4" aria-busy="true" data-testid="vendor-loading">
               <SkeletonCard /><SkeletonCard /><SkeletonCard />
             </div>
+          ) : organizerLoading ? (
+            <div className="space-y-4" aria-busy="true" data-testid="organizer-loading">
+              <SkeletonCard /><SkeletonCard /><SkeletonCard />
+            </div>
           ) : (
             <>
               {vendorBanner}
+              {organizerBanner}
               {children}
             </>
           )}

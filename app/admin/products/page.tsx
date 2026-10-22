@@ -1,12 +1,13 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { ChevronDown, ChevronRight, Plus, RefreshCw, Save } from 'lucide-react';
+import { Suspense, useEffect, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
+import { Calculator, ChevronDown, ChevronRight, Plus, RefreshCw, Save } from 'lucide-react';
 import { useApp } from '../../providers';
-import { api, AdminProductDraft, ApiError, ShopProduct, VendorSummary } from '@/lib/api';
-import { money } from '@/lib/admin-utils';
+import { AdminProductFilters, api, AdminProductDraft, ApiError, PRODUCT_AGE_BANDS, ProductAgeBand, ProductStats, ProductStatsRecompute, ShopProduct, VendorSummary } from '@/lib/api';
+import { formatDateTime, formatNumber, money } from '@/lib/admin-utils';
 import { variantsOf } from '@/lib/vendor';
-import { Alert, Badge, Button, Card, Checkbox, Field, Input, PageHeader, Select, Spinner, Textarea } from '@/components/shared';
+import { Alert, Badge, Button, Card, CardContent, Checkbox, Field, Input, PageHeader, Select, Spinner, Table, TBody, Td, Textarea, Th, THead, Tr } from '@/components/shared';
 import { Dialog, DialogFooter } from '@/components/dialog';
 
 /** Cost and reorder level as typed: '' clears (sent as null). */
@@ -26,6 +27,29 @@ function draftOf(p: ShopProduct): PrivateDraft {
   };
 }
 
+/** Shop personalisation (S2): the server sends the target keys at all only when it knows them. */
+const hasTargets = (p: ShopProduct) => 'targetGender' in p || 'targetAgeBands' in p;
+const BAND_KEY = { '18_29': 'products.target.band.18_29', '30_44': 'products.target.band.30_44', '45_59': 'products.target.band.45_59', '60_plus': 'products.target.band.60_plus' } as const;
+const BAND_A11Y = { '18_29': 'products.target.a11y.18_29', '30_44': 'products.target.a11y.30_44', '45_59': 'products.target.a11y.45_59', '60_plus': 'products.target.a11y.60_plus' } as const;
+const NO_FILTERS: AdminProductFilters = {};
+const GENDER_FILTERS = ['everyone', 'women', 'men'] as const;
+const BAND_FILTERS = ['all', ...PRODUCT_AGE_BANDS] as const;
+/** Filters live in the URL (?targetGender=…&targetAgeBand=…) so refresh and Back keep them. Unknown values are dropped (the server would 400). */
+function filtersFrom(params: URLSearchParams): AdminProductFilters {
+  const g = params.get('targetGender'), b = params.get('targetAgeBand');
+  return {
+    ...((GENDER_FILTERS as readonly string[]).includes(g ?? '') ? { targetGender: g as AdminProductFilters['targetGender'] } : {}),
+    ...((BAND_FILTERS as readonly string[]).includes(b ?? '') ? { targetAgeBand: b as AdminProductFilters['targetAgeBand'] } : {}),
+  };
+}
+const STATUS_KEY = { active: 'vendor.products.status.active', paused: 'vendor.products.status.paused', archived: 'vendor.products.status.archived' } as const;
+
+/** Ratings to two places, counts whole. */
+const statText = (key: keyof ProductStats, v: number | null | undefined) => formatNumber(v, key === 'rating' ? 2 : 0);
+
+/** One-off stats recompute: the dry run being reviewed, then the applied result. */
+type Recompute = { preview: ProductStatsRecompute; result: ProductStatsRecompute | null; applying: boolean; error: string | null };
+
 const EMPTY_PRODUCT: AdminProductDraft = {
   vendorId: '', name: '', description: '', category: '', brand: '',
   priceTzs: 0, stock: 0, approvalStatus: 'pending', homepageVisible: false,
@@ -33,7 +57,14 @@ const EMPTY_PRODUCT: AdminProductDraft = {
 };
 
 export default function ProductsPage() {
+  return <Suspense fallback={null}><ProductsInner /></Suspense>;
+}
+
+function ProductsInner() {
   const { token, user, t } = useApp();
+  const params = useSearchParams();
+  // Read from the URL when the page opens (refresh, Back, a shared link); kept in state so quick changes never use a stale URL.
+  const [filters, setFilters] = useState<AdminProductFilters>(() => filtersFrom(new URLSearchParams(params.toString())));
   const [products, setProducts] = useState<ShopProduct[]>([]);
   const [vendors, setVendors] = useState<VendorSummary[]>([]);
   const [loading, setLoading] = useState(true);
@@ -45,6 +76,11 @@ export default function ProductsPage() {
   const [privates, setPrivates] = useState<Record<string, PrivateDraft>>({});
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [openVariants, setOpenVariants] = useState<Set<string>>(new Set());
+  const [checkingStats, setCheckingStats] = useState(false);
+  const [recompute, setRecompute] = useState<Recompute | null>(null);
+  // Sticky: once the server has sent target fields, keep the filters even when a filter matches nothing.
+  const [targetsShown, setTargetsShown] = useState(false);
+  const filtering = Boolean(filters.targetGender || filters.targetAgeBand);
   const vendorName = (id: string) => {
     const v = vendors.find(x => x.id === id);
     return v?.vendorProfile?.businessName || v?.displayName || id;
@@ -55,15 +91,16 @@ export default function ProductsPage() {
     setFieldErrors(cur => Object.fromEntries(Object.entries(cur).filter(([k]) => !k.startsWith(`${p.id}:`))));
   };
 
-  async function load() {
+  async function load(nextFilters: AdminProductFilters = filters) {
     if (!token) return;
     setLoading(true);
     try {
       const [productRows, vendorRows] = await Promise.all([
-        api.adminProducts(token),
+        api.adminProducts(token, nextFilters),
         api.adminVendors(token),
       ]);
       setProducts(productRows);
+      if (productRows.some(hasTargets)) setTargetsShown(true);
       setVendors(vendorRows);
       setPrivates({});
       setFieldErrors({});
@@ -76,9 +113,9 @@ export default function ProductsPage() {
   }
 
   useEffect(() => {
-    void load();
+    void load(filters);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token]);
+  }, [token, filters]);
 
   function updateDraft(id: string, patch: Partial<ShopProduct>) {
     setProducts((current) => current.map((product) => (
@@ -161,6 +198,59 @@ export default function ProductsPage() {
     }
   }
 
+  const recomputeError = (cause: unknown) => {
+    if (cause instanceof ApiError && cause.status === 403) return t('products.recompute.forbidden');
+    if (cause instanceof ApiError && cause.status === 409 && (cause.body as { error?: string } | null)?.error === 'recompute_in_progress') return t('products.recompute.inProgress');
+    return t('products.recompute.error');
+  };
+
+  /** Dry run first (apply false): nothing is written until the admin applies from the review. */
+  async function previewRecompute() {
+    if (!token) return;
+    setCheckingStats(true);
+    setSuccess(null);
+    try {
+      const preview = await api.recomputeProductStats(token, { apply: false });
+      setRecompute({ preview, result: null, applying: false, error: null });
+      setError(null);
+    } catch (cause) {
+      setError(recomputeError(cause));
+    } finally {
+      setCheckingStats(false);
+    }
+  }
+
+  async function applyRecompute() {
+    if (!token || !recompute || recompute.applying) return;
+    setRecompute({ ...recompute, applying: true, error: null });
+    try {
+      const result = await api.recomputeProductStats(token, { apply: true });
+      setRecompute(cur => cur && { ...cur, result, applying: false });
+    } catch (cause) {
+      setRecompute(cur => cur && { ...cur, applying: false, error: recomputeError(cause) });
+    }
+  }
+
+  const closeRecompute = () => { if (!recompute?.applying) setRecompute(null); };
+
+  /** Sets the filters (the effect above reloads) and mirrors them into the URL, keeping any other query params. */
+  function applyFilters(next: AdminProductFilters) {
+    setFilters(next);
+    setSuccess(null);
+    const url = new URL(window.location.href);
+    url.searchParams.delete('targetGender'); url.searchParams.delete('targetAgeBand');
+    if (next.targetGender) url.searchParams.set('targetGender', next.targetGender);
+    if (next.targetAgeBand) url.searchParams.set('targetAgeBand', next.targetAgeBand);
+    window.history.replaceState(window.history.state, '', `${url.pathname}${url.search}${url.hash}`);
+  }
+
+  const bandsText = (bands: ProductAgeBand[] | undefined) =>
+    bands && bands.length ? bands.map(b => t(BAND_KEY[b])).join(', ') : t('products.target.allAges');
+  const bandsA11y = (bands: ProductAgeBand[] | undefined) =>
+    bands && bands.length ? bands.map(b => t(BAND_A11Y[b])).join(', ') : t('products.target.allAges');
+  const genderText = (g: ShopProduct['targetGender']) =>
+    g === 'women' ? t('products.target.women') : g === 'men' ? t('products.target.men') : t('products.target.everyone');
+
   if (!token || user?.userType !== 'admin') return null;
 
   return (
@@ -168,10 +258,14 @@ export default function ProductsPage() {
       <PageHeader
         title={t('products.title')}
         description={t('products.description')}
-        actions={<div className="flex gap-2">
-          <Button variant="secondary" size="sm" onClick={load} disabled={loading}>
+        actions={<div className="flex flex-wrap gap-2">
+          <Button variant="secondary" size="sm" onClick={() => load()} disabled={loading}>
             <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
             {t('admin.action.refresh')}
+          </Button>
+          <Button variant="secondary" size="sm" onClick={previewRecompute} loading={checkingStats}>
+            {!checkingStats && <Calculator aria-hidden="true" className="h-4 w-4" />}
+            {checkingStats ? t('products.recompute.checking') : t('products.recompute.action')}
           </Button>
           <Button variant="primary" size="sm" onClick={() => setCreateOpen(true)}>
             <Plus className="h-4 w-4" />{t('products.create')}
@@ -182,24 +276,59 @@ export default function ProductsPage() {
       {error && <Alert tone="error">{error}</Alert>}
       {success && <Alert tone="success">{success}</Alert>}
 
+      {targetsShown && (
+        <Card><CardContent>
+          <div className="grid gap-4 sm:grid-cols-[12rem_12rem_auto] sm:items-end" data-testid="product-target-filters">
+            <Field label={t('products.target.madeFor')}>
+              <Select aria-label={t('products.target.filterMadeFor')} value={filters.targetGender ?? ''}
+                onChange={e => applyFilters({ ...filters, targetGender: (e.target.value || undefined) as AdminProductFilters['targetGender'] })}>
+                <option value="">{t('products.target.filterAny')}</option>
+                <option value="everyone">{t('products.target.everyone')}</option>
+                <option value="women">{t('products.target.women')}</option>
+                <option value="men">{t('products.target.men')}</option>
+              </Select>
+            </Field>
+            <Field label={t('products.target.ageGroup')}>
+              <Select aria-label={t('products.target.filterAgeGroup')} value={filters.targetAgeBand ?? ''}
+                onChange={e => applyFilters({ ...filters, targetAgeBand: (e.target.value || undefined) as AdminProductFilters['targetAgeBand'] })}>
+                <option value="">{t('products.target.filterAny')}</option>
+                <option value="all">{t('products.target.allAges')}</option>
+                {PRODUCT_AGE_BANDS.map(b => <option key={b} value={b}>{t(BAND_KEY[b])}</option>)}
+              </Select>
+            </Field>
+            {filtering && (
+              <div className="pb-1">
+                <Button variant="ghost" size="sm" className="min-h-11" onClick={() => applyFilters(NO_FILTERS)}>{t('products.target.clearFilters')}</Button>
+              </div>
+            )}
+          </div>
+          <p className="mt-3 text-sm text-[var(--color-fg-secondary)]" data-testid="product-target-note">{t('products.target.note')}</p>
+        </CardContent></Card>
+      )}
+
       {loading ? (
         <div className="flex justify-center py-16"><Spinner /></div>
       ) : products.length === 0 ? (
-        <Card><p className="py-8 text-center text-sm text-[var(--color-fg-tertiary)]">{t('products.empty')}</p></Card>
+        <Card><p className="py-8 text-center text-sm text-[var(--color-fg-tertiary)]">{t(filtering ? 'products.target.noMatch' : 'products.empty')}</p></Card>
       ) : (
         <div className="space-y-3">
           {products.map((product) => (
-            <Card key={product.id}>
+            <Card key={product.id}><CardContent>
               <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_auto_10rem_11rem_auto] md:items-end">
                 <div className="min-w-0">
                   <div className="flex items-center gap-2">
                     <h2 className="truncate text-sm font-semibold text-[var(--color-fg-primary)]">{product.name}</h2>
-                    <Badge tone={product.status === 'active' ? 'success' : 'gray'}>{product.status}</Badge>
+                    <Badge tone={product.status === 'active' ? 'success' : 'gray'}>{STATUS_KEY[product.status] ? t(STATUS_KEY[product.status]) : product.status}</Badge>
                   </div>
                   <p className="mt-1 text-xs text-[var(--color-fg-tertiary)]">
                     {t('products.vendor')}: {vendorName(product.vendorId)} · {t('products.stock')}: {product.stock}
                     {hasPrivate(product) && <> · {t('vendor.stock.reorderLevel')}: {product.reorderLevel ?? '—'} · {t('vendor.costPrice')}: {product.costTzs == null ? '—' : money(product.costTzs)}</>}
                   </p>
+                  {hasTargets(product) && (
+                    <p className="mt-1 text-xs text-[var(--color-fg-tertiary)]" data-testid={`product-targets-${product.id}`}>
+                      {t('products.target.madeFor')}: {genderText(product.targetGender)} · {t('products.target.ageGroup')}: <span aria-hidden="true">{bandsText(product.targetAgeBands)}</span><span className="sr-only">{bandsA11y(product.targetAgeBands)}</span>
+                    </p>
+                  )}
                   {hasPrivate(product) && product.reorderLevel != null && product.stock <= product.reorderLevel && (
                     <div className="mt-1"><Badge tone="warning">{t('vendor.stock.lowBadge')}</Badge></div>
                   )}
@@ -283,10 +412,90 @@ export default function ProductsPage() {
                   )}
                 </div>
               )}
-            </Card>
+            </CardContent></Card>
           ))}
         </div>
       )}
+
+      {recompute && (() => {
+        const shown = recompute.result ?? recompute.preview;
+        const counts: Array<[string, number]> = [
+          [t('products.recompute.checked'), shown.checked],
+          [t(recompute.result ? 'products.recompute.changed' : 'products.recompute.willChange'), shown.changed.length],
+          [t('products.recompute.unchanged'), shown.unchanged],
+        ];
+        const cols: Array<[keyof ProductStats, string]> = [
+          ['rating', t('products.recompute.colRating')],
+          ['reviewCount', t('products.recompute.colReviews')],
+          ['soldCount', t('products.recompute.colSold')],
+        ];
+        return (
+          <Dialog open onClose={closeRecompute} size="xl" title={t('products.recompute.title')} description={t('products.recompute.explain')}>
+            <div className="space-y-4" data-testid="product-stats-recompute">
+              <dl className="grid grid-cols-3 gap-3">
+                {counts.map(([label, n]) => (
+                  <div key={label} className="rounded-[var(--radius-lg)] border border-[var(--color-border-secondary)] px-4 py-3">
+                    <dt className="text-xs text-[var(--color-fg-tertiary)]">{label}</dt>
+                    <dd className="mt-1 text-lg font-semibold text-[var(--color-fg-primary)]">{formatNumber(n)}</dd>
+                  </div>
+                ))}
+              </dl>
+              {recompute.result && (
+                <Alert tone="success">
+                  {t('products.recompute.applied').replace('{when}', formatDateTime(recompute.result.appliedAt))}
+                  {recompute.result.runId && <span className="block text-xs font-normal">{t('products.recompute.runId').replace('{id}', recompute.result.runId)}</span>}
+                </Alert>
+              )}
+              {recompute.error && <Alert tone="error">{recompute.error}</Alert>}
+              {shown.changed.length === 0 ? (
+                <p className="py-6 text-center text-sm text-[var(--color-fg-tertiary)]">{t('products.recompute.empty')}</p>
+              ) : (
+                <Table aria-label={t('products.recompute.tableLabel')}>
+                  <THead>
+                    <Tr>
+                      <Th>{t('products.recompute.colProduct')}</Th>
+                      {cols.map(([key, label]) => <Th key={key}>{label}</Th>)}
+                    </Tr>
+                  </THead>
+                  <TBody>
+                    {shown.changed.map(row => (
+                      <Tr key={row.productId} data-testid={`recompute-row-${row.productId}`}>
+                        <Td>
+                          <div className="font-medium text-[var(--color-fg-primary)]">{row.name}</div>
+                          <div className="text-xs text-[var(--color-fg-tertiary)]">{t('products.vendor')}: {vendorName(row.vendorId)}</div>
+                        </Td>
+                        {cols.map(([key]) => {
+                          const before = statText(key, row.before?.[key]), after = statText(key, row.after?.[key]);
+                          const same = before === after;
+                          return (
+                            <Td key={key} aria-label={t('vendor.products.wasNow').replace('{old}', before).replace('{new}', after)}>
+                              <span className={same ? 'text-[var(--color-fg-tertiary)]' : 'text-[var(--color-fg-quaternary)] line-through'}>{before}</span>
+                              {!same && <> <span aria-hidden="true">→</span> <span className="font-semibold text-[var(--color-fg-primary)]">{after}</span></>}
+                            </Td>
+                          );
+                        })}
+                      </Tr>
+                    ))}
+                  </TBody>
+                </Table>
+              )}
+              {!recompute.result && shown.changed.length > 0 && (
+                <p className="text-sm text-[var(--color-fg-secondary)]">{t('products.recompute.applyWarning')}</p>
+              )}
+            </div>
+            <DialogFooter>
+              {recompute.result || shown.changed.length === 0 ? (
+                <Button variant="secondary" onClick={closeRecompute}>{t('common.close')}</Button>
+              ) : (
+                <>
+                  <Button variant="secondary" onClick={closeRecompute} disabled={recompute.applying}>{t('admin.action.cancel')}</Button>
+                  <Button variant="destructive" onClick={applyRecompute} loading={recompute.applying}>{t('products.recompute.apply')}</Button>
+                </>
+              )}
+            </DialogFooter>
+          </Dialog>
+        );
+      })()}
 
       <Dialog
         open={createOpen}

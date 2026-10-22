@@ -69,7 +69,7 @@ export function Dialog({
   title: ReactNode;
   description?: ReactNode;
   children: ReactNode;
-  size?: 'sm' | 'md' | 'lg' | 'xl';
+  size?: 'sm' | 'md' | 'lg' | 'xl' | 'full';
 }) {
   const panelRef = useRef<HTMLDivElement>(null);
   const titleId = useId();
@@ -79,7 +79,7 @@ export function Dialog({
 
   if (!open) return null;
 
-  const widths = { sm: 'max-w-sm', md: 'max-w-lg', lg: 'max-w-2xl', xl: 'max-w-4xl' };
+  const widths = { sm: 'max-w-sm', md: 'max-w-lg', lg: 'max-w-2xl', xl: 'max-w-4xl', full: 'max-w-[min(1400px,100%)]' };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -206,9 +206,12 @@ export function ConfirmDialog({
 
         <div className="px-6 py-5 text-center">
           <h3 id={titleId} className="text-base font-semibold text-[var(--color-fg-primary)]">{title}</h3>
-          {description && (
+          {description && (typeof description === 'string' ? (
             <p id={descId} className="mt-2 text-sm text-[var(--color-fg-quaternary)]">{description}</p>
-          )}
+          ) : (
+            // Structured detail (for example a list of facts to check) can't sit inside a <p>.
+            <div id={descId} className="mt-2 text-sm text-[var(--color-fg-quaternary)]">{description}</div>
+          ))}
         </div>
 
         <div className="flex gap-3 px-6 pb-6">

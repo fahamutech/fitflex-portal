@@ -5,13 +5,13 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { ArrowLeft, History, SlidersHorizontal } from 'lucide-react';
 import { api, type LowStockRow, type StockMovement, type StockMovementPage, type VendorProduct } from '@/lib/api';
 import type { MessageKey } from '@/lib/i18n';
-import { addDays, eatDateTime, eatToday, errorCode, fmt, lowKey, PRODUCTS_QS_KEY, shortRefOf, systemNoteKey, variantsOf } from '@/lib/vendor';
+import { addDays, canWalkInSales, eatDateTime, eatToday, errorCode, fmt, lowKey, PRODUCTS_QS_KEY, shortRefOf, systemNoteKey, variantsOf } from '@/lib/vendor';
 import { Alert, Badge, Button, Card, CardContent, EmptyState, ErrorState, Field, Input, PageHeader, Segmented, Select, SkeletonCard, SkeletonTable, Spinner, Table, TBody, Td, Th, THead, Tr } from '@/components/shared';
 import { AdjustStockDialog } from '@/components/vendor/adjust-stock-dialog';
 import { useVendor } from '@/components/vendor-context';
 import { useApp } from '../../../providers';
 
-const KNOWN_REASONS = new Set(['count', 'restock', 'returned', 'found', 'damaged', 'expired', 'lost', 'other', 'reserve', 'release']);
+const KNOWN_REASONS = new Set(['count', 'restock', 'returned', 'found', 'damaged', 'expired', 'lost', 'other', 'reserve', 'release', 'sale', 'sale_void']);
 type Range = '7d' | '30d' | 'custom';
 
 function HistoryInner() {
@@ -99,6 +99,7 @@ function HistoryInner() {
   const reorder = selected ? (selected.effectiveReorderLevel ?? selected.reorderLevel) : product.reorderLevel;
   const isLow = variant ? lowSet.has(lowKey(product.id, variant)) : (lowSet.has(lowKey(product.id, null)) || vs.some(v => lowSet.has(lowKey(product.id, v.name))));
   const canOrders = vendor.can('orders');
+  const canSales = canWalkInSales(vendor.me);
 
   const reasonText = (r: StockMovement) => t((KNOWN_REASONS.has(r.reason) ? `vendor.stock.reason.${r.reason}` : 'vendor.stock.reason.unknown') as MessageKey);
   const delta = (d: number) => (d > 0
@@ -108,6 +109,13 @@ function HistoryInner() {
   // Notes the server writes itself are codes: show them as words; a person's own note as written.
   const note = (r: StockMovement) => { const key = systemNoteKey(r.note); return key ? t(key) : r.note; };
   const orderRef = (r: StockMovement) => {
+    // S3: a shop sale (or its void) links to the sale when this person may open sales; else plain text.
+    if (r.document?.type === 'sale') {
+      const label = fmt(t('vendor.stock.sale'), { number: r.document.number || shortRefOf(r.document.id) });
+      return canSales
+        ? <Link href={`/vendor/sales/?id=${encodeURIComponent(r.document.id)}`} className="inline-flex min-h-11 items-center font-medium text-[var(--color-brand-700)] underline-offset-4 hover:underline">{label}</Link>
+        : <span>{label}</span>;
+    }
     if (r.document?.type !== 'order') return null;
     const label = fmt(t('vendor.stock.order'), { ref: r.document.shortRef || r.document.number || shortRefOf(r.document.id) });
     return canOrders

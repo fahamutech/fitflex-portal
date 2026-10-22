@@ -7,14 +7,15 @@ import type { Locale, MessageKey } from './i18n';
 export const PAYMENT_STATUSES: PaymentStatusValue[] = ['pending', 'approved', 'rejected', 'cancelled'];
 export const DECIDED_STATUSES: PaymentStatusValue[] = ['approved', 'rejected', 'cancelled'];
 
-export const PAYMENT_STAGE_TONE: Record<PaymentApprovalStage, 'warning' | 'brand' | 'danger'> = {
+// Every stage is still work to do, so none is green (green reads as done).
+export const PAYMENT_STAGE_TONE: Record<PaymentApprovalStage, 'warning' | 'danger'> = {
   awaiting_verification: 'warning',
-  awaiting_second_approval: 'brand',
+  awaiting_second_approval: 'warning',
   change_requested: 'danger',
 };
-export const REFUND_STAGE_TONE: Record<RefundApprovalStage, 'warning' | 'brand'> = {
+export const REFUND_STAGE_TONE: Record<RefundApprovalStage, 'warning'> = {
   awaiting_approval: 'warning',
-  awaiting_payment: 'brand',
+  awaiting_payment: 'warning',
 };
 
 export const paymentStageKey = (s: PaymentApprovalStage) => `money2.stage.${s}` as MessageKey;
@@ -66,6 +67,17 @@ const TWO_ADMIN_ROW_ERRORS = ['reference_already_used'];
 export const expectedAmount = (err: unknown): number | null => {
   const v = (err as { body?: { expectedTzs?: number } } | null)?.body?.expectedTzs;
   return typeof v === 'number' ? v : null;
+};
+
+/**
+ * Trainer session outcomes (functions#231): approving a booking group's payment is refused with
+ * 409 group_slot_rebooked when a rejected session's slot was booked by someone else since.
+ * Returns the booking ids the server listed (possibly none), or null for any other error.
+ */
+export const rebookedBookingIds = (err: unknown): string[] | null => {
+  if (errorCode(err) !== 'group_slot_rebooked') return null;
+  const ids = (err as { body?: { bookingIds?: unknown } } | null)?.body?.bookingIds;
+  return Array.isArray(ids) ? ids.filter((x): x is string => typeof x === 'string' && x.length > 0) : [];
 };
 
 export function moneyErrorKey(err: unknown): MessageKey {

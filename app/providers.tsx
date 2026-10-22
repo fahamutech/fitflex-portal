@@ -1,14 +1,18 @@
 'use client';
 import { createContext, ReactNode, useCallback, useContext, useEffect, useState } from 'react';
 import { Locale, MessageKey, t as translate } from '@/lib/i18n';
-import { api, ApiError, setOnUnauthorized, type PersonaSummary } from '@/lib/api';
+import { api, ApiError, setOnPasswordChangeRequired, setOnUnauthorized, tokenRequiresPasswordChange, type PersonaSummary } from '@/lib/api';
 import { PwaRegistration } from '@/components/pwa-registration';
 import { ToastProvider } from '@/components/ui/toast';
 import { VendorProvider } from '@/components/vendor-context';
+import { OrganizerProvider } from '@/components/organizer-context';
+
+/** Session user types the portal knows (events S2 added event_organizer and organizer_staff, D3). */
+export type PortalUserType = 'admin' | 'gym_operator' | 'gym_staff' | 'vendor' | 'vendor_staff' | 'corporate_hr' | 'member' | 'event_organizer' | 'organizer_staff';
 
 export interface PortalAppUser {
   id: string;
-  userType: string;
+  userType: PortalUserType | (string & {});
   gymId?: string;
   email?: string;
   portalUser?: boolean;
@@ -34,11 +38,13 @@ interface AppCtx {
   switchPersona: (personaId: string) => Promise<PortalAppUser>;
   /** Identity V2: people join a gym by invitation; the forms that set a PIN for them are replaced. */
   invitesEnabled: boolean;
+  /** This session must replace the start password an admin set before anything else (token `pwc` or a 403 password_change_required). */
+  passwordChangeRequired: boolean;
 }
 
 // Only personas the portal has screens for; members and trainers use the app,
 // and admin personas are never switched into. Vendors have a web area (S2).
-const PORTAL_PERSONA_TYPES = new Set(['gym_operator', 'gym_staff', 'corporate_hr', 'vendor', 'vendor_staff']);
+const PORTAL_PERSONA_TYPES = new Set(['gym_operator', 'gym_staff', 'corporate_hr', 'vendor', 'vendor_staff', 'event_organizer', 'organizer_staff']);
 
 const Ctx = createContext<AppCtx | null>(null);
 
@@ -55,6 +61,8 @@ export function Providers({ children }: { children: ReactNode }) {
   const [ready, setReady] = useState(false);
   const [personas, setPersonas] = useState<PersonaSummary[]>([]);
   const [invitesEnabled, setInvitesEnabled] = useState(false);
+  // Set when the server refuses a request with 403 password_change_required (the token claim is read too).
+  const [pwcRefused, setPwcRefused] = useState(false);
 
   useEffect(() => {
     const l = (typeof localStorage !== 'undefined' && localStorage.getItem('locale')) as Locale | null;
@@ -73,11 +81,11 @@ export function Providers({ children }: { children: ReactNode }) {
   const signIn = (tk: string, u: AppCtx['user']) => {
     localStorage.setItem('token', tk);
     localStorage.setItem('user', JSON.stringify(u));
-    setToken(tk); setUser(u);
+    setToken(tk); setUser(u); setPwcRefused(false);
   };
   const signOut = useCallback(() => {
     localStorage.removeItem('token'); localStorage.removeItem('user');
-    setToken(null); setUser(null); setPersonas([]);
+    setToken(null); setUser(null); setPersonas([]); setPwcRefused(false);
   }, []);
 
   // Identity V2: the Person's personas; a 404 means V2 is off.
@@ -129,10 +137,17 @@ export function Providers({ children }: { children: ReactNode }) {
     return () => setOnUnauthorized(null);
   }, [signOut]);
 
+  // Any request refused with 403 password_change_required sends the person to choose their own password.
+  useEffect(() => {
+    setOnPasswordChangeRequired(() => setPwcRefused(true));
+    return () => setOnPasswordChangeRequired(null);
+  }, []);
+  const passwordChangeRequired = !!token && (pwcRefused || tokenRequiresPasswordChange(token));
+
   return (
-    <Ctx.Provider value={{ ready, locale, setLocale, t: (k) => translate(locale, k), token, user, signIn, signOut, hasPermission, switchablePersonas, switchPersona, invitesEnabled }}>
+    <Ctx.Provider value={{ ready, locale, setLocale, t: (k) => translate(locale, k), token, user, signIn, signOut, hasPermission, switchablePersonas, switchPersona, invitesEnabled, passwordChangeRequired }}>
       <PwaRegistration />
-      <ToastProvider><VendorProvider>{children}</VendorProvider></ToastProvider>
+      <ToastProvider><VendorProvider><OrganizerProvider>{children}</OrganizerProvider></VendorProvider></ToastProvider>
     </Ctx.Provider>
   );
 }

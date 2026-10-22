@@ -27,17 +27,37 @@ export function payerPhoneDiffers(payment: PaymentRequest): boolean {
   return !!paid && !!registered && paid !== registered;
 }
 
-/** Table cell: the member's transaction ID and the number they paid from, or a dash. */
-export function MemberReferenceCell({ payment }: { payment: PaymentRequest }) {
+const sameId = (a: string | null | undefined, b: string | null | undefined) =>
+  !!a && !!b && a.trim().toUpperCase() === b.trim().toUpperCase();
+
+/**
+ * Table cell: the payment's transaction ID, shown once. The recorded reference wins; the member's
+ * own ID shows only when nothing is recorded yet, or when it differs from what was recorded.
+ * The number the member paid from follows, or a dash when there is nothing at all.
+ */
+export function TransactionIdCell({ payment }: { payment: PaymentRequest }) {
   const { t } = useApp();
-  if (!payment.memberReference && !payment.payerPhone) return <span className="text-xs">—</span>;
+  const recorded = payment.reference?.trim() || '';
+  const member = payment.memberReference?.trim() || '';
+  if (!recorded && !member && !payment.payerPhone) return <span className="text-xs">—</span>;
   return (
-    <div className="space-y-0.5">
-      {payment.memberReference && (
-        <div className="text-xs font-mono font-semibold text-[var(--color-fg-primary)]" data-testid="member-reference">{payment.memberReference}</div>
+    <div className="space-y-0.5 max-w-[9rem]">
+      {recorded && (
+        <div className="truncate text-xs font-mono font-semibold text-[var(--color-fg-primary)]" title={recorded} data-testid="payment-reference">{recorded}</div>
+      )}
+      {member && !recorded && (
+        <>
+          <div className="truncate text-xs font-mono font-semibold text-[var(--color-fg-primary)]" title={member} data-testid="member-reference">{member}</div>
+          <div className="text-xs text-[var(--color-fg-tertiary)]">{t('payments.fromMember')}</div>
+        </>
+      )}
+      {member && recorded && !sameId(member, recorded) && (
+        <div className="truncate text-xs text-[var(--color-warning-700)]" title={member} data-testid="member-reference-differs">
+          {t('payments.memberGave').replace('{ref}', member)}
+        </div>
       )}
       {payment.payerPhone && (
-        <div className="text-xs text-[var(--color-fg-tertiary)] whitespace-nowrap" data-testid="payer-phone">
+        <div className="text-xs text-[var(--color-fg-tertiary)]" data-testid="payer-phone">
           {t('manualPay.payerPhone')}: <span className="font-mono">{payment.payerPhone}</span>
         </div>
       )}
@@ -50,12 +70,14 @@ export function MemberReferenceCell({ payment }: { payment: PaymentRequest }) {
  * the reference already recorded (e.g. by a verifying admin) or else the member's ID.
  */
 export function ApproveWithReferenceDialog({
-  payment, busy, onClose, onConfirm,
+  payment, busy, onClose, onConfirm, verifiedText,
 }: {
   payment: PaymentRequest | null;
   busy: boolean;
   onClose: () => void;
   onConfirm: (reference: string) => void;
+  /** Who verified the payment and when (two-admin approval), shown so the approver sees it before approving. */
+  verifiedText?: string | null;
 }) {
   const { t } = useApp();
   const [reference, setReference] = useState('');
@@ -94,6 +116,9 @@ export function ApproveWithReferenceDialog({
             </dl>
           )}
         </div>
+        {verifiedText && (
+          <p className="text-xs text-[var(--color-fg-tertiary)]" data-testid="approve-verified-by">{verifiedText}</p>
+        )}
         {payerPhoneDiffers(payment) && (
           <p role="status" className="text-xs text-[var(--color-fg-tertiary)]" data-testid="payer-phone-differs">{t('manualPay.phoneDiffers')}</p>
         )}

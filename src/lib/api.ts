@@ -1,6 +1,17 @@
 // Thin client for the bfast-functions backend.
 
 const BASE = process.env.NEXT_PUBLIC_API_BASE || 'https://fitflex-faas.bfast.smartstock.co.tz';
+/** The API server address (for feature modules that build their own requests, e.g. src/lib/shop-banners.ts). */
+export const API_BASE = BASE;
+
+/** Admin view-only read of a partner's declared details (GET /admin/{trainers|gym-owners}/:id/personal-details). */
+export interface PartnerPersonalDetails {
+  dateOfBirth: string | null;
+  age: number | null;
+  gender: 'male' | 'female' | 'other' | null;
+  genderFrom: 'trainer_profile' | 'person' | null;
+  source: 'person' | 'member' | null;
+}
 
 export class ApiError extends Error {
   status: number;
@@ -13,10 +24,42 @@ export class ApiError extends Error {
 }
 
 let _onUnauthorized: (() => void) | null = null;
+/** Tell the session a request came back 401 (for XHR uploads outside request()). */
+export function notifyUnauthorized() { _onUnauthorized?.(); }
 
 /** Register a callback invoked when any API call returns 401. */
 export function setOnUnauthorized(cb: (() => void) | null) {
   _onUnauthorized = cb;
+}
+
+let _onPasswordChangeRequired: (() => void) | null = null;
+
+/**
+ * Register a callback invoked when any API call answers 403 password_change_required:
+ * the session belongs to someone who must replace the start password an admin set.
+ */
+export function setOnPasswordChangeRequired(cb: (() => void) | null) {
+  _onPasswordChangeRequired = cb;
+}
+
+/** Fewest characters the backend accepts for a portal password (POST /auth/portal/password). */
+export const PORTAL_PASSWORD_MIN_LENGTH = 10;
+
+/**
+ * True when the session token carries `pwc: true` (must choose their own password first).
+ * Reads the JWT payload only; the server still decides, and a token that cannot be read counts as false.
+ */
+export function tokenRequiresPasswordChange(token: string | null | undefined): boolean {
+  if (!token) return false;
+  const part = token.split('.')[1];
+  if (!part) return false;
+  try {
+    const b64 = part.replace(/-/g, '+').replace(/_/g, '/');
+    const payload = JSON.parse(atob(b64 + '='.repeat((4 - (b64.length % 4)) % 4)));
+    return payload?.pwc === true;
+  } catch {
+    return false;
+  }
 }
 
 // Identity V2 (decision C3b): this build understands persons and personas.
@@ -36,9 +79,14 @@ const PORTAL_SIGN_IN_ROLES = [
   // A business that sells on FitFlex, and its staff (vendor portal, S2). Never created here.
   { requestedRole: 'vendor', existingOnly: true },
   { requestedRole: 'vendor_staff', existingOnly: true },
+  // Running-event organizers and their staff (events S2, decision D3). Never created here: POST /me/organizer does.
+  { requestedRole: 'event_organizer', existingOnly: true },
+  { requestedRole: 'organizer_staff', existingOnly: true },
 ];
 /** Session user types that open the vendor area (/vendor). */
 export const VENDOR_USER_TYPES = new Set(['vendor', 'vendor_staff']);
+/** Session user types that open the organizer area (/organizer) — events S2 (D3). */
+export const ORGANIZER_USER_TYPES = new Set(['event_organizer', 'organizer_staff']);
 const NO_SUCH_PROFILE = new Set(['admin_self_registration_not_allowed', 'profile_not_found']);
 /** Roles in a B2B organisation that see its billing (invoices, payments, statement). */
 export const ORG_BILLING_ROLES = new Set(['owner', 'admin', 'finance']);
@@ -94,7 +142,7 @@ export interface GymInvitationInput {
   paidAmount?: number;
 }
 
-async function request<T>(
+export async function request<T>(
   path: string,
   opts: RequestInit = {},
   token?: string,
@@ -115,13 +163,16 @@ async function request<T>(
     if (res.status === 401 && _onUnauthorized && !isRefusal401?.(body)) {
       _onUnauthorized();
     }
+    if (res.status === 403 && (body as { error?: string } | null)?.error === 'password_change_required') {
+      _onPasswordChangeRequired?.();
+    }
     throw new ApiError(res.status, body);
   }
   return body as T;
 }
 
 /** "?a=1&b=2" from the set values of `params`, or "". */
-function qs(params: object): string {
+export function qs(params: object): string {
   const q = new URLSearchParams();
   for (const [k, v] of Object.entries(params)) if (v != null && v !== '') q.set(k, String(v));
   const s = q.toString();
@@ -234,7 +285,10 @@ export type CampaignAnalytics = {
   campaign: { id: string; name: string; status: string; startsAt: string; endsAt: string }; range: PromotionAnalyticsRange;
   totals: PromotionMetrics; items: PromotionAnalyticsItem[]; notTracked: string[]; unverifiedEvents?: number;
 };
-export type GeoArea = { id: string; level: 'country' | 'region' | 'city' | 'district'; name: string; parentId: string | null };
+export type GeoArea = { id: string; level: 'country' | 'region' | 'city' | 'district'; name: string; parentId: string | null; active?: boolean;
+  /** /shop/areas: place name per language (sw = nameSw or name). */ names?: { en?: string | null; sw?: string | null } | null;
+  /** /admin/geo-areas (raw row): Swahili place name, null = same as name. */ nameSw?: string | null;
+  /** /shop/areas: can stand for "where you are"; vendors may still pick any area. */ locatable?: boolean };
 export type EntityMatch = {
   entityType: ModerationEntityType; id: string; name: string; subtitle: string | null; status: string; moderationStatus: ModerationStatus;
   promotable: boolean; reasons: string[]; placements: PromotionPlacement[];
@@ -306,6 +360,39 @@ export const api = {
   vendorOrder: (token: string, id: string) => request<VendorOrder>(`/vendor/orders/${encodeURIComponent(id)}`, {}, token),
   vendorOrderStatus: (token: string, id: string, body: { status: string; reason?: string }) =>
     request<VendorOrder>(`/vendor/orders/${encodeURIComponent(id)}/status`, { method: 'POST', body: JSON.stringify(body) }, token),
+  // Walk-in (counter) sales, S3: read, detail, void. Recording happens in the app (no POS in the portal).
+  vendorSales: (token: string, query: VendorSalesQuery = {}) =>
+    request<VendorSalePage>(`/vendor/sales${qs({ ...query, limit: query.limit ?? 50 })}`, {}, token),
+  vendorSale: (token: string, id: string) => request<{ sale: VendorSale }>(`/vendor/sales/${encodeURIComponent(id)}`, {}, token),
+  vendorVoidSale: (token: string, id: string, reason: string) =>
+    request<{ sale: VendorSale }>(`/vendor/sales/${encodeURIComponent(id)}/void`, { method: 'POST', body: JSON.stringify({ reason }) }, token),
+  // ─── Vendor customers, pay-later balances, customer payments, aging (S4) ───
+  vendorCustomers: (token: string, query: VendorCustomersQuery = {}) =>
+    request<VendorCustomerPage>(`/vendor/customers${qs({ ...query, limit: query.limit ?? 50 })}`, {}, token),
+  vendorCreateCustomer: (token: string, body: VendorCustomerInput & { clientRef?: string }) =>
+    request<{ customer: VendorCustomer; phoneDuplicate: VendorPhoneDuplicate }>('/vendor/customers', { method: 'POST', body: JSON.stringify(body) }, token),
+  vendorUpdateCustomer: (token: string, id: string, body: Partial<VendorCustomerInput> & { archived?: boolean; updatedAt?: string }) =>
+    request<{ customer: VendorCustomer; phoneDuplicate: VendorPhoneDuplicate }>(`/vendor/customers/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify(body) }, token),
+  vendorCustomer: (token: string, id: string) =>
+    request<{ customer: VendorCustomerProfile }>(`/vendor/customers/${encodeURIComponent(id)}`, {}, token),
+  vendorCustomerSales: (token: string, id: string, page: { limit?: number; cursor?: string | null } = {}) =>
+    request<VendorSalePage>(`/vendor/customers/${encodeURIComponent(id)}/sales${qs({ limit: page.limit ?? 20, cursor: page.cursor })}`, {}, token),
+  /** One walk-in sale of this customer (read-only; for staff with `customers` but not `sales`). */
+  vendorCustomerSale: (token: string, id: string, saleId: string) =>
+    request<{ sale: VendorSale }>(`/vendor/customers/${encodeURIComponent(id)}/sales/${encodeURIComponent(saleId)}`, {}, token),
+  vendorCustomerOrders: (token: string, id: string, page: { limit?: number; cursor?: string | null } = {}) =>
+    request<{ orders: VendorCustomerOrder[]; nextCursor: string | null }>(`/vendor/customers/${encodeURIComponent(id)}/orders${qs({ limit: page.limit ?? 20, cursor: page.cursor })}`, {}, token),
+  vendorCustomerPayments: (token: string, id: string, page: { from?: string; limit?: number; cursor?: string | null } = {}) =>
+    request<{ payments: VendorCustomerPayment[]; nextCursor: string | null }>(`/vendor/customers/${encodeURIComponent(id)}/payments${qs({ from: page.from, limit: page.limit ?? 20, cursor: page.cursor })}`, {}, token),
+  vendorCustomerPayment: (token: string, id: string, paymentId: string) =>
+    request<{ payment: VendorCustomerPayment }>(`/vendor/customers/${encodeURIComponent(id)}/payments/${encodeURIComponent(paymentId)}`, {}, token),
+  vendorRecordCustomerPayment: (token: string, id: string, body: VendorCustomerPaymentInput) =>
+    request<{ payment: VendorCustomerPayment; customer: VendorCustomerMoney & { asOf: string } }>(`/vendor/customers/${encodeURIComponent(id)}/payments`, { method: 'POST', body: JSON.stringify(body) }, token),
+  vendorVoidCustomerPayment: (token: string, id: string, paymentId: string, reason: string) =>
+    request<{ payment: VendorCustomerPayment; customer: VendorCustomerMoney & { asOf: string } }>(
+      `/vendor/customers/${encodeURIComponent(id)}/payments/${encodeURIComponent(paymentId)}/void`, { method: 'POST', body: JSON.stringify({ reason }) }, token),
+  vendorReceivablesAging: (token: string, query: { bucket?: AgingBucket | null; sort?: 'overdue' | 'owed' | 'name'; limit?: number; cursor?: string | null } = {}) =>
+    request<VendorAgingPage>(`/vendor/receivables/aging${qs({ ...query, limit: query.limit ?? 50 })}`, {}, token),
   vendorPayments: (token: string) => request<VendorPayments>('/vendor/payments', {}, token),
   vendorStatements: (token: string) => request<VendorStatementList>('/vendor/statements', {}, token),
   vendorStatement: (token: string, id: string) =>
@@ -333,6 +420,9 @@ export const api = {
     request<{ token: string; user: { id: string; userType: string; gymId?: string; portalUser?: boolean; aclPermissions?: string[] } }>(
       '/auth/login', { method: 'POST', body: JSON.stringify({ email, password, requestedRole: 'admin' }) }
     ),
+  /** Replace the start password an admin set (sessions with `pwc: true`). Ends every earlier session on success. */
+  changePortalPassword: (token: string, newPassword: string) =>
+    request<SessionResult>('/auth/portal/password', { method: 'POST', body: JSON.stringify({ newPassword }) }, token),
   // ─── Portal user management (admin only) ───
   listPortalUsers: (token: string) => request<PortalUser[]>('/admin/portal-users', {}, token),
   createPortalUser: (token: string, data: { email: string; password: string; displayName?: string; aclPermissions: string[] }) =>
@@ -363,9 +453,9 @@ export const api = {
   // and FitFlex-wide messages (scope 'admin'). Same shapes for both. ──
   commsOverview: (token: string, scope: CommsScope, gymId?: string) =>
     request<CommsOverview>(`/${scope}/communications/overview${gymId ? `?gymId=${encodeURIComponent(gymId)}` : ''}`, {}, token),
-  /** FitFlex (admin) can ask for the trainer audiences with recipients 'trainers'. */
+  /** FitFlex (admin) can ask for the trainer or vendor audiences with recipients 'trainers' / 'vendors'. */
   commsSegments: (token: string, scope: CommsScope, recipients: CommsRecipients = 'members') =>
-    request<CommsCatalog>(`/${scope}/communications/segments${recipients === 'trainers' ? '?recipients=trainers' : ''}`, {}, token),
+    request<CommsCatalog>(`/${scope}/communications/segments${recipients !== 'members' ? `?recipients=${recipients}` : ''}`, {}, token),
   commsAudiencePreview: (token: string, scope: CommsScope, body: { gymId?: string; recipients?: CommsRecipients; preset?: string | null; filter?: unknown; purpose?: string }) =>
     request<CommsAudiencePreview>(`/${scope}/communications/audience/preview`, { method: 'POST', body: JSON.stringify(body) }, token),
   /** Campaign history. Filters: gymId, status, purpose, channel, from, to, search; cursor paging. */
@@ -577,6 +667,8 @@ export const api = {
   searchPromotionPartners: (token: string, q: string) =>
     request<{ items: PartnerMatch[]; total: number }>(`/admin/promotion-partners?q=${encodeURIComponent(q)}`, {}, token),
   geoAreas: (token: string) => request<{ areas: GeoArea[] }>('/admin/geo-areas', {}, token),
+  /** Usable areas for any signed-in role (docs/shop-near-you-api.md); 404 feature_disabled while SHOP_NEAR_YOU is off. */
+  shopAreas: (token: string) => request<{ areas: GeoArea[] }>('/shop/areas', {}, token),
   placementLimits: (token: string) => request<{ limits: PlacementLimit[] }>('/admin/promotion-limits', {}, token),
   setPlacementLimit: (token: string, placement: PromotionPlacement, type: PromotionType, body: { maxSlots: number; maxBoostFraction?: number | null; rotationMode?: 'none' | 'time_slice'; rotationWindowMinutes?: number }) =>
     request<{ limit: PlacementLimit }>(`/admin/promotion-limits/${placement}/${type}`, { method: 'PUT', body: JSON.stringify(body) }, token),
@@ -776,8 +868,9 @@ export const api = {
     request<{ agreements: B2BAgreement[]; inForce: B2BAgreement | null }>(`/admin/b2b/organizations/${encodeURIComponent(orgId)}/agreements`, {}, token),
   createB2BAgreement: (token: string, orgId: string, body: B2BAgreementInput) =>
     request<{ agreement: B2BAgreement }>(`/admin/b2b/organizations/${encodeURIComponent(orgId)}/agreements`, { method: 'POST', body: JSON.stringify(body) }, token),
-  activateB2BAgreement: (token: string, id: string) =>
-    request<{ agreement: B2BAgreement }>(`/admin/b2b/agreements/${encodeURIComponent(id)}/activate`, { method: 'POST', body: '{}' }, token),
+  /** `version` is the agreement's `updatedAt` as the admin saw it: 409 agreement_changed if it has changed since. */
+  activateB2BAgreement: (token: string, id: string, version: string) =>
+    request<{ agreement: B2BAgreement }>(`/admin/b2b/agreements/${encodeURIComponent(id)}/activate`, { method: 'POST', body: JSON.stringify({ version }) }, token),
   endB2BAgreement: (token: string, id: string, effectiveTo?: string) =>
     request<{ agreement: B2BAgreement }>(`/admin/b2b/agreements/${encodeURIComponent(id)}/end`, { method: 'POST', body: JSON.stringify({ effectiveTo }) }, token),
   adminB2BBillingAccount: (token: string, orgId: string) =>
@@ -859,9 +952,19 @@ export const api = {
     request<{ exception: B2BOpsException; run: { outcome?: 'ok' | 'failed'; failure?: string | null; skipped?: string } }>(`/admin/b2b/ops/exceptions/${encodeURIComponent(id)}/retry`, { method: 'POST', body: '{}' }, token),
   // Collections (FitFlex staff).
   adminB2BCollections: (token: string) => request<B2BCollectionsQueue>('/admin/b2b/collections', {}, token),
-  adminB2BPaymentInstructions: (token: string) => request<{ instructions: B2BPaymentInstructions; configured: boolean }>('/admin/b2b/payment-instructions', {}, token),
+  adminB2BPaymentInstructions: (token: string) => request<B2BAdminPaymentInstructions>('/admin/b2b/payment-instructions', {}, token),
+  /** Only REQUESTS the change (202): `instructions` stay the ones in force, the request is in `pendingChange`. */
   setB2BPaymentInstructions: (token: string, body: Partial<B2BPaymentInstructions>) =>
-    request<{ instructions: B2BPaymentInstructions; configured: boolean }>('/admin/b2b/payment-instructions', { method: 'PUT', body: JSON.stringify(body) }, token),
+    request<B2BAdminPaymentInstructions>('/admin/b2b/payment-instructions', { method: 'PUT', body: JSON.stringify(body) }, token),
+  /**
+   * A different admin from the requester puts the waiting change in force. `changeId` is the change the
+   * admin is looking at: 409 change_superseded (with the current changeId) if another request replaced it.
+   */
+  confirmB2BPaymentInstructions: (token: string, changeId: string) =>
+    request<B2BAdminPaymentInstructions>('/admin/b2b/payment-instructions/confirm', { method: 'POST', body: JSON.stringify({ changeId }) }, token),
+  /** Drops the waiting change (the requester withdraws it, or another admin declines it); same `changeId` rule as confirm. */
+  cancelB2BPaymentInstructions: (token: string, changeId: string, reason?: string) =>
+    request<B2BAdminPaymentInstructions>('/admin/b2b/payment-instructions/cancel', { method: 'POST', body: JSON.stringify(reason ? { changeId, reason } : { changeId }) }, token),
   confirmB2BPaymentNotice: (token: string, noticeId: string, body: { amountTzs?: number; note?: string } = {}) =>
     request<{ notice: B2BPaymentNotice; payment?: B2BPayment; skipped?: Array<{ invoiceId: string; reason: string }> }>(
       `/admin/b2b/payment-notices/${encodeURIComponent(noticeId)}/confirm`, { method: 'POST', body: JSON.stringify(body) }, token),
@@ -901,6 +1004,9 @@ export const api = {
   deleteGym: (token: string, id: string) =>
     request<{ ok: boolean; gym: Gym }>(`/admin/gyms/${id}`, { method: 'DELETE' }, token),
   gymOwners: (token: string) => request<GymOwner[]>('/admin/gym-owners', {}, token),
+  /** View only, audited server-side: call only when an admin opens this owner's personal details. `id` is the owner user id. */
+  adminGymOwnerPersonalDetails: (token: string, id: string) =>
+    request<{ ownerId: string; personalDetails: PartnerPersonalDetails }>(`/admin/gym-owners/${encodeURIComponent(id)}/personal-details`, {}, token),
   /** Lightweight owner refs (id/displayName/email/gymIds) — use for owner-name lookups instead of the full gymOwners() list. */
   gymOwnerRefs: (token: string) => request<GymOwnerRef[]>('/admin/gym-owners?refs=true', {}, token),
   saveGymOwner: (token: string, owner: Partial<GymOwner>) =>
@@ -908,13 +1014,23 @@ export const api = {
   deleteGymOwner: (token: string, id: string) =>
     request<{ ok: boolean; owner: GymOwner }>(`/admin/gym-owners/${id}`, { method: 'DELETE' }, token),
   adminTrainers: (token: string) => request<TrainerProfile[]>('/admin/trainers', {}, token),
+  /** View only, audited server-side: call only when an admin opens this trainer's personal details. `id` is the trainer profile id. */
+  adminTrainerPersonalDetails: (token: string, id: string) =>
+    request<{ trainerId: string; userId: string | null; personalDetails: PartnerPersonalDetails }>(`/admin/trainers/${encodeURIComponent(id)}/personal-details`, {}, token),
   /** Lightweight trainer refs (id/displayName/email/gymIds) — use for trainer-name/assignment lookups instead of the full adminTrainers() list. */
   adminTrainerRefs: (token: string) => request<TrainerRef[]>('/admin/trainers?refs=true', {}, token),
   saveTrainer: (token: string, trainer: Partial<TrainerProfile>) =>
     request<TrainerProfile>('/admin/trainers', { method: 'POST', body: JSON.stringify(trainer) }, token),
   deleteTrainer: (token: string, id: string) =>
     request<{ ok: boolean; trainer: TrainerProfile }>(`/admin/trainers/${id}`, { method: 'DELETE' }, token),
-  adminProducts: (token: string) => request<ShopProduct[]>('/admin/products', {}, token),
+  /** Target filters (S2) are sent only when set; older backends ignore them. */
+  adminProducts: (token: string, filters: AdminProductFilters = {}) => {
+    const q = new URLSearchParams();
+    if (filters.targetGender) q.set('targetGender', filters.targetGender);
+    if (filters.targetAgeBand) q.set('targetAgeBand', filters.targetAgeBand);
+    const qs = q.toString();
+    return request<ShopProduct[]>(`/admin/products${qs ? `?${qs}` : ''}`, {}, token);
+  },
   createAdminProduct: (token: string, product: AdminProductDraft) =>
     request<ShopProduct>('/admin/products', { method: 'POST', body: JSON.stringify(product) }, token),
   /** With the stock ledger on the server also takes the private fields (null clears one). */
@@ -924,11 +1040,15 @@ export const api = {
     variants?: Array<{ name: string; costTzs?: number | null; reorderLevel?: number | null }>;
   }) =>
     request<ShopProduct>(`/admin/products/${id}/listing`, { method: 'PUT', body: JSON.stringify(listing) }, token),
+  /** Works rating/reviewCount/soldCount out again from real reviews and orders; writes only with apply true. */
+  recomputeProductStats: (token: string, body: { apply?: boolean; productIds?: string[] } = {}) =>
+    request<ProductStatsRecompute>('/admin/shop/product-stats/recompute', { method: 'POST', body: JSON.stringify(body) }, token),
   adminVendors: (token: string) => request<VendorSummary[]>('/admin/vendors', {}, token),
-  updateAdminVendor: (token: string, id: string, patch: Partial<Pick<VendorSummary, 'approvalStatus' | 'accountStatus' | 'approvalNote' | 'commissionPct'>>) =>
+  updateAdminVendor: (token: string, id: string, patch: Partial<Pick<VendorSummary, 'approvalStatus' | 'accountStatus' | 'approvalNote' | 'commissionPct'>> & VendorAreasPatch) =>
     request<VendorSummary>(`/admin/vendors/${id}`, { method: 'PUT', body: JSON.stringify(patch) }, token),
   trainerBookings: (token: string) => request<TrainerBooking[]>('/admin/trainer-bookings', {}, token),
-  updateTrainerBooking: (token: string, id: string, status: 'confirmed' | 'completed' | 'cancelled') =>
+  /** `no_show` only with TRAINER_SESSION_OUTCOMES on (functions#231); flag off it is 400 invalid_status. */
+  updateTrainerBooking: (token: string, id: string, status: 'confirmed' | 'completed' | 'cancelled' | 'no_show') =>
     request<TrainerBooking>(`/admin/trainer-bookings/${id}`, { method: 'POST', body: JSON.stringify({ status }) }, token),
   paymentRequests: (token: string) => request<PaymentRequest[]>('/admin/payment-requests', {}, token),
   // Trainer and vendor payouts: weekly statements on the same path as gym statements.
@@ -1068,6 +1188,86 @@ export const api = {
   },
   publicPasses: () => request<any[]>('/passes'),
 
+  // ─── App photos (admin, 'brand_media' scope; every route 404 feature_disabled while HERO_IMAGES_CMS is off) ───
+  adminHeroImages: (token: string) => request<HeroImagesState>('/admin/hero-images', {}, token),
+  /**
+   * Uploads the ORIGINAL photo file (no browser resize or re-encode; the server cleans it and makes
+   * the app sizes). Uses XHR for upload progress; `signal` aborts it.
+   */
+  uploadHeroImage: (
+    token: string,
+    file: File,
+    fields: HeroImageUploadFields,
+    opts: { onProgress?: (fraction: number) => void; signal?: AbortSignal } = {},
+  ): Promise<{ image: HeroImage }> => new Promise((resolve, reject) => {
+    const form = new FormData();
+    // Text fields first, the file last, so the server has every field before it reads the file.
+    form.append('source', fields.source);
+    form.append('photographer', fields.photographer);
+    form.append('licence', fields.licence);
+    if (fields.licenceRef) form.append('licenceRef', fields.licenceRef);
+    form.append('people', fields.people);
+    if (fields.consentRef) form.append('consentRef', fields.consentRef);
+    form.append('rightsConfirmed', fields.rightsConfirmed ? 'true' : 'false');
+    form.append('noFacesConfirmed', fields.noFacesConfirmed ? 'true' : 'false');
+    form.append('file', file, file.name);
+
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', `${BASE}/admin/hero-images`);
+    xhr.setRequestHeader('authorization', `Bearer ${token}`);
+    xhr.setRequestHeader('x-fitflex-client', IDENTITY_V2_CLIENT);
+    xhr.upload.onprogress = (e) => { if (e.lengthComputable) opts.onProgress?.(e.loaded / e.total); };
+    xhr.onload = () => {
+      let body: unknown = null;
+      try { body = xhr.responseText ? JSON.parse(xhr.responseText) : null; } catch { body = null; }
+      if (xhr.status >= 200 && xhr.status < 300) return resolve(body as { image: HeroImage });
+      if (xhr.status === 401 && _onUnauthorized) _onUnauthorized();
+      reject(new ApiError(xhr.status, body));
+    };
+    xhr.onerror = () => reject(new TypeError('network_error'));
+    xhr.onabort = () => reject(new DOMException('aborted', 'AbortError'));
+    if (opts.signal) {
+      if (opts.signal.aborted) { xhr.abort(); return; }
+      opts.signal.addEventListener('abort', () => xhr.abort(), { once: true });
+    }
+    xhr.send(form);
+  }),
+  /** A private (cleaned) photo, fetched with the session token: drafts have no public address. */
+  heroImagePreview: async (token: string, id: string, width?: HeroPreviewWidth, signal?: AbortSignal): Promise<Blob> => {
+    const res = await fetch(`${BASE}/admin/hero-images/${encodeURIComponent(id)}/preview${qs({ w: width })}`, {
+      headers: { authorization: `Bearer ${token}`, 'x-fitflex-client': IDENTITY_V2_CLIENT },
+      cache: 'no-store',
+      signal,
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      if (res.status === 401 && _onUnauthorized) _onUnauthorized();
+      throw new ApiError(res.status, body);
+    }
+    return res.blob();
+  },
+  updateHeroImage: (token: string, id: string, body: HeroImagePatch) =>
+    request<{ image: HeroImage; inLiveSnapshot?: boolean }>(
+      `/admin/hero-images/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(body) }, token),
+  /** Fast takedown: re-publishes the live snapshot without this photo. Drafts are untouched (the next publish brings it back). */
+  unpublishHeroImage: (token: string, id: string, note?: string) =>
+    request<{ publication: HeroPublication; removedFromSlots: string[]; rollbackBlockedBefore?: number }>(`/admin/hero-images/${encodeURIComponent(id)}/unpublish`, { method: 'POST', body: JSON.stringify(note ? { note } : {}) }, token),
+  /** Sets a slot's DRAFT photos in order ([] = the app's built-in photo). Nothing changes in the apps until publish. */
+  setHeroSlot: (token: string, slotId: string, imageIds: string[]) =>
+    request<{ slot: { id: string; draft: string[] } }>(
+      `/admin/hero-slots/${encodeURIComponent(slotId)}`, { method: 'PUT', body: JSON.stringify({ imageIds }) }, token),
+  publishHeroSlots: (token: string, note?: string) =>
+    request<{ publication: HeroPublication }>('/admin/hero-slots/publish', { method: 'POST', body: JSON.stringify(note ? { note } : {}) }, token),
+  rollbackHeroSlots: (token: string, publicationId: number) =>
+    request<{ publication: HeroPublication }>('/admin/hero-slots/rollback', { method: 'POST', body: JSON.stringify({ publicationId }) }, token),
+  /** Public, no sign-in: the published app photos. An empty `slots` means "use the built-in photos". */
+  appHeroImages: async (signal?: AbortSignal): Promise<HeroManifest> => {
+    // No custom headers: a plain GET needs no CORS preflight and stays cacheable.
+    const res = await fetch(`${BASE}/app/hero-images`, { signal });
+    if (!res.ok) throw new ApiError(res.status, await res.json().catch(() => null));
+    return res.json() as Promise<HeroManifest>;
+  },
+
   /**
    * Uploads a single file (image) to the Zebra storage service via the
    * backend's multipart proxy (`POST /storage`). Returns the persisted URL
@@ -1089,7 +1289,210 @@ export const api = {
     // the portal domain.
     return { ...body, url: `${BASE}${body.url}`, thumbnailUrl: `${BASE}${body.thumbnailUrl}` } as UploadedFile;
   },
+
+  // ─── Events S2: public options, organizer self-service, partner KYC self-service, admin moderation (spec §14) ───
+  /** Public, no auth; answers with the server flag off too (`discovery: false`). */
+  eventsOptions: () => request<EventsOptions>('/events/options'),
+
+  /** 404 `no_organizer` when this person has none; 404 `feature_disabled` with the server flag off. */
+  organizerMe: (token: string) => request<OrganizerMe>('/organizer/me', {}, token),
+  /** Creates the organizer (draft), its owner staff row and the KYC case. Auth-touching (rule 6, D3). */
+  createOrganizer: (token: string, body: { name: string; timezone: string; contactPhone: string; contactEmail?: string }) =>
+    request<{ organizer: OrganizerMe['organizer']; kycCaseId: string; personaId: string }>('/me/organizer', { method: 'POST', body: JSON.stringify(body) }, token),
+  organizerSummary: (token: string) => request<OrganizerSummary>('/organizer/summary', {}, token),
+  organizerEvents: (token: string, query: { status?: string; type?: string; cursor?: string | null; limit?: number } = {}) =>
+    request<EventsPage<OrganizerEventRow>>(`/organizer/events${qs(query)}`, {}, token),
+  createOrganizerEvent: (token: string, body: { title: string }) =>
+    request<{ id: string; version: number }>('/organizer/events', { method: 'POST', body: JSON.stringify(body) }, token),
+  organizerEvent: (token: string, id: string) => request<EventDocument>(`/organizer/events/${encodeURIComponent(id)}`, {}, token),
+  patchOrganizerEvent: (token: string, id: string, body: EventPatch) =>
+    request<{ version: number; updatedAt: string; material: boolean }>(`/organizer/events/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(body) }, token),
+  /** submit · withdraw · cancel {reason, note{en,sw}} · complete · archive → { status }. */
+  organizerEventAction: (token: string, id: string, action: EventOrganizerAction, body?: { reason?: string; note?: Bilingual }) =>
+    request<{ status: EventStatus }>(`/organizer/events/${encodeURIComponent(id)}/${action}`, { method: 'POST', body: JSON.stringify(body ?? {}) }, token),
+  deleteOrganizerEvent: (token: string, id: string) => request<null>(`/organizer/events/${encodeURIComponent(id)}`, { method: 'DELETE' }, token),
+  organizerEventChanges: (token: string, id: string, cursor?: string | null) =>
+    request<EventsPage<EventChange>>(`/organizer/events/${encodeURIComponent(id)}/changes${qs({ cursor })}`, {}, token),
+  organizerStaff: (token: string) => request<{ items: OrganizerStaffRow[] }>('/organizer/staff', {}, token),
+  /** Phone or email only (no userId): 400 `invalid_contact` otherwise. */
+  inviteOrganizerStaff: (token: string, body: { email?: string; phone?: string; role: OrganizerRole }) =>
+    request<{ invitation: OrganizerStaffRow }>('/organizer/staff', { method: 'POST', body: JSON.stringify(body) }, token),
+  changeOrganizerStaffRole: (token: string, id: string, role: OrganizerRole) =>
+    request<OrganizerStaffRow>(`/organizer/staff/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify({ role }) }, token),
+  removeOrganizerStaff: (token: string, id: string) => request<null>(`/organizer/staff/${encodeURIComponent(id)}`, { method: 'DELETE' }, token),
+
+  // Partner KYC self-service (existing functions/partner-kyc.mjs routes; the organizer onboarding checklist sits on them).
+  myKyc: (token: string) => request<MyKyc>('/me/kyc', {}, token),
+  myKycBusiness: (token: string, body: Record<string, unknown>) => request<MyKyc>('/me/kyc/business', { method: 'PUT', body: JSON.stringify(body) }, token),
+  myKycPerson: (token: string, role: string, body: Record<string, unknown>) =>
+    request<MyKyc>(`/me/kyc/people/${encodeURIComponent(role)}`, { method: 'PUT', body: JSON.stringify(body) }, token),
+  /** multipart/form-data, field "file" (PDF, JPEG, PNG or WebP, up to 10 MB). */
+  myKycUploadDocument: async (token: string, requirementKey: string, file: File): Promise<MyKyc> => {
+    const form = new FormData();
+    form.append('file', file, file.name);
+    const res = await fetch(`${BASE}/me/kyc/documents/${encodeURIComponent(requirementKey)}/file`, {
+      method: 'POST', headers: { authorization: `Bearer ${token}`, 'x-fitflex-client': IDENTITY_V2_CLIENT }, body: form,
+    });
+    const body = await res.json().catch(() => null);
+    if (res.status === 401) notifyUnauthorized();
+    if (!res.ok) throw new ApiError(res.status, body);
+    return body as MyKyc;
+  },
+  myKycAddSettlementAccount: (token: string, body: { method: 'bank' | 'mobile_money'; provider: string; accountName: string; accountNumber: string; branch?: string }) =>
+    request<MyKyc>('/me/kyc/settlement-accounts', { method: 'POST', body: JSON.stringify(body) }, token),
+  myKycAgreements: (token: string, lang: 'en' | 'sw') => request<{ agreements: MyKycAgreement[] }>(`/me/kyc/agreements${qs({ lang })}`, {}, token),
+  myKycAcceptAgreement: (token: string, body: { agreementType: string; version: string }) =>
+    request<MyKyc>('/me/kyc/agreements', { method: 'POST', body: JSON.stringify(body) }, token),
+  /** 409 `kyc_incomplete { missing }` until the checklist is ready. */
+  myKycSubmit: (token: string) => request<MyKyc>('/me/kyc/submit', { method: 'POST' }, token),
+  myKycWithdraw: (token: string) => request<MyKyc>('/me/kyc/withdraw', { method: 'POST' }, token),
+
+  // Admin, scope `events`.
+  adminEvents: (token: string, query: { status?: string; cursor?: string | null; limit?: number } = {}) =>
+    request<EventsPage<AdminEventRow>>(`/admin/events${qs(query)}`, {}, token),
+  adminEventsSummary: (token: string) => request<{ submitted: number }>('/admin/events/summary', {}, token),
+  adminEvent: (token: string, id: string) => request<AdminEventDetail>(`/admin/events/${encodeURIComponent(id)}`, {}, token),
+  adminEventDecision: (token: string, id: string, body: { decision: 'approve' | 'reject'; reason?: string; note?: string }) =>
+    request<{ status: EventStatus }>(`/admin/events/${encodeURIComponent(id)}/decision`, { method: 'POST', body: JSON.stringify(body) }, token),
+  adminEventAction: (token: string, id: string, action: 'cancel' | 'archive' | 'complete', body?: { reason?: string; note?: Bilingual }) =>
+    request<{ status: EventStatus }>(`/admin/events/${encodeURIComponent(id)}/${action}`, { method: 'POST', body: JSON.stringify(body ?? {}) }, token),
+  adminEventAudit: (token: string, id: string) => request<EventsPage<EventAuditRow>>(`/admin/events/${encodeURIComponent(id)}/audit`, {}, token),
+  adminEventsAudit: (token: string, query: { action?: string; cursor?: string | null } = {}) =>
+    request<EventsPage<EventAuditRow>>(`/admin/events/audit${qs(query)}`, {}, token),
 };
+
+// ─── App photos (design spec photo-hero-screens §36–§37; backend functions#216) ───
+export type HeroPeople = 'none' | 'hands_backs' | 'unclear_faces';
+export type HeroImageStatus = 'draft' | 'published' | 'retired';
+export type HeroPreviewWidth = 240 | 480 | 960;
+export type HeroLuminance = { mean: number; maxPatch: number };
+
+export interface HeroImage {
+  id: string;
+  sourceId: string;
+  status: HeroImageStatus;
+  width: number;
+  height: number;
+  /** Each -1..1 (Flutter Alignment). */
+  focal: { x: number; y: number };
+  focalX: number;
+  focalY: number;
+  variants: Record<string, unknown> | null;
+  /** Not a scalar: per text zone. Use `brightWarning` for the badge. */
+  textZoneLuminance: { vertical: HeroLuminance; horizontal: HeroLuminance } | null;
+  /** vertical = phone layouts (bottom 55%), horizontal = the desktop panel (left 50%). */
+  brightWarning: { vertical: boolean; horizontal: boolean };
+  source: string;
+  photographer: string;
+  licence: string;
+  licenceRef: string | null;
+  people: HeroPeople;
+  consentRef: string | null;
+  rightsConfirmedBy: string;
+  rightsConfirmedByName: string | null;
+  rightsConfirmedAt: string;
+  noFacesConfirmedBy: string;
+  noFacesConfirmedByName: string | null;
+  noFacesConfirmedAt: string;
+  createdBy: string;
+  createdByName: string | null;
+  createdAt: string;
+  updatedAt: string;
+  /** Root-relative and authenticated: fetch with the token, never put it in an <img>. */
+  previewUrl: string;
+  /** Public copies exist on storage (a failed publish can make them without the photo ever going live). */
+  hasPublicFiles?: boolean;
+  /** In the current live snapshot (GET /admin/hero-images only; null elsewhere). `status: 'published'` = has been live. */
+  live?: boolean | null;
+  /** Publication id of this photo's latest unpublish; older snapshots holding it can't be put back. */
+  unpublishedInPublication?: number | null;
+}
+
+export interface HeroSlot {
+  id: string;
+  area: string;
+  surface: 'mobile' | 'portal';
+  variant: 'full' | 'compact' | 'footer' | 'panel' | string;
+  aspectHint: number;
+  maxImages: number;
+  /** Image ids, in order. */
+  draft: string[];
+  published: string[];
+  brightWarning: boolean;
+}
+
+export interface HeroPublication {
+  id: number;
+  publishedBy: string;
+  publishedByName?: string | null;
+  publishedAt: string;
+  note: string | null;
+  rolledBackFrom: number | null;
+  /** slotId → image ids. */
+  slots: Record<string, string[]>;
+}
+
+export interface HeroImagesState {
+  areas: string[];
+  images: HeroImage[];
+  slots: HeroSlot[];
+  /** The last 20, newest first. */
+  publications: HeroPublication[];
+}
+
+export interface HeroImageUploadFields {
+  source: string;
+  photographer: string;
+  licence: string;
+  licenceRef?: string;
+  people: HeroPeople;
+  consentRef?: string;
+  rightsConfirmed: boolean;
+  noFacesConfirmed: boolean;
+}
+
+export type HeroImagePatch = Partial<{
+  focal: { x: number; y: number };
+  source: string;
+  photographer: string;
+  licence: string;
+  licenceRef: string | null;
+  people: HeroPeople;
+  consentRef: string | null;
+  status: 'retired';
+  /** Required again whenever source, photographer, licence, licenceRef, people or consentRef change. */
+  rightsConfirmed: boolean;
+  noFacesConfirmed: boolean;
+}>;
+
+export interface HeroManifestEntry {
+  id: string;
+  sourceId: string;
+  url: string;
+  url1x: string;
+  urlWide: string;
+  urlAvif: string | null;
+  width: number;
+  height: number;
+  bytes: number;
+  focal: { x: number; y: number };
+}
+export interface HeroManifest {
+  version: number;
+  publishedAt?: string;
+  slots: Record<string, HeroManifestEntry[]>;
+}
+
+/**
+ * A published app photo's address. The server sends root-relative `/storage/<cid>/<file>`; anything
+ * else (absolute, protocol-relative, other paths) is refused so the portal only ever loads FitFlex's files.
+ */
+export function heroAssetUrl(path: string | null | undefined): string | null {
+  // No percent-escapes (so no %2e / %2f smuggling), no "..", and no "." segment.
+  const m = typeof path === 'string' ? /^\/storage\/([A-Za-z0-9._~-]+)\/([A-Za-z0-9._~-]+)$/.exec(path) : null;
+  if (!m || [m[1], m[2]].some(seg => seg === '.' || seg.includes('..'))) return null;
+  return `${BASE}${path}`;
+}
 
 export interface UploadedFile {
   cid: string | null;
@@ -1110,6 +1513,8 @@ export interface PortalUser {
   aclPermissions: string[];
   createdAt?: string;
   isEnvAdmin?: boolean;
+  /** Still has the start password an admin set; asked to choose their own at the next sign-in. */
+  passwordChangeRequired?: boolean;
 }
 
 export interface DashboardResponse {
@@ -1177,6 +1582,8 @@ export interface CheckInResult {
   error?: string;
   checkin?: CheckIn;
   visitNumberInCycle?: number;
+  /** True when the member already checked in at this gym today: the existing visit is returned, no new one is used. */
+  idempotent?: boolean;
 }
 
 export interface Gym {
@@ -1458,6 +1865,10 @@ export interface Refund {
   approveNotBy?: string | null;
   /** The admin who may not mark it paid (approved it). */
   payNotBy?: string | null;
+  /** Display names (functions#206; null for members, policy or unknown; absent on older servers). */
+  requestedByName?: string | null;
+  decidedByName?: string | null;
+  paidByName?: string | null;
 }
 
 /** A1 second approver: where a payment or refund stands (flag MONEY_SECOND_APPROVER on only). */
@@ -1515,6 +1926,15 @@ export interface PaymentRequest {
   approveNotBy?: string | null;
   /** The admin who may not confirm the requested change (requested it). */
   confirmChangeNotBy?: string | null;
+  /**
+   * Display names of the admins above (functions#206; null for members, policy or unknown; absent on older servers).
+   * Without a name the portal says "another admin", never the raw id.
+   */
+  verifiedByName?: string | null;
+  changeRequestedByName?: string | null;
+  /** The admin who decided it (the row column; the list spreads the whole row). */
+  decidedBy?: string | null;
+  decidedByName?: string | null;
 }
 
 export interface MemberProfile {
@@ -1617,7 +2037,20 @@ export interface ShopProduct {
   /** Private, stock ledger on only (absent otherwise). */
   reorderLevel?: number | null;
   variants?: ProductVariant[] | unknown;
+  /** Shop personalisation (S2), set by the vendor in the app. Absent on older backends. null = everyone. */
+  targetGender?: ProductTargetGender | null;
+  /** Shop personalisation (S2). Absent on older backends. Empty = all ages. */
+  targetAgeBands?: ProductAgeBand[];
 }
+
+export type ProductTargetGender = 'women' | 'men';
+export type ProductAgeBand = '18_29' | '30_44' | '45_59' | '60_plus';
+/** GET /admin/products filters (S2). 'everyone' = untagged gender, 'all' = no age bands. */
+export interface AdminProductFilters {
+  targetGender?: ProductTargetGender | 'everyone';
+  targetAgeBand?: ProductAgeBand | 'all';
+}
+export const PRODUCT_AGE_BANDS: ProductAgeBand[] = ['18_29', '30_44', '45_59', '60_plus'];
 
 /** A product option ("variant"). Private and effective fields come only with the stock ledger on. */
 export interface ProductVariant {
@@ -1649,6 +2082,14 @@ export interface VendorTools {
   stockLedger?: boolean;
   buyerContact?: boolean;
   canSeeCost?: boolean;
+  /** Shop banners (SHOP_BANNERS): merch.banners. When absent the portal asks GET /vendor/shop-banners once. */
+  merch?: { banners?: boolean };
+  /** S5 (VENDOR_DOCUMENTS): share links, PDF, the document view and order invoices. Missing = off. */
+  documents?: boolean;
+  /** S5 (VENDOR_VAT): tax details, VAT codes and VAT on documents. Missing = off. */
+  vat?: boolean;
+  /** S5: VAT applies to this vendor's new sales now (registered, verified, certificate standing). */
+  vatInForce?: boolean;
   [tool: string]: unknown;
 }
 
@@ -1717,8 +2158,251 @@ export interface VendorOrder {
   note: string | null;
   pickupGymId: string | null;
   pickupGym: { id: string; name: string | null } | null;
-  buyer: { customerId: string | null; displayName: string | null; phone?: string | null; contactVisibleUntil?: string | null };
+  /** customerLinked (S4, being added on the backend): the buyer is an app customer of mine whose profile can open. */
+  /** forgotten (S4, being added on the backend): the buyer deleted their FitFlex account — show "Deleted member". */
+  buyer: { customerId: string | null; customerLinked?: boolean; forgotten?: boolean; displayName: string | null; phone?: string | null; contactVisibleUntil?: string | null };
   deliveryAddress?: string | null;
+}
+
+/** GET /vendor/sales query. from/to are EAT days (YYYY-MM-DD, inclusive, on soldAt). */
+export interface VendorSalesQuery {
+  from?: string;
+  to?: string;
+  status?: 'completed' | 'voided' | 'all';
+  createdBy?: 'me';
+  /** S4: cash | credit (pay later) | all. */
+  kind?: 'cash' | 'credit';
+  /** S4: one customer's sales; only for callers who also hold `customers`. */
+  customerId?: string;
+  limit?: number;
+  cursor?: string | null;
+}
+export type VendorSalePerson = { id: string; name: string | null } | null;
+/** A row of GET /vendor/sales. */
+export interface VendorSaleRow {
+  id: string;
+  number: string;
+  soldAt: string;
+  recordedAt: string;
+  status: 'completed' | 'voided';
+  totalTzs: number;
+  itemCount: number;
+  methods: string[];
+  createdBy: VendorSalePerson;
+  /** A line was sold at another price than the shop's. (#214 always sends it; the UI still copes if absent.) */
+  hasOverride: boolean;
+  /** Line discounts + sale discount. */
+  discountTzs: number;
+  /** recordedAt − soldAt > 5 min (the UI falls back to comparing them if absent). */
+  lateRecorded: boolean;
+  /** S4: cash | credit (pay later). Older servers omit these four. */
+  kind?: 'cash' | 'credit';
+  /** Still owed now; 0 for cash. */
+  balanceTzs?: number;
+  dueDate?: string | null;
+  /** Never contact details. forgotten (being added on the backend): the app buyer deleted their account. */
+  customer?: { id: string; name: string | null; forgotten?: boolean } | null;
+}
+/** Completed sales over the whole from/to/createdBy range (not the page, not the status filter); cash net of change. */
+export interface VendorSaleSummary {
+  count: number;
+  totalTzs: number;
+  voidedCount: number;
+  byMethod: Array<{ method: string; amountTzs: number }>;
+  /** Completed: line + sale discounts. (#214 always sends these three; the UI hides a tile if one is absent.) */
+  discountTzs: number;
+  /** Completed sales with a changed price. */
+  overrideCount: number;
+  /** All sales in the range (voided too) recorded > 5 min after soldAt. */
+  lateCount: number;
+  /** S4, only for callers who also hold `customers`: what completed pay-later sales left owing at the counter (byMethod + payLaterTzs = totalTzs). */
+  payLaterTzs?: number;
+  /** S4, only for callers who also hold `customers`: completed pay-later sales in the range, still owed now. */
+  owedTzs?: number;
+}
+export interface VendorSalePage { sales: VendorSaleRow[]; nextCursor: string | null; summary?: VendorSaleSummary | null }
+/** A walk-in sale (GET /vendor/sales/:id, POST …/void). Never carries cost. */
+export interface VendorSale {
+  id: string;
+  number: string;
+  status: 'completed' | 'voided';
+  /** cash, or credit = pay later (S4). */
+  kind: 'cash' | 'credit';
+  soldAt: string;
+  recordedAt: string;
+  /** Σ qty × unitPriceTzs, before discounts. */
+  subtotalTzs: number;
+  /** Σ line discounts. */
+  lineDiscountTzs: number;
+  /** Whole-sale discount, after line discounts. */
+  discountTzs: number;
+  totalTzs: number;
+  paidTzs: number;
+  changeTzs: number;
+  note: string | null;
+  createdBy: VendorSalePerson;
+  voidedBy: VendorSalePerson;
+  voidedAt: string | null;
+  voidReason: string | null;
+  /** recordedAt − soldAt > 5 min (the UI falls back to comparing them if absent). */
+  lateRecorded: boolean;
+  lines: Array<{
+    nameSnapshot: string;
+    variant: string | null;
+    qty: number;
+    listPriceTzs: number;
+    unitPriceTzs: number;
+    priceChanged: boolean;
+    priceChangedBy: VendorSalePerson;
+    discountTzs: number;
+    lineTotalTzs: number;
+  }>;
+  payments: Array<{ method: string; amountTzs: number; reference: string | null }>;
+  /** S4 pay later. Older servers omit these. */
+  customer?: { id: string; name: string | null; forgotten?: boolean } | null;
+  dueDate?: string | null;
+  /** Still owed now; 0 for cash. */
+  balanceTzs?: number;
+  /** Paid at the counter. */
+  paidAtSaleTzs?: number;
+  /** Customer payments towards this sale; only for callers who also hold `customers`. */
+  allocations?: Array<{ paymentId: string; number: string; amountTzs: number; receivedOn: string; voided: boolean }>;
+}
+
+// ─── Vendor customers (S4) ───
+export type AgingBucket = 'current' | 'd1_30' | 'd31_60' | 'd61_90' | 'd90plus';
+export type VendorAging = Record<AgingBucket, number>;
+export type VendorCustomerFilter = 'all' | 'owes' | 'overdue' | 'manual' | 'marketplace' | 'archived';
+export type VendorCustomerSort = 'name' | 'owed' | 'overdue' | 'recent';
+export interface VendorCustomersQuery {
+  q?: string;
+  filter?: VendorCustomerFilter;
+  bucket?: AgingBucket;
+  sort?: VendorCustomerSort;
+  limit?: number;
+  cursor?: string | null;
+}
+/** Money owed by one customer, EAT days. */
+export interface VendorCustomerMoney {
+  owedTzs: number;
+  /** Balance of sales past their due date. */
+  overdueTzs: number;
+  oldestDueDate: string | null;
+  /** 0 when nothing is overdue. */
+  maxDaysOverdue: number;
+  aging: VendorAging;
+}
+/** A row of GET /vendor/customers (caller holds `customers`). */
+export interface VendorCustomerRow extends VendorCustomerMoney {
+  id: string;
+  /** manual = walk-in (the vendor's own record) · marketplace = app buyer. */
+  source: 'manual' | 'marketplace';
+  name: string | null;
+  /** Walk-in customers only (A-02: never for app customers). */
+  phone: string | null;
+  archived: boolean;
+  /** The app buyer deleted their FitFlex account: name is null, show "Deleted member". */
+  forgotten: boolean;
+  lastPurchaseAt: string | null;
+}
+export interface VendorCustomerPage { customers: VendorCustomerRow[]; nextCursor: string | null; asOf?: string }
+/** A customer record. App customers never carry phone, email, address or a user id (A-02). */
+export interface VendorCustomer {
+  id: string;
+  source: 'manual' | 'marketplace';
+  name: string | null;
+  forgotten: boolean;
+  phone: string | null;
+  email: string | null;
+  address: string | null;
+  note: string | null;
+  archived: boolean;
+  archivedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+export interface VendorCustomerOpenSale {
+  id: string;
+  number: string;
+  soldAt: string;
+  dueDate: string;
+  totalTzs: number;
+  balanceTzs: number;
+  /** 0 when not yet due. */
+  daysOverdue: number;
+  overdue: boolean;
+}
+/** GET /vendor/customers/:id. */
+export interface VendorCustomerProfile extends VendorCustomer, VendorCustomerMoney {
+  lastPurchaseAt: string | null;
+  totals: { shopSalesTzs: number; shopSalesCount: number; appOrdersTzs: number; appOrdersCount: number; lastPurchaseAt: string | null };
+  asOf: string;
+  /** Oldest due first. */
+  openSales: VendorCustomerOpenSale[];
+}
+export interface VendorCustomerInput { name: string | null; phone: string | null; email: string | null; address: string | null; note: string | null }
+export type VendorPhoneDuplicate = { id: string; name: string | null } | null;
+/** A paid app order of an app customer (own lines only; never contact details). */
+export interface VendorCustomerOrder {
+  id: string;
+  shortRef: string;
+  createdAt: string | null;
+  status: string;
+  orderStatus: string;
+  tab: 'open' | 'delivered' | 'cancelled';
+  paymentStatus: string | null;
+  totalTzs: number;
+  itemCount: number;
+}
+export interface VendorCustomerPayment {
+  id: string;
+  /** PMT-000001, continuous per vendor. */
+  number: string;
+  customerId: string;
+  status: 'recorded' | 'voided';
+  amountTzs: number;
+  method: string;
+  reference: string | null;
+  /** EAT day. */
+  receivedOn: string;
+  note: string | null;
+  clientRef: string;
+  recordedAt: string;
+  recordedBy: VendorSalePerson;
+  allocations: Array<{ saleId: string; saleNumber: string; amountTzs: number }>;
+  voidedAt: string | null;
+  voidedBy: VendorSalePerson;
+  voidReason: string | null;
+}
+export interface VendorCustomerPaymentInput {
+  clientRef: string;
+  amountTzs: number;
+  method: string;
+  reference?: string;
+  receivedOn?: string;
+  note?: string;
+  /** Manual; omitted → oldest due first. */
+  allocations?: Array<{ saleId: string; amountTzs: number }>;
+}
+export interface VendorAgingRow extends VendorAging {
+  customerId: string;
+  name: string | null;
+  /** Being added on the backend: the app buyer deleted their account ("Deleted member"). */
+  forgotten?: boolean;
+  source: 'manual' | 'marketplace';
+  owedTzs: number;
+  overdueTzs: number;
+  oldestDueDate: string | null;
+  maxDaysOverdue: number;
+  openSaleCount: number;
+  overdueSaleCount: number;
+}
+/** GET /vendor/receivables/aging: totals cover every customer who owes, not the bucket filter or the page. */
+export interface VendorAgingPage {
+  asOf: string;
+  totals: VendorAging & { owedTzs: number; overdueTzs: number; customerCount: number; overdueCustomerCount: number; openSaleCount: number; overdueSaleCount: number };
+  rows: VendorAgingRow[];
+  nextCursor: string | null;
 }
 
 export interface VendorPayments { todaySalesTzs: number; pendingSettlementTzs: number; [figure: string]: unknown }
@@ -1754,6 +2438,21 @@ export interface AdminProductDraft {
   homepagePriority?: number;
 }
 
+/** A product's stored marketplace stats, as POST /admin/shop/product-stats/recompute reports them (rating to 2 decimals). */
+export interface ProductStats { rating: number; reviewCount: number; soldCount: number }
+/**
+ * POST /admin/shop/product-stats/recompute (functions#220): a dry run (apply false) or the applied run.
+ * Errors: 403 non-admin; 409 recompute_in_progress (another apply running); 400 invalid_apply / invalid_product_ids / too_many_product_ids.
+ */
+export interface ProductStatsRecompute {
+  dryRun: boolean;
+  checked: number;
+  changed: Array<{ productId: string; name: string; vendorId: string; before: ProductStats; after: ProductStats }>;
+  unchanged: number;
+  appliedAt?: string;
+  runId?: string;
+}
+
 export interface VendorSummary {
   id: string;
   displayName?: string | null;
@@ -1777,8 +2476,21 @@ export interface VendorSummary {
     businessCategory?: string | null;
     address?: string | null;
     status?: string | null;
+    /** Free text the vendor typed (list or comma text); shown so admins can map it to areas. */
+    deliveryRegions?: string[] | string | null;
+    /** "Based in": a city or district GeoArea id (docs/shop-near-you-api.md). Absent when not set. */
+    cityId?: string | null;
+    /** The region the vendor is based in; the server fills it from cityId. */
+    regionId?: string | null;
+    /** "Delivers to": GeoArea ids of any level; the country id = nationwide; [] = doesn't deliver. */
+    deliveryAreaIds?: string[] | null;
+    /** Read-only: who set the area fields last. */
+    areasSource?: 'vendor' | 'admin' | 'backfill' | null;
   } | null;
 }
+
+/** Admin vendor area mapping (PUT /admin/vendors/:id): null clears cityId/regionId, [] clears deliveryAreaIds. */
+export type VendorAreasPatch = { cityId?: string | null; regionId?: string | null; deliveryAreaIds?: string[] };
 
 /** Lightweight owner projection (id/displayName/email/gymIds) for pages that only need owner names, e.g. the gyms table's owner column and owner-select dropdown. */
 export interface GymOwnerRef {
@@ -1807,7 +2519,10 @@ export interface TrainerBooking {
   date: string;
   slot: string;
   amountTzs: number;
-  status: 'confirmed' | 'completed' | 'cancelled';
+  /** `payment_pending` / `payment_rejected` while its payment is open; `no_show` with TRAINER_SESSION_OUTCOMES on (functions#231). */
+  status: 'payment_pending' | 'payment_rejected' | 'confirmed' | 'completed' | 'no_show' | 'cancelled';
+  /** What the caller may do now; present only with TRAINER_SESSION_OUTCOMES on (missing = flag off). */
+  actions?: { canComplete: boolean; canMarkNoShow: boolean };
   createdAt?: string;
   member?: { email?: string | null; phone?: string | null; displayName?: string | null } | null;
   trainer?: TrainerProfile | null;
@@ -2361,7 +3076,8 @@ export interface CommsTemplatePreview {
   needsValues: string[];
 }
 /** Who a FitFlex message goes to; gym messages always go to members. */
-export type CommsRecipients = 'members' | 'trainers';
+/** 'trainers' and 'vendors' are FitFlex (admin) only: a gym sending to them gets 400 invalid_recipients. */
+export type CommsRecipients = 'members' | 'trainers' | 'vendors';
 export interface CommsAudience { preset?: string | null; filter?: unknown; recipients?: CommsRecipients }
 export interface CommsDraft {
   gymId?: string; name?: string; purpose?: CommsPurpose; audience?: CommsAudience;
@@ -2449,19 +3165,26 @@ export interface CommsOverview {
   senderType: 'gym' | 'platform'; members: number | null;
   /** FitFlex only: active trainers FitFlex can message. */
   trainers?: number | null;
+  /** FitFlex only: people FitFlex can message at vendors (vendor accounts and their admin staff). */
+  vendors?: number | null;
   campaigns: Partial<Record<CommsStatus, number>>;
   recent: CommsCampaign[]; channels: Record<CommsChannel, boolean>;
   limits: { largeSendThreshold: number; marketingWeeklyCap: number };
 }
 export interface CommsCatalog {
-  scope: 'gym' | 'platform' | 'trainers';
+  scope: 'gym' | 'platform' | 'trainers' | 'vendors';
   presets: Array<{ key: string; filter: unknown }>;
   fields: Array<{ key: string; type: string; ops: string[]; values?: string[] }>;
+  limits?: { maxDepth: number; maxConditions: number };
 }
 export interface CommsAudiencePreview {
   count: number; category: string;
   channels: Record<CommsChannel, { eligible: number; excluded: Record<string, number> }>;
-  sample: Array<{ id: string; displayName: string | null; status: string }>;
+  sample: Array<{
+    id: string; displayName: string | null; status: string;
+    /** Vendor audiences only: which shop, and whether this is the vendor account or one of its admin staff. */
+    businessName?: string | null; vendorId?: string; vendorRecipient?: 'account' | 'admin_staff';
+  }>;
 }
 export interface CommsPreview {
   category: string; counts: CommsCounts; largeSendThreshold: number;
@@ -2856,6 +3579,10 @@ export interface B2BAgreement {
   platformFeeTzs: number | null; vatRateBps: number | null; notes: string | null;
   /** The organisation's agreed fee per person per month for a sponsored pass, by tier. */
   passRates?: Record<string, number> | null;
+  /** Who drafted it, who last changed it and everyone who ever edited it: none of them can activate it. */
+  createdBy?: string | null; updatedBy?: string | null; editors?: string[] | null;
+  /** Sent back as `version` when activating. */
+  updatedAt?: string | null;
 }
 export interface B2BAgreementInput {
   effectiveFrom: string; effectiveTo?: string | null; prepaidTermsDays?: number; usageTermsDays?: number;
@@ -2940,6 +3667,8 @@ export interface B2BProgramLifecycle {
 }
 export interface B2BImportResult {
   dryRun?: boolean; importId?: string; total: number; enrolled: number; invited: number; unchanged: number; rejected: number; withoutEmail: number; withoutPhone: number; emailConfigured: boolean; smsConfigured: boolean;
+  /** False when FitFlex can't send email codes, so email-only people can't confirm their email. Absent on older backends. */
+  emailCodesAvailable?: boolean;
   problems: Array<{ line: number; name: string | null; contact: string | null; problem: string }>;
 }
 export interface B2BBeneficiaryInvite {
@@ -2979,6 +3708,16 @@ export interface B2BDataQuality { checkedAt: string; issues: number; checks: Arr
 export interface B2BPaymentInstructions {
   bankName: string | null; accountName: string | null; accountNumber: string | null; branch: string | null; swiftCode: string | null;
   lipaNamba: string | null; lipaNambaName: string | null; notes: string | null; updatedAt?: string | null;
+}
+/** A change to the payment details asked for by one admin, waiting for a different admin to confirm it. */
+export interface B2BPaymentInstructionsChange {
+  /** Names this request; confirm and cancel send it back. */
+  changeId: string;
+  instructions: Pick<B2BPaymentInstructions, 'bankName' | 'accountName' | 'accountNumber' | 'branch' | 'swiftCode' | 'lipaNamba' | 'lipaNambaName' | 'notes'>;
+  requestedBy: string; requestedAt: string;
+}
+export interface B2BAdminPaymentInstructions {
+  instructions: B2BPaymentInstructions; configured: boolean; pendingChange: B2BPaymentInstructionsChange | null;
 }
 export interface B2BPaymentNotice {
   id: string; organizationId: string; organizationName?: string | null; amountTzs: number; method: string; reference: string; paidOn: string;
@@ -3148,4 +3887,97 @@ export interface ExerciseOptions {
   equipment: string[];
   environments: string[];
   goals: string[];
+}
+
+// ─── Events S2 (design spec events-s2-organizer-and-discovery §14; decisions D3, D4, D5) ───
+export type Bilingual = { en: string; sw: string };
+export type OrganizerStatus = 'draft' | 'pending_review' | 'active' | 'rejected' | 'suspended';
+export type OrganizerRole = 'owner' | 'admin' | 'ops' | 'finance' | 'timing';
+export type EventType = 'road' | 'trail' | 'fun' | 'charity' | 'virtual';
+export type EventStatus = 'draft' | 'submitted' | 'published' | 'registration_closed' | 'in_progress' | 'completed' | 'cancelled' | 'archived';
+export type EventAvailability = 'open' | 'closing_soon' | 'sold_out' | 'closed' | 'not_yet_open' | 'cancelled' | 'in_progress' | 'completed';
+export type RefundPolicyPreset = 'no_refund' | 'refund_until_close' | 'custom';
+/** POST /organizer/events/:id/<action> (§7.2); approve/reject are the admin's decision route. */
+export type EventOrganizerAction = 'submit' | 'withdraw' | 'cancel' | 'complete' | 'archive';
+/** `allowedActions` vocabulary on organizer and admin event documents (§7.2, §16.5). */
+export type EventAllowedAction = EventOrganizerAction | 'delete' | 'edit' | 'approve' | 'reject';
+export type EventsPage<T> = { items: T[]; nextCursor: string | null; total?: number };
+
+export interface EventsOptions {
+  discovery: boolean; favourites: boolean; registration: boolean; currency: string; closingSoonHours: number;
+  regions: Array<{ code: string; name: Bilingual }>; timezones: string[];
+}
+export interface OrganizerMe {
+  organizer: { id: string; name: string; status: OrganizerStatus; timezone: string; kycCaseId: string | null; kycStatus: KycCaseStatus | null; statusReason: string | null };
+  role: OrganizerRole;
+  permissions: string[];
+}
+export interface EventSummary {
+  id: string; slug: string; title: string; type: EventType; status: EventStatus;
+  startsAt: string; endsAt: string; timezone: string; utcOffsetMinutes: number; timezoneAbbr: string;
+  registrationOpensAt: string | null; registrationClosesAt: string | null; availability: EventAvailability | null;
+  venue: { name: string | null; city: string | null; region: string | null };
+  heroThumbUrl: string | null; heroImageAlt: string | null; distancesM: number[]; fromPriceTzs: number | null; currency: string;
+  organizer: { id: string; name: string; verified: boolean }; isSaved?: boolean; updatedAt: string;
+}
+export interface OrganizerEventRow extends EventSummary { categoriesCount: number; allowedActions: EventAllowedAction[] }
+export interface OrganizerSummary {
+  eventsTotal: number; publishedTotal: number; registrationsTotal: number; awaitingPaymentTotal: number; confirmedTotal: number;
+  nextEvents: OrganizerEventRow[];
+}
+export interface EventTicketType {
+  id?: string; name: string; priceTzs: number; currency: string; capacity: number | null;
+  saleOpensAt: string | null; saleClosesAt: string | null; minPerOrder: number; maxPerOrder: number; availability?: EventAvailability;
+}
+export interface EventCategory {
+  id?: string; name: string; distanceM: number; startsAt: string | null; capacity: number | null; availability?: EventAvailability;
+  remaining?: number | null; eligibility: Bilingual | null; minAge: number | null; ticketTypes: EventTicketType[];
+}
+export interface EventCollectionPoint {
+  id?: string; name: string; address: string; lat: number | null; lng: number | null;
+  windows: Array<{ opensAt: string; closesAt: string }>; instructions: Bilingual;
+}
+export interface EventScheduleItem { id?: string; at: string; label: Bilingual }
+export interface EventSponsor { id?: string; name: string; logoUrl: string | null; url: string | null }
+/** The organizer's full editable document (GET /organizer/events/:id), both languages always. */
+export interface EventDocument extends EventSummary {
+  description: Bilingual; heroImageUrl: string | null; coverAlt: string | null;
+  routeUrl: string | null; routeImageUrl: string | null; routeImageAlt: string | null;
+  venue: { name: string | null; address: string | null; city: string | null; region: string | null; lat: number | null; lng: number | null };
+  accessibility: Bilingual | null; inclusions: Bilingual | null;
+  /** Whether a race kit is handed out (the submit rule keys on it); collection points are required when true. */
+  kitProvided: boolean;
+  categories: EventCategory[]; collectionPoints: EventCollectionPoint[]; schedule: EventScheduleItem[]; sponsors: EventSponsor[];
+  contact: { email: string | null; phone: string | null; whatsapp: string | null };
+  terms: Bilingual; refundPolicy: { preset: RefundPolicyPreset | null; text: Bilingual | null };
+  cancellation: { reason: string; note: Bilingual } | null;
+  shareUrl: string | null; publishedAt: string | null; version: number; allowedActions: EventAllowedAction[];
+  submittedAt: string | null; rejection: { reason: string; note: string; at: string } | null; changeLogCount: number;
+}
+/** PATCH /organizer/events/:id: the current version plus the fields that changed (nested lists carry ids for upsert). */
+export type EventPatch = { version: number; changeNote?: Bilingual } & Partial<Omit<EventDocument, 'id' | 'slug' | 'status' | 'version' | 'allowedActions' | 'organizer' | 'updatedAt'>>;
+export interface EventChange {
+  id: string; at: string; actor: { name: string | null; role: string }; fields: string[]; material: boolean; note: Bilingual | null;
+  before: Record<string, unknown> | null; after: Record<string, unknown> | null;
+}
+export interface OrganizerStaffRow {
+  id: string; userId: string | null; displayName: string | null; maskedContact: string | null; role: OrganizerRole;
+  status: 'invited' | 'active' | 'removed'; addedAt: string;
+}
+export interface AdminEventRow extends OrganizerEventRow {
+  organizer: EventSummary['organizer'] & { status: OrganizerStatus; kycCaseId: string | null }; permitOnFile: boolean; submittedAt: string | null;
+}
+export interface AdminEventDetail extends EventDocument {
+  organizer: EventSummary['organizer'] & { status: OrganizerStatus; kycCaseId: string | null }; permitOnFile: boolean;
+}
+export interface EventAuditRow { id?: string; at: string; actor: { id: string; name: string | null }; action: string; target: string | null; reason: string | null; note: string | null }
+
+/** GET /me/kyc: the partner's own case, details and checklist (functions partner-kyc-service overview()). */
+export interface MyKyc {
+  partnerType: string; case: KycCase | null; people: KycPerson[]; documents: KycDocument[];
+  settlementAccounts: KycSettlementAccount[]; checklist: KycChecklist;
+}
+export interface MyKycAgreement {
+  agreementType: string; version: string; reference: string; title: string; lang: 'en' | 'sw';
+  sections: Array<{ heading: string; text: string }>; acceptedAt: string | null;
 }
