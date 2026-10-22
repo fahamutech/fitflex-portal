@@ -29,10 +29,11 @@ import { ResultsPanel, SourcesTable, periodTitle } from './communication-results
 
 const TRANSACTIONAL: CommsPurpose[] = ['renewal', 'payment', 'announcement'];
 // Vendors get service messages only until the vendor app lets them switch
-// marketing off: the backend refuses a marketing purpose (promotion,
-// engagement, general) for recipients 'vendors' with vendor_marketing_not_available.
+// marketing off: the backend allows announcement, renewal and payment and
+// refuses promotion, engagement and general with vendor_marketing_not_available.
+const VENDOR_PURPOSES: CommsPurpose[] = ['announcement', 'renewal', 'payment'];
 const vendorBlocked = (recipients: CommsRecipients, purpose?: CommsPurpose) =>
-  recipients === 'vendors' && purpose != null && !TRANSACTIONAL.includes(purpose);
+  recipients === 'vendors' && purpose != null && !VENDOR_PURPOSES.includes(purpose);
 const CHANNELS: CommsChannel[] = ['in_app', 'push', 'whatsapp', 'sms'];
 const STEPS = ['purpose', 'audience', 'message', 'channels', 'schedule', 'preview', 'confirm'] as const;
 type Step = typeof STEPS[number];
@@ -72,7 +73,8 @@ function trainerRefineToFilter(r: TrainerRefine) {
 // ── FitFlex → vendors: conditions on top of a vendor preset ────────────────
 // A vendor audience is people: each vendor account plus its admin staff.
 type VendorRefine = {
-  approval?: 'approved' | 'pending_approval' | 'rejected';
+  // Rejected vendors are never in a vendor audience, so 'rejected' isn't offered.
+  approval?: 'approved' | 'pending_approval';
   walkIn?: 'yes' | 'no';
   products?: 'none_listed' | 'none_live' | 'some_live';
   category?: string;
@@ -91,6 +93,21 @@ function vendorRefineToFilter(r: VendorRefine) {
   if (r.recipient) all.push({ field: 'vendorRecipient', op: 'eq', value: r.recipient });
   if (r.joinedWithin != null) all.push({ field: 'joinedDaysAgo', op: 'lte', value: r.joinedWithin });
   return all.length ? { all } : undefined;
+}
+
+// The backend ANDs this onto every vendor audience that doesn't name
+// vendorApproval itself; if a saved or echoed filter carries it, it's not a
+// condition the admin set, so it's left out of the form and the detail.
+const VENDOR_BASE = { all: [{ field: 'vendorApproval', op: 'in', value: ['approved', 'pending_approval'] }] };
+const isVendorBase = (node: unknown) => JSON.stringify(node) === JSON.stringify(VENDOR_BASE);
+/** A saved audience filter without the vendor base group (undefined when nothing else is left). */
+function userFilter(recipients: CommsRecipients | undefined, filter: unknown): unknown {
+  if (filter == null || recipients !== 'vendors') return filter ?? undefined;
+  if (isVendorBase(filter)) return undefined;
+  const all = (filter as { all?: unknown[] }).all;
+  if (!Array.isArray(all) || !all.some(isVendorBase)) return filter;
+  const rest = all.filter(n => !isVendorBase(n));
+  return rest.length === 0 ? undefined : rest.length === 1 && typeof rest[0] === 'object' && rest[0] && ('all' in rest[0] || 'any' in rest[0]) ? rest[0] : { all: rest };
 }
 
 /** Label keys for an audience's preset and "N match", by recipients. */
@@ -368,7 +385,7 @@ function Composer({ scope, token, t, locale, gymId, campaign, templateId, onClos
   const [trainerRefine, setTrainerRefine] = useState<TrainerRefine>({});
   const [vendorRefine, setVendorRefine] = useState<VendorRefine>({});
   // A saved filter this form didn't build is kept untouched until cleared.
-  const [savedFilter, setSavedFilter] = useState<unknown>(campaign?.audience?.filter);
+  const [savedFilter, setSavedFilter] = useState<unknown>(userFilter(campaign?.audience?.recipients, campaign?.audience?.filter));
   const [content, setContent] = useState<CommsContent>(campaign?.content
     ? { locale: 'en', ...campaign.content }
     : { title: '', body: '', deepLink: 'message', locale });
@@ -858,7 +875,7 @@ function VendorConditions({ t, value: r, onChange }: { t: T; value: VendorRefine
         <Select className="min-h-11" value={r.approval ?? ''} data-testid="refine-vendor-approval"
           onChange={e => set({ approval: (e.target.value || undefined) as VendorRefine['approval'] })}>
           <option value="">—</option>
-          {(['approved', 'pending_approval', 'rejected'] as const).map(v => <option key={v} value={v}>{t(`comms.audience.vendorApproval.${v}`)}</option>)}
+          {(['approved', 'pending_approval'] as const).map(v => <option key={v} value={v}>{t(`comms.audience.vendorApproval.${v}`)}</option>)}
         </Select>
       </Field>
       <Field label={t('comms.audience.vendorWalkIn')} hint={t('comms.audience.vendorWalkIn.hint')}>
@@ -971,7 +988,7 @@ function Detail({ scope, token, t, id, onBack, onEdit, onOpenMember }: {
       <div className="grid gap-4 lg:grid-cols-2">
         <Card className="p-4 space-y-2">
           <p className="text-sm font-semibold">{t('comms.detail.audience')}</p>
-          <p className="text-sm">{t(audienceKeys(c.audience?.recipients, c.audience?.preset ?? 'all', 0).preset)}{c.audience?.filter ? ` · ${t('comms.detail.withConditions')}` : ''}</p>
+          <p className="text-sm">{t(audienceKeys(c.audience?.recipients, c.audience?.preset ?? 'all', 0).preset)}{userFilter(c.audience?.recipients, c.audience?.filter) ? ` · ${t('comms.detail.withConditions')}` : ''}</p>
           {c.counts && <p className="text-sm">{fill(t(audienceKeys(c.audience?.recipients, c.audience?.preset ?? 'all', c.counts.targeted).match), { n: c.counts.targeted })}</p>}
           <p className="text-xs text-[var(--color-fg-quaternary)]">{c.channels.map(ch => t(`comms.channel.${ch}`)).join(' · ')}</p>
         </Card>

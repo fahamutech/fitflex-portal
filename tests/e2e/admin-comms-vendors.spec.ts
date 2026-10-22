@@ -34,7 +34,20 @@ const refused = { status: 400, json: { error: 'vendor_marketing_not_available' }
 const marketingToVendors = (b: Record<string, any>) =>
   (b.recipients ?? b.audience?.recipients) === 'vendors' && MARKETING.includes(b.purpose);
 
-async function mockAdmin(page: Page, seen: Seen, opts: { refuseSend?: boolean } = {}) {
+// The group #257 ANDs onto every vendor audience that doesn't name vendorApproval.
+const VENDOR_BASE = { all: [{ field: 'vendorApproval', op: 'in', value: ['approved', 'pending_approval'] }] };
+const draft = (id: string, filter: unknown) => ({
+  id, senderType: 'platform', gymId: null, name: `Draft ${id}`, purpose: 'announcement', category: 'transactional', status: 'draft',
+  audience: { recipients: 'vendors', preset: 'all', filter }, channels: ['in_app'],
+  content: { title: 'Holiday hours', body: 'Orders close on 24 December.', deepLink: 'message', locale: 'en' },
+  scheduledAt: null, sentAt: null, createdAt: '2026-10-22T07:00:00Z', counts: null,
+});
+const DRAFTS = [
+  draft('cmp_base', VENDOR_BASE),
+  draft('cmp_mixed', { all: [VENDOR_BASE, { all: [{ field: 'vendorWalkInSales', op: 'eq', value: 'yes' }] }] }),
+];
+
+async function mockAdmin(page: Page, seen: Seen, opts: { refuseSend?: boolean; drafts?: boolean } = {}) {
   await page.addInitScript(() => {
     localStorage.setItem('token', 'admin-e2e-token');
     localStorage.setItem('user', JSON.stringify({ id: 'admin-1', userType: 'admin', email: 'admin@example.com' }));
@@ -46,7 +59,7 @@ async function mockAdmin(page: Page, seen: Seen, opts: { refuseSend?: boolean } 
     const p = url.pathname;
     if (p === '/admin/communications/overview') {
       return route.fulfill({ json: {
-        senderType: 'platform', members: 120, trainers: 3, vendors: 7, campaigns: {}, recent: [],
+        senderType: 'platform', members: 120, trainers: 3, vendors: 7, campaigns: {}, recent: opts.drafts ? DRAFTS : [],
         channels: { in_app: true, push: true, whatsapp: false, sms: false }, limits: { largeSendThreshold: 500, marketingWeeklyCap: 2 },
       } });
     }
@@ -66,7 +79,7 @@ async function mockAdmin(page: Page, seen: Seen, opts: { refuseSend?: boolean } 
       if (marketingToVendors(body)) return route.fulfill(refused);
       const vendors = body.recipients === 'vendors';
       return route.fulfill({ json: {
-        count: vendors ? 4 : 120, category: 'marketing', channels,
+        count: vendors ? 4 : 120, category: vendors && body.purpose == null ? 'transactional' : 'marketing', channels,
         sample: vendors
           ? [
             { id: 'usr_v1', displayName: 'Juma Ally', status: 'active', businessName: 'Juma Sports', vendorId: 'usr_v1', vendorRecipient: 'account' },
@@ -101,11 +114,13 @@ async function mockAdmin(page: Page, seen: Seen, opts: { refuseSend?: boolean } 
           id: 'cmp_v', senderType: 'platform', gymId: null, name: 'Stock up for December', purpose: 'announcement', category: 'transactional',
           status: 'sent', audience: draft.audience, content: draft.content, channels: ['in_app'], scheduledAt: null,
           sentAt: '2026-10-22T08:00:00Z', createdAt: '2026-10-22T07:59:00Z',
-          counts: { targeted: 4, queued: 3, skipped: { vendor_unavailable: 1 }, byChannel: {} },
+          counts: { targeted: 4, queued: 2, skipped: { vendor_unavailable: 1, not_vendor_admin: 1 }, byChannel: {} },
         },
         progress: {}, stats: null,
       } });
     }
+    const d = DRAFTS.find(x => p === `/admin/communications/campaigns/${x.id}`);
+    if (d) return route.fulfill({ json: { campaign: d, progress: {}, stats: null } });
     if (p === '/admin/communications/campaigns/cmp_v/analytics') return route.fulfill({ json: results });
     if (p === '/admin/communications/campaigns/cmp_v/recipients') return route.fulfill({ json: { recipients: [], nextCursor: null } });
     if (p === '/admin/communications/templates') return route.fulfill({ json: { templates: [] } });
@@ -163,6 +178,8 @@ test('FitFlex sends a message to vendors: presets, conditions, sample, warnings 
       { field: 'joinedDaysAgo', op: 'lte', value: 30 },
     ] },
   });
+  // Only approved / pending approval: rejected vendors are never in a vendor audience.
+  await expect(page.getByTestId('refine-vendor-approval').locator('option')).toHaveText(['—', 'Approved', 'Pending approval']);
   await page.getByTestId('refine-vendor-approval').selectOption('approved');
   await expect.poll(() => (seen.previews.at(-1)?.filter?.all ?? [])[0]).toEqual({ field: 'vendorApproval', op: 'eq', value: 'approved' });
 
@@ -183,7 +200,8 @@ test('FitFlex sends a message to vendors: presets, conditions, sample, warnings 
 
   expect(seen.created.at(-1)?.audience).toMatchObject({ recipients: 'vendors', preset: 'approved' });
   // The sent campaign: vendor preset wording and the vendor skip reason.
-  await expect(page.getByText('Vendor suspended or closed: 1')).toBeVisible();
+  await expect(page.getByText('Vendor suspended, closed or rejected: 1')).toBeVisible();
+  await expect(page.getByText("No longer one of the vendor's admin staff: 1")).toBeVisible();
   await expect(page.getByText('4 people at vendors match this audience.')).toBeVisible();
 
   expect(seen.segments).toContain('?recipients=vendors');
@@ -321,4 +339,37 @@ test('vendor_marketing_not_available from the server reads as the plain note', a
   await expect(page.getByText("Promotions to vendors aren't available yet — vendors can't opt out in the app yet.")).toBeVisible();
   await expect(page.getByText('vendor_marketing_not_available')).toHaveCount(0);
   expect(seen.outside).toEqual([]);
+});
+
+test("the vendor base group a filter may carry isn't shown as the admin's own conditions", async ({ page }) => {
+  const runtimeErrors: Error[] = [];
+  page.on('pageerror', e => runtimeErrors.push(e));
+  const seen: Seen = { previews: [], drafts: [], created: [], segments: [], outside: [] };
+  await mockAdmin(page, seen, { drafts: true });
+
+  await page.goto('/admin/communications');
+  // Only the base group: no "extra conditions", and the vendor conditions are editable.
+  await page.getByTestId('campaign-cmp_base').click();
+  await expect(page.getByText('All vendors', { exact: true })).toBeVisible();
+  await expect(page.getByText('With extra conditions')).toHaveCount(0);
+  await page.getByTestId('detail-edit').click();
+  await page.getByTestId('comms-next').click();
+  await expect(page.getByTestId('recipients-vendors')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByText("This audience has conditions that can't be edited here.")).toHaveCount(0);
+  await expect(page.getByTestId('vendor-conditions')).toBeVisible();
+  await expect.poll(() => seen.previews.at(-1)).toEqual({ recipients: 'vendors', preset: 'all', purpose: 'announcement' });
+
+  // The base group plus a real condition: only the real one is kept.
+  await page.goto('/admin/communications');
+  await page.getByTestId('campaign-cmp_mixed').click();
+  await expect(page.getByText('With extra conditions', { exact: false })).toBeVisible();
+  await page.getByTestId('detail-edit').click();
+  await page.getByTestId('comms-next').click();
+  await expect(page.getByText("This audience has conditions that can't be edited here.")).toBeVisible();
+  await expect.poll(() => seen.previews.at(-1)).toEqual({
+    recipients: 'vendors', preset: 'all', purpose: 'announcement',
+    filter: { all: [{ field: 'vendorWalkInSales', op: 'eq', value: 'yes' }] },
+  });
+  expect(seen.outside).toEqual([]);
+  expect(runtimeErrors).toEqual([]);
 });
