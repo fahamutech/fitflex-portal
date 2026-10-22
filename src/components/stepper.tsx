@@ -8,7 +8,8 @@ import { cn } from '@/lib/cn';
  * not let past a step that is not valid yet.
  */
 export function Stepper({ steps, current, maxReached, onStep }: {
-  steps: Array<{ key: string; label: string }>; current: number; maxReached: number; onStep: (index: number) => void;
+  /** `ariaSuffix` is read by assistive tech only (e.g. "has errors"); the visible label stays as is. */
+  steps: Array<{ key: string; label: string; ariaSuffix?: string }>; current: number; maxReached: number; onStep: (index: number) => void;
 }) {
   return (
     <div>
@@ -19,7 +20,7 @@ export function Stepper({ steps, current, maxReached, onStep }: {
         return (
           <li key={s.key} className="min-w-0 flex-1 sm:flex-none">
             <button type="button" disabled={!reachable} onClick={() => onStep(i)} aria-current={i === current ? 'step' : undefined}
-              data-testid={`step-${s.key}`} aria-label={`${i + 1}. ${s.label}`}
+              data-testid={`step-${s.key}`} aria-label={`${i + 1}. ${s.label}${s.ariaSuffix ? ` · ${s.ariaSuffix}` : ''}`}
               className={cn(
                 'flex h-10 w-full items-center sm:w-auto justify-center gap-2 rounded-full text-sm transition-colors sm:px-3',
                 i === current ? 'bg-[var(--color-brand-600)] font-semibold text-white'

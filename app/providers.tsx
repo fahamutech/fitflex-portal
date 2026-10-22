@@ -5,10 +5,14 @@ import { api, ApiError, setOnPasswordChangeRequired, setOnUnauthorized, tokenReq
 import { PwaRegistration } from '@/components/pwa-registration';
 import { ToastProvider } from '@/components/ui/toast';
 import { VendorProvider } from '@/components/vendor-context';
+import { OrganizerProvider } from '@/components/organizer-context';
+
+/** Session user types the portal knows (events S2 added event_organizer and organizer_staff, D3). */
+export type PortalUserType = 'admin' | 'gym_operator' | 'gym_staff' | 'vendor' | 'vendor_staff' | 'corporate_hr' | 'member' | 'event_organizer' | 'organizer_staff';
 
 export interface PortalAppUser {
   id: string;
-  userType: string;
+  userType: PortalUserType | (string & {});
   gymId?: string;
   email?: string;
   portalUser?: boolean;
@@ -143,7 +147,7 @@ export function Providers({ children }: { children: ReactNode }) {
   return (
     <Ctx.Provider value={{ ready, locale, setLocale, t: (k) => translate(locale, k), token, user, signIn, signOut, hasPermission, switchablePersonas, switchPersona, invitesEnabled, passwordChangeRequired }}>
       <PwaRegistration />
-      <ToastProvider><VendorProvider>{children}</VendorProvider></ToastProvider>
+      <ToastProvider><VendorProvider><OrganizerProvider>{children}</OrganizerProvider></VendorProvider></ToastProvider>
     </Ctx.Provider>
   );
 }

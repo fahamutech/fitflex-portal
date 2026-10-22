@@ -7,7 +7,7 @@ import { useApp } from '../../providers';
 import { api, PortalUser, ApiError } from '@/lib/api';
 import { Button, PageHeader, Alert, Spinner, Card, Badge, Field, Table, TBody, Td, Th, THead, Tr } from '@/components/shared';
 import { ConfirmDialog } from '@/components/dialog';
-import { HERO_IMAGES_ADMIN } from '@/lib/flags';
+import { EVENTS_MODULE, HERO_IMAGES_ADMIN } from '@/lib/flags';
 import { fmt } from '@/lib/vendor';
 
 const ALL_ACL_SCOPES = [
@@ -34,6 +34,8 @@ const ALL_ACL_SCOPES = [
   { key: 'kyc',       label: 'Partner verification' },
   { key: 'account_recovery', label: 'Account recovery' },
   { key: 'exercises', label: 'Exercises' },
+  // Events S2: the moderation queue (/admin/events). Only offered in builds with NEXT_PUBLIC_EVENTS_MODULE=true.
+  { key: 'events',    label: 'Events' },
   { key: 'settings',  label: 'Settings' },
   { key: 'users',     label: 'Portal Users' },
   { key: 'communications', label: 'Messages' },
@@ -49,7 +51,7 @@ const ALL_ACL_SCOPES = [
 ] as const;
 
 type AclScope = typeof ALL_ACL_SCOPES[number]['key'];
-const ACL_SCOPES = ALL_ACL_SCOPES.filter(s => s.key !== 'brand_media' || HERO_IMAGES_ADMIN);
+const ACL_SCOPES = ALL_ACL_SCOPES.filter(s => (s.key !== 'brand_media' || HERO_IMAGES_ADMIN) && (s.key !== 'events' || EVENTS_MODULE));
 
 const ROLE_PRESETS = [
   { key: 'custom',      label: 'Custom',      scopes: [] as AclScope[] },
