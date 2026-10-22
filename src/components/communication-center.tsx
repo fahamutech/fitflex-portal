@@ -10,7 +10,7 @@ import { Megaphone, Plus, RefreshCw, ArrowLeft, FileText } from 'lucide-react';
 import { useApp } from '../../app/providers';
 import {
   api, ApiError, CommsCampaign, CommsChannel, CommsContent, CommsDeepLink, CommsDraft, CommsLocale, CommsOverview, CommsStats,
-  CommsPreview, CommsPurpose, CommsRecipients, CommsScope, CommsStatus, CommsTemplate, CommsText, Gym,
+  CommsAudiencePreview, CommsPreview, CommsPurpose, CommsRecipients, CommsScope, CommsStatus, CommsTemplate, CommsText, Gym,
 } from '@/lib/api';
 import type { MessageKey } from '@/lib/i18n';
 import { Alert, Badge, Button, Card, Checkbox, EmptyState, Field, Input, MetricCard, PageHeader, Radio, Segmented, Select, Spinner, Table, TBody, Td, Tr } from './shared';
@@ -64,15 +64,60 @@ function trainerRefineToFilter(r: TrainerRefine) {
   return all.length ? { all } : undefined;
 }
 
+// ── FitFlex → vendors: conditions on top of a vendor preset ────────────────
+// A vendor audience is people: each vendor account plus its admin staff.
+type VendorRefine = {
+  approval?: 'approved' | 'pending_approval' | 'rejected';
+  walkIn?: 'yes' | 'no';
+  products?: 'none_listed' | 'none_live' | 'some_live';
+  category?: string;
+  recipient?: 'account' | 'admin_staff';
+  joinedWithin?: number;
+};
+
+function vendorRefineToFilter(r: VendorRefine) {
+  const all: unknown[] = [];
+  if (r.approval) all.push({ field: 'vendorApproval', op: 'eq', value: r.approval });
+  if (r.walkIn) all.push({ field: 'vendorWalkInSales', op: 'eq', value: r.walkIn });
+  if (r.products === 'none_listed') all.push({ field: 'vendorProducts', op: 'eq', value: 0 });
+  if (r.products === 'none_live') all.push({ field: 'vendorLiveProducts', op: 'eq', value: 0 });
+  if (r.products === 'some_live') all.push({ field: 'vendorLiveProducts', op: 'gte', value: 1 });
+  if (r.category?.trim()) all.push({ field: 'vendorCategory', op: 'eq', value: r.category.trim() });
+  if (r.recipient) all.push({ field: 'vendorRecipient', op: 'eq', value: r.recipient });
+  if (r.joinedWithin != null) all.push({ field: 'joinedDaysAgo', op: 'lte', value: r.joinedWithin });
+  return all.length ? { all } : undefined;
+}
+
 /** Label keys for an audience's preset and "N match", by recipients. */
 function audienceKeys(recipients: CommsRecipients | undefined, preset: string, n: number) {
-  const trainers = recipients === 'trainers';
+  if (recipients === 'trainers') {
+    return {
+      preset: `comms.trainerPreset.${preset}`,
+      match: n === 1 ? 'comms.audience.matchOneTrainer' : 'comms.audience.matchTrainers',
+      none: 'comms.audience.noneTrainers',
+    };
+  }
+  if (recipients === 'vendors') {
+    return {
+      preset: `comms.vendorPreset.${preset}`,
+      match: n === 1 ? 'comms.audience.matchOneVendorPerson' : 'comms.audience.matchVendorPeople',
+      none: 'comms.audience.noneVendors',
+    };
+  }
   return {
-    preset: trainers ? `comms.trainerPreset.${preset}` : `comms.preset.${preset}`,
-    match: trainers
-      ? (n === 1 ? 'comms.audience.matchOneTrainer' : 'comms.audience.matchTrainers')
-      : (n === 1 ? 'comms.audience.matchOne' : 'comms.audience.match'),
+    preset: `comms.preset.${preset}`,
+    match: n === 1 ? 'comms.audience.matchOne' : 'comms.audience.match',
+    none: 'comms.audience.none',
   };
+}
+
+type AudienceSample = CommsAudiencePreview['sample'][number];
+/** A name in the "For example" line; vendor people also show their shop and role. */
+function sampleName(t: T, s: AudienceSample) {
+  const name = s.displayName || s.businessName || '';
+  if (!name || !s.businessName || s.vendorRecipient == null) return name;
+  return fill(t(s.vendorRecipient === 'admin_staff' ? 'comms.audience.vendorSample.staff' : 'comms.audience.vendorSample.account'),
+    { name, business: s.businessName });
 }
 
 // ── entry ───────────────────────────────────────────────────────────────────
@@ -213,6 +258,9 @@ function Home({ scope, token, t, gyms, gymId, setGymId, initialTab, onNew, onOpe
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             <MetricCard label={t('comms.overview.members')} value={overview.members ?? '–'} />
             {overview.trainers !== undefined && <MetricCard label={t('comms.overview.trainers')} value={overview.trainers ?? '–'} />}
+            {scope === 'admin' && overview.vendors !== undefined && (
+              <div data-testid="overview-vendors"><MetricCard label={t('comms.overview.vendors')} value={overview.vendors ?? '–'} /></div>
+            )}
             <MetricCard label={t('comms.overview.sent')} value={sent} />
             <MetricCard label={t('comms.overview.scheduled')} value={overview.campaigns.scheduled ?? 0} />
             <MetricCard label={t('comms.overview.drafts')} value={overview.campaigns.draft ?? 0} />
@@ -309,10 +357,11 @@ function Composer({ scope, token, t, locale, gymId, campaign, templateId, onClos
   const [step, setStep] = useState<Step>('purpose');
   const [purpose, setPurpose] = useState<CommsPurpose | undefined>(campaign?.purpose);
   const [preset, setPreset] = useState<string>(campaign?.audience?.preset ?? 'active');
-  // FitFlex only: members (default) or trainers.
-  const [recipients, setRecipients] = useState<CommsRecipients>(campaign?.audience?.recipients ?? 'members');
+  // FitFlex only: members (default), trainers or vendors. Gyms always send to members.
+  const [recipients, setRecipients] = useState<CommsRecipients>(scope === 'admin' ? campaign?.audience?.recipients ?? 'members' : 'members');
   const [refine, setRefine] = useState<Refine>(EMPTY_REFINE);
   const [trainerRefine, setTrainerRefine] = useState<TrainerRefine>({});
+  const [vendorRefine, setVendorRefine] = useState<VendorRefine>({});
   // A saved filter this form didn't build is kept untouched until cleared.
   const [savedFilter, setSavedFilter] = useState<unknown>(campaign?.audience?.filter);
   const [content, setContent] = useState<CommsContent>(campaign?.content
@@ -394,12 +443,13 @@ function Composer({ scope, token, t, locale, gymId, campaign, templateId, onClos
   function chooseRecipients(next: CommsRecipients) {
     if (next === recipients) return;
     setRecipients(next);
-    setPreset(next === 'trainers' ? 'all' : 'active');
+    setPreset(next === 'members' ? 'active' : 'all');
     setSavedFilter(undefined);
     setCount(null);
   }
 
-  const filter = savedFilter ?? (recipients === 'trainers' ? trainerRefineToFilter(trainerRefine) : refineToFilter(refine));
+  const filter = savedFilter ?? (recipients === 'trainers' ? trainerRefineToFilter(trainerRefine)
+    : recipients === 'vendors' ? vendorRefineToFilter(vendorRefine) : refineToFilter(refine));
   const main: CommsLocale = content.locale ?? 'en';
   const texts: Partial<Record<CommsLocale, CommsText>> = {
     ...content.translations,
@@ -414,7 +464,7 @@ function Composer({ scope, token, t, locale, gymId, campaign, templateId, onClos
       ...(scope === 'owner' && gymId ? { gymId } : {}),
       name: content.title.trim().slice(0, 80) || undefined,
       purpose,
-      audience: { preset, ...(filter ? { filter } : {}), ...(recipients === 'trainers' ? { recipients } : {}) },
+      audience: { preset, ...(filter ? { filter } : {}), ...(recipients !== 'members' ? { recipients } : {}) },
       content: {
         ...content,
         ctaLabel: content.ctaLabel?.trim() || undefined,
@@ -442,10 +492,10 @@ function Composer({ scope, token, t, locale, gymId, campaign, templateId, onClos
     const timer = setTimeout(() => {
       api.commsAudiencePreview(token, scope, {
         gymId: scope === 'owner' ? gymId : undefined,
-        ...(recipients === 'trainers' ? { recipients } : {}),
+        ...(recipients !== 'members' ? { recipients } : {}),
         preset, filter, purpose,
       })
-        .then(r => setCount({ n: r.count, names: r.sample.map(s => s.displayName || '').filter(Boolean) }))
+        .then(r => setCount({ n: r.count, names: r.sample.map(s => sampleName(t, s)).filter(Boolean) }))
         .catch(e => setError(errorText(t, e)));
     }, 400);
     return () => clearTimeout(timer);
@@ -552,8 +602,9 @@ function Composer({ scope, token, t, locale, gymId, campaign, templateId, onClos
             {scope === 'admin' && (
               <Field label={t('comms.audience.sendTo')}>
                 <div className="flex flex-wrap gap-2">
-                  {(['members', 'trainers'] as const).map(r => (
-                    <Button key={r} size="sm" variant={chip(recipients === r)} onClick={() => chooseRecipients(r)} data-testid={`recipients-${r}`}>
+                  {(['members', 'trainers', 'vendors'] as const).map(r => (
+                    <Button key={r} size="sm" className="min-h-11" variant={chip(recipients === r)} aria-pressed={recipients === r}
+                      onClick={() => chooseRecipients(r)} data-testid={`recipients-${r}`}>
                       {t(`comms.recipients.${r}`)}
                     </Button>
                   ))}
@@ -561,20 +612,24 @@ function Composer({ scope, token, t, locale, gymId, campaign, templateId, onClos
               </Field>
             )}
             <div data-testid="audience-count"><Alert tone="info">
-              {count == null ? '…' : count.n === 0 ? t(recipients === 'trainers' ? 'comms.audience.noneTrainers' : 'comms.audience.none')
+              {count == null ? '…' : count.n === 0 ? t(audienceKeys(recipients, preset, 0).none)
                 : fill(t(audienceKeys(recipients, preset, count.n).match), { n: count.n })}
+              {recipients === 'vendors' && <span className="block text-xs font-normal" data-testid="vendor-people-note">{t('comms.audience.vendorPeopleNote')}</span>}
               {count && count.names.length > 0 && <span className="block text-xs font-normal">{fill(t('comms.audience.forExample'), { names: count.names.slice(0, 3).join(', ') })}</span>}
             </Alert></div>
             <Field label={t('comms.audience.who')} hint={presets.includes(preset)
-              ? t(recipients === 'trainers' ? `comms.trainerPreset.${preset}.body` : scope === 'admin' && preset === 'all' ? 'comms.admin.all.body' : `comms.preset.${preset}.body`)
+              ? t(recipients !== 'members' ? `${audienceKeys(recipients, preset, 0).preset}.body` : scope === 'admin' && preset === 'all' ? 'comms.admin.all.body' : `comms.preset.${preset}.body`)
               : undefined}>
               <div className="flex flex-wrap gap-2">
-                {presets.map(p => <Button key={p} size="sm" variant={chip(preset === p)} onClick={() => setPreset(p)} data-testid={`preset-${p}`}>{t(audienceKeys(recipients, p, 0).preset)}</Button>)}
+                {/* A preset this build has no wording for (a newer server's) shows its key, not a blank chip. */}
+                {presets.map(p => <Button key={p} size="sm" className="min-h-11" variant={chip(preset === p)} aria-pressed={preset === p} onClick={() => setPreset(p)} data-testid={`preset-${p}`}>{t(audienceKeys(recipients, p, 0).preset) || p}</Button>)}
               </div>
             </Field>
             <p className="text-sm font-semibold">{t('comms.audience.narrow')}</p>
             {savedFilter ? (
               <Alert tone="info">{t('comms.audience.customSetElsewhere')} <Button type="button" variant="link" className="inline h-auto px-0 font-medium text-inherit underline" onClick={() => setSavedFilter(undefined)}>{t('comms.audience.clearCustom')}</Button></Alert>
+            ) : recipients === 'vendors' ? (
+              <VendorConditions t={t} value={vendorRefine} onChange={setVendorRefine} />
             ) : recipients === 'trainers' ? (
               <div className="grid gap-4 sm:grid-cols-2">
                 <Field label={t('comms.audience.trainerPass')}>
@@ -768,6 +823,53 @@ function Composer({ scope, token, t, locale, gymId, campaign, templateId, onClos
           <Button disabled={!canContinue[step]} onClick={() => setStep(STEPS[index + 1])} data-testid="comms-next">{t('comms.next')}</Button>
         )}
       </div>
+    </div>
+  );
+}
+
+// ── vendor conditions ───────────────────────────────────────────────────────
+function VendorConditions({ t, value: r, onChange }: { t: T; value: VendorRefine; onChange: (r: VendorRefine) => void }) {
+  const set = (patch: Partial<VendorRefine>) => onChange({ ...r, ...patch });
+  return (
+    <div className="grid gap-4 sm:grid-cols-2" data-testid="vendor-conditions">
+      <Field label={t('comms.audience.vendorApproval')}>
+        <Select className="min-h-11" value={r.approval ?? ''} data-testid="refine-vendor-approval"
+          onChange={e => set({ approval: (e.target.value || undefined) as VendorRefine['approval'] })}>
+          <option value="">—</option>
+          {(['approved', 'pending_approval', 'rejected'] as const).map(v => <option key={v} value={v}>{t(`comms.audience.vendorApproval.${v}`)}</option>)}
+        </Select>
+      </Field>
+      <Field label={t('comms.audience.vendorWalkIn')} hint={t('comms.audience.vendorWalkIn.hint')}>
+        <Select className="min-h-11" value={r.walkIn ?? ''} data-testid="refine-vendor-walkin"
+          onChange={e => set({ walkIn: (e.target.value || undefined) as VendorRefine['walkIn'] })}>
+          <option value="">—</option>
+          {(['yes', 'no'] as const).map(v => <option key={v} value={v}>{t(`comms.audience.vendorWalkIn.${v}`)}</option>)}
+        </Select>
+      </Field>
+      <Field label={t('comms.audience.vendorProducts')}>
+        <Select className="min-h-11" value={r.products ?? ''} data-testid="refine-vendor-products"
+          onChange={e => set({ products: (e.target.value || undefined) as VendorRefine['products'] })}>
+          <option value="">—</option>
+          {(['some_live', 'none_live', 'none_listed'] as const).map(v => <option key={v} value={v}>{t(`comms.audience.vendorProducts.${v}`)}</option>)}
+        </Select>
+      </Field>
+      <Field label={t('comms.audience.vendorRecipient')} hint={t('comms.audience.vendorRecipient.hint')}>
+        <Select className="min-h-11" value={r.recipient ?? ''} data-testid="refine-vendor-recipient"
+          onChange={e => set({ recipient: (e.target.value || undefined) as VendorRefine['recipient'] })}>
+          <option value="">—</option>
+          {(['account', 'admin_staff'] as const).map(v => <option key={v} value={v}>{t(`comms.audience.vendorRecipient.${v}`)}</option>)}
+        </Select>
+      </Field>
+      <Field label={t('comms.audience.vendorJoined')}>
+        <Select className="min-h-11" value={r.joinedWithin ?? ''} data-testid="refine-vendor-joined"
+          onChange={e => set({ joinedWithin: e.target.value ? Number(e.target.value) : undefined })}>
+          <option value="">—</option>{[7, 14, 30, 90].map(d => <option key={d} value={d}>{fill(t('comms.days'), { n: d })}</option>)}
+        </Select>
+      </Field>
+      <Field label={t('comms.audience.vendorCategory')} hint={t('comms.audience.vendorCategory.hint')}>
+        <Input className="min-h-11" value={r.category ?? ''} data-testid="refine-vendor-category"
+          onChange={e => set({ category: e.target.value || undefined })} />
+      </Field>
     </div>
   );
 }
