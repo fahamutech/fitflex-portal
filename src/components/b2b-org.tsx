@@ -21,7 +21,7 @@ import type { MessageKey } from '@/lib/i18n';
  * screens only hide what would be refused.
  */
 
-export type Mine = { organization: B2BOrganization; role: string; permissions: string[] };
+export type Mine = { organization: B2BOrganization; role: string; permissions: string[]; companyStaffManage?: boolean };
 
 const ERRORS: Record<string, string> = {
   invalid_email: 'That email address doesn’t look right.',
@@ -76,7 +76,7 @@ export function useMyOrganization() {
     if (!token || !orgId) return;
     setMine(null);
     api.b2bOrganization(token, orgId)
-      .then(r => setMine({ organization: r.organization, role: r.access.role, permissions: r.access.permissions }))
+      .then(r => setMine({ organization: r.organization, role: r.access.role, permissions: r.access.permissions, companyStaffManage: r.access.companyStaffManage === true }))
       .catch(() => setError('Could not load your organisation.'));
   }, [token, orgId]);
 

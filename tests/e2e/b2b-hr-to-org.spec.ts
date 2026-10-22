@@ -18,11 +18,21 @@ const EMPLOYEES = [
 ];
 
 /** The company organisation as an HR login sees it, with the flag on and the staff list above. */
-async function companyOrg(page: Page, user: Json = MARKED_HR, permissions = HR_ACCESS) {
+// Owner decision (functions#252 7bee485): only org roles hr and admin manage a company's staff.
+const STAFF_ROLES = new Set(['hr', 'admin']);
+/** Employee rows as a role that may not manage company staff gets them: read-only, no contact details. */
+const readOnlyRows = () => EMPLOYEES.map(({ email, phone, ...e }) => ({ ...e, readOnly: true })); // eslint-disable-line @typescript-eslint/no-unused-vars
+
+/** The company organisation as `role` sees it (default hr), with the flag on and the staff list above. */
+async function companyOrg(page: Page, user: Json = MARKED_HR, permissions = HR_ACCESS, role = 'hr') {
+  const manage = STAFF_ROLES.has(role) && permissions.includes('beneficiaries.manage');
   const mock = await setupB2B(page, user);
   mock.on('GET', /^\/b2b\/me\/organizations$/, () => MY_COMPANY);
-  mock.on('GET', /^\/b2b\/organizations\/org-3$/, () => ({ organization: { id: 'org-3', organizationType: 'employer', legalName: 'Mwenge Textiles', tradingName: null, legacyCorporateId: 'corp-1', status: 'active', source: 'corporate', managedFields: ['legalName'] }, access: { role: 'hr', permissions } }));
-  mock.on('GET', /^\/b2b\/organizations\/org-3\/beneficiaries$/, () => ({ items: EMPLOYEES, total: EMPLOYEES.length, nextCursor: null }));
+  mock.on('GET', /^\/b2b\/organizations\/org-3$/, () => ({ organization: { id: 'org-3', organizationType: 'employer', legalName: 'Mwenge Textiles', tradingName: null, legacyCorporateId: 'corp-1', status: 'active', source: 'corporate', managedFields: ['legalName'] }, access: { role, permissions, companyStaffManage: manage } }));
+  mock.on('GET', /^\/b2b\/organizations\/org-3\/beneficiaries$/, () => {
+    const items = manage ? EMPLOYEES : readOnlyRows();
+    return { items, total: items.length, nextCursor: null };
+  });
   flagOn(mock);
   return mock;
 }
@@ -30,7 +40,12 @@ async function companyOrg(page: Page, user: Json = MARKED_HR, permissions = HR_A
 const byContact = ({ userId, linked, ...rest }: Json) => rest; // eslint-disable-line @typescript-eslint/no-unused-vars
 const storedUser = (page: Page) => page.evaluate(() => JSON.parse(localStorage.getItem('user') || 'null'));
 
+// `next dev` compiles each page on its first visit (seconds for /org/insights with its charts), and these tests
+// are often the first to open an /org page: give navigation time (test.slow triples the test timeout).
+const FIRST_VISIT = { timeout: 60_000 };
+
 test.describe('sign-in and routing', () => {
+  test.slow();
   test.beforeEach(async ({ page }) => {
     // Nothing may reach a real service (live API, Firebase, Google).
     await page.route(/^https?:\/\/(?!localhost[:/])/, route => route.abort());
@@ -47,9 +62,8 @@ test.describe('sign-in and routing', () => {
     await page.getByTestId('hr-email-input').fill('hr@example.test');
     await page.getByTestId('hr-password-input').fill('secret-pass');
     await page.getByTestId('hr-submit').click();
-    // In /org (the login page asks for /org/people; the Shell may first open the first /org page for the role).
-    // The first /org page may still be compiling in `next dev`.
-    await expect(page).toHaveURL(/\/org\/(people|insights)\/?$/, { timeout: 20_000 });
+    // The login page and the Shell both open /org/people for a company HR login (the first /org page may still be compiling in `next dev`).
+    await expect(page).toHaveURL(/\/org\/people\/?$/, FIRST_VISIT);
     expect(mock.writes(/^\/auth\/login$/)[0].body).toEqual({ email: 'hr@example.test', password: 'secret-pass', requestedRole: 'corporate_hr' });
     expect(await storedUser(page)).toMatchObject({ userType: 'corporate_hr', organizationUser: true, organizationRoles: ['hr'], organizationIds: ['org-3'] });
     // The organisation navigation, not the HR one.
@@ -67,7 +81,7 @@ test.describe('sign-in and routing', () => {
     await page.getByTestId('hr-email-input').fill('hr@example.test');
     await page.getByTestId('hr-password-input').fill('secret-pass');
     await page.getByTestId('hr-submit').click();
-    await expect(page).toHaveURL(/\/hr\/?$/, { timeout: 20_000 });
+    await expect(page).toHaveURL(/\/hr\/?$/, FIRST_VISIT);
     // The flag is asked once; off leaves the stored user alone and the person in /hr.
     await expect.poll(() => mock.reads(SESSION).length).toBeGreaterThan(0);
     await page.waitForTimeout(300);
@@ -82,7 +96,7 @@ test.describe('sign-in and routing', () => {
     test(`a marked HR session on ${from} is sent to ${to}`, async ({ page }) => {
       await companyOrg(page);
       await page.goto(from);
-      await expect(page).toHaveURL(new RegExp(`${to}/?$`));
+      await expect(page).toHaveURL(new RegExp(`${to}/?$`), FIRST_VISIT);
     });
   }
 
@@ -310,14 +324,56 @@ test.describe('company people in /org (flag on)', () => {
   });
 
   test('a role without beneficiaries.manage sees the list only', async ({ page }) => {
-    const mock = await companyOrg(page, { ...MARKED_HR, organizationRoles: ['analyst'] }, ['organization.read', 'beneficiaries.read']);
-    mock.on('GET', /^\/b2b\/organizations\/org-3\/beneficiaries$/, () => ({ items: EMPLOYEES.map(({ email, phone, ...e }) => e), total: 3, nextCursor: null })); // eslint-disable-line @typescript-eslint/no-unused-vars
+    await companyOrg(page, { ...MARKED_HR, organizationRoles: ['analyst'] }, ['organization.read', 'beneficiaries.read'], 'analyst');
     await page.goto('/org/people');
     await expect(page.getByTestId('org-staff-list')).toContainText('Fatuma Hassan');
     await expect(page.getByText('Your role can see the staff list but not change it.')).toBeVisible();
     await expect(page.getByTestId('org-staff-add')).toHaveCount(0);
     await expect(page.getByTestId('org-staff-import-open')).toHaveCount(0);
     await expect(page.getByTestId('org-staff-list').getByRole('button')).toHaveCount(0);
+  });
+
+  // Owner and manager hold beneficiaries.manage but are not company-staff roles (companyStaffManage false).
+  for (const role of ['owner', 'manager']) {
+    test(`${role}: read-only list (no add, import, status, link, contact details)`, async ({ page }) => {
+      const mock = await companyOrg(page, { ...MARKED_HR, userType: 'member', organizationRoles: [role] }, HR_ACCESS, role);
+      await page.goto('/org/people');
+      const list = page.getByTestId('org-staff-list');
+      await expect(list).toContainText('Fatuma Hassan');
+      await expect(list).not.toContainText('fatuma@mwenge.test');
+      await expect(page.getByText('Your organisation’s HR and admin users manage company staff.')).toBeVisible();
+      await expect(page.getByTestId('org-staff-add')).toHaveCount(0);
+      await expect(page.getByTestId('org-staff-import-open')).toHaveCount(0);
+      await expect(page.getByTestId('org-staff-link-cemp_2')).toHaveCount(0);
+      await expect(list.getByRole('button')).toHaveCount(0);
+      expect(mock.writes()).toEqual([]);
+    });
+  }
+
+  test('admin: sees the controls', async ({ page }) => {
+    await companyOrg(page, { ...MARKED_HR, userType: 'member', organizationRoles: ['admin'] }, HR_ACCESS, 'admin');
+    await page.goto('/org/people');
+    await expect(page.getByTestId('org-staff-add')).toBeVisible();
+    await expect(page.getByTestId('org-staff-import-open')).toBeVisible();
+    await expect(page.getByTestId('org-staff-row-cemp_1').getByRole('button', { name: 'Suspend' })).toBeVisible();
+    await expect(page.getByTestId('org-staff-link-cemp_2')).toBeVisible();
+    await expect(page.getByTestId('org-staff-list')).toContainText('fatuma@mwenge.test');
+  });
+
+  test('403 forbidden with requiredRoles reads as "not allowed" (EN and SW)', async ({ page }) => {
+    const mock = await companyOrg(page);
+    mock.on('POST', /^\/b2b\/organizations\/org-3\/beneficiaries$/, () => ({ status: 403, json: { error: 'forbidden', requiredRoles: ['hr', 'admin'] } }));
+    await page.goto('/org/people');
+    await page.getByTestId('org-staff-name').fill('Neema Said');
+    await page.getByTestId('org-staff-add-button').click();
+    await expect(page.getByRole('alert').filter({ hasText: 'Only your organisation’s HR and admin users can manage company staff.' })).toBeVisible();
+    await expect(page.getByTestId('org-staff-pin')).toHaveCount(0);
+    // Runs after the mock's own init script (which sets English), so the reload opens in Swahili.
+    await page.addInitScript(() => localStorage.setItem('locale', 'sw'));
+    await page.reload();
+    await page.getByTestId('org-staff-name').fill('Neema Said');
+    await page.getByTestId('org-staff-add-button').click();
+    await expect(page.getByRole('alert').filter({ hasText: 'Watumiaji wa HR na admin wa shirika lako pekee ndio wanaweza kusimamia wafanyakazi wa kampuni.' })).toBeVisible();
   });
 
   test('Swahili: form, PIN dialog and an error', async ({ page }) => {
@@ -344,11 +400,12 @@ test.describe('company people in /org (flag on)', () => {
 
   test('challenges, rewards and groups use the organisation routes (no /corporate calls)', async ({ page }) => {
     const mock = await companyOrg(page);
-    for (const path of ['/org/challenges', '/org/rewards', '/org/groups']) {
+    for (const [path, route] of [['/org/challenges', 'challenges'], ['/org/rewards', 'rewards'], ['/org/groups', 'groups']]) {
       await page.goto(path);
       await expect(page).toHaveURL(new RegExp(`${path}/?$`));
+      // Each page asks its own organisation route before the next one opens (it may still be compiling).
+      await expect.poll(() => mock.calls.filter(c => c.path.startsWith(`/b2b/organizations/org-3/${route}`)).length, { timeout: 15_000 }).toBeGreaterThan(0);
     }
-    await expect.poll(() => mock.calls.filter(c => /^\/b2b\/organizations\/org-3\/(challenges|rewards|groups)/.test(c.path)).length).toBeGreaterThanOrEqual(3);
     expect(mock.calls.filter(c => c.path.startsWith('/corporate/')).map(c => c.path)).toEqual([]);
   });
 });

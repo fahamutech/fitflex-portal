@@ -521,7 +521,13 @@ export function Shell({ children }: { children: ReactNode }) {
     if (inOrganizerArea && path !== '/organizer/onboarding') return homeFor(user);
 
     // B5b: company HR in the organisation area: an old /hr page opens the /org page of the same name.
-    if (isOrgUser && isHrInOrg(user)) { const to = orgPathForHr(path); if (to) return to; }
+    if (isOrgUser && isHrInOrg(user)) {
+      const to = orgPathForHr(path);
+      if (to) return to;
+      // Anywhere else outside /org (e.g. /login right after sign-in): the same page the login page opens, so the
+      // two redirects agree instead of racing.
+      if (path !== '/org' && !path.startsWith('/org/')) return orgHome(user?.organizationRoles);
+    }
     // Someone signed in for an organisation's billing only ever sees /org; nobody else does.
     // Exact area match: /organizer (events S2) is not the /org area.
     const inOrgArea = path === '/org' || path.startsWith('/org/');

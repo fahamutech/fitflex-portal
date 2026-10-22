@@ -798,7 +798,8 @@ export const api = {
   createB2BOrganization: (token: string, body: Partial<B2BOrganization>) =>
     request<{ organization: B2BOrganization }>('/admin/b2b/organizations', { method: 'POST', body: JSON.stringify(body) }, token),
   b2bOrganization: (token: string, id: string) =>
-    request<{ organization: B2BOrganization; access: { role: string; permissions: string[] } }>(`/b2b/organizations/${encodeURIComponent(id)}`, {}, token),
+    // companyStaffManage (B5a): may add, change, link and import a company's staff here (org roles hr/admin, ORG_ONLY_SPONSORS on).
+    request<{ organization: B2BOrganization; access: { role: string; permissions: string[]; companyStaffManage?: boolean } }>(`/b2b/organizations/${encodeURIComponent(id)}`, {}, token),
   updateB2BOrganization: (token: string, id: string, body: Partial<B2BOrganization>) =>
     request<{ organization: B2BOrganization }>(`/b2b/organizations/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify(body) }, token),
   setB2BOrganizationStatus: (token: string, id: string, status: string, reason?: string) =>

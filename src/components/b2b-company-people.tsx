@@ -17,15 +17,17 @@ import { ConfirmDialog, Dialog, DialogFooter } from '@/components/dialog';
  * fitflex-functions#252 and B2B_FOUNDATION.md §3a). With the flag off the older screens are used instead.
  */
 
-type Mine = { organization: { id: string }; permissions: string[] };
+type Mine = { organization: { id: string }; permissions: string[]; companyStaffManage?: boolean };
 type T = (key: MessageKey) => string;
 
 const known = (key: string): key is MessageKey => key in messages.en;
 
 /** The message for an error the server answered with, or the fallback. */
 function errorText(t: T, err: unknown, fallback: MessageKey): string {
-  const body = errorBody<{ seatsAvailable?: number; requested?: number }>(err);
+  const body = errorBody<{ seatsAvailable?: number; requested?: number; requiredRoles?: string[] }>(err);
   const code = body?.error;
+  // Company staff are managed by the organisation's HR and admin users only (owner decision, functions#252 7bee485).
+  if (code === 'forbidden' && Array.isArray(body?.requiredRoles)) return t('b2b.hrOrg.err.companyStaffRoles');
   // An import that needs more seats than are free adds nobody, and says how many it asked for.
   if (code === 'seat_limit_reached' && typeof body?.requested === 'number') {
     return fmt(t('b2b.hrOrg.err.seat_limit_import'), { requested: body.requested, available: body.seatsAvailable ?? 0 });
@@ -76,7 +78,9 @@ export function CompanyPeopleOr({ token, mine, children }: { token: string; mine
 export function CompanyPeople({ token, mine }: { token: string; mine: Mine }) {
   const { t } = useApp();
   const orgId = mine.organization.id;
-  const canManage = mine.permissions.includes('beneficiaries.manage');
+  // Owner decision (functions#252 7bee485): only org roles hr and admin manage a company's staff, so the
+  // server says so (access.companyStaffManage); beneficiaries.manage alone is not enough here.
+  const canManage = mine.companyStaffManage === true;
   const [people, setPeople] = useState<B2BBeneficiary[] | null>(null);
   const [total, setTotal] = useState(0);
   const [search, setSearch] = useState('');
