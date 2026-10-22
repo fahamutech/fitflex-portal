@@ -196,9 +196,6 @@ export async function setupB2B(page_: Page, user: Json | null = ADMIN, extra: Ar
     ['GET', /^\/b2b\/organizations\/([^/]+)\/beneficiary-invites$/, () => ({ items: [], invited: 0, emailConfigured: false, smsConfigured: false })],
     ['GET', /^\/b2b\/organizations\/([^/]+)\/program-lifecycle$/, () => ({ today: '2026-10-12', items: [] })],
     ['POST', /^\/b2b\/organizations\/([^/]+)\/beneficiaries$/, c => ({ beneficiary: { ...BENEFICIARIES[0], id: 'ben-new', displayName: 'New Person', beneficiaryType: c.body?.beneficiaryType ?? 'member' } })],
-    // B5b: the portal asks the link route about an id that can't exist to learn whether ORG_ONLY_SPONSORS is on.
-    // Off here (404 not_found), as on a server without the flag; a spec answers beneficiary_not_found for on.
-    ['POST', /^\/b2b\/organizations\/([^/]+)\/beneficiaries\/__flag_probe__\/link$/, () => ({ status: 404, json: { error: 'not_found' } })],
     ['POST', /^\/b2b\/organizations\/([^/]+)\/beneficiaries\/([^/]+)\/status$/, (c, m) => ({ beneficiary: { ...BENEFICIARIES.find(b => b.id === m[2]), status: c.body?.status } })],
     // Programmes and benefits
     ['GET', /^\/b2b\/organizations\/([^/]+)\/programs$/, () => page([PROGRAM, PROGRAM_PENDING])],
@@ -255,6 +252,8 @@ export async function setupB2B(page_: Page, user: Json | null = ADMIN, extra: Ar
     ['POST', /^\/admin\/b2b\/payments\/([^/]+)\/allocate$/, () => ({ payment: PAYMENTS[0] })],
     ['POST', /^\/admin\/b2b\/payments\/([^/]+)\/reverse$/, () => ({ payment: { ...PAYMENTS[0], status: 'reversed' } })],
     // Organisation's own billing
+    // B5b: what a sign-in would say about this session (functions#252). Flag off here; a spec overrides it.
+    ['GET', /^\/b2b\/me\/organization-session$/, () => ({ orgOnlySponsors: false })],
     ['GET', /^\/b2b\/me\/organizations$/, () => ({ organizations: [{ id: 'org-1', legalName: 'Safari Insurance Ltd', tradingName: 'Safari Cover', role: 'finance', status: 'active' }] })],
     ['GET', /^\/b2b\/organizations\/([^/]+)$/, (_c, m) => ({ organization: org(m[1]), access: { role: 'admin', permissions: ['beneficiaries.read', 'beneficiaries.manage', 'programs.read', 'analytics.read', 'analytics.people', 'billing.read', 'engagement.read'] } })],
     ['GET', /^\/b2b\/organizations\/([^/]+)\/billing$/, () => ({ ...BALANCES, organization: { id: 'org-1', name: 'Safari Cover' }, account: { organizationId: 'org-1', contactName: 'Neema Finance', email: 'finance@safari.test', phone: null, taxIdentificationNumber: 'TIN-200', registrationNumber: null, currency: 'TZS', source: 'billing_account' }, terms: { reference: 'AGR-0001', contractReference: null, billingCycle: 'monthly', prepaidTermsDays: 0, usageTermsDays: 14, platformFeeTzs: 50000 }, recentInvoices: INVOICES.slice(0, 2) })],

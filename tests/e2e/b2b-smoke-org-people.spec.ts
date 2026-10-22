@@ -103,10 +103,8 @@ test.describe('company HR', () => {
     await form.getByLabel('Email or mobile number (optional)', { exact: true }).fill('rehema@mwenge.test');
     await form.getByLabel('Department (optional)', { exact: true }).fill('Finance');
     await page.getByTestId('company-staff-add-button').click();
-    // B5b: the flag probe (POST …/__flag_probe__/link) changes nothing and isn't part of this flow.
-    const staffWrites = () => mock.writes().filter(c => !c.path.includes('__flag_probe__'));
-    await expect.poll(() => staffWrites().length).toBe(3);
-    const [provision, activate, link] = staffWrites();
+    await expect.poll(() => mock.writes().length).toBe(3);
+    const [provision, activate, link] = mock.writes();
     expect(provision).toMatchObject({ method: 'POST', path: '/corporate/staff', body: { displayName: 'Rehema Ally', department: 'Finance', email: 'rehema@mwenge.test' } });
     expect(activate).toMatchObject({ method: 'POST', path: '/corporate/staff/emp-new/status', body: { status: 'active' } });
     expect(link).toMatchObject({ method: 'POST', path: '/corporate/staff/emp-new/link', body: { email: 'rehema@mwenge.test' } });

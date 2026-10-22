@@ -6,8 +6,9 @@ import { B2BMock, HR, Json, setupB2B } from './helpers/b2b-mock';
 
 const MARKED_HR = { ...HR, organizationUser: true, organizationRoles: ['hr'], organizationIds: ['org-3'] };
 const MY_COMPANY = { organizations: [{ id: 'org-3', legalName: 'Mwenge Textiles', tradingName: null, role: 'hr', status: 'active' }] };
-const FLAG_PROBE = /^\/b2b\/organizations\/org-3\/beneficiaries\/__flag_probe__\/link$/;
-const flagOn = (mock: B2BMock) => mock.on('POST', FLAG_PROBE, () => ({ status: 404, json: { error: 'beneficiary_not_found' } }));
+// GET /b2b/me/organization-session (functions#252): what a sign-in would say about this session now.
+const SESSION = /^\/b2b\/me\/organization-session$/;
+const flagOn = (mock: B2BMock) => mock.on('GET', SESSION, () => ({ orgOnlySponsors: true, organizationUser: true, organizationRoles: ['hr'], organizationIds: ['org-3'] }));
 const HR_ACCESS = ['organization.read', 'beneficiaries.read', 'beneficiaries.manage', 'programs.read', 'analytics.read', 'analytics.people', 'engagement.read'];
 
 const EMPLOYEES = [
@@ -68,7 +69,7 @@ test.describe('sign-in and routing', () => {
     await page.getByTestId('hr-submit').click();
     await expect(page).toHaveURL(/\/hr\/?$/, { timeout: 20_000 });
     // The flag is asked once; off leaves the stored user alone and the person in /hr.
-    await expect.poll(() => mock.writes(FLAG_PROBE).length).toBe(1);
+    await expect.poll(() => mock.reads(SESSION).length).toBeGreaterThan(0);
     await page.waitForTimeout(300);
     await expect(page).toHaveURL(/\/hr\/?$/);
     const user = await storedUser(page);
@@ -101,8 +102,22 @@ test.describe('sign-in and routing', () => {
     const user = await storedUser(page);
     expect(user).toMatchObject({ id: 'hr-1', userType: 'corporate_hr', organizationUser: true, organizationRoles: ['hr'], organizationIds: ['org-3'] });
     expect(await page.evaluate(() => localStorage.getItem('token'))).toBe('b2b-e2e-token');
-    // No sign-in was needed and nothing was written (the probe changes nothing).
-    expect(mock.writes().filter(c => !FLAG_PROBE.test(c.path))).toEqual([]);
+    // No sign-in was needed and nothing was written.
+    expect(mock.writes()).toEqual([]);
+    expect(mock.reads(SESSION).length).toBeGreaterThan(0);
+  });
+
+  test('an older server without the session route (404) changes nothing', async ({ page }) => {
+    const mock = await setupB2B(page, HR);
+    mock.on('GET', /^\/b2b\/me\/organizations$/, () => MY_COMPANY);
+    mock.on('GET', SESSION, () => ({ status: 404, json: { error: 'not_found' } }));
+    await page.goto('/hr/people');
+    await expect(page.getByTestId('company-staff-list')).toBeVisible();
+    await expect.poll(() => mock.reads(SESSION).length).toBeGreaterThan(0);
+    await page.waitForTimeout(300);
+    await expect(page).toHaveURL(/\/hr\/people\/?$/);
+    expect((await storedUser(page)).organizationUser).toBeUndefined();
+    expect(mock.writes()).toEqual([]);
   });
 
   test('an HR session stored before the flag stays in /hr while the flag is off', async ({ page }) => {
@@ -110,7 +125,8 @@ test.describe('sign-in and routing', () => {
     mock.on('GET', /^\/b2b\/me\/organizations$/, () => MY_COMPANY);
     await page.goto('/hr/people');
     await expect(page.getByTestId('company-staff-list')).toBeVisible();
-    await expect.poll(() => mock.writes(FLAG_PROBE).length).toBeGreaterThan(0);
+    // The default mock answers { orgOnlySponsors: false }.
+    await expect.poll(() => mock.reads(SESSION).length).toBeGreaterThan(0);
     await page.waitForTimeout(300);
     await expect(page).toHaveURL(/\/hr\/people\/?$/);
     expect((await storedUser(page)).organizationUser).toBeUndefined();
@@ -203,7 +219,7 @@ test.describe('company people in /org (flag on)', () => {
 
   test('link by number and unlink with an empty body', async ({ page }) => {
     const mock = await companyOrg(page);
-    mock.on('POST', /^\/b2b\/organizations\/org-3\/beneficiaries\/([^/]+)\/link$/, (c, m) => (m[1] === '__flag_probe__' ? undefined : { beneficiary: { ...EMPLOYEES.find(e => e.id === m[1]), linked: !!Object.keys(c.body ?? {}).length }, writtenThrough: 'corporate_staff' }));
+    mock.on('POST', /^\/b2b\/organizations\/org-3\/beneficiaries\/([^/]+)\/link$/, (c, m) => ({ beneficiary: { ...EMPLOYEES.find(e => e.id === m[1]), linked: !!Object.keys(c.body ?? {}).length }, writtenThrough: 'corporate_staff' }));
     await page.goto('/org/people');
     await page.getByTestId('org-staff-link-cemp_2').fill('0712345678');
     await page.getByTestId('org-staff-row-cemp_2').getByRole('button', { name: 'Link', exact: true }).click();
@@ -296,7 +312,6 @@ test.describe('company people in /org (flag on)', () => {
   test('a role without beneficiaries.manage sees the list only', async ({ page }) => {
     const mock = await companyOrg(page, { ...MARKED_HR, organizationRoles: ['analyst'] }, ['organization.read', 'beneficiaries.read']);
     mock.on('GET', /^\/b2b\/organizations\/org-3\/beneficiaries$/, () => ({ items: EMPLOYEES.map(({ email, phone, ...e }) => e), total: 3, nextCursor: null })); // eslint-disable-line @typescript-eslint/no-unused-vars
-    mock.on('POST', FLAG_PROBE, () => ({ status: 403, json: { error: 'forbidden' } }));
     await page.goto('/org/people');
     await expect(page.getByTestId('org-staff-list')).toContainText('Fatuma Hassan');
     await expect(page.getByText('Your role can see the staff list but not change it.')).toBeVisible();

@@ -78,8 +78,6 @@ const NO_SUCH_PROFILE = new Set(['admin_self_registration_not_allowed', 'profile
 export const ORG_BILLING_ROLES = new Set(['owner', 'admin', 'finance']);
 /** Roles that see the organisation's people (beneficiaries). Everyone sees its programmes. */
 export const ORG_PEOPLE_ROLES = new Set(['owner', 'admin', 'manager', 'hr', 'analyst']);
-/** An id no beneficiary can have (server ids are prefixed, e.g. b2bb_/cemp_): see api.orgOnlySponsors. */
-const ORG_FLAG_PROBE_ID = '__flag_probe__';
 
 /** How a person is named when adding them: the email or mobile number of their FitFlex account, or their user id. */
 export type UserContact = { userId?: string; email?: string; phone?: string };
@@ -819,22 +817,12 @@ export const api = {
   linkB2BBeneficiary: (token: string, id: string, beneficiaryId: string, contact: UserContact | Record<string, never>) =>
     request<{ beneficiary: B2BBeneficiary; writtenThrough?: 'corporate_staff' }>(`/b2b/organizations/${encodeURIComponent(id)}/beneficiaries/${encodeURIComponent(beneficiaryId)}/link`, { method: 'POST', body: JSON.stringify(contact) }, token),
   /**
-   * B5a: is ORG_ONLY_SPONSORS on? The server has no flag endpoint, so this asks the link route about an id
-   * that cannot exist: it answers 404 `not_found` while the flag is off, and (flag on) `beneficiary_not_found`,
-   * or `forbidden` for a role without beneficiaries.manage. Nothing is changed either way. Anything else
-   * (network, 5xx, an organisation the caller can't reach) is `unknown`, which callers treat as off.
+   * B5a: what a sign-in would say about this session right now (functions#252): always { orgOnlySponsors };
+   * for a company HR login that reaches its organisation while the flag is on, also the organisation fields.
+   * 404 on an older server.
    */
-  orgOnlySponsors: async (token: string, orgId: string): Promise<'on' | 'off' | 'unknown'> => {
-    try {
-      await request(`/b2b/organizations/${encodeURIComponent(orgId)}/beneficiaries/${ORG_FLAG_PROBE_ID}/link`, { method: 'POST', body: '{}' }, token);
-      return 'unknown';
-    } catch (err) {
-      const code = err instanceof ApiError ? (err.body as { error?: string } | null)?.error : undefined;
-      if (err instanceof ApiError && err.status === 404 && code === 'not_found') return 'off';
-      if (code === 'beneficiary_not_found' || code === 'forbidden') return 'on';
-      return 'unknown';
-    }
-  },
+  organizationSession: (token: string) =>
+    request<{ orgOnlySponsors: boolean; organizationUser?: boolean; organizationRoles?: string[]; organizationIds?: string[] }>('/b2b/me/organization-session', {}, token),
   setB2BBeneficiaryStatus: (token: string, id: string, beneficiaryId: string, status: string) =>
     request<{ beneficiary: B2BBeneficiary }>(`/b2b/organizations/${encodeURIComponent(id)}/beneficiaries/${encodeURIComponent(beneficiaryId)}/status`, { method: 'POST', body: JSON.stringify({ status }) }, token),
   // ── B2B wellness programmes and benefits ──

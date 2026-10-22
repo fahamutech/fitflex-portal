@@ -43,9 +43,12 @@ const countLabel = (t: T, base: 'b2b.hrOrg.count' | 'b2b.hrOrg.import.confirm', 
 
 const flagCache = new Map<string, 'on' | 'off'>();
 
-/** 'checking' until known; 'off' also when it can't be told (the older screens keep working either way). */
-export function useOrgOnlySponsors(token: string, orgId: string, enabled: boolean): 'checking' | 'on' | 'off' {
-  const cacheKey = `${token.slice(-24)}:${orgId}`;
+/**
+ * GET /b2b/me/organization-session says whether the flag is on (functions#252). 'checking' until known;
+ * 'off' also when it can't be told (404 on an older server, an error): the older screens keep working.
+ */
+export function useOrgOnlySponsors(token: string, enabled: boolean): 'checking' | 'on' | 'off' {
+  const cacheKey = token.slice(-24);
   const [state, setState] = useState<'checking' | 'on' | 'off'>(() => (enabled ? flagCache.get(cacheKey) ?? 'checking' : 'off'));
   useEffect(() => {
     if (!enabled) { setState('off'); return; }
@@ -53,20 +56,17 @@ export function useOrgOnlySponsors(token: string, orgId: string, enabled: boolea
     if (cached) { setState(cached); return; }
     let cancelled = false;
     setState('checking');
-    api.orgOnlySponsors(token, orgId).then((flag) => {
-      if (cancelled) return;
-      const answer = flag === 'on' ? 'on' : 'off';
-      if (flag !== 'unknown') flagCache.set(cacheKey, answer);
-      setState(answer);
-    });
+    api.organizationSession(token)
+      .then((s) => { const answer = s.orgOnlySponsors === true ? 'on' : 'off'; flagCache.set(cacheKey, answer); if (!cancelled) setState(answer); })
+      .catch(() => { if (!cancelled) setState('off'); });
     return () => { cancelled = true; };
-  }, [token, orgId, enabled, cacheKey]);
+  }, [token, enabled, cacheKey]);
   return state;
 }
 
 /** For a company's organisation: this screen while ORG_ONLY_SPONSORS is on, else `fallback` (unchanged). */
 export function CompanyPeopleOr({ token, mine, children }: { token: string; mine: Mine; children: ReactNode }) {
-  const flag = useOrgOnlySponsors(token, mine.organization.id, true);
+  const flag = useOrgOnlySponsors(token, true);
   if (flag === 'checking') return <Spinner className="h-6 w-6" />;
   return flag === 'on' ? <CompanyPeople token={token} mine={mine} /> : <>{children}</>;
 }
