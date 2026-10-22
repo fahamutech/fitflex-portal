@@ -28,6 +28,11 @@ import { AutomationsTab, automationTitle } from './communication-automations';
 import { ResultsPanel, SourcesTable, periodTitle } from './communication-results';
 
 const TRANSACTIONAL: CommsPurpose[] = ['renewal', 'payment', 'announcement'];
+// Vendors get service messages only until the vendor app lets them switch
+// marketing off: the backend refuses a marketing purpose (promotion,
+// engagement, general) for recipients 'vendors' with vendor_marketing_not_available.
+const vendorBlocked = (recipients: CommsRecipients, purpose?: CommsPurpose) =>
+  recipients === 'vendors' && purpose != null && !TRANSACTIONAL.includes(purpose);
 const CHANNELS: CommsChannel[] = ['in_app', 'push', 'whatsapp', 'sms'];
 const STEPS = ['purpose', 'audience', 'message', 'channels', 'schedule', 'preview', 'confirm'] as const;
 type Step = typeof STEPS[number];
@@ -486,9 +491,13 @@ function Composer({ scope, token, t, locale, gymId, campaign, templateId, onClos
     setContent(c => { const { [l]: _gone, ...rest } = c.translations ?? {}; return { ...c, translations: rest }; });
   }
 
+  const marketingToVendors = vendorBlocked(recipients, purpose);
+
   // Live "N members match" count.
   useEffect(() => {
     if (step !== 'audience') return;
+    // The backend would refuse it; the note explains why instead.
+    if (marketingToVendors) { setCount(null); return; }
     const timer = setTimeout(() => {
       api.commsAudiencePreview(token, scope, {
         gymId: scope === 'owner' ? gymId : undefined,
@@ -499,7 +508,7 @@ function Composer({ scope, token, t, locale, gymId, campaign, templateId, onClos
         .catch(e => setError(errorText(t, e)));
     }, 400);
     return () => clearTimeout(timer);
-  }, [step, token, scope, gymId, recipients, preset, JSON.stringify(filter), purpose]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [step, token, scope, gymId, recipients, preset, JSON.stringify(filter), purpose, marketingToVendors]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     setError(null);
@@ -524,8 +533,8 @@ function Composer({ scope, token, t, locale, gymId, campaign, templateId, onClos
   const largeSend = needsConfirm || (preview ? preview.counts.targeted >= preview.largeSendThreshold : false);
 
   const canContinue: Record<Step, boolean> = {
-    purpose: Boolean(purpose),
-    audience: (count?.n ?? 0) > 0,
+    purpose: Boolean(purpose) && !marketingToVendors,
+    audience: (count?.n ?? 0) > 0 && !marketingToVendors,
     message: textOk(texts[main], true) && others.every(l => textOk(texts[l], false)) && !unknown.length && !missing.length,
     channels: channels.length > 0,
     schedule: !tooSoon,
@@ -586,15 +595,21 @@ function Composer({ scope, token, t, locale, gymId, campaign, templateId, onClos
 
       <Card className="p-5 space-y-4">
         {step === 'purpose' && (
-          <div className="grid gap-3 sm:grid-cols-2">
-            {PURPOSES.map(p => (
-              <button key={p} type="button" onClick={() => setPurpose(p)} data-testid={`purpose-${p}`}
-                className={`rounded-[var(--radius-lg)] border p-4 text-left ${purpose === p ? 'border-[var(--color-brand-500)] ring-1 ring-[var(--color-brand-500)]' : 'border-[var(--color-border-secondary)]'}`}>
-                <p className="text-sm font-semibold">{t(`comms.purpose.${p}`)}</p>
-                <p className="text-xs text-[var(--color-fg-quaternary)]">{t(`comms.purpose.${p}.body`)}</p>
-              </button>
-            ))}
-          </div>
+          <>
+            {recipients === 'vendors' && <div data-testid="vendor-marketing-note"><Alert tone="info">{t('comms.vendor.marketingUnavailable')}</Alert></div>}
+            <div className="grid gap-3 sm:grid-cols-2">
+              {PURPOSES.map(p => {
+                const off = vendorBlocked(recipients, p);
+                return (
+                  <button key={p} type="button" onClick={() => setPurpose(p)} data-testid={`purpose-${p}`} disabled={off}
+                    className={`rounded-[var(--radius-lg)] border p-4 text-left ${off ? 'cursor-not-allowed opacity-50' : ''} ${purpose === p ? 'border-[var(--color-brand-500)] ring-1 ring-[var(--color-brand-500)]' : 'border-[var(--color-border-secondary)]'}`}>
+                    <p className="text-sm font-semibold">{t(`comms.purpose.${p}`)}</p>
+                    <p className="text-xs text-[var(--color-fg-quaternary)]">{t(`comms.purpose.${p}.body`)}</p>
+                  </button>
+                );
+              })}
+            </div>
+          </>
         )}
 
         {step === 'audience' && (
@@ -610,6 +625,13 @@ function Composer({ scope, token, t, locale, gymId, campaign, templateId, onClos
                   ))}
                 </div>
               </Field>
+            )}
+            {marketingToVendors && (
+              <div data-testid="vendor-marketing-blocked"><Alert tone="warning">
+                {t('comms.vendor.marketingUnavailable')}{' '}
+                <Button type="button" variant="link" className="inline min-h-11 px-0 font-medium text-inherit underline" onClick={() => setStep('purpose')}
+                  data-testid="vendor-change-purpose">{t('comms.vendor.changePurpose')}</Button>
+              </Alert></div>
             )}
             <div data-testid="audience-count"><Alert tone="info">
               {count == null ? '…' : count.n === 0 ? t(audienceKeys(recipients, preset, 0).none)

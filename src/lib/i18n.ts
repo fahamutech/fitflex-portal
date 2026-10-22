@@ -1591,7 +1591,9 @@ export const messages = {
     'comms.vendorPreset.new.body': 'Vendors who joined in the last 30 days.',
     'comms.warn.no_swahili_text': 'This message has no Swahili text. {n} of {of} vendor recipients read Swahili and will get it in the language it was written in. Add a Swahili version.',
     'comms.warn.no_english_text': 'This message has no English text. {n} of {of} vendor recipients chose English and will get it in the language it was written in. Add an English version.',
-    'comms.skip.vendor_unavailable': 'Vendor suspended or closed'
+    'comms.skip.vendor_unavailable': 'Vendor suspended or closed',
+    'comms.vendor.marketingUnavailable': 'Promotions to vendors aren\'t available yet — vendors can\'t opt out in the app yet. Choose a renewal reminder, payment or announcement.',
+    'comms.vendor.changePurpose': 'Change the purpose'
 ,
     'admin.nav.accountRecovery': 'Account recovery',
     'rec.title': 'Account recovery',
@@ -5101,6 +5103,8 @@ export const messages = {
     'comms.warn.no_swahili_text': 'Ujumbe huu hauna maandishi ya Kiswahili. Wapokeaji {n} kati ya {of} wa wauzaji husoma Kiswahili na wataupokea kwa lugha uliyoandikwa. Ongeza toleo la Kiswahili.',
     'comms.warn.no_english_text': 'Ujumbe huu hauna maandishi ya Kiingereza. Wapokeaji {n} kati ya {of} wa wauzaji walichagua Kiingereza na wataupokea kwa lugha uliyoandikwa. Ongeza toleo la Kiingereza.',
     'comms.skip.vendor_unavailable': 'Muuzaji amesimamishwa au amefungwa',
+    'comms.vendor.marketingUnavailable': 'Promosheni kwa wauzaji bado hazipatikani — wauzaji bado hawawezi kujiondoa kwenye app. Chagua kikumbusho cha kulipia tena, malipo au tangazo.',
+    'comms.vendor.changePurpose': 'Badilisha lengo la ujumbe',
     'admin.nav.accountRecovery': 'Kurejesha akaunti',
     'rec.title': 'Kurejesha akaunti',
     'rec.description': 'Watu waliopoteza namba na barua pepe zote zilizothibitishwa na kusahau PIN huomba hapa akaunti yao ihamishiwe kwenye namba au barua pepe mpya. Linganisha majibu yao na akaunti, kisha idhinisha au kataa.',

@@ -54,6 +54,7 @@ export function errorText(t: T, err: unknown): string {
     account_suspended: 'comms.error.accountSuspended',
     not_your_gym: 'comms.error.notYourGym',
     invalid_audience: 'comms.error.invalidAudience',
+    vendor_marketing_not_available: 'comms.vendor.marketingUnavailable',
   };
   return code && known[code] ? t(known[code]) : `${t('comms.error.generic')}${code ? ` (${code})` : ''}`;
 }
