@@ -2,6 +2,7 @@ import { expect, Page, test } from '@playwright/test';
 
 // Shop Phase 2 slice 3 ("Popular near you"): admins map vendors to areas on /admin/vendors.
 // Contract: fitflex-functions docs/shop-near-you-api.md (vendorProfile.cityId, regionId, deliveryAreaIds, areasSource).
+// AREAS are raw GET /admin/geo-areas rows (active, nameSw); /shop/areas rows are built from them (names, locatable, no active).
 const API = process.env.FITFLEX_API_URL || 'http://localhost:3000';
 
 const AREAS = [
@@ -10,7 +11,7 @@ const AREAS = [
   { id: 'tz-dar-city', level: 'city', name: 'Dar es Salaam', parentId: 'tz-dar', active: true },
   { id: 'tz-dar-kinondoni', level: 'district', name: 'Kinondoni', parentId: 'tz-dar-city', active: true },
   { id: 'tz-aru', level: 'region', name: 'Arusha', parentId: 'tz', active: true },
-  { id: 'tz-aru-city', level: 'city', name: 'Arusha', names: { en: 'Arusha City', sw: 'Jiji la Arusha' }, parentId: 'tz-aru', active: true },
+  { id: 'tz-aru-city', level: 'city', name: 'Arusha City', nameSw: 'Jiji la Arusha', parentId: 'tz-aru', active: true },
   { id: 'tz-mwz', level: 'region', name: 'Mwanza', parentId: 'tz', active: false },
 ];
 
@@ -40,7 +41,10 @@ async function setup(page: Page, mock: Mock = {}, locale = 'en') {
     }
     if (path === '/shop/areas') {
       if (mock.shopAreas === 'disabled') return route.fulfill({ status: 404, json: { error: 'feature_disabled' } });
-      return route.fulfill({ json: { areas: AREAS.filter(a => a.active).map(({ active: _a, ...a }) => a) } });
+      const rows = AREAS.filter(a => a.active).map(({ active: _a, nameSw, ...a }) => ({
+        ...a, names: { en: a.name, sw: nameSw || a.name }, locatable: a.level !== 'country', lat: null, lng: null, radiusKm: null,
+      }));
+      return route.fulfill({ json: { areas: rows } });
     }
     if (path === '/admin/vendors/v-unmapped' && req.method() === 'PUT') {
       const body = req.postDataJSON();
@@ -195,4 +199,11 @@ test('area names in English', async ({ page }) => {
   await page.getByTestId('vendor-areas-edit-v-mapped').click();
   await expect(page.getByRole('dialog').getByTestId('vendor-delivers-to')).toContainText('Arusha City');
   await expect(page.getByRole('dialog').getByTestId('vendor-areas-dropped')).toHaveCount(0);
+});
+
+test('Swahili names also come through the /shop/areas fallback (names.sw)', async ({ page }) => {
+  await setup(page, { geoAreas: 'forbidden' }, 'sw');
+  await page.goto('/admin/vendors');
+  await page.getByTestId('vendor-areas-edit-v-mapped').click();
+  await expect(page.getByRole('dialog').getByTestId('vendor-delivers-to')).toContainText('Jiji la Arusha');
 });

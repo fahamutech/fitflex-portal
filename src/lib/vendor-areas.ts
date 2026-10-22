@@ -24,9 +24,9 @@ export function ancestors(id: string, byId: Map<string, GeoArea>): GeoArea[] {
   return out;
 }
 
-/** Show each area's name in the reader's language when the backend sends one (falls back to `name`). */
+/** Show each area's name in the reader's language: `names[lang]` (/shop/areas) or `nameSw` (/admin/geo-areas rows), else `name`. */
 export function localiseAreas(areas: GeoArea[], locale: 'en' | 'sw'): GeoArea[] {
-  return areas.map(a => ({ ...a, name: a.names?.[locale]?.trim() || a.name }));
+  return areas.map(a => ({ ...a, name: a.names?.[locale]?.trim() || (locale === 'sw' ? a.nameSw?.trim() : '') || a.name }));
 }
 
 /** Usable = this area and every ancestor active (rows from /shop/areas carry no `active`, they are all usable). */
@@ -88,7 +88,7 @@ export function suggestAreas(texts: string[], areas: GeoArea[]): GeoArea[] {
       continue;
     }
     for (const level of order) {
-      const hit = areas.find(a => a.level === level && [a.name, a.names?.en, a.names?.sw].some(n => n?.toLowerCase() === q));
+      const hit = areas.find(a => a.level === level && [a.name, a.names?.en, a.names?.sw, a.nameSw].some(n => n?.toLowerCase() === q));
       if (hit) { found.set(hit.id, hit); break; }
     }
   }

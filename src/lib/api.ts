@@ -271,7 +271,10 @@ export type CampaignAnalytics = {
   campaign: { id: string; name: string; status: string; startsAt: string; endsAt: string }; range: PromotionAnalyticsRange;
   totals: PromotionMetrics; items: PromotionAnalyticsItem[]; notTracked: string[]; unverifiedEvents?: number;
 };
-export type GeoArea = { id: string; level: 'country' | 'region' | 'city' | 'district'; name: string; parentId: string | null; active?: boolean; /** Place name per language, when the backend sends it. */ names?: { en?: string | null; sw?: string | null } | null };
+export type GeoArea = { id: string; level: 'country' | 'region' | 'city' | 'district'; name: string; parentId: string | null; active?: boolean;
+  /** /shop/areas: place name per language (sw = nameSw or name). */ names?: { en?: string | null; sw?: string | null } | null;
+  /** /admin/geo-areas (raw row): Swahili place name, null = same as name. */ nameSw?: string | null;
+  /** /shop/areas: can stand for "where you are"; vendors may still pick any area. */ locatable?: boolean };
 export type EntityMatch = {
   entityType: ModerationEntityType; id: string; name: string; subtitle: string | null; status: string; moderationStatus: ModerationStatus;
   promotable: boolean; reasons: string[]; placements: PromotionPlacement[];
