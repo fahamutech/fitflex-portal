@@ -1,12 +1,13 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { Calculator, ChevronDown, ChevronRight, Plus, RefreshCw, Save } from 'lucide-react';
 import { useApp } from '../../providers';
 import { AdminProductFilters, api, AdminProductDraft, ApiError, PRODUCT_AGE_BANDS, ProductAgeBand, ProductStats, ProductStatsRecompute, ShopProduct, VendorSummary } from '@/lib/api';
 import { formatDateTime, formatNumber, money } from '@/lib/admin-utils';
 import { variantsOf } from '@/lib/vendor';
-import { Alert, Badge, Button, Card, Checkbox, Field, Input, PageHeader, Select, Spinner, Table, TBody, Td, Textarea, Th, THead, Tr } from '@/components/shared';
+import { Alert, Badge, Button, Card, CardContent, Checkbox, Field, Input, PageHeader, Select, Spinner, Table, TBody, Td, Textarea, Th, THead, Tr } from '@/components/shared';
 import { Dialog, DialogFooter } from '@/components/dialog';
 
 /** Cost and reorder level as typed: '' clears (sent as null). */
@@ -31,6 +32,17 @@ const hasTargets = (p: ShopProduct) => 'targetGender' in p || 'targetAgeBands' i
 const BAND_KEY = { '18_29': 'products.target.band.18_29', '30_44': 'products.target.band.30_44', '45_59': 'products.target.band.45_59', '60_plus': 'products.target.band.60_plus' } as const;
 const BAND_A11Y = { '18_29': 'products.target.a11y.18_29', '30_44': 'products.target.a11y.30_44', '45_59': 'products.target.a11y.45_59', '60_plus': 'products.target.a11y.60_plus' } as const;
 const NO_FILTERS: AdminProductFilters = {};
+const GENDER_FILTERS = ['everyone', 'women', 'men'] as const;
+const BAND_FILTERS = ['all', ...PRODUCT_AGE_BANDS] as const;
+/** Filters live in the URL (?targetGender=…&targetAgeBand=…) so refresh and Back keep them. Unknown values are dropped (the server would 400). */
+function filtersFrom(params: URLSearchParams): AdminProductFilters {
+  const g = params.get('targetGender'), b = params.get('targetAgeBand');
+  return {
+    ...((GENDER_FILTERS as readonly string[]).includes(g ?? '') ? { targetGender: g as AdminProductFilters['targetGender'] } : {}),
+    ...((BAND_FILTERS as readonly string[]).includes(b ?? '') ? { targetAgeBand: b as AdminProductFilters['targetAgeBand'] } : {}),
+  };
+}
+const STATUS_KEY = { active: 'vendor.products.status.active', paused: 'vendor.products.status.paused', archived: 'vendor.products.status.archived' } as const;
 
 /** Ratings to two places, counts whole. */
 const statText = (key: keyof ProductStats, v: number | null | undefined) => formatNumber(v, key === 'rating' ? 2 : 0);
@@ -45,7 +57,14 @@ const EMPTY_PRODUCT: AdminProductDraft = {
 };
 
 export default function ProductsPage() {
+  return <Suspense fallback={null}><ProductsInner /></Suspense>;
+}
+
+function ProductsInner() {
   const { token, user, t } = useApp();
+  const params = useSearchParams();
+  // Read from the URL when the page opens (refresh, Back, a shared link); kept in state so quick changes never use a stale URL.
+  const [filters, setFilters] = useState<AdminProductFilters>(() => filtersFrom(new URLSearchParams(params.toString())));
   const [products, setProducts] = useState<ShopProduct[]>([]);
   const [vendors, setVendors] = useState<VendorSummary[]>([]);
   const [loading, setLoading] = useState(true);
@@ -59,7 +78,6 @@ export default function ProductsPage() {
   const [openVariants, setOpenVariants] = useState<Set<string>>(new Set());
   const [checkingStats, setCheckingStats] = useState(false);
   const [recompute, setRecompute] = useState<Recompute | null>(null);
-  const [filters, setFilters] = useState<AdminProductFilters>(NO_FILTERS);
   // Sticky: once the server has sent target fields, keep the filters even when a filter matches nothing.
   const [targetsShown, setTargetsShown] = useState(false);
   const filtering = Boolean(filters.targetGender || filters.targetAgeBand);
@@ -95,9 +113,9 @@ export default function ProductsPage() {
   }
 
   useEffect(() => {
-    void load();
+    void load(filters);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token]);
+  }, [token, filters]);
 
   function updateDraft(id: string, patch: Partial<ShopProduct>) {
     setProducts((current) => current.map((product) => (
@@ -215,10 +233,15 @@ export default function ProductsPage() {
 
   const closeRecompute = () => { if (!recompute?.applying) setRecompute(null); };
 
+  /** Sets the filters (the effect above reloads) and mirrors them into the URL, keeping any other query params. */
   function applyFilters(next: AdminProductFilters) {
     setFilters(next);
     setSuccess(null);
-    void load(next);
+    const url = new URL(window.location.href);
+    url.searchParams.delete('targetGender'); url.searchParams.delete('targetAgeBand');
+    if (next.targetGender) url.searchParams.set('targetGender', next.targetGender);
+    if (next.targetAgeBand) url.searchParams.set('targetAgeBand', next.targetAgeBand);
+    window.history.replaceState(window.history.state, '', `${url.pathname}${url.search}${url.hash}`);
   }
 
   const bandsText = (bands: ProductAgeBand[] | undefined) =>
@@ -235,7 +258,7 @@ export default function ProductsPage() {
       <PageHeader
         title={t('products.title')}
         description={t('products.description')}
-        actions={<div className="flex gap-2">
+        actions={<div className="flex flex-wrap gap-2">
           <Button variant="secondary" size="sm" onClick={() => load()} disabled={loading}>
             <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
             {t('admin.action.refresh')}
@@ -254,7 +277,7 @@ export default function ProductsPage() {
       {success && <Alert tone="success">{success}</Alert>}
 
       {targetsShown && (
-        <Card>
+        <Card><CardContent>
           <div className="grid gap-4 sm:grid-cols-[12rem_12rem_auto] sm:items-end" data-testid="product-target-filters">
             <Field label={t('products.target.madeFor')}>
               <Select aria-label={t('products.target.filterMadeFor')} value={filters.targetGender ?? ''}
@@ -280,7 +303,7 @@ export default function ProductsPage() {
             )}
           </div>
           <p className="mt-3 text-sm text-[var(--color-fg-secondary)]" data-testid="product-target-note">{t('products.target.note')}</p>
-        </Card>
+        </CardContent></Card>
       )}
 
       {loading ? (
@@ -290,12 +313,12 @@ export default function ProductsPage() {
       ) : (
         <div className="space-y-3">
           {products.map((product) => (
-            <Card key={product.id}>
+            <Card key={product.id}><CardContent>
               <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_auto_10rem_11rem_auto] md:items-end">
                 <div className="min-w-0">
                   <div className="flex items-center gap-2">
                     <h2 className="truncate text-sm font-semibold text-[var(--color-fg-primary)]">{product.name}</h2>
-                    <Badge tone={product.status === 'active' ? 'success' : 'gray'}>{product.status}</Badge>
+                    <Badge tone={product.status === 'active' ? 'success' : 'gray'}>{STATUS_KEY[product.status] ? t(STATUS_KEY[product.status]) : product.status}</Badge>
                   </div>
                   <p className="mt-1 text-xs text-[var(--color-fg-tertiary)]">
                     {t('products.vendor')}: {vendorName(product.vendorId)} · {t('products.stock')}: {product.stock}
@@ -389,7 +412,7 @@ export default function ProductsPage() {
                   )}
                 </div>
               )}
-            </Card>
+            </CardContent></Card>
           ))}
         </div>
       )}
