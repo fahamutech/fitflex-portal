@@ -303,7 +303,7 @@ export default function ProductsPage() {
                   </p>
                   {hasTargets(product) && (
                     <p className="mt-1 text-xs text-[var(--color-fg-tertiary)]" data-testid={`product-targets-${product.id}`}>
-                      {t('products.target.madeFor')}: {genderText(product.targetGender)} · {t('products.target.ageGroup')}: <span aria-label={bandsA11y(product.targetAgeBands)}>{bandsText(product.targetAgeBands)}</span>
+                      {t('products.target.madeFor')}: {genderText(product.targetGender)} · {t('products.target.ageGroup')}: <span aria-hidden="true">{bandsText(product.targetAgeBands)}</span><span className="sr-only">{bandsA11y(product.targetAgeBands)}</span>
                     </p>
                   )}
                   {hasPrivate(product) && product.reorderLevel != null && product.stock <= product.reorderLevel && (

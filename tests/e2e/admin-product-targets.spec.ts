@@ -65,10 +65,14 @@ test('rows show Made for and Age group, with the ordering-only note', async ({ p
   await mockApi(page, base());
   await page.goto('/admin/products');
 
-  await expect(page.getByTestId('product-targets-prd_w')).toHaveText('Made for: Women · Age group: 18–29, 30–44');
-  await expect(page.getByTestId('product-targets-prd_m')).toHaveText('Made for: Men · Age group: 60+');
-  await expect(page.getByTestId('product-targets-prd_p')).toHaveText('Made for: Everyone · Age group: All ages');
-  await expect(page.getByTestId('product-target-note')).toContainText('only change the order');
+  await expect(page.getByTestId('product-targets-prd_w')).toContainText('Made for: Women · Age group: 18–29, 30–44');
+  await expect(page.getByTestId('product-targets-prd_m')).toContainText('Made for: Men · Age group: 60+');
+  await expect(page.getByTestId('product-targets-prd_p')).toContainText('Made for: Everyone · Age group: All ages');
+  // Screen readers get the bands as words (visually hidden text, visible digits hidden from them).
+  await expect(page.getByTestId('product-targets-prd_w').locator('.sr-only')).toHaveText('18 to 29, 30 to 44');
+  await expect(page.getByTestId('product-targets-prd_w').locator('[aria-hidden="true"]')).toHaveText('18–29, 30–44');
+  await expect(page.getByTestId('product-targets-prd_m').locator('.sr-only')).toHaveText('60 and over');
+  await expect(page.getByTestId('product-target-note')).toContainText('Vendors set "Made for" and "Age group" in the app. They only change the order products are shown in to members who keep "Personalised shop" on.');
   await expect(page.getByTestId('product-target-note')).toContainText('never change who can see or buy');
   // Read-only: no control edits the targets.
   await expect(page.getByRole('combobox', { name: /Made for/ })).toHaveCount(1);
@@ -126,10 +130,15 @@ test('Swahili labels and note', async ({ page }) => {
   await signedIn(page, 'sw');
   await mockApi(page, base());
   await page.goto('/admin/products');
-  await expect(page.getByTestId('product-targets-prd_w')).toHaveText('Imetengenezwa kwa: Wanawake · Kundi la umri: 18–29, 30–44');
-  await expect(page.getByTestId('product-targets-prd_p')).toHaveText('Imetengenezwa kwa: Wote · Kundi la umri: Umri wote');
-  await expect(page.getByTestId('product-target-note')).toContainText('Duka kwa ajili yako');
-  await page.getByLabel('Chuja: Imetengenezwa kwa').selectOption('men');
+  await expect(page.getByTestId('product-targets-prd_w')).toContainText('Walengwa: Wanawake · Kundi la umri: 18–29, 30–44');
+  await expect(page.getByTestId('product-targets-prd_w').locator('.sr-only')).toHaveText('18 hadi 29, 30 hadi 44');
+  await expect(page.getByTestId('product-targets-prd_p')).toContainText('Walengwa: Wote · Kundi la umri: Umri wote');
+  await expect(page.getByTestId('product-target-note')).toContainText('Wauzaji huchagua "Walengwa" na "Kundi la umri" kwenye app.');
+  await expect(page.getByTestId('product-target-note')).toContainText('walioacha "Duka kwa ajili yako" likiwa limewashwa');
+  // "Yoyote" (no filter) is distinct from "Wote" (Everyone).
+  await expect(page.getByLabel('Chuja: Walengwa').locator('option').first()).toHaveText('Yoyote');
+  await expect(page.getByLabel('Chuja: Walengwa').locator('option').nth(1)).toHaveText('Wote');
+  await page.getByLabel('Chuja: Walengwa').selectOption('men');
   await page.getByLabel('Chuja: Kundi la umri').selectOption('18_29');
   await expect(page.getByText('Hakuna bidhaa zinazolingana na vichujio hivi.')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Futa vichujio' })).toBeVisible();
