@@ -756,7 +756,7 @@ export const api = {
     request<{ employee: CorporateEmployee }>(`/corporate/staff/${encodeURIComponent(employeeId)}/status`, { method: 'POST', body: JSON.stringify({ status }) }, token),
   /** Link an employee to their FitFlex member account (by email, mobile number or user id); `null` unlinks. */
   linkCorporateStaff: (token: string, employeeId: string, contact: UserContact | null) =>
-    request<{ employee: CorporateEmployee }>(`/corporate/staff/${encodeURIComponent(employeeId)}/link`, { method: 'POST', body: JSON.stringify(contact ?? { userId: null }) }, token),
+    request<{ employee: CorporateEmployee; unchanged?: boolean } | PendingMemberAcceptance>(`/corporate/staff/${encodeURIComponent(employeeId)}/link`, { method: 'POST', body: JSON.stringify(contact ?? { userId: null }) }, token),
   /** HR sign-in: email + password (not Firebase). */
   hrLogin: (email: string, password: string) =>
     request<{ token: string; user: { id: string; userType: string; email?: string; displayName?: string; corporateId?: string } }>(
@@ -785,14 +785,18 @@ export const api = {
     request<{ organization: B2BOrganization }>(`/admin/b2b/organizations/${encodeURIComponent(id)}/status`, { method: 'POST', body: JSON.stringify({ status, reason }) }, token),
   syncCorporateOrganizations: (token: string) =>
     request<{ created: number; existing: number }>('/admin/b2b/corporate-sync', { method: 'POST' }, token),
+  /** pendingMemberAcceptance: adds by user id the member has not accepted yet (absent on an older API). */
   b2bOrganizationUsers: (token: string, id: string, params: { status?: string; limit?: number } = {}) =>
-    request<Paged<B2BOrganizationUser>>(`/b2b/organizations/${encodeURIComponent(id)}/users${qs(params)}`, {}, token),
+    request<Paged<B2BOrganizationUser> & { pendingMemberAcceptance?: B2BMemberRequest[] }>(`/b2b/organizations/${encodeURIComponent(id)}/users${qs(params)}`, {}, token),
   addB2BOrganizationUser: (token: string, id: string, body: UserContact & { role: string; permissions?: string[] }) =>
-    request<{ organizationUser: B2BOrganizationUser }>(`/b2b/organizations/${encodeURIComponent(id)}/users`, { method: 'POST', body: JSON.stringify(body) }, token),
+    request<{ organizationUser: B2BOrganizationUser } | PendingMemberAcceptance>(`/b2b/organizations/${encodeURIComponent(id)}/users`, { method: 'POST', body: JSON.stringify(body) }, token),
   updateB2BOrganizationUser: (token: string, id: string, orgUserId: string, body: { role?: string; status?: string; permissions?: string[] }) =>
     request<{ organizationUser: B2BOrganizationUser }>(`/b2b/organizations/${encodeURIComponent(id)}/users/${encodeURIComponent(orgUserId)}`, { method: 'PUT', body: JSON.stringify(body) }, token),
   b2bBeneficiaries: (token: string, id: string, params: { status?: string; search?: string; limit?: number } = {}) =>
-    request<Paged<B2BBeneficiary>>(`/b2b/organizations/${encodeURIComponent(id)}/beneficiaries${qs(params)}`, {}, token),
+    request<Paged<B2BBeneficiary> & { pendingMemberAcceptance?: B2BMemberRequest[] }>(`/b2b/organizations/${encodeURIComponent(id)}/beneficiaries${qs(params)}`, {}, token),
+  /** Withdraw an add by user id the member has not answered (beneficiaries.manage / users.manage, by kind). */
+  cancelB2BMemberRequest: (token: string, id: string, requestId: string) =>
+    request<{ memberRequest: B2BMemberRequest }>(`/b2b/organizations/${encodeURIComponent(id)}/member-requests/${encodeURIComponent(requestId)}`, { method: 'DELETE' }, token),
   // Programme lifecycle: how long each has left, and its renewal.
   b2bProgramLifecycle: (token: string, id: string) =>
     request<{ today: string; items: B2BProgramLifecycle[] }>(`/b2b/organizations/${encodeURIComponent(id)}/program-lifecycle`, {}, token),
@@ -809,7 +813,7 @@ export const api = {
   resendB2BBeneficiaryInvite: (token: string, id: string, inviteId: string) =>
     request<{ invite: B2BBeneficiaryInvite; sent: { email: boolean; sms: boolean }; emailConfigured: boolean; smsConfigured: boolean }>(`/b2b/organizations/${encodeURIComponent(id)}/beneficiary-invites/${encodeURIComponent(inviteId)}/resend`, { method: 'POST', body: '{}' }, token),
   enrollB2BBeneficiary: (token: string, id: string, body: UserContact & { beneficiaryType?: string; externalReference?: string; groupName?: string; status?: string }) =>
-    request<{ beneficiary: B2BBeneficiary }>(`/b2b/organizations/${encodeURIComponent(id)}/beneficiaries`, { method: 'POST', body: JSON.stringify(body) }, token),
+    request<{ beneficiary: B2BBeneficiary } | PendingMemberAcceptance>(`/b2b/organizations/${encodeURIComponent(id)}/beneficiaries`, { method: 'POST', body: JSON.stringify(body) }, token),
   setB2BBeneficiaryStatus: (token: string, id: string, beneficiaryId: string, status: string) =>
     request<{ beneficiary: B2BBeneficiary }>(`/b2b/organizations/${encodeURIComponent(id)}/beneficiaries/${encodeURIComponent(beneficiaryId)}/status`, { method: 'POST', body: JSON.stringify({ status }) }, token),
   // ── B2B wellness programmes and benefits ──
@@ -2647,6 +2651,39 @@ export interface CorporateEmployee {
   /** Their FitFlex member account, once linked; benefits only work for a linked employee. */
   userId?: string | null;
   status: string;
+  /** A link by user id the member has not accepted yet (fitflex-functions#241); null or absent when none. */
+  pendingLink?: B2BMemberRequest | null;
+}
+/**
+ * An add by user id waiting for the member to accept in the app (fitflex-functions#241). The organisation's
+ * view: never the member's contact details.
+ */
+export interface B2BMemberRequest {
+  id: string;
+  kind: 'beneficiary' | 'org_user' | 'employee_link';
+  status: 'pending_member_acceptance' | 'accepted' | 'declined' | 'expired' | 'cancelled';
+  organizationId: string | null;
+  corporateId: string | null;
+  employeeId: string | null;
+  userId: string;
+  displayName: string | null;
+  role: string | null;
+  permissions: string[] | null;
+  beneficiaryType: string | null;
+  groupName: string | null;
+  externalReference: string | null;
+  beneficiaryStatus: string | null;
+  expiresAt: string;
+  createdAt: string;
+  decidedAt: string | null;
+  reason: string | null;
+}
+/** 202 answer to an add by user id: nobody is added until the member accepts. */
+export type PendingMemberAcceptance = { outcome: 'pending_member_acceptance'; memberRequest: B2BMemberRequest };
+/** True when an add answered "request sent" rather than "added" (older backends never do). */
+export function isPendingMemberAcceptance(r: unknown): r is PendingMemberAcceptance {
+  return !!r && typeof r === 'object' && (r as { outcome?: unknown }).outcome === 'pending_member_acceptance'
+    && !!(r as { memberRequest?: unknown }).memberRequest;
 }
 export interface CorporateAccount {
   id: string;
