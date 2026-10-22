@@ -6,8 +6,10 @@ test.use({ serviceWorkers: 'block' });
 
 test('staff without the events scope get no nav item and are redirected (P-AD-1)', async ({ page }) => {
   await setupEvents(page, OTHER_STAFF);
+  // The redirect target is compiled on demand by the dev server: warm it so the client-side replace completes promptly.
+  await page.goto('/admin/');
   await page.goto('/admin/events/');
-  await expect(page).not.toHaveURL(/\/admin\/events/);
+  await expect(page).not.toHaveURL(/\/admin\/events/, { timeout: 20_000 });
   await expect(page.getByRole('navigation', { name: 'Main navigation' }).getByRole('link', { name: /Events/ })).toHaveCount(0);
 });
 
@@ -83,7 +85,7 @@ test('later statuses offer cancel/archive, the audit card lists rows, the Audit 
   await setupEvents(page, SUPER_ADMIN);
   await page.goto('/admin/events/?event=evt_pub');
   await expect(page.getByTestId('admin-action-cancel')).toBeVisible();
-  await expect(page.getByTestId('admin-event-audit')).toContainText('submitted');
+  await expect(page.getByTestId('admin-event-audit')).toContainText('Submitted');
   await page.goto('/admin/events/?tab=audit');
   await expect(page.getByTestId('admin-events-audit')).toContainText('Admin One');
   await page.goto('/admin/events/?tab=published');

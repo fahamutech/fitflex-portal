@@ -176,6 +176,29 @@ test.describe('wizard', () => {
     expect(mock.writes(/^\/organizer\/events\/evt_pub$/)[0].body?.changeNote).toBeUndefined();
   });
 
+  test('kit step sends kitProvided; a 422 with backend paths attaches to the right fields', async ({ page }) => {
+    const mock = await setupEvents(page, OWNER);
+    await page.goto('/organizer/events/?event=evt_1&step=kit');
+    await page.getByTestId('ev-hasKit').check();
+    await page.getByTestId('ev-collectionPoints-0-name').fill('Expo hall');
+    await page.getByTestId('wizard-save-draft').click();
+    await expect.poll(() => mock.writes(/^\/organizer\/events\/evt_1$/).length).toBe(1);
+    const body = mock.writes(/^\/organizer\/events\/evt_1$/)[0].body!;
+    expect(body.kitProvided).toBe(true);
+    expect(body.collectionPoints[0].name).toBe('Expo hall');
+    await expect(page.getByTestId('save-indicator')).toContainText('Saved');
+    // The server's field paths ("venue.name", "categories[0].ticketTypes[0].priceTzs") land on the form's own fields.
+    mock.on('PATCH', /^\/organizer\/events\/evt_1$/, () => ({ status: 422, json: { error: 'event_invalid', fields: [{ path: 'venue.name', code: 'too_long' }, { path: 'categories[0].ticketTypes[0].priceTzs', code: 'wholeShillings' }] } }));
+    await page.getByTestId('ev-hasKit').uncheck();
+    await page.getByTestId('wizard-save-draft').click();
+    await expect(page.getByTestId('save-indicator')).toContainText('Not saved');
+    // Tickets first: once the venue step shows an error, later steps are not reachable (maxReached).
+    await page.getByTestId('step-tickets').click();
+    await expect(page.getByText('Enter whole shillings without decimals.')).toBeVisible();
+    await page.getByTestId('step-venue').click();
+    await expect(page.getByText('This is too long.')).toBeVisible();
+  });
+
   test('cancel asks for a reason; a 409 has_registrations shows the ask-FitFlex copy (P-LC-5)', async ({ page }) => {
     const mock = await setupEvents(page, OWNER, { extra: [['POST', /\/organizer\/events\/evt_pub\/cancel$/, () => ({ status: 409, json: { error: 'has_registrations' } })]] });
     await page.goto('/organizer/events/?event=evt_pub');
@@ -200,7 +223,7 @@ test.describe('wizard', () => {
   test('Swahili: the wizard renders no raw keys; the status reads Imechapishwa', async ({ page }) => {
     await setupEvents(page, OWNER, { locale: 'sw' });
     await page.goto('/organizer/events/?event=evt_pub');
-    await expect(page.getByTestId('event-wizard')).toContainText('Imechapishwa');
+    await expect(page.getByTestId('event-wizard')).toContainText('Limechapishwa');
     await expect(page.getByTestId('stepper-current')).toContainText('1 / 7 · Msingi');
     await expectNoRawKeys(page);
   });

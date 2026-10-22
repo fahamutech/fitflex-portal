@@ -16,12 +16,12 @@ test.describe('organizer onboarding', () => {
     expect(mock.writes(/\/me\/organizer$/)).toHaveLength(0);
     await page.getByTestId('intro-name').fill('Dar Runners');
     await page.getByTestId('intro-phone').fill('0712 345 678');
-    // After creation /organizer/me answers with the new draft organizer.
-    mock.on('GET', /^\/organizer\/me$/, () => organizerMe('draft'));
     await page.getByTestId('intro-submit').click();
+    await expect(page.getByTestId('organizer-checklist')).toBeVisible();
     const write = mock.writes(/\/me\/organizer$/)[0];
     expect(write.body).toEqual({ name: 'Dar Runners', timezone: 'Africa/Dar_es_Salaam', contactPhone: '0712 345 678' });
-    await expect(page.getByTestId('organizer-checklist')).toBeVisible();
+    // The organizer lives on its own persona: the session switches to it before /organizer/me is asked again.
+    expect(mock.writes(/\/auth\/switch-persona$/)[0].body).toEqual({ personaId: 'per_org_1' });
     await expect(page.getByTestId('organizer-status-badge')).toHaveText('Not submitted');
   });
 
@@ -43,6 +43,11 @@ test.describe('organizer onboarding', () => {
     await page.getByTestId('kyc-legalName').fill('Dar Runners Ltd');
     await page.getByTestId('kyc-save-business').click();
     await expect.poll(() => mock.writes(/\/me\/kyc\/business$/).length).toBe(1);
+    await page.getByTestId('kyc-fullName').fill('Neema Organizer');
+    await page.getByTestId('kyc-save-representative').click();
+    await expect.poll(() => mock.writes(/\/me\/kyc\/people\//).length).toBe(1);
+    expect(mock.writes(/\/me\/kyc\/people\//)[0].path).toBe('/me/kyc/people/authorised_representative');
+    await expect(page.getByRole('status').filter({ hasText: 'Saved.' })).toBeVisible();
     await page.getByTestId('kyc-file-tin_certificate').setInputFiles({ name: 'tin.pdf', mimeType: 'application/pdf', buffer: Buffer.from('%PDF-1.4 test') });
     await expect.poll(() => mock.writes(/\/me\/kyc\/documents\/tin_certificate\/file$/).length).toBe(1);
   });
@@ -92,10 +97,13 @@ test.describe('organizer onboarding', () => {
   });
 
   test('a non-owner staff member sees the status view read-only with the owner-only note', async ({ page }) => {
-    await setupEvents(page, STAFF_OPS, { me: organizerMe('active', 'ops'), kyc: KYC_SUBMITTED });
+    const mock = await setupEvents(page, STAFF_OPS, { me: organizerMe('active', 'ops'), kyc: KYC_SUBMITTED });
     await page.goto('/organizer/onboarding/');
+    await expect(page.getByTestId('organizer-status-active')).toBeVisible();
     await expect(page.getByText('Only the organizer owner can edit verification details.')).toBeVisible();
     await expect(page.getByTestId('kyc-submit')).toHaveCount(0);
+    // Staff personas may not call /me/kyc/* (the backend admits only the owner): nothing was asked.
+    expect(mock.reads(/^\/me\/kyc/)).toHaveLength(0);
   });
 
   test('Swahili: the onboarding page shows no English keys and the status reads Inakaguliwa (P-ON-7)', async ({ page }) => {

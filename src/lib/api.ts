@@ -1278,7 +1278,7 @@ export const api = {
   organizerMe: (token: string) => request<OrganizerMe>('/organizer/me', {}, token),
   /** Creates the organizer (draft), its owner staff row and the KYC case. Auth-touching (rule 6, D3). */
   createOrganizer: (token: string, body: { name: string; timezone: string; contactPhone: string; contactEmail?: string }) =>
-    request<{ organizer: OrganizerMe['organizer']; kycCaseId: string }>('/me/organizer', { method: 'POST', body: JSON.stringify(body) }, token),
+    request<{ organizer: OrganizerMe['organizer']; kycCaseId: string; personaId: string }>('/me/organizer', { method: 'POST', body: JSON.stringify(body) }, token),
   organizerSummary: (token: string) => request<OrganizerSummary>('/organizer/summary', {}, token),
   organizerEvents: (token: string, query: { status?: string; type?: string; cursor?: string | null; limit?: number } = {}) =>
     request<EventsPage<OrganizerEventRow>>(`/organizer/events${qs(query)}`, {}, token),
@@ -1294,8 +1294,9 @@ export const api = {
   organizerEventChanges: (token: string, id: string, cursor?: string | null) =>
     request<EventsPage<EventChange>>(`/organizer/events/${encodeURIComponent(id)}/changes${qs({ cursor })}`, {}, token),
   organizerStaff: (token: string) => request<{ items: OrganizerStaffRow[] }>('/organizer/staff', {}, token),
-  inviteOrganizerStaff: (token: string, body: UserContact & { role: OrganizerRole }) =>
-    request<OrganizerStaffRow>('/organizer/staff', { method: 'POST', body: JSON.stringify(body) }, token),
+  /** Phone or email only (no userId): 400 `invalid_contact` otherwise. */
+  inviteOrganizerStaff: (token: string, body: { email?: string; phone?: string; role: OrganizerRole }) =>
+    request<{ invitation: OrganizerStaffRow }>('/organizer/staff', { method: 'POST', body: JSON.stringify(body) }, token),
   changeOrganizerStaffRole: (token: string, id: string, role: OrganizerRole) =>
     request<OrganizerStaffRow>(`/organizer/staff/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify({ role }) }, token),
   removeOrganizerStaff: (token: string, id: string) => request<null>(`/organizer/staff/${encodeURIComponent(id)}`, { method: 'DELETE' }, token),
@@ -1333,7 +1334,7 @@ export const api = {
   adminEvent: (token: string, id: string) => request<AdminEventDetail>(`/admin/events/${encodeURIComponent(id)}`, {}, token),
   adminEventDecision: (token: string, id: string, body: { decision: 'approve' | 'reject'; reason?: string; note?: string }) =>
     request<{ status: EventStatus }>(`/admin/events/${encodeURIComponent(id)}/decision`, { method: 'POST', body: JSON.stringify(body) }, token),
-  adminEventAction: (token: string, id: string, action: 'cancel' | 'archive', body?: { reason?: string; note?: Bilingual }) =>
+  adminEventAction: (token: string, id: string, action: 'cancel' | 'archive' | 'complete', body?: { reason?: string; note?: Bilingual }) =>
     request<{ status: EventStatus }>(`/admin/events/${encodeURIComponent(id)}/${action}`, { method: 'POST', body: JSON.stringify(body ?? {}) }, token),
   adminEventAudit: (token: string, id: string) => request<EventsPage<EventAuditRow>>(`/admin/events/${encodeURIComponent(id)}/audit`, {}, token),
   adminEventsAudit: (token: string, query: { action?: string; cursor?: string | null } = {}) =>
@@ -3903,6 +3904,8 @@ export interface EventDocument extends EventSummary {
   routeUrl: string | null; routeImageUrl: string | null; routeImageAlt: string | null;
   venue: { name: string | null; address: string | null; city: string | null; region: string | null; lat: number | null; lng: number | null };
   accessibility: Bilingual | null; inclusions: Bilingual | null;
+  /** Whether a race kit is handed out (the submit rule keys on it); collection points are required when true. */
+  kitProvided: boolean;
   categories: EventCategory[]; collectionPoints: EventCollectionPoint[]; schedule: EventScheduleItem[]; sponsors: EventSponsor[];
   contact: { email: string | null; phone: string | null; whatsapp: string | null };
   terms: Bilingual; refundPolicy: { preset: RefundPolicyPreset | null; text: Bilingual | null };
@@ -3913,7 +3916,7 @@ export interface EventDocument extends EventSummary {
 /** PATCH /organizer/events/:id: the current version plus the fields that changed (nested lists carry ids for upsert). */
 export type EventPatch = { version: number; changeNote?: Bilingual } & Partial<Omit<EventDocument, 'id' | 'slug' | 'status' | 'version' | 'allowedActions' | 'organizer' | 'updatedAt'>>;
 export interface EventChange {
-  id: string; at: string; actor: { name: string; role: string }; fields: string[]; material: boolean; note: Bilingual | null;
+  id: string; at: string; actor: { name: string | null; role: string }; fields: string[]; material: boolean; note: Bilingual | null;
   before: Record<string, unknown> | null; after: Record<string, unknown> | null;
 }
 export interface OrganizerStaffRow {

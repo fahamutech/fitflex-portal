@@ -31,7 +31,7 @@ const reasonLabel = (t: (k: MessageKey) => string, code: string | null | undefin
 
 // ── State A: request organizer access (§4.3) ──
 export function OrganizerIntro({ onCreated }: { onCreated: () => void }) {
-  const { t, token } = useApp();
+  const { t, token, switchPersona } = useApp();
   const toast = useToast();
   const [options, setOptions] = useState<EventsOptions | null>(null);
   const [name, setName] = useState('');
@@ -55,14 +55,18 @@ export function OrganizerIntro({ onCreated }: { onCreated: () => void }) {
     if (Object.keys(next).length) return;
     setBusy(true); setNotAllowed(false);
     try {
-      await api.createOrganizer(token, { name: name.trim(), timezone, contactPhone: phone.trim(), ...(email.trim() ? { contactEmail: email.trim() } : {}) });
+      const created = await api.createOrganizer(token, { name: name.trim(), timezone, contactPhone: phone.trim(), ...(email.trim() ? { contactEmail: email.trim() } : {}) });
       toast.success(t('organizer.intro.created'));
+      // The organizer lives on its own persona: move the session onto it before asking /organizer/me (403 otherwise).
+      if (created.personaId) await switchPersona(created.personaId);
       onCreated();
     } catch (err) {
       const code = errorCode(err);
       if (code === 'organizer_exists') { onCreated(); return; }
       if (code === 'invalid_name') { setErrors({ name: fmt(t('events.validation.length'), { min: 2, max: 80 }) }); return; }
       if (code === 'invalid_phone') { setErrors({ phone: t('events.validation.phone') }); return; }
+      if (code === 'invalid_email') { setErrors({ email: t('events.validation.email') }); return; }
+      if (code === 'invalid_timezone') { toast.error(t('events.error.invalid_timezone')); return; }
       if (code === 'persona_not_allowed') { setNotAllowed(true); return; }
       toast.error(t(errorKey(err)));
     } finally { setBusy(false); }
@@ -201,7 +205,7 @@ function RepresentativeSection({ kyc, items, editable, onSaved }: SectionProps) 
     try {
       const body: Record<string, unknown> = {};
       for (const [k, v] of Object.entries(form)) body[k] = v || null;
-      const next = await api.myKycPerson(token, 'representative', body);
+      const next = await api.myKycPerson(token, 'authorised_representative', body);
       onSaved(next); toast.success(t('organizer.kyc.saved'));
     } catch (err) { toast.error(t(errorKey(err))); } finally { setBusy(false); }
   }
@@ -370,15 +374,15 @@ export function OrganizerChecklist() {
   const [busy, setBusy] = useState(false);
   const [missingHint, setMissingHint] = useState<string[] | null>(null);
 
-  const load = useCallback(async () => {
-    if (!token) return;
-    setError(null);
-    try { setKyc(await api.myKyc(token)); } catch (err) { setError(t(errorKey(err))); }
-  }, [token, t]);
-  useEffect(() => { void load(); }, [load]);
-
   const organizer = org.organizer!;
   const isOwner = org.role === 'owner';
+  // Only the owner's persona may call /me/kyc/*: staff get the status from /organizer/me alone.
+  const load = useCallback(async () => {
+    if (!token || !isOwner) return;
+    setError(null);
+    try { setKyc(await api.myKyc(token)); } catch (err) { setError(t(errorKey(err))); }
+  }, [token, t, isOwner]);
+  useEffect(() => { void load(); }, [load]);
   const caseStatus = kyc?.case?.status ?? 'draft';
   const editableAll = isOwner && (!kyc?.case || caseStatus === 'draft');
   const infoRequested = isOwner && caseStatus === 'info_requested';
@@ -405,6 +409,7 @@ export function OrganizerChecklist() {
     finally { setBusy(false); }
   }
 
+  if (!isOwner) return <StaffStatusView />;
   if (error) return <Alert tone="error">{error}</Alert>;
   if (!kyc) return <div aria-busy="true" className="space-y-3"><Card><CardContent><div className="h-24 animate-pulse rounded-[var(--radius-md)] bg-[var(--color-gray-200)]" /></CardContent></Card></div>;
 
@@ -469,6 +474,27 @@ export function OrganizerChecklist() {
       <ConfirmDialog open={confirm === 'withdraw'} onClose={() => setConfirm(null)} onConfirm={() => void doWithdraw()} tone="primary" busy={busy}
         title={t('organizer.kyc.withdrawTitle')} confirmLabel={t('organizer.kyc.withdraw')} />
       <span className="sr-only" data-testid="kyc-locale">{locale}</span>
+    </div>
+  );
+}
+
+/** Non-owner staff (state C only, §4.4): the organizer status from /organizer/me, no checklist and no /me/kyc call. */
+function StaffStatusView() {
+  const { t } = useApp();
+  const org = useOrganizer();
+  const organizer = org.organizer!;
+  const reason = organizer.statusReason || t('organizer.status.noReason');
+  const card = organizer.status === 'active'
+    ? <StatusCard icon={<BadgeCheck />} title={t('organizer.status.activeTitle')} body={t('organizer.status.activeBody')} testId="organizer-status-active">
+        {org.role === 'admin' && (<><Link href="/organizer/events?event=new" className="inline-flex"><Button>{t('organizer.status.createFirst')}</Button></Link><Link href="/organizer/staff" className="inline-flex"><Button variant="secondary">{t('organizer.status.inviteStaff')}</Button></Link></>)}
+      </StatusCard>
+    : organizer.status === 'rejected' ? <StatusCard icon={<XCircle />} title={t('organizer.status.rejectedTitle')} body={fmt(t('organizer.status.rejectedBody'), { reason })} testId="organizer-status-rejected" />
+    : organizer.status === 'suspended' ? <StatusCard icon={<Ban />} title={t('organizer.status.suspendedTitle')} body={fmt(t('organizer.status.suspendedBody'), { reason })} testId="organizer-status-suspended" />
+    : <StatusCard icon={<Clock />} title={t('organizer.status.pendingTitle')} body={t('organizer.status.pendingBody')} testId="organizer-status-pending" />;
+  return (
+    <div className="space-y-4" data-testid="organizer-checklist">
+      {card}
+      <Alert tone="info">{t('organizer.kyc.ownerOnly')}</Alert>
     </div>
   );
 }

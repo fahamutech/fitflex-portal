@@ -44,7 +44,7 @@ interface AppCtx {
 
 // Only personas the portal has screens for; members and trainers use the app,
 // and admin personas are never switched into. Vendors have a web area (S2).
-const PORTAL_PERSONA_TYPES = new Set(['gym_operator', 'gym_staff', 'corporate_hr', 'vendor', 'vendor_staff']);
+const PORTAL_PERSONA_TYPES = new Set(['gym_operator', 'gym_staff', 'corporate_hr', 'vendor', 'vendor_staff', 'event_organizer', 'organizer_staff']);
 
 const Ctx = createContext<AppCtx | null>(null);
 

@@ -1,7 +1,7 @@
 'use client';
 import { FormEvent, useCallback, useEffect, useState } from 'react';
 import { UserPlus } from 'lucide-react';
-import { api, userContact, type OrganizerRole, type OrganizerStaffRow } from '@/lib/api';
+import { api, type OrganizerRole, type OrganizerStaffRow } from '@/lib/api';
 import { INVITABLE_ROLES, STAFF_STATUS, errorCode, errorKey, eventDay, fmt, isEmail, isTzPhone, maskContact, roleDescKey, roleKey } from '@/lib/events';
 import { Badge, Button, Card, CardContent, Field, Input, PageHeader, Radio, useToast } from '@/components/shared';
 import { DataTable, type ColumnDef } from '@/components/data-table';
@@ -54,17 +54,18 @@ function StaffInner() {
     e.preventDefault();
     if (!token) return;
     const value = contact.trim();
-    if (!value || (!isEmail(value) && !isTzPhone(value) && !/^usr_/i.test(value))) { setContactError(t('organizer.staff.invalidContact')); return; }
+    // Email or Tanzanian phone only: the backend refuses anything else (400 invalid_contact), including user ids.
+    if (!value || (!isEmail(value) && !isTzPhone(value))) { setContactError(t('organizer.staff.invalidContact')); return; }
     setContactError(null); setBusy(true);
     try {
-      await api.inviteOrganizerStaff(token, { ...userContact(value), role });
+      await api.inviteOrganizerStaff(token, { ...(isEmail(value) ? { email: value } : { phone: value }), role });
       toast.success(t('organizer.staff.sent'));
       setInviteOpen(false); setContact(''); setRole('ops');
       await load();
     } catch (err) {
       const code = errorCode(err);
       if (code === 'already_staff') setContactError(t('organizer.staff.alreadyStaff'));
-      else if (code === 'invalid_contact') setContactError(t('organizer.staff.invalidContact'));
+      else if (code === 'invalid_contact' || code === 'invalid_email') setContactError(t('organizer.staff.invalidContact'));
       else if (code === 'cannot_invite_self') setContactError(t('organizer.staff.cannotInviteSelf'));
       else toast.error(t(errorKey(err)));
     } finally { setBusy(false); }

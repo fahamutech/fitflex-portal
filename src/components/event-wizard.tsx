@@ -98,11 +98,13 @@ export function EventWizard({ eventId, initialStep, view, onBack, onView }: {
     void load(eventId);
   }, [eventId, load]);
   useEffect(() => { api.eventsOptions().then(setOptions).catch(() => setOptions(null)); }, []);
+  // Only the owner's persona may read /me/kyc; admins see no permit warning (the admin queue shows it anyway).
+  const isOwner = org.role === 'owner';
   useEffect(() => {
-    if (!token || !canManage) return;
+    if (!token || !canManage || !isOwner) return;
     api.myKyc(token).then(k => setPermitOnFile(k.documents.some(d => d.requirementKey === 'event_permit' && d.hasFile && d.status !== 'rejected' && d.status !== 'superseded')))
       .catch(() => setPermitOnFile(null));
-  }, [token, canManage]);
+  }, [token, canManage, isOwner]);
 
   // ── Validation ──
   const allErrors = useMemo(() => ({ ...validateEvent(form), ...serverErrs }), [form, serverErrs]);

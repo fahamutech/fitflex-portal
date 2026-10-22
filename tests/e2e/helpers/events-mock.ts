@@ -47,7 +47,7 @@ export const DOC = (over: Json = {}) => ({
   ...summary(), description: { en: LONG, sw: 'Haya ni maelezo marefu ya kutosha kuhusu mbio za nusu marathoni, yenye kila kitu mkimbiaji anachohitaji kujua.' },
   heroImageUrl: null, coverAlt: null, routeUrl: null, routeImageUrl: null, routeImageAlt: null,
   venue: { name: 'Coco Beach', address: 'Toure Drive', city: 'Dar es Salaam', region: 'dar', lat: -6.75, lng: 39.27 },
-  accessibility: null, inclusions: null,
+  accessibility: null, inclusions: null, kitProvided: false,
   categories: [
     { id: 'cat_1', name: '21K Half Marathon', distanceM: 21100, startsAt: T0, capacity: 500, eligibility: null, minAge: 16, ticketTypes: [{ id: 'tt_1', name: 'Early bird', priceTzs: 25000, currency: 'TZS', capacity: null, saleOpensAt: null, saleClosesAt: null, minPerOrder: 1, maxPerOrder: 10 }] },
     { id: 'cat_2', name: '10K', distanceM: 10000, startsAt: null, capacity: null, eligibility: null, minAge: null, ticketTypes: [{ id: 'tt_2', name: 'Standard', priceTzs: 0, currency: 'TZS', capacity: null, saleOpensAt: null, saleClosesAt: null, minPerOrder: 1, maxPerOrder: 10 }] },
@@ -118,6 +118,12 @@ export async function setupEvents(page_: Page, user: Json = OWNER, opts: { me?: 
   const me = opts.me === undefined ? organizerMe() : opts.me;
   let kyc: Json = opts.kyc ?? KYC_DRAFT;
   let staff: Json[] = STAFF.map(s => ({ ...s }));
+  // Strict about the backend's rules (contract check vs fitflex-functions#249): the organizer lives on its own persona,
+  // /me/kyc/* admits only the owner persona, the representative role is fixed, invites are phone/email only, and the
+  // kit step must say kitProvided.
+  let currentType: string = String(user.userType);
+  let created: Json | null = null;
+  const isOrganizerSession = () => currentType === 'event_organizer' || currentType === 'organizer_staff';
   const docs: Record<string, Json> = { evt_1: DOC(), evt_pub: PUBLISHED, evt_sub: SUBMITTED, evt_arch: DOC({ id: 'evt_arch', status: 'archived', allowedActions: [] }) };
   let version = 3;
 
@@ -127,23 +133,36 @@ export async function setupEvents(page_: Page, user: Json = OWNER, opts: { me?: 
     ['GET', /^\/admin\/shop-merch$/, () => ({ status: 404, json: { error: 'feature_disabled' } })],
     ['GET', /^\/admin\/tax-rates$/, () => ({ status: 404, json: { error: 'feature_disabled' } })],
     ['GET', /^\/events\/options$/, () => OPTIONS],
-    ['GET', /^\/organizer\/me$/, () => (me ? me : { status: 404, json: { error: 'no_organizer' } })],
-    ['POST', /^\/me\/organizer$/, c => ({ status: 201, json: { organizer: { ...organizerMe('draft').organizer, name: c.body?.name }, kycCaseId: 'kyc_1' } })],
+    ['GET', /^\/organizer\/me$/, () => {
+      if (me) return isOrganizerSession() ? me : { status: 403, json: { error: 'forbidden' } };
+      if (!created) return { status: 404, json: { error: 'no_organizer' } };
+      return isOrganizerSession() ? created : { status: 403, json: { error: 'forbidden' } };
+    }],
+    ['POST', /^\/me\/organizer$/, c => {
+      if (created || me) return { status: 409, json: { error: 'organizer_exists' } };
+      created = organizerMe('draft', 'owner', { name: c.body?.name });
+      return { status: 201, json: { organizer: created.organizer, kycCaseId: 'kyc_1', personaId: 'per_org_1' } };
+    }],
+    ['POST', /^\/auth\/switch-persona$/, c => {
+      if (c.body?.personaId !== 'per_org_1') return { status: 404, json: { error: 'persona_not_found' } };
+      currentType = 'event_organizer';
+      return { token: 'events-e2e-token-2', user: { ...OWNER, displayName: user.displayName ?? OWNER.displayName }, personas: [] };
+    }],
     ['GET', /^\/organizer\/summary$/, () => SUMMARY],
     ['GET', /^\/organizer\/events$/, () => pageOf(ROWS)],
     ['POST', /^\/organizer\/events$/, c => { docs.evt_new = DOC({ id: 'evt_new', slug: 'new-event', title: c.body?.title, categories: [], terms: { en: '', sw: '' }, refundPolicy: { preset: null, text: null }, contact: { email: null, phone: null, whatsapp: null }, description: { en: '', sw: '' }, version: 1 }); return { status: 201, json: { id: 'evt_new', version: 1 } }; }],
     ['GET', /^\/organizer\/events\/([^/]+)\/changes$/, () => pageOf(CHANGES)],
     ['GET', /^\/organizer\/events\/([^/]+)$/, (_c, m) => (m[1] === 'evt_other' ? { status: 403, json: { error: 'not_your_organizer' } } : docs[m[1]] ? docs[m[1]] : { status: 404, json: { error: 'event_not_found' } })],
-    ['PATCH', /^\/organizer\/events\/([^/]+)$/, c => { version = Number(c.body?.version ?? version) + 1; return { version, updatedAt: '2026-10-22T10:00:00.000Z', material: !!c.body?.changeNote }; }],
+    ['PATCH', /^\/organizer\/events\/([^/]+)$/, c => { if ('collectionPoints' in (c.body ?? {}) && typeof c.body?.kitProvided !== 'boolean') return { status: 400, json: { error: 'kit_provided_required' } }; version = Number(c.body?.version ?? version) + 1; return { version, updatedAt: '2026-10-22T10:00:00.000Z', material: !!c.body?.changeNote }; }],
     ['POST', /^\/organizer\/events\/([^/]+)\/(submit|withdraw|cancel|complete|archive)$/, (_c, m) => { const next = { submit: 'submitted', withdraw: 'draft', cancel: 'cancelled', complete: 'completed', archive: 'archived' }[m[2]]!; if (docs[m[1]]) docs[m[1]] = { ...docs[m[1]], status: next, allowedActions: next === 'submitted' ? ['withdraw'] : [] }; return { status: next }; }],
     ['DELETE', /^\/organizer\/events\/([^/]+)$/, () => ({ status: 204 })],
     ['GET', /^\/organizer\/staff$/, () => ({ items: staff })],
-    ['POST', /^\/organizer\/staff$/, c => { const row = { id: `st_${staff.length}`, userId: null, displayName: null, maskedContact: c.body?.email ? 'n•••@example.com' : '+255 7•• ••• 999', role: c.body?.role, status: 'invited', addedAt: '2026-10-22T08:00:00.000Z' }; staff = [...staff, row]; return { status: 201, json: row }; }],
+    ['POST', /^\/organizer\/staff$/, c => { if (c.body?.userId || (!c.body?.email && !c.body?.phone)) return { status: 400, json: { error: 'invalid_contact' } }; const row = { id: `st_${staff.length}`, userId: null, displayName: null, maskedContact: c.body?.email ? 'n•••@example.com' : '+255 7•• ••• 999', role: c.body?.role, status: 'invited', addedAt: '2026-10-22T08:00:00.000Z' }; staff = [...staff, row]; return { status: 201, json: { invitation: row } }; }],
     ['PATCH', /^\/organizer\/staff\/([^/]+)$/, (c, m) => { staff = staff.map(s => (s.id === m[1] ? { ...s, role: c.body?.role } : s)); return staff.find(s => s.id === m[1])!; }],
     ['DELETE', /^\/organizer\/staff\/([^/]+)$/, (_c, m) => { staff = staff.filter(s => s.id !== m[1]); return { status: 204 }; }],
-    ['GET', /^\/me\/kyc$/, () => kyc],
+    ['GET', /^\/me\/kyc$/, () => (currentType === 'event_organizer' ? kyc : { status: 403, json: { error: 'forbidden' } })],
     ['PUT', /^\/me\/kyc\/business$/, c => { kyc = { ...kyc, case: { ...kyc.case, ...c.body } }; return kyc; }],
-    ['PUT', /^\/me\/kyc\/people\/([^/]+)$/, c => { kyc = { ...kyc, people: [{ id: 'per_1', role: 'authorised_representative', status: 'active', ...c.body }] }; return kyc; }],
+    ['PUT', /^\/me\/kyc\/people\/([^/]+)$/, (c, m) => { if (m[1] !== 'authorised_representative') return { status: 400, json: { error: 'invalid_role' } }; kyc = { ...kyc, people: [{ id: 'per_1', role: 'authorised_representative', status: 'active', ...c.body }] }; return kyc; }],
     ['POST', /^\/me\/kyc\/documents\/([^/]+)\/file$/, (_c, m) => { kyc = { ...kyc, documents: [...(kyc.documents ?? []), { id: `doc_${m[1]}`, requirementKey: m[1], docType: m[1], status: 'pending', hasFile: true, fileName: 'scan.pdf', createdAt: '2026-10-22T08:00:00.000Z' }] }; return kyc; }],
     ['POST', /^\/me\/kyc\/settlement-accounts$/, c => { kyc = { ...kyc, settlementAccounts: [{ id: 'acc_1', status: 'pending_verification', isPrimary: false, currency: 'TZS', branch: null, createdAt: '2026-10-22T08:00:00.000Z', ...c.body }] }; return kyc; }],
     ['GET', /^\/me\/kyc\/agreements$/, () => AGREEMENTS],

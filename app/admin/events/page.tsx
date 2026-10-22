@@ -4,7 +4,7 @@ import { Suspense, useCallback, useEffect, useState } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { api, type AdminEventDetail, type AdminEventRow, type Bilingual, type EventAuditRow } from '@/lib/api';
 import { EVENTS_MODULE } from '@/lib/flags';
-import { ORGANIZER_STATUS, REJECT_REASONS, distanceLabel, errorCode, errorKey, eventDateTime, eventStatusOf, isFeatureOff, rejectReasonKey, relativeTime, typeKey } from '@/lib/events';
+import { ORGANIZER_STATUS, REJECT_REASONS, auditActionLabel, distanceLabel, errorCode, errorKey, eventDateTime, eventStatusOf, isFeatureOff, rejectReasonKey, relativeTime, typeKey } from '@/lib/events';
 import { Alert, Badge, Button, Card, CardContent, CardHeader, Checkbox, Field, PageHeader, Segmented, Select, SkeletonTable, Textarea, useToast } from '@/components/shared';
 import { DataTable, type ColumnDef } from '@/components/data-table';
 import { Dialog, DialogFooter } from '@/components/dialog';
@@ -93,7 +93,7 @@ function AuditTable({ eventId }: { eventId?: string }) {
   const columns: ColumnDef<EventAuditRow>[] = [
     { key: 'at', header: t('admin.events.audit.when'), sortable: true, cell: r => eventDateTime(r.at, 'Africa/Dar_es_Salaam', locale) },
     { key: 'actor', header: t('admin.events.audit.actor'), cell: r => r.actor?.name ?? r.actor?.id ?? '—' },
-    { key: 'action', header: t('admin.events.audit.action'), sortable: true, cell: r => <Badge tone="gray">{r.action}</Badge> },
+    { key: 'action', header: t('admin.events.audit.action'), sortable: true, cell: r => <Badge tone="gray">{auditActionLabel(r.action, t)}</Badge> },
     { key: 'reason', header: t('admin.events.audit.reason'), cell: r => [r.reason ? t(rejectReasonKey(r.reason)) : null, r.note].filter(Boolean).join(' · ') || '—' },
   ];
   return (
@@ -102,7 +102,7 @@ function AuditTable({ eventId }: { eventId?: string }) {
         extraFilters={!eventId ? (
           <Select size="sm" aria-label={t('admin.events.audit.filterAction')} value={action} onChange={e => setAction(e.target.value)}>
             <option value="">{t('admin.events.audit.allActions')}</option>
-            {actions.map(a => <option key={a} value={a}>{a}</option>)}
+            {actions.map(a => <option key={a} value={a}>{auditActionLabel(a, t)}</option>)}
           </Select>
         ) : undefined} />
     </div>
@@ -145,7 +145,7 @@ function Detail({ id, onBack }: { id: string; onBack: () => void }) {
     } finally { setBusy(false); }
   }
   async function run(action: LifecycleAction, body?: { reason?: string; note?: Bilingual }) {
-    if (!token || (action !== 'cancel' && action !== 'archive')) return;
+    if (!token || (action !== 'cancel' && action !== 'archive' && action !== 'complete')) return;
     try { await api.adminEventAction(token, id, action, body); toast.success(t('events.action.done')); await load(); }
     catch (err) { if (errorCode(err) === 'invalid_transition') { toast.error(t('admin.events.error.invalidTransition')); await load(); } throw err; }
   }
@@ -155,7 +155,7 @@ function Detail({ id, onBack }: { id: string; onBack: () => void }) {
   if (!doc) return <PageLoading />;
   const st = eventStatusOf(doc.status);
   const canKyc = hasPermission('kyc');
-  const laterActions = (['cancel', 'archive'] as LifecycleAction[]).filter(a => doc.allowedActions?.includes(a));
+  const laterActions = (['cancel', 'complete', 'archive'] as LifecycleAction[]).filter(a => doc.allowedActions?.includes(a));
   return (
     <div className="space-y-4" data-testid="admin-event-detail">
       <PageHeader title={doc.title} description={<span className="inline-flex items-center gap-2"><Badge tone={st.tone}>{t(st.key)}</Badge><span>{doc.organizer?.name}</span></span>}

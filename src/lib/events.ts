@@ -66,6 +66,10 @@ export const REJECT_REASONS = ['incomplete_details', 'permit_missing', 'pricing_
 export const rejectReasonKey = (reason: string) => `admin.events.rejectReason.${(REJECT_REASONS as readonly string[]).includes(reason) ? reason : 'other'}` as MessageKey;
 export const CANCEL_REASONS = ['weather', 'permit', 'safety', 'low_turnout', 'organizer_decision', 'other'] as const;
 export const cancelReasonKey = (reason: string) => `events.cancel.reason.${(CANCEL_REASONS as readonly string[]).includes(reason) ? reason : 'other'}` as MessageKey;
+/** Audit `action` codes → label key; unknown codes fall back to the raw code (shown as given). */
+export const AUDIT_ACTIONS = ['created', 'updated', 'submitted', 'withdrawn', 'approved', 'published', 'rejected', 'cancelled', 'completed', 'archived', 'deleted', 'registration_closed', 'started'] as const;
+export const auditActionLabel = (code: string, t: (k: MessageKey) => string) =>
+  (AUDIT_ACTIONS as readonly string[]).includes(code) ? t(`admin.events.audit.action.${code}` as MessageKey) : code;
 export const POLICY_PRESETS: RefundPolicyPreset[] = ['no_refund', 'refund_until_close', 'custom'];
 
 /** `allowedActions` vocabulary (§7.2) and the i18n key of each button. */
@@ -103,6 +107,11 @@ export const EVENTS_ERRORS: Record<string, MessageKey> = {
   cannot_remove_owner: 'events.error.cannot_remove_owner',
   kyc_incomplete: 'events.error.kyc_incomplete',
   rate_limited: 'events.error.rate_limited',
+  invalid_role: 'events.error.invalid_role',
+  staff_not_found: 'events.error.staff_not_found',
+  cannot_remove_self: 'events.error.cannot_remove_self',
+  invalid_email: 'events.validation.email',
+  invalid_timezone: 'events.error.invalid_timezone',
 };
 export const errorCode = (err: unknown): string | null =>
   err instanceof ApiError ? ((err.body as { error?: string } | null)?.error ?? null) : null;
@@ -243,7 +252,7 @@ const s = (v: unknown) => (v == null ? '' : String(v));
 const kmText = (m: number | null | undefined) => (m == null ? '' : String(Math.round(m / 100) / 10));
 /** The server document as the form edits it. */
 export function formFromDoc(doc: EventDocument): EventForm {
-  const hasKit = doc.collectionPoints.length > 0 || !!(doc.inclusions?.en || doc.inclusions?.sw);
+  const hasKit = typeof doc.kitProvided === 'boolean' ? doc.kitProvided : doc.collectionPoints.length > 0 || !!(doc.inclusions?.en || doc.inclusions?.sw);
   return {
     title: s(doc.title), type: doc.type ?? '', descriptionEn: s(doc.description?.en), descriptionSw: s(doc.description?.sw), timezone: doc.timezone || 'Africa/Dar_es_Salaam',
     startsAt: s(doc.startsAt), endsAt: s(doc.endsAt), registrationOpensAt: s(doc.registrationOpensAt), registrationClosesAt: s(doc.registrationClosesAt),
@@ -296,6 +305,7 @@ export function stepPayload(form: EventForm, step: WizardStep): Omit<EventPatch,
       return { categories: form.categories.map(categoryPayload) };
     case 'kit':
       return {
+        kitProvided: form.hasKit,
         collectionPoints: form.hasKit ? form.collectionPoints.map(p => ({
           id: p.id, name: p.name.trim(), address: p.address.trim(), lat: p.lat, lng: p.lng,
           windows: p.windows.filter(w => w.opensAt && w.closesAt), instructions: { en: p.instructionsEn.trim(), sw: p.instructionsSw.trim() },
@@ -339,7 +349,7 @@ export function docFromForm(form: EventForm, base: Partial<EventDocument> = {}):
     venue: p.venue!, heroThumbUrl: form.heroThumbUrl || null, heroImageAlt: nul(form.coverAlt), distancesM: form.categories.map(c => Math.round(Number(c.distanceKm) * 1000)).filter(Number.isFinite),
     fromPriceTzs: minPrice(form), currency: 'TZS', organizer: base.organizer ?? { id: '', name: '', verified: false }, updatedAt: base.updatedAt ?? '',
     description: p.description!, heroImageUrl: nul(form.heroImageUrl), coverAlt: nul(form.coverAlt), routeUrl: p.routeUrl ?? null, routeImageUrl: p.routeImageUrl ?? null,
-    routeImageAlt: p.routeImageAlt ?? null, accessibility: p.accessibility ?? null, inclusions: p.inclusions ?? null, categories: p.categories ?? [],
+    routeImageAlt: p.routeImageAlt ?? null, accessibility: p.accessibility ?? null, inclusions: p.inclusions ?? null, kitProvided: form.hasKit, categories: p.categories ?? [],
     collectionPoints: p.collectionPoints ?? [], schedule: p.schedule ?? [], sponsors: p.sponsors ?? [], contact: p.contact!, terms: p.terms!,
     refundPolicy: p.refundPolicy!, cancellation: base.cancellation ?? null, shareUrl: base.shareUrl ?? null, publishedAt: base.publishedAt ?? null,
     version: base.version ?? 0, allowedActions: base.allowedActions ?? [], submittedAt: base.submittedAt ?? null, rejection: base.rejection ?? null, changeLogCount: base.changeLogCount ?? 0,
@@ -504,11 +514,33 @@ export function errorsByStep(errors: Errors): Record<WizardStep, number> {
   return out;
 }
 /** Server 422 `event_invalid { fields: [{path, code}] }` (§14.3) merged onto the same paths. */
+const SERVER_PATHS: Array<[RegExp, string]> = [
+  [/^description\.en$/, 'descriptionEn'], [/^description\.sw$/, 'descriptionSw'], [/^heroImageAlt$/, 'coverAlt'], [/^coverAlt$/, 'coverAlt'],
+  [/^venue\.name$/, 'venueName'], [/^venue\.address$/, 'venueAddress'], [/^venue\.city$/, 'venueCity'], [/^venue\.region$/, 'venueRegion'], [/^venue\.(lat|lng)$/, 'pin'],
+  [/^accessibility\.en$/, 'accessEn'], [/^accessibility\.sw$/, 'accessSw'], [/^inclusions\.en$/, 'inclusionsEn'], [/^inclusions\.sw$/, 'inclusionsSw'],
+  [/^terms\.en$/, 'termsEn'], [/^terms\.sw$/, 'termsSw'], [/^refundPolicy\.preset$/, 'policyPreset'], [/^refundPolicy\.text\.en$/, 'policyEn'], [/^refundPolicy\.text\.sw$/, 'policySw'],
+  [/^contact\.email$/, 'contactEmail'], [/^contact\.phone$/, 'contactPhone'], [/^contact\.whatsapp$/, 'contactWhatsapp'],
+  [/^(categories\.\d+)\.distanceM$/, '$1.distanceKm'], [/^(categories\.\d+)\.eligibility\.en$/, '$1.eligibilityEn'], [/^(categories\.\d+)\.eligibility\.sw$/, '$1.eligibilitySw'],
+  [/^(categories\.\d+\.ticketTypes\.\d+)\.priceTzs$/, '$1.priceText'],
+  [/^(collectionPoints\.\d+)\.instructions\.en$/, '$1.instructionsEn'], [/^(collectionPoints\.\d+)\.instructions\.sw$/, '$1.instructionsSw'],
+  [/^(collectionPoints\.\d+)\.(lat|lng)$/, '$1.pin'], [/^(collectionPoints\.\d+\.windows\.\d+)\.(opensAt|closesAt)$/, '$1'],
+  [/^(schedule\.\d+)\.label\.en$/, '$1.labelEn'], [/^(schedule\.\d+)\.label\.sw$/, '$1.labelSw'],
+];
+/** A backend field path ("categories[0].ticketTypes[1].priceTzs") as the form names it ("categories.0.ticketTypes.1.priceText"). */
+export function normaliseServerPath(path: string): string {
+  let p = path.replace(/\[(\d+)\]/g, '.$1').replace(/^\./, '');
+  for (const [re, to] of SERVER_PATHS) { if (re.test(p)) { p = p.replace(re, to); break; } }
+  return p;
+}
+// Backend code → the portal's own message key where the wording already exists (`too_long` keeps its own generic text).
+const CODE_ALIASES: Record<string, string> = { invalid_url: 'httpsOnly', invalid_email: 'email', invalid_phone: 'phone' };
+/** Server 422 `event_invalid { fields: [{path, code}] }` (§14.3) merged onto the form's own paths. */
 export function serverErrors(fields: Array<{ path: string; code: string }> | undefined): Errors {
   const out: Errors = {};
   for (const f of fields ?? []) {
-    const code = f.code.replace(/^events\.validation\./, '');
-    out[f.path.replace(/^description\.en$/, 'descriptionEn').replace(/^description\.sw$/, 'descriptionSw')] = { key: `events.validation.${code}` as MessageKey };
+    const raw = f.code.replace(/^events\.validation\./, '');
+    const code = CODE_ALIASES[raw] ?? raw;
+    out[normaliseServerPath(f.path)] = { key: `events.validation.${code}` as MessageKey };
   }
   return out;
 }
