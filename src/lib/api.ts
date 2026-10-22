@@ -453,9 +453,9 @@ export const api = {
   // and FitFlex-wide messages (scope 'admin'). Same shapes for both. ──
   commsOverview: (token: string, scope: CommsScope, gymId?: string) =>
     request<CommsOverview>(`/${scope}/communications/overview${gymId ? `?gymId=${encodeURIComponent(gymId)}` : ''}`, {}, token),
-  /** FitFlex (admin) can ask for the trainer audiences with recipients 'trainers'. */
+  /** FitFlex (admin) can ask for the trainer or vendor audiences with recipients 'trainers' / 'vendors'. */
   commsSegments: (token: string, scope: CommsScope, recipients: CommsRecipients = 'members') =>
-    request<CommsCatalog>(`/${scope}/communications/segments${recipients === 'trainers' ? '?recipients=trainers' : ''}`, {}, token),
+    request<CommsCatalog>(`/${scope}/communications/segments${recipients !== 'members' ? `?recipients=${recipients}` : ''}`, {}, token),
   commsAudiencePreview: (token: string, scope: CommsScope, body: { gymId?: string; recipients?: CommsRecipients; preset?: string | null; filter?: unknown; purpose?: string }) =>
     request<CommsAudiencePreview>(`/${scope}/communications/audience/preview`, { method: 'POST', body: JSON.stringify(body) }, token),
   /** Campaign history. Filters: gymId, status, purpose, channel, from, to, search; cursor paging. */
@@ -3076,7 +3076,8 @@ export interface CommsTemplatePreview {
   needsValues: string[];
 }
 /** Who a FitFlex message goes to; gym messages always go to members. */
-export type CommsRecipients = 'members' | 'trainers';
+/** 'trainers' and 'vendors' are FitFlex (admin) only: a gym sending to them gets 400 invalid_recipients. */
+export type CommsRecipients = 'members' | 'trainers' | 'vendors';
 export interface CommsAudience { preset?: string | null; filter?: unknown; recipients?: CommsRecipients }
 export interface CommsDraft {
   gymId?: string; name?: string; purpose?: CommsPurpose; audience?: CommsAudience;
@@ -3164,19 +3165,26 @@ export interface CommsOverview {
   senderType: 'gym' | 'platform'; members: number | null;
   /** FitFlex only: active trainers FitFlex can message. */
   trainers?: number | null;
+  /** FitFlex only: people FitFlex can message at vendors (vendor accounts and their admin staff). */
+  vendors?: number | null;
   campaigns: Partial<Record<CommsStatus, number>>;
   recent: CommsCampaign[]; channels: Record<CommsChannel, boolean>;
   limits: { largeSendThreshold: number; marketingWeeklyCap: number };
 }
 export interface CommsCatalog {
-  scope: 'gym' | 'platform' | 'trainers';
+  scope: 'gym' | 'platform' | 'trainers' | 'vendors';
   presets: Array<{ key: string; filter: unknown }>;
   fields: Array<{ key: string; type: string; ops: string[]; values?: string[] }>;
+  limits?: { maxDepth: number; maxConditions: number };
 }
 export interface CommsAudiencePreview {
   count: number; category: string;
   channels: Record<CommsChannel, { eligible: number; excluded: Record<string, number> }>;
-  sample: Array<{ id: string; displayName: string | null; status: string }>;
+  sample: Array<{
+    id: string; displayName: string | null; status: string;
+    /** Vendor audiences only: which shop, and whether this is the vendor account or one of its admin staff. */
+    businessName?: string | null; vendorId?: string; vendorRecipient?: 'account' | 'admin_staff';
+  }>;
 }
 export interface CommsPreview {
   category: string; counts: CommsCounts; largeSendThreshold: number;
