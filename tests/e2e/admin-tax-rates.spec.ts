@@ -208,6 +208,32 @@ test.describe('tax rates', () => {
     expect(calls.outside).toEqual([]);
   });
 
+  test('UAT D3: names for proposedBy / decidedBy ({ id, name }), "System" for the seed, the id when there is no name', async ({ page }) => {
+    await signIn(page);
+    const named = [
+      rate('tr_a', { proposedBy: { id: 'system', name: 'System' }, decidedBy: { id: 'system', name: 'System' }, history: [{ action: 'tax_rate_proposed', actor: { id: 'system', name: 'System' }, at: NOW, before: null, after: { status: 'pending' } }] }),
+      rate('tr_p1', { ratePct: 16, effectiveFrom: day(10), status: 'pending', proposedBy: { id: 'adm_2', name: 'Amina Juma' }, decidedBy: null, decidedAt: null }),
+      rate('tr_p2', { ratePct: 17, effectiveFrom: day(20), status: 'pending', proposedBy: { id: ME.id, name: 'One Admin' }, decidedBy: null, decidedAt: null }),
+      rate('tr_p3', { ratePct: 15, effectiveFrom: day(30), status: 'rejected', proposedBy: { id: 'adm_3', name: null }, decidedBy: { id: 'adm_2', name: 'Amina Juma' },
+        history: [{ action: 'tax_rate_rejected', actor: { id: 'adm_2', name: 'Amina Juma' }, at: NOW, before: null, after: { status: 'rejected', note: 'Wrong date' } }] }),
+    ];
+    const calls = await mockApi(page, { 'GET /admin/tax-rates': { json: { asOf: day(0), codes, rates: named } } });
+    await page.goto('/admin/tax-rates/');
+    await expect(page.getByTestId('tax-rate-tr_a').locator('td').nth(6)).toHaveText('System');
+    await expect(page.getByTestId('tax-rate-tr_p1').locator('td').nth(6)).toHaveText('Amina Juma');
+    await expect(page.getByTestId('tax-rate-tr_p1').getByTestId('tax-approve-tr_p1')).toBeEnabled();
+    // The proposer, as an object, is still "You" and can't approve.
+    await expect(page.getByTestId('tax-rate-tr_p2').locator('td').nth(6)).toHaveText('You');
+    await expect(page.getByTestId('tax-approve-tr_p2')).toBeDisabled();
+    await expect(page.getByTestId('tax-rate-tr_p3').locator('td').nth(6)).toHaveText('adm_3');
+    await page.getByTestId('tax-history-toggle-tr_p3').click();
+    await expect(page.getByTestId('tax-decided-by-tr_p3')).toContainText('Decided by Amina Juma');
+    await expect(page.getByTestId('tax-history-tr_p3')).toContainText('Amina Juma');
+    await page.getByTestId('tax-history-toggle-tr_a').click();
+    await expect(page.getByTestId('tax-decided-by-tr_a')).toContainText('Decided by System');
+    expect(calls.outside).toEqual([]);
+  });
+
   test('Kiswahili labels', async ({ page }) => {
     await signIn(page, ME, 'sw');
     await mockApi(page, { 'GET /admin/tax-rates': { json: { asOf: day(0), codes, rates: seed() } } });
@@ -217,6 +243,8 @@ test.describe('tax rates', () => {
     await expect(page.getByTestId('tax-rate-tr_a')).toContainText('Kiwango cha kawaida');
     await expect(page.getByTestId('tax-code-B')).toContainText('Hakitumiki');
     await expect(page.getByTestId('tax-propose')).toHaveText('Pendekeza mabadiliko');
+    // Older answers (ids only): the seed's "system" is shown as "Mfumo".
+    await expect(page.getByTestId('tax-rate-tr_a').locator('td').nth(6)).toHaveText('Mfumo');
   });
 });
 
