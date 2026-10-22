@@ -10,7 +10,7 @@ import { Alert, Badge, Button, Card, Field, PageHeader, Segmented, Spinner } fro
 import { Dialog, DialogFooter } from '@/components/dialog';
 import { ColumnDef, DataTable } from '@/components/data-table';
 import { VendorAreaPicker } from '@/components/vendor-area-picker';
-import { areaLabel, deliveryIds, freeTextRegions, hasNoArea, indexAreas, regionOf, suggestAreas, usableAreas } from '@/lib/vendor-areas';
+import { areaLabel, deliveryIds, freeTextRegions, hasNoArea, indexAreas, localiseAreas, regionOf, suggestAreas, usableAreas } from '@/lib/vendor-areas';
 
 type T = ReturnType<typeof useApp>['t'];
 type AreaFilter = 'all' | 'none' | 'backfill';
@@ -75,7 +75,7 @@ function approvalTone(status: VendorSummary['approvalStatus']) {
 }
 
 export default function VendorsPage() {
-  const { token, user, t } = useApp();
+  const { token, user, t, locale } = useApp();
   const [vendors, setVendors] = useState<VendorSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -86,13 +86,16 @@ export default function VendorsPage() {
   const [rate, setRate] = useState('');
   const [rateError, setRateError] = useState<string | null>(null);
   // Shop areas ("Popular near you"): where a vendor is based and delivers to.
-  const [areas, setAreas] = useState<GeoArea[]>([]);
+  const [rawAreas, setAreas] = useState<GeoArea[]>([]);
   const [areasState, setAreasState] = useState<'loading' | 'ready' | 'failed'>('loading');
   const [areaFilter, setAreaFilter] = useState<AreaFilter>('all');
   const [areaTarget, setAreaTarget] = useState<VendorSummary | null>(null);
   const [basedIn, setBasedIn] = useState<string | null>(null);
   const [delivers, setDelivers] = useState<string[]>([]);
   const [areaError, setAreaError] = useState<string | null>(null);
+  // Stored areas dropped on opening because they are no longer usable (deactivated or deleted).
+  const [droppedCount, setDroppedCount] = useState(0);
+  const areas = useMemo(() => localiseAreas(rawAreas, locale), [rawAreas, locale]);
   const byId = useMemo(() => indexAreas(areas), [areas]);
 
   async function load() {
@@ -108,7 +111,7 @@ export default function VendorsPage() {
     }
   }
 
-  // GET /admin/geo-areas needs a promotions scope; /shop/areas works for any signed-in admin while SHOP_NEAR_YOU is on.
+  // GET /admin/geo-areas (readable with the shop or a promotions scope); /shop/areas is the fallback while SHOP_NEAR_YOU is on.
   async function loadAreas() {
     if (!token) return;
     setAreasState('loading');
@@ -128,9 +131,15 @@ export default function VendorsPage() {
   useEffect(() => { void load(); void loadAreas(); }, [token]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function openAreas(vendor: VendorSummary) {
+    // Keep only areas that are still usable, so a deactivated one can't block saving.
+    const storedCity = vendor.vendorProfile?.cityId ?? null;
+    const cityOk = !storedCity || ['city', 'district'].includes(byId.get(storedCity)?.level ?? '');
+    const stored = deliveryIds(vendor.vendorProfile);
+    const kept = stored.filter(id => byId.has(id));
     setAreaTarget(vendor);
-    setBasedIn(vendor.vendorProfile?.cityId ?? null);
-    setDelivers(deliveryIds(vendor.vendorProfile));
+    setBasedIn(cityOk ? storedCity : null);
+    setDelivers(kept);
+    setDroppedCount(stored.length - kept.length + (cityOk ? 0 : 1));
     setAreaError(null);
   }
 
@@ -277,6 +286,7 @@ export default function VendorsPage() {
     <Dialog open={!!areaTarget} onClose={() => setAreaTarget(null)} title={t('vendors.areas.edit')} description={areaTarget?.vendorProfile?.businessName || areaTarget?.displayName || ''} size="lg">
       <div className="space-y-5">
         {areaError && <Alert tone="error">{areaError}</Alert>}
+        {droppedCount > 0 && <Alert tone="warning"><span data-testid="vendor-areas-dropped">{t('vendors.areas.dropped').replace('{n}', String(droppedCount))}</span></Alert>}
         {/* What the seller typed, so the admin can map it to areas. */}
         <section className="space-y-2 rounded-[var(--radius-md)] bg-[var(--color-bg-secondary)] p-3 text-sm" data-testid="vendor-areas-written">
           <p className="font-medium text-[var(--color-fg-primary)]">{t('vendors.areas.written')}</p>

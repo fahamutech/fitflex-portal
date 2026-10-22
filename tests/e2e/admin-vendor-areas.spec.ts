@@ -10,13 +10,15 @@ const AREAS = [
   { id: 'tz-dar-city', level: 'city', name: 'Dar es Salaam', parentId: 'tz-dar', active: true },
   { id: 'tz-dar-kinondoni', level: 'district', name: 'Kinondoni', parentId: 'tz-dar-city', active: true },
   { id: 'tz-aru', level: 'region', name: 'Arusha', parentId: 'tz', active: true },
-  { id: 'tz-aru-city', level: 'city', name: 'Arusha', parentId: 'tz-aru', active: true },
+  { id: 'tz-aru-city', level: 'city', name: 'Arusha', names: { en: 'Arusha City', sw: 'Jiji la Arusha' }, parentId: 'tz-aru', active: true },
   { id: 'tz-mwz', level: 'region', name: 'Mwanza', parentId: 'tz', active: false },
 ];
 
 const base = { userType: 'vendor', approvalStatus: 'approved', accountStatus: 'active', productCount: 2, pendingProductCount: 0, kycExempt: true };
 const mapped = { ...base, id: 'v-mapped', vendorProfile: { businessName: 'Kinondoni Gear', cityId: 'tz-dar-kinondoni', regionId: 'tz-dar', deliveryAreaIds: ['tz-dar', 'tz-aru'], areasSource: 'vendor' } };
 const unmapped = { ...base, id: 'v-unmapped', vendorProfile: { businessName: 'Asha Fitness Store', address: 'Plot 4, Mikocheni', deliveryRegions: ['Dar es Salaam', 'Arusha', 'Zanzibar'] } };
+// Stored areas that are no longer usable: Mwanza is inactive, the city was deleted.
+const stale = { ...base, id: 'v-stale', vendorProfile: { businessName: 'Old Lake Sports', cityId: 'tz-gone-city', regionId: 'tz-gone', deliveryAreaIds: ['tz-dar', 'tz-mwz'], areasSource: 'vendor' } };
 const guessed = { ...base, id: 'v-guessed', vendorProfile: { businessName: 'Nationwide Supplements', deliveryAreaIds: ['tz'], areasSource: 'backfill', deliveryRegions: 'Tanzania nzima' } };
 
 type Mock = { geoAreas?: 'ok' | 'forbidden' | 'empty'; shopAreas?: 'ok' | 'disabled'; put?: 'ok' | 'invalid' };
@@ -31,7 +33,7 @@ async function setup(page: Page, mock: Mock = {}, locale = 'en') {
   await page.route(`${API}/**`, async (route) => {
     const req = route.request();
     const path = new URL(req.url()).pathname;
-    if (path === '/admin/vendors') return route.fulfill({ json: [mapped, unmapped, guessed] });
+    if (path === '/admin/vendors') return route.fulfill({ json: [mapped, unmapped, guessed, stale] });
     if (path === '/admin/geo-areas') {
       if (mock.geoAreas === 'forbidden') return route.fulfill({ status: 403, json: { error: 'forbidden' } });
       return route.fulfill({ json: { areas: mock.geoAreas === 'empty' ? [] : AREAS } });
@@ -45,6 +47,12 @@ async function setup(page: Page, mock: Mock = {}, locale = 'en') {
       puts.push(body);
       if (mock.put === 'invalid') return route.fulfill({ status: 400, json: { error: 'invalid_area', field: 'deliveryAreaIds', ids: ['tz-aru'], reason: 'inactive' } });
       return route.fulfill({ json: { ...unmapped, vendorProfile: { ...unmapped.vendorProfile, ...body, regionId: 'tz-dar', areasSource: 'admin' } } });
+    }
+    if (path.startsWith('/admin/vendors/') && req.method() === 'PUT') {
+      const body = req.postDataJSON();
+      puts.push(body);
+      const v = [mapped, guessed, stale].find(x => path.endsWith(`/${x.id}`))!;
+      return route.fulfill({ json: { ...v, vendorProfile: { ...v.vendorProfile, ...body, areasSource: 'admin' } } });
     }
     return route.fulfill({ json: [] });
   });
@@ -156,4 +164,35 @@ test('Swahili labels', async ({ page }) => {
   await expect(page.getByTestId('vendor-areas-v-guessed')).toContainText('Ina delivery hadi: Nchi nzima');
   await page.getByTestId('vendor-areas-edit-v-unmapped').click();
   await expect(page.getByRole('dialog').getByText('Alichoandika muuzaji')).toBeVisible();
+});
+
+test('stored areas that are no longer available are dropped on opening, so saving is not blocked', async ({ page }) => {
+  const puts = await setup(page);
+  await page.goto('/admin/vendors');
+  await page.getByTestId('vendor-areas-edit-v-stale').click();
+  const dialog = page.getByRole('dialog');
+  await expect(dialog.getByTestId('vendor-areas-dropped')).toHaveText('Removed 2 areas that are no longer available.');
+  await expect(dialog.getByTestId('vendor-delivers-to-tz-dar')).toBeChecked();
+  await dialog.getByTestId('vendor-areas-save').click();
+  await expect.poll(() => puts.length).toBe(1);
+  expect(puts[0]).toEqual({ deliveryAreaIds: ['tz-dar'], cityId: null, regionId: null });
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+});
+
+test('area names follow the reader\'s language when the backend sends them', async ({ page }) => {
+  await setup(page, {}, 'sw');
+  await page.goto('/admin/vendors');
+  await page.getByTestId('vendor-areas-edit-v-mapped').click();
+  await expect(page.getByRole('dialog').getByTestId('vendor-delivers-to')).toContainText('Jiji la Arusha');
+  await expect(page.getByRole('dialog').getByTestId('vendor-delivers-to').getByText('Nchi nzima (Tanzania yote)')).toBeVisible();
+  await page.getByRole('dialog').getByTestId('vendor-delivers-to-search').fill('jiji la');
+  await expect(page.getByRole('dialog').getByTestId('vendor-delivers-to-tz-aru-city')).toBeVisible();
+});
+
+test('area names in English', async ({ page }) => {
+  await setup(page);
+  await page.goto('/admin/vendors');
+  await page.getByTestId('vendor-areas-edit-v-mapped').click();
+  await expect(page.getByRole('dialog').getByTestId('vendor-delivers-to')).toContainText('Arusha City');
+  await expect(page.getByRole('dialog').getByTestId('vendor-areas-dropped')).toHaveCount(0);
 });

@@ -271,7 +271,7 @@ export type CampaignAnalytics = {
   campaign: { id: string; name: string; status: string; startsAt: string; endsAt: string }; range: PromotionAnalyticsRange;
   totals: PromotionMetrics; items: PromotionAnalyticsItem[]; notTracked: string[]; unverifiedEvents?: number;
 };
-export type GeoArea = { id: string; level: 'country' | 'region' | 'city' | 'district'; name: string; parentId: string | null; active?: boolean };
+export type GeoArea = { id: string; level: 'country' | 'region' | 'city' | 'district'; name: string; parentId: string | null; active?: boolean; /** Place name per language, when the backend sends it. */ names?: { en?: string | null; sw?: string | null } | null };
 export type EntityMatch = {
   entityType: ModerationEntityType; id: string; name: string; subtitle: string | null; status: string; moderationStatus: ModerationStatus;
   promotable: boolean; reasons: string[]; placements: PromotionPlacement[];
