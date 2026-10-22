@@ -66,10 +66,17 @@ export const REJECT_REASONS = ['incomplete_details', 'permit_missing', 'pricing_
 export const rejectReasonKey = (reason: string) => `admin.events.rejectReason.${(REJECT_REASONS as readonly string[]).includes(reason) ? reason : 'other'}` as MessageKey;
 export const CANCEL_REASONS = ['weather', 'permit', 'safety', 'low_turnout', 'organizer_decision', 'other'] as const;
 export const cancelReasonKey = (reason: string) => `events.cancel.reason.${(CANCEL_REASONS as readonly string[]).includes(reason) ? reason : 'other'}` as MessageKey;
-/** Audit `action` codes → label key; unknown codes fall back to the raw code (shown as given). */
-export const AUDIT_ACTIONS = ['created', 'updated', 'submitted', 'withdrawn', 'approved', 'published', 'rejected', 'cancelled', 'completed', 'archived', 'deleted', 'registration_closed', 'started'] as const;
-export const auditActionLabel = (code: string, t: (k: MessageKey) => string) =>
-  (AUDIT_ACTIONS as readonly string[]).includes(code) ? t(`admin.events.audit.action.${code}` as MessageKey) : code;
+/** Backend audit `action` names (rows carry `events.<name>`); approve writes `published`. Unknown codes show as given. */
+export const AUDIT_ACTIONS = [
+  'organizer_created', 'organizer_status', 'event_created', 'event_updated', 'submitted', 'withdrawn', 'published', 'rejected', 'cancelled',
+  'completed', 'archived', 'started', 'registration_closed', 'deleted', 'staff_invited', 'staff_removed', 'staff_role_changed',
+] as const;
+export const AUDIT_ACTION_PREFIX = 'events.';
+export const auditActionName = (code: string) => code.replace(/^events\./, '');
+export const auditActionLabel = (code: string, t: (k: MessageKey) => string) => {
+  const name = auditActionName(code);
+  return (AUDIT_ACTIONS as readonly string[]).includes(name) ? t(`admin.events.audit.action.${name}` as MessageKey) : code;
+};
 export const POLICY_PRESETS: RefundPolicyPreset[] = ['no_refund', 'refund_until_close', 'custom'];
 
 /** `allowedActions` vocabulary (§7.2) and the i18n key of each button. */

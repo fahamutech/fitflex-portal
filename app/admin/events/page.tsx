@@ -4,7 +4,7 @@ import { Suspense, useCallback, useEffect, useState } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { api, type AdminEventDetail, type AdminEventRow, type Bilingual, type EventAuditRow } from '@/lib/api';
 import { EVENTS_MODULE } from '@/lib/flags';
-import { ORGANIZER_STATUS, REJECT_REASONS, auditActionLabel, distanceLabel, errorCode, errorKey, eventDateTime, eventStatusOf, isFeatureOff, rejectReasonKey, relativeTime, typeKey } from '@/lib/events';
+import { AUDIT_ACTIONS, AUDIT_ACTION_PREFIX, ORGANIZER_STATUS, REJECT_REASONS, auditActionLabel, distanceLabel, errorCode, errorKey, eventDateTime, eventStatusOf, isFeatureOff, rejectReasonKey, relativeTime, typeKey } from '@/lib/events';
 import { Alert, Badge, Button, Card, CardContent, CardHeader, Checkbox, Field, PageHeader, Segmented, Select, SkeletonTable, Textarea, useToast } from '@/components/shared';
 import { DataTable, type ColumnDef } from '@/components/data-table';
 import { Dialog, DialogFooter } from '@/components/dialog';
@@ -89,7 +89,6 @@ function AuditTable({ eventId }: { eventId?: string }) {
   useEffect(() => { void load(); }, [load]);
   if (error) return <PageError onRetry={() => void load()} />;
   if (!rows) return <div aria-busy="true"><SkeletonTable /></div>;
-  const actions = Array.from(new Set(rows.map(r => r.action)));
   const columns: ColumnDef<EventAuditRow>[] = [
     { key: 'at', header: t('admin.events.audit.when'), sortable: true, cell: r => eventDateTime(r.at, 'Africa/Dar_es_Salaam', locale) },
     { key: 'actor', header: t('admin.events.audit.actor'), cell: r => r.actor?.name ?? r.actor?.id ?? '—' },
@@ -102,7 +101,7 @@ function AuditTable({ eventId }: { eventId?: string }) {
         extraFilters={!eventId ? (
           <Select size="sm" aria-label={t('admin.events.audit.filterAction')} value={action} onChange={e => setAction(e.target.value)}>
             <option value="">{t('admin.events.audit.allActions')}</option>
-            {actions.map(a => <option key={a} value={a}>{auditActionLabel(a, t)}</option>)}
+            {AUDIT_ACTIONS.map(a => <option key={a} value={`${AUDIT_ACTION_PREFIX}${a}`}>{auditActionLabel(a, t)}</option>)}
           </Select>
         ) : undefined} />
     </div>

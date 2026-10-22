@@ -88,6 +88,9 @@ test('later statuses offer cancel/archive, the audit card lists rows, the Audit 
   await expect(page.getByTestId('admin-event-audit')).toContainText('Submitted');
   await page.goto('/admin/events/?tab=audit');
   await expect(page.getByTestId('admin-events-audit')).toContainText('Admin One');
+  await expect(page.getByTestId('admin-events-audit')).toContainText('Submitted');
+  // The filter lists the backend's real action names, translated.
+  await expect(page.getByRole('combobox', { name: 'Action' }).locator('option', { hasText: 'Staff role changed' })).toHaveAttribute('value', 'events.staff_role_changed');
   await page.goto('/admin/events/?tab=published');
   await expect(page.getByRole('region', { name: 'Events for review' })).toContainText('Arusha Trail 10K');
 });

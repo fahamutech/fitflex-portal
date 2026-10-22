@@ -94,7 +94,7 @@ export const AGREEMENTS = { agreements: [
 const adminRow = (d: Json, over: Json = {}) => ({ ...summary(), ...d, organizer: { id: 'org_1', name: 'Dar Runners', verified: true, status: 'active', kycCaseId: 'kyc_1' }, permitOnFile: false, submittedAt: d.submittedAt ?? null, ...over });
 export const ADMIN_ROWS = [adminRow(SUBMITTED), adminRow(PUBLISHED, { permitOnFile: true }), adminRow(ROWS[0])];
 export const ADMIN_DOC = (d: Json = SUBMITTED, over: Json = {}) => ({ ...d, organizer: { id: 'org_1', name: 'Dar Runners', verified: true, status: 'active', kycCaseId: 'kyc_1' }, permitOnFile: false, allowedActions: d.status === 'submitted' ? ['approve', 'reject'] : d.status === 'published' ? ['cancel'] : [], ...over });
-export const AUDIT = [{ id: 'aud_1', at: '2026-10-21T09:00:00.000Z', actor: { id: 'admin-1', name: 'Admin One' }, action: 'submitted', target: 'evt_sub', reason: null, note: null }];
+export const AUDIT = [{ id: 'aud_1', at: '2026-10-21T09:00:00.000Z', actor: { id: 'admin-1', name: 'Admin One' }, action: 'events.submitted', target: 'evt_sub', reason: null, note: null }];
 
 const empty = { items: [], total: 0, nextCursor: null };
 export const pageOf = <T,>(items: T[]) => ({ items, total: items.length, nextCursor: null });
