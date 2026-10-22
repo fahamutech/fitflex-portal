@@ -3,7 +3,7 @@ import { useId, useMemo, useState } from 'react';
 import type { GeoArea } from '@/lib/api';
 import { useApp } from '../../app/providers';
 import { Button, Checkbox, Input, Radio } from './shared';
-import { ancestors, areaLabel, coveringArea, indexAreas, searchVisible } from '@/lib/vendor-areas';
+import { ancestors, areaLabel, coveringArea, indexAreas, nameSaysLevel, searchVisible } from '@/lib/vendor-areas';
 
 type Props = {
   areas: GeoArea[];
@@ -40,7 +40,9 @@ export function VendorAreaPicker(props: Props) {
 
   const row = (a: GeoArea, depth: number): React.ReactNode => {
     const parent = ancestors(a.id, byId).find(p => p.level !== 'country');
-    const description = parent ? `${levelName(a)} · ${parent.name}` : levelName(a);
+    // Skip the level word when the name already says it ("Zanzibar City" is not followed by "City").
+    const level = nameSaysLevel(a, levelName(a)) ? null : levelName(a);
+    const description = [level, parent?.name].filter(Boolean).join(' · ') || undefined;
     const indent = { paddingLeft: Math.min(depth, 4) * 16 };
     let control: React.ReactNode;
     if (mode === 'single') {

@@ -13,13 +13,17 @@ const AREAS = [
   { id: 'tz-aru', level: 'region', name: 'Arusha', parentId: 'tz', active: true },
   { id: 'tz-aru-city', level: 'city', name: 'Arusha City', nameSw: 'Jiji la Arusha', parentId: 'tz-aru', active: true },
   { id: 'tz-mwz', level: 'region', name: 'Mwanza', parentId: 'tz', active: false },
+  { id: 'tz-znz', level: 'region', name: 'Zanzibar', parentId: 'tz', active: true },
+  { id: 'tz-znz-city', level: 'city', name: 'Zanzibar City', nameSw: 'Mji wa Zanzibar', parentId: 'tz-znz', active: true },
 ];
 
 const base = { userType: 'vendor', approvalStatus: 'approved', accountStatus: 'active', productCount: 2, pendingProductCount: 0, kycExempt: true };
 const mapped = { ...base, id: 'v-mapped', vendorProfile: { businessName: 'Kinondoni Gear', cityId: 'tz-dar-kinondoni', regionId: 'tz-dar', deliveryAreaIds: ['tz-dar', 'tz-aru'], areasSource: 'vendor' } };
-const unmapped = { ...base, id: 'v-unmapped', vendorProfile: { businessName: 'Asha Fitness Store', address: 'Plot 4, Mikocheni', deliveryRegions: ['Dar es Salaam', 'Arusha', 'Zanzibar'] } };
+const unmapped = { ...base, id: 'v-unmapped', vendorProfile: { businessName: 'Asha Fitness Store', address: 'Plot 4, Mikocheni', deliveryRegions: ['Dar es Salaam', 'Arusha', 'Mbeya'] } };
 // Stored areas that are no longer usable: Mwanza is inactive, the city was deleted.
 const stale = { ...base, id: 'v-stale', vendorProfile: { businessName: 'Old Lake Sports', cityId: 'tz-gone-city', regionId: 'tz-gone', deliveryAreaIds: ['tz-dar', 'tz-mwz'], areasSource: 'vendor' } };
+// One stored area that is no longer usable.
+const stale1 = { ...base, id: 'v-stale1', vendorProfile: { businessName: 'Lake Runners', cityId: 'tz-aru-city', regionId: 'tz-aru', deliveryAreaIds: ['tz-aru', 'tz-mwz'], areasSource: 'vendor' } };
 const guessed = { ...base, id: 'v-guessed', vendorProfile: { businessName: 'Nationwide Supplements', deliveryAreaIds: ['tz'], areasSource: 'backfill', deliveryRegions: 'Tanzania nzima' } };
 
 type Mock = { geoAreas?: 'ok' | 'forbidden' | 'empty'; shopAreas?: 'ok' | 'disabled'; put?: 'ok' | 'invalid' };
@@ -34,7 +38,7 @@ async function setup(page: Page, mock: Mock = {}, locale = 'en') {
   await page.route(`${API}/**`, async (route) => {
     const req = route.request();
     const path = new URL(req.url()).pathname;
-    if (path === '/admin/vendors') return route.fulfill({ json: [mapped, unmapped, guessed, stale] });
+    if (path === '/admin/vendors') return route.fulfill({ json: [mapped, unmapped, guessed, stale, stale1] });
     if (path === '/admin/geo-areas') {
       if (mock.geoAreas === 'forbidden') return route.fulfill({ status: 403, json: { error: 'forbidden' } });
       return route.fulfill({ json: { areas: mock.geoAreas === 'empty' ? [] : AREAS } });
@@ -68,7 +72,7 @@ test('vendors table shows Based in and Delivers to, and filters unmapped and gue
   await page.goto('/admin/vendors');
   await expect(page.getByRole('columnheader', { name: 'Where they sell' })).toBeVisible();
   const mappedCell = page.getByTestId('vendor-areas-v-mapped');
-  await expect(mappedCell).toContainText('Based in: Kinondoni, Dar es Salaam');
+  await expect(mappedCell).toContainText('Based in: Kinondoni (Dar es Salaam)');
   await expect(mappedCell).toContainText('Delivers to: Dar es Salaam, Arusha');
   await expect(page.getByTestId('vendor-areas-v-guessed')).toContainText('Delivers to: Nationwide');
   await expect(page.getByTestId('vendor-areas-v-guessed')).toContainText('Guessed from their text');
@@ -90,7 +94,7 @@ test('admin maps an unmapped vendor from what they wrote and saves to the contra
   await page.getByTestId('vendor-areas-edit-v-unmapped').click();
   const dialog = page.getByRole('dialog');
   await expect(dialog.getByTestId('vendor-areas-written')).toContainText('Plot 4, Mikocheni');
-  await expect(dialog.getByTestId('vendor-areas-written')).toContainText('Dar es Salaam, Arusha, Zanzibar');
+  await expect(dialog.getByTestId('vendor-areas-written')).toContainText('Dar es Salaam, Arusha, Mbeya');
   // Inactive Mwanza is not offered.
   await expect(dialog.getByTestId('vendor-delivers-to-tz-mwz')).toHaveCount(0);
 
@@ -100,9 +104,9 @@ test('admin maps an unmapped vendor from what they wrote and saves to the contra
   await expect(dialog.getByTestId('vendor-based-in')).toContainText('Dar es Salaam');
   await expect(dialog.getByTestId('vendor-based-in-tz-aru-city')).toHaveCount(0);
   await dialog.getByTestId('vendor-based-in-tz-dar-kinondoni').check();
-  await expect(dialog.getByTestId('vendor-based-in-selected')).toContainText('Selected: Kinondoni, Dar es Salaam');
+  await expect(dialog.getByTestId('vendor-based-in-selected')).toContainText('Selected: Kinondoni (Dar es Salaam)');
 
-  // Exact-name matches from the free text, region first; Zanzibar matches nothing.
+  // Exact-name matches from the free text, region first; Mbeya matches nothing.
   await dialog.getByRole('button', { name: 'Add Dar es Salaam' }).click();
   await dialog.getByRole('button', { name: 'Add Arusha' }).click();
   await expect(dialog.getByRole('button', { name: /Add / })).toHaveCount(0);
@@ -116,7 +120,7 @@ test('admin maps an unmapped vendor from what they wrote and saves to the contra
   expect(puts[0]).toEqual({ deliveryAreaIds: ['tz-dar', 'tz-aru'], cityId: 'tz-dar-kinondoni', regionId: 'tz-dar' });
   await expect(page.getByRole('dialog')).toHaveCount(0);
   await expect(page.getByText('Vendor updated.')).toBeVisible();
-  await expect(page.getByTestId('vendor-areas-v-unmapped')).toContainText('Based in: Kinondoni, Dar es Salaam');
+  await expect(page.getByTestId('vendor-areas-v-unmapped')).toContainText('Based in: Kinondoni (Dar es Salaam)');
   await expect(page.getByTestId('vendor-areas-v-unmapped')).toContainText('Delivers to: Dar es Salaam, Arusha');
 });
 
@@ -141,7 +145,7 @@ test('nationwide covers every area, and an invalid_area refusal is explained', a
 test('falls back to /shop/areas when the admin has no promotions scope', async ({ page }) => {
   await setup(page, { geoAreas: 'forbidden' });
   await page.goto('/admin/vendors');
-  await expect(page.getByTestId('vendor-areas-v-mapped')).toContainText('Based in: Kinondoni, Dar es Salaam');
+  await expect(page.getByTestId('vendor-areas-v-mapped')).toContainText('Based in: Kinondoni (Dar es Salaam)');
 });
 
 test('area mapping stays hidden when no areas are set up', async ({ page }) => {
@@ -164,7 +168,7 @@ test('Swahili labels', async ({ page }) => {
   await setup(page, {}, 'sw');
   await page.goto('/admin/vendors');
   await expect(page.getByRole('columnheader', { name: 'Anapouzia' })).toBeVisible();
-  await expect(page.getByTestId('vendor-areas-v-mapped')).toContainText('Ipo: Kinondoni, Dar es Salaam');
+  await expect(page.getByTestId('vendor-areas-v-mapped')).toContainText('Ipo: Kinondoni (Dar es Salaam)');
   await expect(page.getByTestId('vendor-areas-v-guessed')).toContainText('Ina delivery hadi: Nchi nzima');
   await page.getByTestId('vendor-areas-edit-v-unmapped').click();
   await expect(page.getByRole('dialog').getByText('Alichoandika muuzaji')).toBeVisible();
@@ -175,7 +179,7 @@ test('stored areas that are no longer available are dropped on opening, so savin
   await page.goto('/admin/vendors');
   await page.getByTestId('vendor-areas-edit-v-stale').click();
   const dialog = page.getByRole('dialog');
-  await expect(dialog.getByTestId('vendor-areas-dropped')).toHaveText('Removed 2 areas that are no longer available.');
+  await expect(dialog.getByTestId('vendor-areas-dropped')).toHaveText('Removed 2 areas that are no longer available: tz-gone-city, Mwanza');
   await expect(dialog.getByTestId('vendor-delivers-to-tz-dar')).toBeChecked();
   await dialog.getByTestId('vendor-areas-save').click();
   await expect.poll(() => puts.length).toBe(1);
@@ -206,4 +210,36 @@ test('Swahili names also come through the /shop/areas fallback (names.sw)', asyn
   await page.goto('/admin/vendors');
   await page.getByTestId('vendor-areas-edit-v-mapped').click();
   await expect(page.getByRole('dialog').getByTestId('vendor-delivers-to')).toContainText('Jiji la Arusha');
+});
+
+test('the list names areas that are no longer available, and the note uses the singular for one', async ({ page }) => {
+  await setup(page);
+  await page.goto('/admin/vendors');
+  // Mwanza is inactive (named from its admin row); the deleted city has no row, so its id is the last resort.
+  await expect(page.getByTestId('vendor-areas-v-stale')).toContainText('Based in: tz-gone-city (no longer available)');
+  await expect(page.getByTestId('vendor-areas-v-stale')).toContainText('Delivers to: Dar es Salaam, Mwanza (no longer available)');
+  await page.getByTestId('vendor-areas-edit-v-stale1').click();
+  await expect(page.getByRole('dialog').getByTestId('vendor-areas-dropped')).toHaveText('Removed 1 area that is no longer available: Mwanza');
+});
+
+test('Swahili: unavailable areas and the removed-areas note', async ({ page }) => {
+  await setup(page, {}, 'sw');
+  await page.goto('/admin/vendors');
+  await expect(page.getByTestId('vendor-areas-v-stale')).toContainText('Mwanza (halipatikani tena)');
+  await page.getByTestId('vendor-areas-edit-v-stale1').click();
+  await expect(page.getByRole('dialog').getByTestId('vendor-areas-dropped')).toHaveText('Limeondolewa eneo 1 ambalo halipatikani tena: Mwanza');
+});
+
+test('a name that already says its level is not followed by the level again', async ({ page }) => {
+  await setup(page);
+  await page.goto('/admin/vendors');
+  await page.getByTestId('vendor-areas-edit-v-unmapped').click();
+  const dialog = page.getByRole('dialog');
+  const row = dialog.getByTestId('vendor-delivers-to').locator('label').filter({ has: page.getByTestId('vendor-delivers-to-tz-znz-city') });
+  await expect(row).toContainText('Zanzibar City');
+  await expect(row).not.toContainText('City ·');
+  await expect(row).toContainText('Zanzibar');
+  // Other cities still say their level.
+  const darCity = dialog.getByTestId('vendor-delivers-to').locator('label').filter({ has: page.getByTestId('vendor-delivers-to-tz-dar-city') });
+  await expect(darCity).toContainText('City · Dar es Salaam');
 });
