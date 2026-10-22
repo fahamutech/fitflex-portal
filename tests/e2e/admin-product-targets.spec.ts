@@ -143,3 +143,74 @@ test('Swahili labels and note', async ({ page }) => {
   await expect(page.getByText('Hakuna bidhaa zinazolingana na vichujio hivi.')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Futa vichujio' })).toBeVisible();
 });
+
+test('filters live in the URL: refresh and Back restore them; unknown values are ignored', async ({ page }) => {
+  await signedIn(page);
+  const calls = await mockApi(page, base());
+  await page.goto('/admin/products');
+  await page.getByLabel('Filter: Made for').selectOption('women');
+  await page.getByLabel('Filter: Age group').selectOption('30_44');
+  await expect(page).toHaveURL(/\/admin\/products\/?\?targetGender=women&targetAgeBand=30_44$/);
+  await expect(page.getByText('Yoga Mat')).toBeVisible();
+
+  await page.reload();
+  await expect(page.getByLabel('Filter: Made for')).toHaveValue('women');
+  await expect(page.getByLabel('Filter: Age group')).toHaveValue('30_44');
+  await expect(page.getByText('Beard Balm')).toHaveCount(0);
+  expect(productQueries(calls).at(-1)).toBe('?targetGender=women&targetAgeBand=30_44');
+
+  await page.goto('about:blank');
+  await page.goBack();
+  await expect(page.getByLabel('Filter: Made for')).toHaveValue('women');
+  await expect(page.getByLabel('Filter: Age group')).toHaveValue('30_44');
+
+  await page.getByRole('button', { name: 'Clear filters' }).click();
+  await expect(page).toHaveURL(/\/admin\/products\/?$/);
+  await expect(page.getByText('Beard Balm')).toBeVisible();
+
+  await page.goto('/admin/products?targetGender=nobody&targetAgeBand=99');
+  await expect(page.getByText('Beard Balm')).toBeVisible();
+  await expect(page.getByLabel('Filter: Made for')).toHaveValue('');
+  expect(productQueries(calls).at(-1)).toBe('');
+});
+
+test('filter card content is inset from the card edge', async ({ page }) => {
+  await signedIn(page);
+  await mockApi(page, base());
+  await page.goto('/admin/products');
+  const filters = page.getByTestId('product-target-filters');
+  const note = page.getByTestId('product-target-note');
+  await expect(note).toBeVisible();
+  const cardOf = (el: typeof filters) => el.locator('xpath=ancestor::div[contains(@class,"radius-xl")][1]');
+  const card = cardOf(filters);
+  const [c, f, n] = await Promise.all([card.boundingBox(), filters.boundingBox(), note.boundingBox()]);
+  expect(f!.x - c!.x).toBeGreaterThanOrEqual(16);
+  expect(f!.y - c!.y).toBeGreaterThanOrEqual(16);
+  expect(c!.x + c!.width - (n!.x + n!.width)).toBeGreaterThanOrEqual(16);
+  expect(c!.y + c!.height - (n!.y + n!.height)).toBeGreaterThanOrEqual(16);
+  // Product row cards are inset the same way.
+  const row = page.getByTestId('product-targets-prd_w');
+  const [rc, r] = await Promise.all([cardOf(row).boundingBox(), row.boundingBox()]);
+  expect(r!.x - rc!.x).toBeGreaterThanOrEqual(16);
+});
+
+test('Swahili at 375 px: header buttons fit, status badge translated', async ({ page }) => {
+  await page.setViewportSize({ width: 375, height: 812 });
+  await signedIn(page, 'sw');
+  await mockApi(page, base({ 'GET /admin/products': { json: [women, { ...men, status: 'paused' }] } }));
+  await page.goto('/admin/products');
+  const recompute = page.getByRole('button', { name: 'Hesabu upya alama na mauzo' });
+  await expect(recompute).toBeVisible();
+  const box = await recompute.boundingBox();
+  expect(box!.x).toBeGreaterThanOrEqual(0);
+  expect(box!.x + box!.width).toBeLessThanOrEqual(375);
+  expect(await recompute.evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
+  for (const name of ['Sasisha', 'Ongeza bidhaa']) {
+    const b = page.getByRole('button', { name });
+    const bb = await b.boundingBox(); expect(bb!.x + bb!.width).toBeLessThanOrEqual(375);
+  }
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
+  await expect(page.getByText('Inauzwa', { exact: true })).toBeVisible();
+  await expect(page.getByText('Imesimamishwa', { exact: true })).toBeVisible();
+  await expect(page.getByText('active', { exact: true })).toHaveCount(0);
+});
