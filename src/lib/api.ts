@@ -1004,6 +1004,12 @@ export const api = {
   deleteGym: (token: string, id: string) =>
     request<{ ok: boolean; gym: Gym }>(`/admin/gyms/${id}`, { method: 'DELETE' }, token),
   gymOwners: (token: string) => request<GymOwner[]>('/admin/gym-owners', {}, token),
+  /** Who a gym's payouts go to, and its owners (ACL gyms or owners). */
+  gymPayoutOwner: (token: string, gymId: string) =>
+    request<GymPayoutOwnerView>(`/admin/gyms/${encodeURIComponent(gymId)}/payout-owner`, {}, token),
+  /** Name one of the gym's owners as its payout owner, or clear it with null. Audited; stored even while GYM_PAYOUT_OWNER is off. */
+  setGymPayoutOwner: (token: string, gymId: string, ownerId: string | null) =>
+    request<GymPayoutOwnerView>(`/admin/gyms/${encodeURIComponent(gymId)}/payout-owner`, { method: 'PUT', body: JSON.stringify({ ownerId }) }, token),
   /** View only, audited server-side: call only when an admin opens this owner's personal details. `id` is the owner user id. */
   adminGymOwnerPersonalDetails: (token: string, id: string) =>
     request<{ ownerId: string; personalDetails: PartnerPersonalDetails }>(`/admin/gym-owners/${encodeURIComponent(id)}/personal-details`, {}, token),
@@ -1613,6 +1619,41 @@ export interface Gym {
   homepagePriority?: number;
   /** Trainer passes the owner sells — only trainers (and admins) see them. */
   trainerPass?: TrainerPassConfig;
+  /** Admin gym rows only (GET /admin/gyms): the named payout owner (stored even while GYM_PAYOUT_OWNER is off). */
+  payoutOwnerId?: string | null;
+  /** Admin gym rows only: every owner account of this gym, by name. */
+  owners?: GymOwnerSummary[];
+  /** Admin gym rows only: who would be paid now, under the current switch. */
+  payoutOwner?: GymPayoutOwnerState;
+}
+
+/** One owner account of a gym, as the payout-owner endpoints list it. */
+export interface GymOwnerSummary {
+  id: string;
+  displayName: string | null;
+  email: string | null;
+}
+
+export type GymPayoutOwnerSource = 'named' | 'only_owner' | 'first_owner';
+export type GymPayoutOwnerReason = 'payout_owner_required' | 'no_owner_account';
+
+/**
+ * Who a gym's payouts go to now. mode 'first_owner': GYM_PAYOUT_OWNER is off and the
+ * first owner account found is paid (ownerId null). mode 'named': the switch is on.
+ */
+export interface GymPayoutOwnerState {
+  mode: 'named' | 'first_owner';
+  ownerId: string | null;
+  source: GymPayoutOwnerSource | null;
+  reason: GymPayoutOwnerReason | null;
+}
+
+/** GET / PUT /admin/gyms/:id/payout-owner. */
+export interface GymPayoutOwnerView {
+  gymId: string;
+  payoutOwnerId: string | null;
+  owners: GymOwnerSummary[];
+  payoutOwner: GymPayoutOwnerState;
 }
 
 export type TrainerPassPeriod = 'daily' | 'weekly' | 'monthly';
@@ -1984,6 +2025,8 @@ export interface GymOwner {
   gyms?: Gym[];
   accountStatus?: 'active' | 'suspended';
   approvalStatus?: 'pending_approval' | 'approved' | 'rejected';
+  /** POST /admin/gym-owners answer only (GYM_PAYOUT_OWNER on): gyms this change left with 2+ owners and no named payout owner. */
+  payoutOwnerRequiredGymIds?: string[];
 }
 
 export interface TrainerProfile {
@@ -3463,8 +3506,18 @@ export interface SettlementAdjustment {
   rejectReason?: string | null;
 }
 
+/** Who a gym statement is paid to (admin statement detail, GYM_PAYOUT_OWNER on). */
+export interface SettlementPayee {
+  ownerId: string | null;
+  displayName: string | null;
+  source: 'destination_snapshot' | GymPayoutOwnerSource | null;
+  reason: GymPayoutOwnerReason | null;
+}
+
 export interface GymSettlementDetail {
   statement: GymSettlement;
+  /** Present only while GYM_PAYOUT_OWNER is on. */
+  payee?: SettlementPayee;
   lines: GymSettlementLine[];
   visits: SettlementVisit[];
   adjustments: SettlementAdjustment[];
