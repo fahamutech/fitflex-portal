@@ -15,7 +15,7 @@ const apiURL = process.env.FITFLEX_API_URL || 'http://localhost:3000';
 
 export default defineConfig({
   testDir: './tests/e2e',
-  testMatch: flagOn ? /events-(?!flag-off)[a-z-]+\.spec\.ts$/ : /events-flag-off\.spec\.ts$/,
+  testMatch: flagOn ? /events-(?!flag-off)[a-z0-9-]+\.spec\.ts$/ : /events-flag-off\.spec\.ts$/,
   timeout: 90_000,
   fullyParallel: false,
   workers: 1,

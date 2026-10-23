@@ -99,6 +99,105 @@ export const AUDIT = [{ id: 'aud_1', at: '2026-10-21T09:00:00.000Z', actor: { id
 const empty = { items: [], total: 0, nextCursor: null };
 export const pageOf = <T,>(items: T[]) => ({ items, total: items.length, nextCursor: null });
 
+
+// ── Events S3 fixtures (spec events-s3-registration-and-orders §3.1, §3.10, §3.13) ──
+export const OPTIONS_S3 = { ...OPTIONS, registration: true, holdTtlMinutes: 30, maxParticipantsPerOrder: 10, payment: 'none', teams: true, corporate: true, claim: { smsCodes: true, emailCodes: false }, consentTextVersion: '2026-10-draft' };
+export const STAFF_FINANCE = { id: 'usr_sfin', userType: 'organizer_staff', displayName: 'Fatma Finance' };
+/** An organisation user (B2B): `roles` are the session's organizationRoles; `permissions` answer GET /b2b/organizations/:id. */
+export const orgUser = (roles: string[]) => ({ id: 'org-user-1', userType: 'member', email: 'people@safari.test', displayName: 'Neema People', organizationUser: true, organizationRoles: roles });
+export const HR_USER = { id: 'hr-1', userType: 'corporate_hr', email: 'hr@mwenge.test', displayName: 'Juma HR' };
+export const ORG = { id: 'org-1', organizationType: 'club', legalName: 'Safari Cover Ltd', tradingName: 'Safari Cover', status: 'active', email: 'ops@safari.test', phone: '+255700000000' };
+export const PERMS_PEOPLE = ['beneficiaries.read', 'beneficiaries.manage', 'analytics.read'];
+export const PERMS_BILLING = [...PERMS_PEOPLE, 'billing.read', 'billing.pay'];
+export const PUBLIC_EVENTS = [
+  { ...PUBLISHED, availability: 'open', categories: undefined },
+  { ...DOC({ id: 'evt_pub2', slug: 'moshi-fun-run', title: 'Moshi Fun Run', type: 'fun', status: 'published', startsAt: '2027-06-05T04:00:00.000Z', endsAt: '2027-06-05T07:00:00.000Z' }), availability: 'open', categories: undefined },
+];
+export const PUBLIC_DETAIL = { ...PUBLISHED, availability: 'open', shareUrl: 'https://fitflex.test/e/arusha-trail-10k', participantFields: { phone: 'required', email: 'optional', dateOfBirth: 'required', gender: 'off', emergencyContact: 'optional', kitSize: 'off' }, duplicatePolicy: 'one_per_category',
+  categories: PUBLISHED.categories.map((c: Json) => ({ ...c, availability: 'open', remaining: null, ticketTypes: c.ticketTypes.map((tt: Json) => ({ ...tt, availability: 'open' })) })) };
+const CONSENT = { version: '2026-10-draft', en: 'We confirm our organisation has each listed person\'s permission to register them for this event and to share their details with FitFlex and the organizer.', sw: 'Tunathibitisha shirika letu lina ruhusa ya kila mtu aliyeorodheshwa kumsajili kwenye tukio hili na kushiriki taarifa zake na FitFlex na mwandaaji.' };
+const participant = (first: string, last: string, phone: string, email: string | null, ticketTypeId: string, extra: Json = {}) => ({ ticketTypeId, firstName: first, lastName: last, phone, email, dateOfBirth: '1990-01-01', gender: null, emergencyContact: null, kitSize: null, groupLabel: null, consentBasis: 'organisation', ...extra });
+const quoteFor = (lines: Array<{ ticketTypeId: string; quantity: number }>, discountPct = 0) => {
+  const price: Record<string, [string, string, string, number]> = { tt_1: ['Early bird', 'cat_1', '21K Half Marathon', 25000], tt_2: ['Standard', 'cat_2', '10K', 0] };
+  const ql = lines.map(l => { const [name, categoryId, categoryName, unit] = price[l.ticketTypeId]; const sub = unit * l.quantity; const disc = Math.round(sub * discountPct / 100); return { ticketTypeId: l.ticketTypeId, ticketTypeName: name, categoryId, categoryName, quantity: l.quantity, unitPriceTzs: unit, discountTzs: disc, feesTzs: 0, lineTotalTzs: sub - disc }; });
+  const subtotalTzs = ql.reduce((a, l) => a + l.unitPriceTzs * l.quantity, 0); const discountTzs = ql.reduce((a, l) => a + l.discountTzs, 0);
+  return { currency: 'TZS', lines: ql, subtotalTzs, discountTzs, feesTzs: 0, totalTzs: subtotalTzs - discountTzs, feeLabel: null };
+};
+/** Parses the posted CSV the way the service does (header aliases, DD/MM/YYYY) far enough for the specs: name, phone, email, category. */
+function parseRoster(rawText: string) {
+  const lines = rawText.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+  const header = lines[0].toLowerCase().split(',').map(h => h.trim());
+  const idx = (names: string[]) => header.findIndex(h => names.includes(h));
+  const iFirst = idx(['first name', 'given name']); const iLast = idx(['last name', 'surname']); const iName = idx(['name']); const iPhone = idx(['phone', 'mobile', 'mobile number']);
+  const iEmail = idx(['email']); const iCat = idx(['category', 'distance', 'race']); const iDob = idx(['date of birth', 'dob']); const iGroup = idx(['group', 'department']);
+  return lines.slice(1).map((line, index) => {
+    const c = line.split(',').map(v => v.trim());
+    let first = iFirst >= 0 ? c[iFirst] ?? '' : ''; let last = iLast >= 0 ? c[iLast] ?? '' : '';
+    if (iName >= 0 && !first) { const parts = (c[iName] ?? '').split(/\s+/); first = parts.slice(0, -1).join(' '); last = parts.slice(-1)[0] ?? ''; if (parts.length < 2) { first = parts[0] ?? ''; last = ''; } }
+    return { index, first, last, phone: iPhone >= 0 ? c[iPhone] ?? '' : '', email: iEmail >= 0 ? c[iEmail] ?? '' : '', category: iCat >= 0 ? c[iCat] ?? '' : '', dob: iDob >= 0 ? c[iDob] ?? '' : '', group: iGroup >= 0 ? c[iGroup] ?? '' : '' };
+  });
+}
+/** The roster dry run (§3.10): per-row problems, duplicates, lines and a quote for the ok rows. */
+export function validateRoster(rawText: string, opts: { capacityShort?: Json[]; alreadyRegistered?: string[]; discountPct?: number } = {}) {
+  const parsed = parseRoster(rawText);
+  const seen = new Map<string, number>();
+  const duplicates: Json[] = [];
+  const rows = parsed.map(p => {
+    const problems: Json[] = [];
+    if (!p.first || !p.last) problems.push({ field: 'name', code: 'name_incomplete' });
+    const digits = p.phone.replace(/\D/g, '');
+    if (!p.phone && !p.email) problems.push({ field: 'phone', code: 'contact_required' });
+    else if (p.phone && !/^(255|0)[67]\d{8}$/.test(digits)) problems.push({ field: 'phone', code: 'phone_invalid' });
+    const cat = /21/.test(p.category) ? 'cat_1' : /10/.test(p.category) ? 'cat_2' : null;
+    if (!cat) problems.push({ field: 'category', code: 'category_unknown' });
+    if (cat === 'cat_1' && !p.dob) problems.push({ field: 'dateOfBirth', code: 'dob_required' });
+    const key = digits || p.email.toLowerCase();
+    if (key && seen.has(key)) duplicates.push({ index: p.index, kind: 'in_list', otherIndex: seen.get(key) }); else if (key) seen.set(key, p.index);
+    if (opts.alreadyRegistered?.includes(digits)) { duplicates.push({ index: p.index, kind: 'already_registered', registrationStatus: 'confirmed' }); problems.push({ field: 'phone', code: 'duplicate_participant' }); }
+    const ticketTypeId = cat === 'cat_1' ? 'tt_1' : cat === 'cat_2' ? 'tt_2' : null;
+    return { index: p.index, ok: problems.length === 0, participant: participant(p.first, p.last, p.phone || null, p.email || null, ticketTypeId ?? '', { dateOfBirth: p.dob || null, groupLabel: p.group || null }), categoryId: cat, ticketTypeId, problems };
+  });
+  const dupIdx = new Set(duplicates.map(d => d.index));
+  const okRows = rows.filter(r => r.ok && !dupIdx.has(r.index));
+  const lines = Object.entries(okRows.reduce<Record<string, number>>((acc, r) => { acc[r.ticketTypeId!] = (acc[r.ticketTypeId!] ?? 0) + 1; return acc; }, {})).map(([ticketTypeId, quantity]) => ({ ticketTypeId, quantity }));
+  const availability: Json = { tt_1: { availability: 'open', remaining: 8 }, tt_2: { availability: 'open', remaining: null } };
+  return {
+    rows, duplicates, summary: { total: rows.length, ok: okRows.length, problems: rows.filter(r => !r.ok).length, duplicates: duplicates.length },
+    lines, quote: okRows.length ? quoteFor(lines, opts.discountPct ?? 0) : null, availability, fields: PUBLIC_DETAIL.participantFields, consentText: CONSENT,
+    refundPolicy: { preset: 'no_refund', text: null }, capacityShort: opts.capacityShort ?? [],
+  };
+}
+const ORDER_EVENT = { id: 'evt_pub', slug: 'arusha-trail-10k', title: 'Arusha Trail 10K', startsAt: '2027-05-02T04:00:00.000Z', timezone: 'Africa/Dar_es_Salaam', utcOffsetMinutes: 180, timezoneAbbr: 'EAT', heroThumbUrl: null };
+export const ORDER_ROW = (over: Json = {}) => ({ id: 'ord_1', reference: 'EV-2026-0001', status: 'awaiting_payment', event: ORDER_EVENT, placesCount: 3, totalTzs: 50000, currency: 'TZS', holdExpiresAt: new Date(Date.now() + 27 * 60_000).toISOString(), createdAt: '2026-10-22T08:00:00.000Z', closedAt: null, closeReason: null, createdBy: { name: 'Neema People' }, costCentre: 'CC-12', purchaserReference: 'PO-77', ...over });
+export const ORDER_DETAIL = (over: Json = {}, regsOver: Json[] = []) => {
+  const row = ORDER_ROW(over);
+  const regs = [
+    { id: 'reg_1', ticketTypeId: 'tt_1', categoryId: 'cat_1', categoryName: '21K Half Marathon', ticketTypeName: 'Early bird', firstName: 'Asha', lastName: 'Mollel', status: row.status === 'awaiting_payment' ? 'reserved' : row.status === 'confirmed' ? 'confirmed' : 'cancelled', consentBasis: 'organisation', isSelf: false, claimState: 'claimed', phone: '0712345678', email: 'asha@example.co.tz', groupLabel: 'Finance', kitSize: null },
+    { id: 'reg_2', ticketTypeId: 'tt_1', categoryId: 'cat_1', categoryName: '21K Half Marathon', ticketTypeName: 'Early bird', firstName: 'Juma', lastName: 'Omari', status: row.status === 'awaiting_payment' ? 'reserved' : row.status === 'confirmed' ? 'confirmed' : 'cancelled', consentBasis: 'organisation', isSelf: false, claimState: 'unclaimed', phone: '0755000111', email: null, groupLabel: 'Operations', kitSize: null },
+    { id: 'reg_3', ticketTypeId: 'tt_2', categoryId: 'cat_2', categoryName: '10K', ticketTypeName: 'Standard', firstName: 'Zawadi', lastName: 'Kim', status: row.status === 'awaiting_payment' ? 'reserved' : row.status === 'confirmed' ? 'confirmed' : 'cancelled', consentBasis: 'organisation', isSelf: false, claimState: 'unclaimed', phone: '0788000222', email: 'z@example.co.tz', groupLabel: null, kitSize: null },
+  ].map((r, i) => ({ ...r, ...(regsOver[i] ?? {}) }));
+  return {
+    order: { id: row.id, reference: row.reference, eventId: 'evt_pub', status: row.status, currency: 'TZS', subtotalTzs: 50000, discountTzs: 0, feesTzs: 0, totalTzs: row.totalTzs, holdExpiresAt: row.holdExpiresAt, holdCycle: 1, createdAt: row.createdAt, teamId: 'team_1', closedAt: row.closedAt, closeReason: row.closeReason, organizationId: 'org-1', costCentre: row.costCentre, purchaserReference: row.purchaserReference, termsAcceptedAt: row.createdAt, consentTextVersion: '2026-10-draft' },
+    lines: quoteFor([{ ticketTypeId: 'tt_1', quantity: 2 }, { ticketTypeId: 'tt_2', quantity: 1 }]).lines, registrations: regs,
+    event: { ...PUBLISHED, shareUrl: 'https://fitflex.test/e/arusha-trail-10k' }, team: { id: 'team_1', name: 'Safari Cover', teamType: 'corporate', memberCount: 3 },
+    next: { payment: 'none', instructions: null }, allowedActions: row.status === 'awaiting_payment' ? ['cancel'] : [], createdBy: row.createdBy, costCentre: row.costCentre, purchaserReference: row.purchaserReference,
+  };
+};
+/** Organizer roster rows (§3.13): the server masks reserved names and never returns contact fields. */
+export const REG_ROWS = [
+  { id: 'reg_1', participant: { name: 'A*** M*****' }, categoryName: '21K Half Marathon', ticketTypeName: 'Early bird', status: 'reserved', orderReference: 'EV-2026-0001', teamName: 'Safari Cover', kitSize: null, createdAt: '2026-10-22T08:00:00.000Z', claimed: true },
+  { id: 'reg_4', participant: { name: 'Baraka Mushi' }, categoryName: '10K', ticketTypeName: 'Standard', status: 'confirmed', orderReference: 'EV-2026-0002', teamName: null, kitSize: 'l', createdAt: '2026-10-21T08:00:00.000Z', claimed: true },
+  { id: 'reg_5', participant: { name: 'Neema Ally' }, categoryName: '10K', ticketTypeName: 'Standard', status: 'cancelled', orderReference: 'EV-2026-0003', teamName: null, kitSize: null, createdAt: '2026-10-20T08:00:00.000Z', claimed: false },
+];
+export const REG_ROWS_ADMIN = REG_ROWS.map(r => (r.id === 'reg_1' ? { ...r, participant: { name: 'Asha Mollel' } } : r));
+export const REG_SUMMARY = { byStatus: { reserved: 1, confirmed: 1, cancelled: 1 }, byCategory: [{ categoryId: 'cat_1', name: '21K Half Marathon', capacity: 500, sold: 0, held: 1 }, { categoryId: 'cat_2', name: '10K', capacity: null, sold: 1, held: 0 }] };
+export const ORG_ORDER_ROWS = [
+  { id: 'ord_1', reference: 'EV-2026-0001', status: 'awaiting_payment', purchaser: { type: 'organization', label: 'Safari Cover' }, placesCount: 3, totalTzs: 50000, feesTzs: 0, currency: 'TZS', createdAt: '2026-10-22T08:00:00.000Z', holdExpiresAt: '2026-10-22T08:30:00.000Z', closedAt: null, closeReason: null },
+  { id: 'ord_2', reference: 'EV-2026-0002', status: 'confirmed', purchaser: { type: 'member', label: 'B***** M****' }, placesCount: 1, totalTzs: 0, feesTzs: 0, currency: 'TZS', createdAt: '2026-10-21T08:00:00.000Z', holdExpiresAt: null, closedAt: '2026-10-21T08:10:00.000Z', closeReason: null },
+];
+export const ORG_ORDER_ROWS_ADMIN = ORG_ORDER_ROWS.map(r => (r.id === 'ord_2' ? { ...r, purchaser: { type: 'member', label: 'Baraka Mushi' } } : r));
+export const ADMIN_ORDER_DETAIL = (id = 'ord_1') => ({ ...(ORG_ORDER_ROWS_ADMIN.find(r => r.id === id) ?? ORG_ORDER_ROWS_ADMIN[0]), ...ORDER_DETAIL({ id }).order, ...{ lines: ORDER_DETAIL().lines, registrations: ORDER_DETAIL().registrations }, holdCycle: 1, createdBy: { name: 'Neema People' } });
+
 export type EventsMock = {
   calls: Call[]; unmatched: Call[];
   writes: (path?: RegExp) => Call[];
@@ -111,7 +210,8 @@ export type EventsMock = {
  * Signs the page in as `user` (localStorage session, as the other specs do) and answers the API from fixtures.
  * `me` is the GET /organizer/me answer (null → 404 no_organizer). `extra` routes win over the defaults.
  */
-export async function setupEvents(page_: Page, user: Json = OWNER, opts: { me?: Json | null; locale?: 'en' | 'sw'; kyc?: Json; extra?: Array<[string, RegExp, Handler]> } = {}): Promise<EventsMock> {
+export async function setupEvents(page_: Page, user: Json = OWNER, opts: { me?: Json | null; locale?: 'en' | 'sw'; kyc?: Json; extra?: Array<[string, RegExp, Handler]>;
+  /** S3: the options probe says registration + corporate are on, and the S3 routes answer. */ s3?: boolean; orgPermissions?: string[]; orgStatus?: string; orders?: Record<string, Json> } = {}): Promise<EventsMock> {
   const calls: Call[] = [];
   const unmatched: Call[] = [];
   const routes: Array<[string, RegExp, Handler]> = [...(opts.extra ?? [])];
@@ -125,6 +225,9 @@ export async function setupEvents(page_: Page, user: Json = OWNER, opts: { me?: 
   let created: Json | null = null;
   const isOrganizerSession = () => currentType === 'event_organizer' || currentType === 'organizer_staff';
   const docs: Record<string, Json> = { evt_1: DOC(), evt_pub: PUBLISHED, evt_sub: SUBMITTED, evt_arch: DOC({ id: 'evt_arch', status: 'archived', allowedActions: [] }) };
+  const orgRole = (user.organizationRoles ?? [])[0] ?? (user.userType === 'corporate_hr' ? 'hr' : 'member');
+  const orders: Record<string, Json> = opts.orders ?? { ord_1: ORDER_DETAIL() };
+  const adminCancelled = new Set<string>();
   let version = 3;
 
   const defaults: Array<[string, RegExp, Handler]> = [
@@ -132,7 +235,43 @@ export async function setupEvents(page_: Page, user: Json = OWNER, opts: { me?: 
     ['GET', /^\/me\/invitations$/, () => ({ status: 404, json: { error: 'not_found' } })],
     ['GET', /^\/admin\/shop-merch$/, () => ({ status: 404, json: { error: 'feature_disabled' } })],
     ['GET', /^\/admin\/tax-rates$/, () => ({ status: 404, json: { error: 'feature_disabled' } })],
-    ['GET', /^\/events\/options$/, () => OPTIONS],
+    ['GET', /^\/events\/options$/, () => (opts.s3 ? OPTIONS_S3 : OPTIONS)],
+    // ── S3: B2B organisation frame, public discovery, corporate orders, organizer/admin reads ──
+    ['GET', /^\/b2b\/me\/organizations$/, () => ({ organizations: [{ id: ORG.id, legalName: ORG.legalName, tradingName: ORG.tradingName, role: orgRole, status: ORG.status }] })],
+    ['GET', /^\/b2b\/organizations\/org-1$/, () => ({ organization: { ...ORG, status: opts.orgStatus ?? 'active' }, access: { role: orgRole, permissions: opts.orgPermissions ?? PERMS_BILLING } })],
+    ['GET', /^\/events$/, () => (opts.s3 ? pageOf(PUBLIC_EVENTS) : { status: 404, json: { error: 'feature_disabled' } })],
+    ['GET', /^\/events\/evt_pub$/, () => PUBLIC_DETAIL],
+    ['POST', /^\/b2b\/organizations\/org-1\/event-orders\/roster\/validate$/, c => (!opts.s3 ? { status: 404, json: { error: 'feature_disabled' } } : c.body?.eventId !== 'evt_pub' ? { status: 404, json: { error: 'event_not_found' } } : validateRoster(String(c.body?.rawText ?? '')))],
+    ['POST', /^\/b2b\/organizations\/org-1\/event-orders$/, c => {
+      if (!opts.s3) return { status: 404, json: { error: 'feature_disabled' } };
+      if (c.body?.acceptedTerms !== true) return { status: 400, json: { error: 'terms_not_accepted' } };
+      const places = (c.body?.rows ?? []).length;
+      const created = ORDER_DETAIL({ id: 'ord_new', reference: 'EV-2026-0009', placesCount: places, costCentre: c.body?.costCentre ?? null, purchaserReference: c.body?.purchaserReference ?? null, totalTzs: c.body?.expectedTotalTzs ?? 0 });
+      orders.ord_new = created;
+      return { status: 201, json: { order: created.order, lines: created.lines, registrations: created.registrations, holdExpiresAt: created.order.holdExpiresAt, next: { payment: 'none', instructions: null }, event: PUBLISHED, replayed: false, organizationId: 'org-1' } };
+    }],
+    ['GET', /^\/b2b\/organizations\/org-1\/event-orders$/, () => (opts.s3 ? pageOf(Object.values(orders).map(o => ({ ...ORDER_ROW({ id: o.order.id, reference: o.order.reference, status: o.order.status, holdExpiresAt: o.order.holdExpiresAt, closedAt: o.order.closedAt, closeReason: o.order.closeReason, totalTzs: o.order.totalTzs, placesCount: o.registrations.length }) }))) : { status: 404, json: { error: 'feature_disabled' } })],
+    ['GET', /^\/b2b\/organizations\/org-1\/event-orders\/([^/]+)$/, (_c, m) => (orders[m[1]] ? orders[m[1]] : { status: 404, json: { error: 'order_not_found' } })],
+    ['POST', /^\/b2b\/organizations\/org-1\/event-orders\/([^/]+)\/cancel$/, (c, m) => {
+      const o = orders[m[1]]; if (!o) return { status: 404, json: { error: 'order_not_found' } };
+      if (!['changed_mind', 'wrong_details', 'duplicate', 'other'].includes(String(c.body?.reason))) return { status: 400, json: { error: 'invalid_reason' } };
+      if (o.order.status !== 'awaiting_payment') return { status: 409, json: { error: 'invalid_transition', kind: 'order', from: o.order.status, to: 'cancelled' } };
+      orders[m[1]] = { ...o, order: { ...o.order, status: 'cancelled', closedAt: '2026-10-22T09:00:00.000Z', closeReason: 'cancelled' }, registrations: o.registrations.map((r: Json) => ({ ...r, status: 'cancelled', cancelReason: c.body?.reason })), allowedActions: [] };
+      return { order: orders[m[1]].order, registrations: orders[m[1]].registrations };
+    }],
+    ['GET', /^\/organizer\/events\/([^/]+)\/registrations\/summary$/, (_c, m) => (m[1] === 'evt_pub' ? REG_SUMMARY : { byStatus: { reserved: 0, confirmed: 0, cancelled: 0 }, byCategory: [] })],
+    ['GET', /^\/organizer\/events\/([^/]+)\/registrations$/, (c, m) => (m[1] === 'evt_other' ? { status: 404, json: { error: 'event_not_found' } } : m[1] !== 'evt_pub' ? pageOf([]) : pageOf(REG_ROWS.filter(r => (!c.query.status || r.status === c.query.status) && (!c.query.q || (r.status === 'confirmed' && r.participant.name.toLowerCase().includes(c.query.q.toLowerCase()))))))],
+    ['GET', /^\/organizer\/events\/([^/]+)\/orders$/, (c, m) => (m[1] === 'evt_other' ? { status: 404, json: { error: 'event_not_found' } } : m[1] !== 'evt_pub' ? pageOf([]) : pageOf(ORG_ORDER_ROWS.filter(r => !c.query.status || r.status === c.query.status)))],
+    ['GET', /^\/admin\/events\/([^/]+)\/registrations$/, (c, m) => (m[1] !== 'evt_pub' ? pageOf([]) : pageOf(REG_ROWS_ADMIN.filter(r => !c.query.status || r.status === c.query.status)))],
+    ['GET', /^\/admin\/events\/([^/]+)\/orders\/([^/]+)$/, (_c, m) => ADMIN_ORDER_DETAIL(m[2])],
+    ['GET', /^\/admin\/events\/([^/]+)\/orders$/, (c, m) => (m[1] !== 'evt_pub' ? pageOf([]) : pageOf(ORG_ORDER_ROWS_ADMIN.filter(r => !adminCancelled.has(r.id) && (!c.query.status || r.status === c.query.status))))],
+    ['POST', /^\/admin\/events\/([^/]+)\/orders\/([^/]+)\/cancel$/, (c, m) => {
+      if (!c.body?.note || String(c.body.note).length < 5) return { status: 400, json: { error: 'note_required' } };
+      const row = ORG_ORDER_ROWS_ADMIN.find(r => r.id === m[2]); if (!row) return { status: 404, json: { error: 'order_not_found' } };
+      if (row.status !== 'awaiting_payment') return { status: 409, json: { error: 'invalid_transition', kind: 'order', from: row.status, to: 'cancelled' } };
+      adminCancelled.add(m[2]);
+      return { order: { ...ORDER_DETAIL({ id: m[2] }).order, status: 'cancelled', closeReason: 'admin' }, registrations: [] };
+    }],
     ['GET', /^\/organizer\/me$/, () => {
       if (me) return isOrganizerSession() ? me : { status: 403, json: { error: 'forbidden' } };
       if (!created) return { status: 404, json: { error: 'no_organizer' } };
@@ -223,5 +362,5 @@ export async function setupEvents(page_: Page, user: Json = OWNER, opts: { me?: 
 /** No i18n key leaked as text (P-ON-7, P-AD-6): nothing like "events.list.title" on the page. */
 export async function expectNoRawKeys(page: Page) {
   const text = await page.locator('main').innerText();
-  expect(text, 'raw i18n key rendered').not.toMatch(/\b(?:events|organizer|admin|nav|common|login|kyc)\.[a-zA-Z0-9_]+\.[a-zA-Z0-9_.]+\b/);
+  expect(text, 'raw i18n key rendered').not.toMatch(/\b(?:events|organizer|admin|nav|common|login|kyc|corp|org|hr)\.[a-zA-Z0-9_]+\.[a-zA-Z0-9_.]+\b/);
 }
