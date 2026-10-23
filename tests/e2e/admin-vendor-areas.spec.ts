@@ -238,8 +238,23 @@ test('a name that already says its level is not followed by the level again', as
   const row = dialog.getByTestId('vendor-delivers-to').locator('label').filter({ has: page.getByTestId('vendor-delivers-to-tz-znz-city') });
   await expect(row).toContainText('Zanzibar City');
   await expect(row).not.toContainText('City ·');
-  await expect(row).toContainText('Zanzibar');
+  // The parent keeps the same " · " separator as rows that show their level.
+  await expect(dialog.getByTestId('vendor-delivers-to-tz-znz-city')).toHaveAccessibleName('Zanzibar City · Zanzibar');
+  await expect(dialog.getByTestId('vendor-delivers-to-tz-znz-city')).toHaveAccessibleDescription('· Zanzibar');
   // Other cities still say their level.
   const darCity = dialog.getByTestId('vendor-delivers-to').locator('label').filter({ has: page.getByTestId('vendor-delivers-to-tz-dar-city') });
   await expect(darCity).toContainText('City · Dar es Salaam');
+  await expect(dialog.getByTestId('vendor-delivers-to-tz-dar-city')).toHaveAccessibleDescription('City · Dar es Salaam');
+});
+
+test('Swahili: a dropped level word keeps the parent separator', async ({ page }) => {
+  await setup(page, {}, 'sw');
+  await page.goto('/admin/vendors');
+  await page.getByTestId('vendor-areas-edit-v-unmapped').click();
+  const dialog = page.getByRole('dialog');
+  await expect(dialog.getByTestId('vendor-delivers-to-tz-znz-city')).toHaveAccessibleName('Mji wa Zanzibar · Zanzibar');
+  await expect(dialog.getByTestId('vendor-delivers-to-tz-znz-city')).toHaveAccessibleDescription('· Zanzibar');
+  await expect(dialog.getByTestId('vendor-delivers-to-tz-dar-city')).toHaveAccessibleDescription('Jiji · Dar es Salaam');
+  // Based in (radio) uses the same rule.
+  await expect(dialog.getByTestId('vendor-based-in-tz-znz-city')).toHaveAccessibleDescription('· Zanzibar');
 });

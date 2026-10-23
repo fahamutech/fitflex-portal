@@ -42,7 +42,8 @@ export function VendorAreaPicker(props: Props) {
     const parent = ancestors(a.id, byId).find(p => p.level !== 'country');
     // Skip the level word when the name already says it ("Zanzibar City" is not followed by "City").
     const level = nameSaysLevel(a, levelName(a)) ? null : levelName(a);
-    const description = [level, parent?.name].filter(Boolean).join(' · ') || undefined;
+    // The parent always follows " · ", so "Zanzibar City · Zanzibar" reads like "Mwanza" + "City · Mwanza".
+    const description = parent ? (level ? `${level} · ${parent.name}` : `· ${parent.name}`) : level ?? undefined;
     const indent = { paddingLeft: Math.min(depth, 4) * 16 };
     let control: React.ReactNode;
     if (mode === 'single') {
