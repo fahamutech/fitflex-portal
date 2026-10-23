@@ -9,6 +9,7 @@ import { Alert, Badge, Button, Card, CardContent, Field, Input, PageHeader, Sele
 import { money } from '@/lib/admin-utils';
 import { ChallengeManager } from '@/components/challenge-manager';
 import { PeopleImport } from '@/components/b2b-people-import';
+import { CompanyPeopleOr } from '@/components/b2b-company-people';
 import { RewardQueue } from '@/components/reward-queue';
 import { GroupManager } from '@/components/group-manager';
 import type { MessageKey } from '@/lib/i18n';
@@ -20,7 +21,7 @@ import type { MessageKey } from '@/lib/i18n';
  * screens only hide what would be refused.
  */
 
-export type Mine = { organization: B2BOrganization; role: string; permissions: string[] };
+export type Mine = { organization: B2BOrganization; role: string; permissions: string[]; companyStaffManage?: boolean };
 
 const ERRORS: Record<string, string> = {
   invalid_email: 'That email address doesn’t look right.',
@@ -75,7 +76,7 @@ export function useMyOrganization() {
     if (!token || !orgId) return;
     setMine(null);
     api.b2bOrganization(token, orgId)
-      .then(r => setMine({ organization: r.organization, role: r.access.role, permissions: r.access.permissions }))
+      .then(r => setMine({ organization: r.organization, role: r.access.role, permissions: r.access.permissions, companyStaffManage: r.access.companyStaffManage === true }))
       .catch(() => setError('Could not load your organisation.'));
   }, [token, orgId]);
 
@@ -114,10 +115,11 @@ export function OrgPeoplePage() {
       {(mine, token) => {
         if (!mine.permissions.includes('beneficiaries.read')) return <Alert tone="info">Your role doesn’t include the list of people. Ask your organisation’s owner or admin.</Alert>;
         // A company set up under Companies keeps its staff list there; its HR login manages it.
+        // B5b: while the server has ORG_ONLY_SPONSORS on, the staff list is managed here for every role that may.
         if (mine.organization.legacyCorporateId) {
-          return user?.userType === 'corporate_hr' || user?.userType === 'admin'
+          return <CompanyPeopleOr token={token} mine={mine}>{user?.userType === 'corporate_hr' || user?.userType === 'admin'
             ? <CompanyStaff token={token} />
-            : <Beneficiaries token={token} mine={mine} readOnlyNote="Your company’s staff list is managed by its HR login." />;
+            : <Beneficiaries token={token} mine={mine} readOnlyNote="Your company’s staff list is managed by its HR login." />}</CompanyPeopleOr>;
         }
         return <Beneficiaries token={token} mine={mine} />;
       }}

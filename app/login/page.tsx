@@ -42,7 +42,7 @@ export default function LoginPage() {
     return () => { cancelled = true; };
   }, []);
 
-  function handleSuccess(token: string, user: { id: string; userType: string; gymId?: string; portalUser?: boolean; aclPermissions?: string[]; email?: string; organizationUser?: boolean; organizationRoles?: string[] }) {
+  function handleSuccess(token: string, user: { id: string; userType: string; gymId?: string; portalUser?: boolean; aclPermissions?: string[]; email?: string; organizationUser?: boolean; organizationRoles?: string[]; organizationIds?: string[] }) {
     signIn(token, user);
     // An organisation user lands on what their role is for: its people, else its billing, else its programmes.
     const roles = user.organizationRoles ?? [];

@@ -4048,6 +4048,8 @@ export const messages = {
     "tsess.err.forbidden": "You don't have access to trainer sessions.",
     "tsess.err.payment_in_progress": "A mobile money payment is in progress for this booking — try again in a few minutes.",
     "tsess.err.generic": "That did not save. Try again.",
+    // Phase B · B5b: company HR in the organisation area (src/lib/i18n-hr-org.ts).
+    ...hrOrgMessages.en,
   },
   sw: {
     'app.title': 'FitFlex Af — Portal ya Waendeshaji',
@@ -8104,8 +8106,13 @@ export const messages = {
     "tsess.err.forbidden": "Huna ruhusa ya kuona vipindi vya trainer.",
     "tsess.err.payment_in_progress": "Malipo ya pesa kwa simu yanaendelea kwa miadi hii — jaribu tena baada ya dakika chache.",
     "tsess.err.generic": "Haikuhifadhiwa. Jaribu tena.",
+    ...hrOrgMessages.sw,
   }
 } as const;
+
+// Imported here, not at the top, so it doesn't overlap other open i18n changes (portal#52).
+// ES imports are hoisted, so this is the same as importing at the top.
+import { hrOrgMessages } from './i18n-hr-org';
 
 export type MessageKey = keyof typeof messages['en'];
 

@@ -21,6 +21,8 @@ export interface PortalAppUser {
   organizationUser?: boolean;
   /** Their roles across the organisations they belong to (which screens to offer; the server decides what each shows). */
   organizationRoles?: string[];
+  /** The organisations those roles are in (B5a: a company HR login's sign-in says so while ORG_ONLY_SPONSORS is on). */
+  organizationIds?: string[];
 }
 
 interface AppCtx {
