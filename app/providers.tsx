@@ -21,6 +21,8 @@ export interface PortalAppUser {
   organizationUser?: boolean;
   /** Their roles across the organisations they belong to (which screens to offer; the server decides what each shows). */
   organizationRoles?: string[];
+  /** Sign-in says this session must replace a start credential first (admins: password; gym staff: PIN). */
+  passwordChangeRequired?: boolean;
 }
 
 interface AppCtx {
@@ -38,7 +40,7 @@ interface AppCtx {
   switchPersona: (personaId: string) => Promise<PortalAppUser>;
   /** Identity V2: people join a gym by invitation; the forms that set a PIN for them are replaced. */
   invitesEnabled: boolean;
-  /** This session must replace the start password an admin set before anything else (token `pwc` or a 403 password_change_required). */
+  /** This session must replace a start credential before anything else (token `pwc`, user.passwordChangeRequired or a 403 password_change_required). */
   passwordChangeRequired: boolean;
 }
 
@@ -137,12 +139,13 @@ export function Providers({ children }: { children: ReactNode }) {
     return () => setOnUnauthorized(null);
   }, [signOut]);
 
-  // Any request refused with 403 password_change_required sends the person to choose their own password.
+  // Any request refused with 403 password_change_required sends the person to choose their own password (or PIN).
   useEffect(() => {
     setOnPasswordChangeRequired(() => setPwcRefused(true));
     return () => setOnPasswordChangeRequired(null);
   }, []);
-  const passwordChangeRequired = !!token && (pwcRefused || tokenRequiresPasswordChange(token));
+  // The session user carries it too (sign-in and the change itself say so); the change route stores false.
+  const passwordChangeRequired = !!token && (pwcRefused || tokenRequiresPasswordChange(token) || user?.passwordChangeRequired === true);
 
   return (
     <Ctx.Provider value={{ ready, locale, setLocale, t: (k) => translate(locale, k), token, user, signIn, signOut, hasPermission, switchablePersonas, switchPersona, invitesEnabled, passwordChangeRequired }}>
