@@ -52,6 +52,7 @@ import { PhotoPanel } from './photo-panel';
 import { EVENTS_MODULE, HERO_IMAGES_ADMIN, PHOTO_HERO_UI } from '@/lib/flags';
 import { eventsAreaOpen, staffAreaOpen } from '@/lib/events';
 import { useAdminEventsSummary, useOrganizer } from './organizer-context';
+import { useCorporateEventsAvailable } from './events-options';
 import { useShopBannersAvailable } from './shop-banners-gate';
 import { useTaxRatesAvailable } from './tax-rates-gate';
 
@@ -82,10 +83,13 @@ const ROOTS = new Set(['/admin', '/hr', '/org', '/vendor', '/organizer']);
 const ORG_PEOPLE = new Set(['owner', 'admin', 'manager', 'hr', 'analyst']);
 const ORG_BILLING = new Set(['owner', 'admin', 'finance']);
 const ORG_INSIGHTS = new Set(['owner', 'admin', 'manager', 'hr', 'finance', 'analyst']);
-const orgNav = (roles?: string[]): NavItem[] => [
+// Events S3 (spec §6.1): /org/events and /hr/events appear only with the build flag and the server's
+// `registration && corporate` options (probed once by useCorporateEventsAvailable); roster roles only (D18 gates placing inside).
+const orgNav = (roles?: string[], corporateEvents = false): NavItem[] => [
   ...(!roles || roles.some(r => ORG_INSIGHTS.has(r)) ? [{ href: '/org/insights', labelKey: 'org.nav.insights', icon: LineChart }] : []),
   ...(!roles || roles.some(r => ORG_PEOPLE.has(r)) ? [{ href: '/org/people', labelKey: 'org.nav.people', icon: Users }] : []),
   { href: '/org/programmes', labelKey: 'org.nav.programmes', icon: Network },
+  ...(corporateEvents && (!roles || roles.some(r => ORG_PEOPLE.has(r))) ? [{ href: '/org/events', labelKey: 'org.nav.events', icon: Flag }] : []),
   // Challenges, the rewards they earn, and groups: the same roles that see people.
   ...(!roles || roles.some(r => ORG_PEOPLE.has(r)) ? [
     { href: '/org/challenges', labelKey: 'hr.nav.challenges', icon: Trophy },
@@ -96,12 +100,13 @@ const orgNav = (roles?: string[]): NavItem[] => [
 ];
 
 // Company HR: their company's wellness challenges, nothing else.
-const HR_NAV: NavItem[] = [
+const hrNav = (corporateEvents = false): NavItem[] => [
   { href: '/hr', labelKey: 'hr.nav.challenges', icon: Trophy },
   { href: '/hr/rewards', labelKey: 'hr.nav.rewards', icon: Gift },
   { href: '/hr/groups', labelKey: 'hr.nav.groups', icon: Users },
   { href: '/hr/people', labelKey: 'hr.nav.people', icon: UserCheck },
   { href: '/hr/programmes', labelKey: 'hr.nav.programmes', icon: Network },
+  ...(corporateEvents ? [{ href: '/hr/events', labelKey: 'org.nav.events', icon: Flag }] : []),
   { href: '/hr/insights', labelKey: 'org.nav.insights', icon: LineChart },
 ];
 
@@ -461,6 +466,7 @@ export function Shell({ children }: { children: ReactNode }) {
   const isVendor      = !!token && VENDOR_USER_TYPES.has(user?.userType ?? '');
   const isOrganizer   = !!token && ORGANIZER_USER_TYPES.has(user?.userType ?? '');
   const adminEvents = useAdminEventsSummary(token, !!isAdminUser && hasPermission('events'));
+  const corporateEvents = useCorporateEventsAvailable(!!token && (!!isOrgUser || !!isHr));
   const bannersOn = useShopBannersAvailable(
     isVendor ? 'vendor' : 'admin', token,
     isVendor ? vendor.status === 'ready' && !!vendor.me?.permissions?.includes('products') : !!isAdminUser && (hasPermission('promotions') || hasPermission('promotions_approve')),
@@ -486,8 +492,8 @@ export function Shell({ children }: { children: ReactNode }) {
       }).map(item => (item.href === '/admin/events' && adminEvents.submitted > 0
         ? { ...item, count: { n: adminEvents.submitted, labelKey: 'admin.nav.eventsCount' as MessageKey, tone: 'warning' as const } }
         : item))
-    : isOrgUser ? orgNav(user?.organizationRoles)
-    : isHr ? HR_NAV
+    : isOrgUser ? orgNav(user?.organizationRoles, corporateEvents)
+    : isHr ? hrNav(corporateEvents)
     : OPERATOR_NAV.filter(item => !item.aclScope || user?.userType !== 'gym_staff' || hasPermission(item.aclScope));
 
   // Where this person must go instead of the current page, or null when they may see it. One decision
