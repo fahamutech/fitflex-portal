@@ -5,7 +5,7 @@ import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { api, type AdminEventDetail, type AdminEventOrderDetail, type AdminEventRow, type Bilingual, type EventAuditRow, type EventOrderRow } from '@/lib/api';
 import { money } from '@/lib/admin-utils';
 import { EVENTS_MODULE } from '@/lib/flags';
-import { AUDIT_ACTIONS, AUDIT_ACTION_PREFIX, ORGANIZER_STATUS, REJECT_REASONS, auditActionLabel, distanceLabel, errorCode, errorKey, eventDateTime, eventStatusOf, isFeatureOff, maskContact, orderStatusOf, registrationStatusOf, rejectReasonKey, relativeTime, typeKey } from '@/lib/events';
+import { AUDIT_ACTIONS, AUDIT_ACTION_PREFIX, ORGANIZER_STATUS, REJECT_REASONS, auditActionLabel, distanceLabel, errorCode, errorKey, eventDateTime, eventStatusOf, closeReasonKey, isFeatureOff, maskContact, orderStatusOf, registrationStatusOf, rejectReasonKey, relativeTime, typeKey } from '@/lib/events';
 import { Alert, Badge, Button, Card, CardContent, CardHeader, Checkbox, Field, PageHeader, Segmented, Select, SkeletonTable, Textarea, useToast } from '@/components/shared';
 import { DataTable, type ColumnDef } from '@/components/data-table';
 import { Dialog, DialogFooter } from '@/components/dialog';
@@ -273,6 +273,8 @@ function AdminOrderDialog({ eventId, row, timezone, timezoneAbbr, onClose, onCha
   }
   const st = orderStatusOf(doc?.status ?? row?.status);
   const unpaid = (doc?.status ?? row?.status) === 'awaiting_payment';
+  // The admin order detail no longer returns contact fields: the column only shows when some row has one.
+  const hasContact = (doc?.registrations ?? []).some(r => !!r.phone || !!r.email);
   return (
     <Dialog open={!!row} onClose={onClose} title={row ? `${row.reference} · ${row.purchaser?.label ?? ''}` : ''} size="lg">
       <div className="space-y-4 text-sm" data-testid="admin-order-dialog">
@@ -287,7 +289,7 @@ function AdminOrderDialog({ eventId, row, timezone, timezoneAbbr, onClose, onCha
             <dl className="grid gap-x-6 gap-y-1 sm:grid-cols-2" data-testid="admin-order-meta">
               <dt className="text-[var(--color-fg-quaternary)]">{t('corp.events.col.created')}</dt><dd>{eventDateTime(doc.createdAt, timezone, locale, timezoneAbbr)}</dd>
               <dt className="text-[var(--color-fg-quaternary)]">{t('corp.events.col.heldUntil')}</dt><dd>{unpaid ? eventDateTime(doc.holdExpiresAt, timezone, locale, timezoneAbbr) : '—'}{doc.holdCycle != null ? ` · ${t('admin.events.order.holdCycle')} ${doc.holdCycle}` : ''}</dd>
-              <dt className="text-[var(--color-fg-quaternary)]">{t('organizer.orders.col.closed')}</dt><dd>{doc.closedAt ? `${eventDateTime(doc.closedAt, timezone, locale, timezoneAbbr)}${doc.closeReason ? ` · ${doc.closeReason}` : ''}` : '—'}</dd>
+              <dt className="text-[var(--color-fg-quaternary)]">{t('organizer.orders.col.closed')}</dt><dd>{doc.closedAt ? `${eventDateTime(doc.closedAt, timezone, locale, timezoneAbbr)}${doc.closeReason ? ` · ${t(closeReasonKey(doc.closeReason))}` : ''}` : '—'}</dd>
               <dt className="text-[var(--color-fg-quaternary)]">{t('admin.events.order.terms')}</dt><dd>{doc.termsAcceptedAt ? `${eventDateTime(doc.termsAcceptedAt, timezone, locale, timezoneAbbr)}${doc.consentTextVersion ? ` · ${doc.consentTextVersion}` : ''}` : '—'}</dd>
               {(doc.costCentre || doc.purchaserReference) && <><dt className="text-[var(--color-fg-quaternary)]">{t('corp.events.costCentre')} / {t('corp.events.reference')}</dt><dd>{[doc.costCentre, doc.purchaserReference].filter(Boolean).join(' · ')}</dd></>}
             </dl>
@@ -296,10 +298,10 @@ function AdminOrderDialog({ eventId, row, timezone, timezoneAbbr, onClose, onCha
               <tbody>{(doc.lines ?? []).map(l => <tr key={l.ticketTypeId}><td>{l.ticketTypeName} · {l.categoryName}</td><td className="text-right">{l.quantity}</td><td className="text-right">{money(l.lineTotalTzs, doc.currency)}</td></tr>)}</tbody>
             </table>
             <table className="ui-table ui-table-dense w-full" data-testid="admin-order-participants">
-              <thead><tr><th scope="col">{t('corp.events.col.name')}</th><th scope="col">{t('corp.events.col.phone')} / {t('corp.events.col.email')}</th><th scope="col">{t('corp.events.col.category')}</th><th scope="col">{t('corp.events.col.status')}</th><th scope="col">{t('organizer.reg.col.claimed')}</th></tr></thead>
+              <thead><tr><th scope="col">{t('corp.events.col.name')}</th>{hasContact && <th scope="col">{t('corp.events.col.phone')} / {t('corp.events.col.email')}</th>}<th scope="col">{t('corp.events.col.category')}</th><th scope="col">{t('corp.events.col.status')}</th><th scope="col">{t('organizer.reg.col.claimed')}</th></tr></thead>
               <tbody>
                 {(doc.registrations ?? []).map(r => { const rs = registrationStatusOf(r.status); return (
-                  <tr key={r.id}><td>{r.firstName} {r.lastName}</td><td>{[r.phone ? maskContact(r.phone) : null, r.email ? maskContact(r.email) : null].filter(Boolean).join(' · ') || '—'}</td><td>{r.categoryName ?? doc.lines?.find(l => l.ticketTypeId === r.ticketTypeId)?.categoryName ?? '—'}</td><td><Badge tone={rs.tone}>{t(rs.key)}</Badge></td><td>{t(r.claimState === 'claimed' || r.claimState === 'self' ? 'common.yes' : 'common.no')}</td></tr>
+                  <tr key={r.id}><td>{r.firstName} {r.lastName}</td>{hasContact && <td>{[r.phone ? maskContact(r.phone) : null, r.email ? maskContact(r.email) : null].filter(Boolean).join(' · ') || '—'}</td>}<td>{r.categoryName ?? doc.lines?.find(l => l.ticketTypeId === r.ticketTypeId)?.categoryName ?? '—'}</td><td><Badge tone={rs.tone}>{t(rs.key)}</Badge></td><td>{t(r.claimState === 'claimed' || r.claimState === 'self' ? 'common.yes' : 'common.no')}</td></tr>
                 ); })}
               </tbody>
             </table>

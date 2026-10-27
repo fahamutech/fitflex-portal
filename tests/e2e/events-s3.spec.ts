@@ -33,6 +33,7 @@ test.describe('corporate bulk registration (§6.2, D18, D19)', () => {
     // Step 2: the help block lists what this event requires; the example downloads; the list is checked.
     await expect(page.getByTestId('roster-help')).toContainText('Required for this event: First name, Last name, Mobile number, Category, Date of birth');
     await expect(page.getByTestId('roster-help')).toContainText('21K Half Marathon have an age rule');
+    await expect(page.getByTestId('roster-headers-note')).toContainText('Keep the column names in English');
     const download = page.waitForEvent('download');
     await page.getByTestId('roster-example').click();
     expect((await download).suggestedFilename()).toBe('events-roster-example.csv');
@@ -203,6 +204,33 @@ test.describe('corporate bulk registration (§6.2, D18, D19)', () => {
     await expect(page.getByRole('region', { name: 'Event registrations' })).toContainText('Expired');
   });
 
+  test('backend #265: 429 on the dry run shows the retry message; invalid_text blocks Place inline; an ok row with a warning stays ready', async ({ page }) => {
+    let limited = true;
+    await setupEvents(page, orgUser(['owner']), { s3: true, extra: [['POST', /\/roster\/validate$/, c => {
+      if (limited) { limited = false; return { status: 429, json: { error: 'rate_limited' } }; }
+      const v = validateRoster(String(c.body?.rawText ?? ''));
+      return { ...v, rows: v.rows.map(r => (r.index === 0 ? { ...r, problems: [{ field: 'emergencyContact', code: 'not_collected' }] } : r)), duplicates: [{ index: 1, kind: 'already_registered' }].slice(0, 0) };
+    }]] });
+    await page.goto('/org/events/?new=1');
+    await page.getByRole('button', { name: 'Choose a published event' }).click();
+    await page.getByRole('option', { name: /Arusha Trail 10K/ }).click();
+    await page.getByTestId('corp-next').click();
+    await page.getByTestId('roster-text').fill(ROSTER_OK);
+    await page.getByTestId('roster-check').click();
+    await expect(page.getByTestId('roster-server-error')).toContainText('Too many list checks. Wait a minute, then check again.');
+    await page.getByTestId('roster-check').click();
+    await expect(page.getByTestId('corp-next')).toBeEnabled();
+    await expect(page.getByRole('region', { name: 'Check' })).toContainText('Not collected for this event (ignored)');
+    await page.getByTestId('corp-next').click();
+    await page.getByTestId('corp-consent').check();
+    await page.getByTestId('corp-terms').check();
+    await page.getByTestId('corp-cost-centre').fill('=SUM(A1)');
+    await expect(page.getByText('Text can\'t start with = + - or @')).toBeVisible();
+    await expect(page.getByTestId('corp-place')).toBeDisabled();
+    await page.getByTestId('corp-cost-centre').fill('CC-12');
+    await expect(page.getByTestId('corp-place')).toBeEnabled();
+  });
+
   test('the HR page renders the same component for a company HR login', async ({ page }) => {
     await setupEvents(page, HR_USER, { s3: true });
     await page.goto('/hr/events/');
@@ -211,11 +239,11 @@ test.describe('corporate bulk registration (§6.2, D18, D19)', () => {
     await expect(page.getByRole('region', { name: 'Event registrations' })).toContainText('EV-2026-0001');
   });
 
-  test('Swahili: the list, wizard and order page show no raw keys; the status reads Linasubiri malipo (P-ALL-1)', async ({ page }) => {
+  test('Swahili: the list, wizard and order page show no raw keys; the status reads Inasubiri malipo (P-ALL-1)', async ({ page }) => {
     await setupEvents(page, orgUser(['owner']), { s3: true, locale: 'sw' });
     await page.goto('/org/events/');
     await expect(page.getByRole('heading', { level: 1 })).toHaveText('Usajili wa matukio');
-    await expect(page.getByRole('region', { name: 'Usajili wa matukio' })).toContainText('Linasubiri malipo');
+    await expect(page.getByRole('region', { name: 'Usajili wa matukio' })).toContainText('Inasubiri malipo');
     await expectNoRawKeys(page);
     await page.getByTestId('corp-events-new').click();
     await expect(page.getByTestId('corp-step-heading')).toHaveText('Tukio');
@@ -359,8 +387,9 @@ test.describe('admin orders and registrations (§6.5, P-A-1)', () => {
     await page.getByTestId('order-open-ord_1').click();
     const dialog = page.getByTestId('admin-order-dialog');
     await expect(dialog).toContainText('Asha Mollel');
-    await expect(page.getByTestId('admin-order-participants')).toContainText('+255 7•• ••• 678');
-    await expect(page.getByTestId('admin-order-participants')).not.toContainText('0712345678');
+    // #265: no contact fields come back, so the column is not shown at all and nothing breaks.
+    await expect(page.getByTestId('admin-order-participants')).not.toContainText('Mobile');
+    await expect(page.getByTestId('admin-order-participants')).toContainText('Juma Omari');
     await expect(page.getByTestId('admin-order-meta')).toContainText('2026-10-draft');
     await expect(page.getByTestId('admin-order-cancel')).toBeDisabled();
     await page.getByTestId('admin-order-cancel-note').fill('Dup');
@@ -378,7 +407,7 @@ test.describe('admin orders and registrations (§6.5, P-A-1)', () => {
     await setupEvents(page, SUPER_ADMIN, { s3: true, locale: 'sw' });
     await page.goto('/admin/events/?event=evt_pub');
     await expect(page.getByTestId('event-review-summary')).toBeVisible();
-    await page.getByRole('button', { name: 'Maagizo' }).click();
+    await page.getByRole('button', { name: 'Oda' }).click();
     await expect(page).toHaveURL(/view=orders/);
     await expect(page.getByTestId('admin-orders')).toBeVisible();
     await expectNoRawKeys(page);

@@ -69,7 +69,7 @@ export const cancelReasonKey = (reason: string) => `events.cancel.reason.${(CANC
 /** Backend audit `action` names (rows carry `events.<name>`); approve writes `published`. Unknown codes show as given. */
 export const AUDIT_ACTIONS = [
   'organizer_created', 'organizer_status', 'event_created', 'event_updated', 'submitted', 'withdrawn', 'published', 'rejected', 'cancelled',
-  'completed', 'archived', 'started', 'registration_closed', 'deleted', 'staff_invited', 'staff_removed', 'staff_role_changed',
+  'completed', 'archived', 'started', 'registration_closed', 'deleted', 'staff_invited', 'staff_removed', 'staff_role_changed', 'order_cancelled',
 ] as const;
 export const AUDIT_ACTION_PREFIX = 'events.';
 export const auditActionName = (code: string) => code.replace(/^events\./, '');
@@ -158,6 +158,9 @@ export const EVENTS_ERRORS: Record<string, MessageKey> = {
   participants_mismatch: 'events.error.participant_invalid',
   invalid_participant: 'events.error.participant_invalid',
   already_closed: 'events.error.invalid_transition_order',
+  invalid_text: 'events.error.invalid_text',
+  expected_total_required: 'events.error.price_changed',
+  hold_limit_reached: 'events.error.capacity_unavailable',
 };
 export const errorCode = (err: unknown): string | null =>
   err instanceof ApiError ? ((err.body as { error?: string } | null)?.error ?? null) : null;
@@ -687,6 +690,8 @@ export const registrationStatusOf = (status: string | null | undefined) => REGIS
 /** §3.8 closed set a purchaser (member or organisation) may give. */
 export const MEMBER_CANCEL_REASONS = ['changed_mind', 'wrong_details', 'duplicate', 'other'] as const;
 export const memberCancelReasonKey = (reason: string) => `events.cancelReason.${(MEMBER_CANCEL_REASONS as readonly string[]).includes(reason) ? reason : 'other'}` as MessageKey;
+/** `closeReason` of an order (store RELEASE_REASONS, §3.8) → label key; unknown values fall back to the generic "Other". */
+export const closeReasonKey = (reason: string) => `events.cancelReason.${['admin', 'expired', 'cancelled', 'payment_failed', ...MEMBER_CANCEL_REASONS].includes(reason) ? reason : 'other'}` as MessageKey;
 export const KIT_SIZES = ['xs', 's', 'm', 'l', 'xl', 'xxl', 'xxxl'] as const;
 export const GENDERS = ['male', 'female', 'other'] as const;
 
@@ -700,7 +705,7 @@ export const canPlaceCorporateOrder = (role: string | null | undefined, permissi
 export const PARTICIPANT_CODES = [
   'required', 'not_collected', 'name_invalid', 'phone_invalid', 'email_invalid', 'contact_required', 'dob_invalid', 'dob_required', 'age_not_eligible',
   'gender_invalid', 'kit_size_invalid', 'emergency_contact_invalid', 'duplicate_participant', 'listed_twice', 'self_contact_mismatch', 'consent_basis_invalid',
-  'category_unknown', 'category_closed', 'ticket_type_unknown', 'name_incomplete', 'group_ignored', 'invalid_participant',
+  'category_unknown', 'category_closed', 'ticket_type_unknown', 'name_incomplete', 'group_ignored', 'invalid_participant', 'invalid_text',
 ] as const;
 export const participantCodeKey = (code: string) => ((PARTICIPANT_CODES as readonly string[]).includes(code) ? `events.validation.${code}` : 'events.validation.invalid_participant') as MessageKey;
 /** The wire field names a roster problem may name (§3.3, §3.10) → the column label key. */
@@ -742,6 +747,8 @@ export const maskEmail = (email: string | null | undefined) => (email ? maskCont
 export const ROSTER_COLUMNS = ['first name', 'last name', 'phone', 'email', 'category', 'date of birth', 'gender', 'kit size', 'group'] as const;
 export const ROSTER_HEADER = ROSTER_COLUMNS.join(',');
 export const ROSTER_EXAMPLE_CSV = `${ROSTER_HEADER}\nAsha,Mollel,0712 345 678,asha@example.co.tz,10K,1994-05-12,female,m,Finance\nJuma,Omari,0755 000 111,,21K Half Marathon,1988-11-02,male,l,Operations`;
+/** Free text the server rejects (`invalid_text`): a leading = + - @ would be read as a spreadsheet formula. */
+export const startsWithFormulaChar = (v: string) => /^\s*[=+\-@]/.test(v);
 export const ROSTER_MAX_ROWS = 500;
 export const ROSTER_MAX_BYTES = 2_000_000;
 const csvCell = (v: string) => (/[",\n\r]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v);

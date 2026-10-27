@@ -11,7 +11,7 @@ import { money } from '@/lib/admin-utils';
 import { EVENTS_MODULE } from '@/lib/flags';
 import {
   DEFAULT_PARTICIPANT_FIELDS, MEMBER_CANCEL_REASONS, canPlaceCorporateOrder, canValidateRoster, errorBody, errorCode, errorKey, eventDateTime, eventDay, fmt,
-  holdMinutesLeft, isRosterWarning, maskEmail, maskPhoneLast3, memberCancelReasonKey, newCorporateIdempotencyKey, orderStatusOf, participantCodeKey, placesLeft,
+  holdMinutesLeft, startsWithFormulaChar, maskEmail, maskPhoneLast3, memberCancelReasonKey, newCorporateIdempotencyKey, orderStatusOf, participantCodeKey, placesLeft,
   registrationStatusOf, rosterFieldKey, trackEventsS3Analytics,
 } from '@/lib/events';
 import type { MessageKey } from '@/lib/i18n';
@@ -178,6 +178,7 @@ function CorporateWizard({ token, orgId, orgName, canPlace, holdTtlMinutes, cons
     return f;
   }, [validation, event]);
 
+  const textBad = startsWithFormulaChar(costCentre) || startsWithFormulaChar(reference) || startsWithFormulaChar(teamName);
   const clean = !!validation && !!validation.quote && validation.summary.ok > 0 && validation.summary.problems === 0 && validation.duplicates.length === 0 && validation.capacityShort.length === 0;
   const maxReached = !eventId ? 0 : !validation ? 1 : clean ? 3 : 2;
   const goTo = (i: number) => { setStep(Math.max(0, Math.min(STEPS.length - 1, i))); setTimeout(() => headingRef.current?.focus(), 50); };
@@ -192,7 +193,7 @@ function CorporateWizard({ token, orgId, orgName, canPlace, holdTtlMinutes, cons
       if (v.quote) trackEventsS3Analytics('checkout_quote_created', { eventId, placesCount: v.summary.ok, totalTzs: v.quote.totalTzs, mode: 'corporate' });
       goTo(2);
     } catch (err) {
-      setCheckError(t(errorKey(err)));
+      setCheckError(t(errorCode(err) === 'rate_limited' ? 'corp.events.rateLimited' : errorKey(err)));
     } finally { setChecking(false); }
   };
 
@@ -207,14 +208,16 @@ function CorporateWizard({ token, orgId, orgName, canPlace, holdTtlMinutes, cons
     if (!validation) return [];
     return validation.rows.map(row => {
       const dup = validation.duplicates.find(d => d.index === row.index);
-      const hard = row.problems.filter(p => !isRosterWarning(p.code));
       const problems = row.problems.map(problemText);
       if (dup) {
         problems.push(dup.kind === 'already_registered'
-          ? fmt(t('corp.events.alreadyRegistered'), { category: catName(row.categoryId), status: t(registrationStatusOf(dup.registrationStatus).key) })
+          ? (dup.registrationStatus
+            ? fmt(t('corp.events.alreadyRegistered'), { category: catName(row.categoryId), status: t(registrationStatusOf(dup.registrationStatus).key) })
+            : fmt(t('corp.events.alreadyRegisteredNoStatus'), { category: catName(row.categoryId) }))
           : `${t('events.validation.listed_twice')}${dup.otherIndex != null ? ` (#${dup.otherIndex + 1})` : ''}`);
       }
-      return { row, kind: dup ? 'duplicate' : hard.length || !row.ok ? 'fix' : 'ok', problems };
+      // The server decides (`ok`): problems on an ok row are warnings (e.g. a required field the event cannot collect).
+      return { row, kind: dup ? 'duplicate' : !row.ok ? 'fix' : 'ok', problems };
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [validation, event, locale]);
@@ -361,9 +364,9 @@ function CorporateWizard({ token, orgId, orgName, canPlace, holdTtlMinutes, cons
               </tbody>
             </table>
             <div className="grid gap-4 sm:grid-cols-3">
-              <Field label={t('corp.events.costCentre')}><Input value={costCentre} onChange={e => setCostCentre(e.target.value)} maxLength={80} data-testid="corp-cost-centre" /></Field>
-              <Field label={t('corp.events.reference')} hint={t('corp.events.reference.hint')}><Input value={reference} onChange={e => setReference(e.target.value)} maxLength={80} data-testid="corp-reference" /></Field>
-              <Field label={t('corp.events.teamName')} hint={t('corp.events.teamName.hint')}><Input value={teamName} onChange={e => setTeamName(e.target.value)} maxLength={120} data-testid="corp-team-name" /></Field>
+              <Field label={t('corp.events.costCentre')} error={startsWithFormulaChar(costCentre) ? t('events.error.invalid_text') : undefined}><Input value={costCentre} onChange={e => setCostCentre(e.target.value)} maxLength={80} data-testid="corp-cost-centre" /></Field>
+              <Field label={t('corp.events.reference')} hint={t('corp.events.reference.hint')} error={startsWithFormulaChar(reference) ? t('events.error.invalid_text') : undefined}><Input value={reference} onChange={e => setReference(e.target.value)} maxLength={80} data-testid="corp-reference" /></Field>
+              <Field label={t('corp.events.teamName')} hint={t('corp.events.teamName.hint')} error={startsWithFormulaChar(teamName) ? t('events.error.invalid_text') : undefined}><Input value={teamName} onChange={e => setTeamName(e.target.value)} maxLength={120} data-testid="corp-team-name" /></Field>
             </div>
             <Checkbox label={consentLabel} checked={consent} onChange={e => setConsent(e.target.checked)} disabled={!canPlace} data-testid="corp-consent" />
             <Checkbox label={t('corp.events.acceptTerms')} checked={terms} onChange={e => setTerms(e.target.checked)} disabled={!canPlace} data-testid="corp-terms" />
@@ -379,7 +382,7 @@ function CorporateWizard({ token, orgId, orgName, canPlace, holdTtlMinutes, cons
         {current === 'event' && <Button disabled={!eventId || !event} onClick={() => goTo(1)} data-testid="corp-next">{t('events.wizard.next')}</Button>}
         {current === 'check' && <Button disabled={!clean} onClick={() => goTo(3)} data-testid="corp-next">{t('events.wizard.next')}</Button>}
         {current === 'confirm' && quote && (
-          <Button disabled={!canPlace || !consent || !terms} loading={placing} onClick={() => void place()} data-testid="corp-place">{fmt(t('corp.events.place'), { amount: money(quote.totalTzs, quote.currency) })}</Button>
+          <Button disabled={!canPlace || !consent || !terms || textBad} loading={placing} onClick={() => void place()} data-testid="corp-place">{fmt(t('corp.events.place'), { amount: money(quote.totalTzs, quote.currency) })}</Button>
         )}
       </div>
     </div>
@@ -475,7 +478,7 @@ function CorporateOrderDetail({ token, orgId, orderId, onBack }: { token: string
       {event.shareUrl && <Link href={event.shareUrl} target="_blank" className="text-sm underline" data-testid="corp-order-public">{t('corp.events.viewPublic')}</Link>}
 
       <Dialog open={cancelOpen} onClose={() => setCancelOpen(false)} title={t('corp.events.order.cancel')} description={t('corp.events.order.cancel.body')} size="sm">
-        <Field label={t('admin.events.rejectReason')} required>
+        <Field label={t('corp.events.order.cancel.reason')} required>
           <Select value={reason} onChange={e => setReason(e.target.value)} data-testid="corp-cancel-reason">
             <option value="">—</option>
             {MEMBER_CANCEL_REASONS.map(r => <option key={r} value={r}>{t(memberCancelReasonKey(r))}</option>)}

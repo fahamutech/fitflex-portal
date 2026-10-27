@@ -263,7 +263,8 @@ export async function setupEvents(page_: Page, user: Json = OWNER, opts: { me?: 
     ['GET', /^\/organizer\/events\/([^/]+)\/registrations$/, (c, m) => (m[1] === 'evt_other' ? { status: 404, json: { error: 'event_not_found' } } : m[1] !== 'evt_pub' ? pageOf([]) : pageOf(REG_ROWS.filter(r => (!c.query.status || r.status === c.query.status) && (!c.query.q || (r.status === 'confirmed' && r.participant.name.toLowerCase().includes(c.query.q.toLowerCase()))))))],
     ['GET', /^\/organizer\/events\/([^/]+)\/orders$/, (c, m) => (m[1] === 'evt_other' ? { status: 404, json: { error: 'event_not_found' } } : m[1] !== 'evt_pub' ? pageOf([]) : pageOf(ORG_ORDER_ROWS.filter(r => !c.query.status || r.status === c.query.status)))],
     ['GET', /^\/admin\/events\/([^/]+)\/registrations$/, (c, m) => (m[1] !== 'evt_pub' ? pageOf([]) : pageOf(REG_ROWS_ADMIN.filter(r => !c.query.status || r.status === c.query.status)))],
-    ['GET', /^\/admin\/events\/([^/]+)\/orders\/([^/]+)$/, (_c, m) => ADMIN_ORDER_DETAIL(m[2])],
+    // #265: the admin order detail no longer returns phone/email/DOB/gender.
+    ['GET', /^\/admin\/events\/([^/]+)\/orders\/([^/]+)$/, (_c, m) => { const d = ADMIN_ORDER_DETAIL(m[2]); return { ...d, closeReason: m[2] === 'ord_2' ? 'admin' : d.closeReason, registrations: d.registrations.map((r: Json) => { const { phone, email, dateOfBirth, gender, ...rest } = r; void phone; void email; void dateOfBirth; void gender; return rest; }) }; }],
     ['GET', /^\/admin\/events\/([^/]+)\/orders$/, (c, m) => (m[1] !== 'evt_pub' ? pageOf([]) : pageOf(ORG_ORDER_ROWS_ADMIN.filter(r => !adminCancelled.has(r.id) && (!c.query.status || r.status === c.query.status))))],
     ['POST', /^\/admin\/events\/([^/]+)\/orders\/([^/]+)\/cancel$/, (c, m) => {
       if (!c.body?.note || String(c.body.note).length < 5) return { status: 400, json: { error: 'note_required' } };

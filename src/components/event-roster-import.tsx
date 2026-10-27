@@ -69,6 +69,7 @@ export function EventRosterImport({ text, onText, event, fields, busy, onCheck, 
       <Field label={t('corp.events.paste')} hint={fmt(t('corp.events.rowCount'), { n: rows, max: ROSTER_MAX_ROWS })} error={tooMany ? t('events.error.too_many_rows') : undefined}>
         <Textarea className="font-mono text-xs" rows={8} value={text} onChange={e => onText(e.target.value)} placeholder={ROSTER_EXAMPLE_CSV} data-testid="roster-text" />
       </Field>
+      <p className="-mt-2 text-xs text-[var(--color-fg-quaternary)]" data-testid="roster-headers-note">{t('corp.events.headersEnglish')}</p>
       <div className="flex flex-wrap items-center gap-2">
         <label className="inline-flex cursor-pointer items-center gap-2 text-sm">
           <Upload aria-hidden="true" className="h-4 w-4" />
