@@ -45,6 +45,9 @@ const KNOWN_ERRORS = [
   'reference_locked_provider',
   // the flag is off on the server, or the row is gone
   'feature_disabled', 'not_found',
+  // Events S4 (spec §3.7, §3.17): event payment decisions and event refunds
+  'order_amount_mismatch', 'order_buyer_mismatch', 'currency_mismatch', 'payment_row_mismatch', 'reason_code_required', 'note_required',
+  'order_not_found', 'payment_not_unfulfilled', 'refundable_changed', 'rate_limited',
 ];
 
 /**

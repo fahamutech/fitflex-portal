@@ -2,11 +2,11 @@
 import Link from 'next/link';
 import { Suspense, useCallback, useEffect, useState } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
-import { api, type AdminEventDetail, type AdminEventOrderDetail, type AdminEventRow, type Bilingual, type EventAuditRow, type EventOrderRow } from '@/lib/api';
+import { api, type AdminCancelRefundMode, type AdminEventDetail, type AdminEventOrderDetail, type AdminEventRow, type Bilingual, type EventAuditRow, type EventCancelPreview, type EventOrderRow } from '@/lib/api';
 import { money } from '@/lib/admin-utils';
 import { EVENTS_MODULE } from '@/lib/flags';
 import { AUDIT_ACTIONS, AUDIT_ACTION_PREFIX, ORGANIZER_STATUS, REJECT_REASONS, auditActionLabel, distanceLabel, errorCode, errorKey, eventDateTime, eventStatusOf, closeReasonKey, isFeatureOff, maskContact, orderStatusOf, registrationStatusOf, rejectReasonKey, relativeTime, typeKey } from '@/lib/events';
-import { Alert, Badge, Button, Card, CardContent, CardHeader, Checkbox, Field, PageHeader, Segmented, Select, SkeletonTable, Textarea, useToast } from '@/components/shared';
+import { Alert, Badge, Button, Card, CardContent, CardHeader, Checkbox, Field, PageHeader, Radio, Segmented, Select, SkeletonTable, Textarea, useToast } from '@/components/shared';
 import { DataTable, type ColumnDef } from '@/components/data-table';
 import { Dialog, DialogFooter } from '@/components/dialog';
 import { EventReviewSummary } from '@/components/event-review-summary';
@@ -15,6 +15,8 @@ import { EventOrdersTable } from '@/components/event-orders-table';
 import { hasRegistrationData } from '@/components/organizer/event-views';
 import { useEventsOptions } from '@/components/events-options';
 import { LifecycleButtons, LifecycleDialogs, type LifecycleAction } from '@/components/event-lifecycle';
+import { EventCancelWithRefundsDialog } from '@/components/event-refund-batch-dialog';
+import { AdminOrderPaymentPanel } from '@/components/event-payment-panel';
 import { EventsUnavailable, PageError, PageLoading, useDocumentTitle } from '@/components/organizer/page-states';
 import { useApp } from '../../providers';
 
@@ -117,7 +119,7 @@ function AuditTable({ eventId }: { eventId?: string }) {
 const DETAIL_VIEWS = ['review', 'orders', 'registrations'] as const;
 type DetailView = (typeof DETAIL_VIEWS)[number];
 
-function Detail({ id, view, onView, onBack }: { id: string; view: DetailView; onView: (v: DetailView) => void; onBack: () => void }) {
+function Detail({ id, view, orderParam, onView, onBack }: { id: string; view: DetailView; orderParam: string | null; onView: (v: DetailView) => void; onBack: () => void }) {
   const { t, token, locale, hasPermission } = useApp();
   const toast = useToast();
   const [doc, setDoc] = useState<AdminEventDetail | null>(null);
@@ -129,7 +131,8 @@ function Detail({ id, view, onView, onBack }: { id: string; view: DetailView; on
   const [busy, setBusy] = useState(false);
   const [lifecycle, setLifecycle] = useState<LifecycleAction | null>(null);
   const [auditKey, setAuditKey] = useState(0);
-  const [order, setOrder] = useState<EventOrderRow | null>(null);
+  // `order=<id>` in the URL (links from Payments) opens that order's dialog straight away; the row fills in once loaded.
+  const [order, setOrder] = useState<EventOrderRow | null>(orderParam ? { id: orderParam, reference: '', status: 'awaiting_payment', purchaser: { type: 'member', label: '' }, placesCount: 0, totalTzs: 0, feesTzs: 0, currency: 'TZS', createdAt: '', holdExpiresAt: null, closedAt: null, closeReason: null } : null);
   const [ordersKey, setOrdersKey] = useState(0);
   // S3 §6.5: the orders and registrations tabs exist only while the server says registration is on.
   const registrationOn = !!useEventsOptions()?.registration;
@@ -244,7 +247,9 @@ function Detail({ id, view, onView, onBack }: { id: string; view: DetailView; on
           <Button variant="destructive" loading={busy} disabled={!reason || !note.trim()} onClick={() => void decide('reject')} data-testid="admin-reject-confirm">{t('admin.events.reject')}</Button>
         </DialogFooter>
       </Dialog>
-      <LifecycleDialogs action={lifecycle} onClose={() => setLifecycle(null)} run={run} />
+      <LifecycleDialogs action={lifecycle === 'cancel' ? null : lifecycle} onClose={() => setLifecycle(null)} run={run} />
+      {/* S4 §6.5: an admin's cancel shows what happens to paid orders and raises the refund batch. */}
+      <EventCancelWithRefundsDialog open={lifecycle === 'cancel'} eventId={id} onClose={() => setLifecycle(null)} onCancelled={() => { toast.success(t('events.action.done')); void load(); }} />
     </div>
   );
 }
@@ -257,18 +262,28 @@ function AdminOrderDialog({ eventId, row, timezone, timezoneAbbr, onClose, onCha
   const [error, setError] = useState(false);
   const [note, setNote] = useState('');
   const [busy, setBusy] = useState(false);
+  // S4 §6.4: cancelling a paid order picks how much is refunded (full, per the event's policy, none); a second admin approves it.
+  const [mode, setMode] = useState<AdminCancelRefundMode>('policy');
+  const [preview, setPreview] = useState<EventCancelPreview | null>(null);
   const orderId = row?.id ?? null;
   const load = useCallback(async () => {
     if (!token || !orderId) { setDoc(null); return; }
     setError(false);
     try { setDoc(await api.adminEventOrder(token, eventId, orderId)); } catch { setError(true); }
   }, [token, eventId, orderId]);
-  useEffect(() => { setNote(''); void load(); }, [load]);
+  useEffect(() => { setNote(''); setMode('policy'); setPreview(null); void load(); }, [load]);
+  const paidStatus = doc?.order?.status;
+  const cancellablePaid = paidStatus === 'confirmed' || paidStatus === 'partially_cancelled';
+  // The amounts per mode come from the member-style preview when the backend serves it for admins; without it the modes show no amount.
+  useEffect(() => {
+    if (!token || !orderId || !cancellablePaid) return;
+    api.adminEventOrderCancelPreview(token, eventId, orderId).then(setPreview).catch(() => setPreview(null));
+  }, [token, eventId, orderId, cancellablePaid]);
   async function cancel() {
     if (!token || !orderId || note.trim().length < 5) return;
     setBusy(true);
     try {
-      await api.adminCancelEventOrder(token, eventId, orderId, note.trim());
+      await api.adminCancelEventOrder(token, eventId, orderId, note.trim(), cancellablePaid ? mode : undefined);
       toast.success(t('admin.events.audit.order_cancelled'));
       onChanged(); onClose();
     } catch (err) {
@@ -280,12 +295,13 @@ function AdminOrderDialog({ eventId, row, timezone, timezoneAbbr, onClose, onCha
   const status = o?.status ?? row?.status;
   const st = orderStatusOf(status);
   const unpaid = status === 'awaiting_payment';
+  const paidCancel = status === 'confirmed' || status === 'partially_cancelled';
   const purchaser = doc?.purchaser ?? row?.purchaser;
   const createdBy = doc?.createdBy?.name ?? o?.createdBy?.name ?? null;
   // The admin order detail returns no contact fields (#265): the column only shows when some row has one.
   const hasContact = (doc?.registrations ?? []).some(r => !!r.phone || !!r.email);
   return (
-    <Dialog open={!!row} onClose={onClose} title={row ? `${row.reference} · ${row.purchaser?.label ?? ''}` : ''} size="lg">
+    <Dialog open={!!row} onClose={onClose} title={row ? `${o?.reference || row.reference} · ${purchaser?.label ?? ''}` : ''} size="lg">
       <div className="space-y-4 text-sm" data-testid="admin-order-dialog">
         {error ? <PageError onRetry={() => void load()} /> : !doc || !o ? <div aria-busy="true"><SkeletonTable rows={3} /></div> : (
           <>
@@ -314,8 +330,24 @@ function AdminOrderDialog({ eventId, row, timezone, timezoneAbbr, onClose, onCha
                 ); })}
               </tbody>
             </table>
-            {unpaid && (
-              <Field label={t('admin.events.order.cancel.note')} required>
+            {/* S4 §6.4: payment timeline, tickets and refunds of the order (read-only; payer details masked without `payments`). */}
+            <AdminOrderPaymentPanel eventId={eventId} orderId={o.id} orderReference={o.reference} orderStatus={o.status} payment={doc.payment} tickets={doc.tickets} refunds={doc.refunds}
+              timezone={timezone} timezoneAbbr={timezoneAbbr} onChanged={() => { void load(); onChanged(); }} />
+            {paidCancel && (
+              <fieldset className="space-y-1" data-testid="admin-order-refund-mode">
+                <legend className="text-sm font-medium text-[var(--color-fg-secondary)]">{t('events.order.cancelPaid.mode')}</legend>
+                {(['full', 'policy', 'none'] as const).map(m => {
+                  const amount = m === 'full' ? preview?.paidTzs : m === 'none' ? 0 : preview?.refundTzs;
+                  return (
+                    <Radio key={m} name="admin-refund-mode" value={m} checked={mode === m} onChange={() => setMode(m)} data-testid={`admin-refund-mode-${m}`}
+                      label={`${t(`events.order.cancelPaid.mode.${m}` as 'events.order.cancelPaid.mode.full')}${amount != null ? ` · ${money(amount, o.currency)}` : ''}`} />
+                  );
+                })}
+                <p className="text-xs text-[var(--color-fg-quaternary)]">{t('events.order.cancelPaid.secondAdmin')}</p>
+              </fieldset>
+            )}
+            {(unpaid || paidCancel) && (
+              <Field label={t('admin.events.order.cancel.note')} required hint={paidCancel ? t('events.order.cancelPaid.noteHint') : undefined}>
                 <Textarea rows={2} value={note} onChange={e => setNote(e.target.value)} maxLength={500} data-testid="admin-order-cancel-note" />
               </Field>
             )}
@@ -324,7 +356,7 @@ function AdminOrderDialog({ eventId, row, timezone, timezoneAbbr, onClose, onCha
       </div>
       <DialogFooter>
         <Button variant="secondary" onClick={onClose} disabled={busy}>{t('events.common.close')}</Button>
-        {unpaid && doc && <Button variant="destructive" loading={busy} disabled={note.trim().length < 5} onClick={() => void cancel()} data-testid="admin-order-cancel">{t('admin.events.order.cancel')}</Button>}
+        {(unpaid || paidCancel) && doc && <Button variant="destructive" loading={busy} disabled={note.trim().length < 5} onClick={() => void cancel()} data-testid="admin-order-cancel">{t('admin.events.order.cancel')}</Button>}
       </DialogFooter>
     </Dialog>
   );
@@ -348,7 +380,7 @@ function AdminEventsInner() {
     router.push(s ? `${pathname}?${s}` : pathname, { scroll: false });
   };
   if (!EVENTS_MODULE) return <EventsUnavailable />;
-  if (event) return <Detail id={event} view={view} onView={v => go({ view: v === 'review' ? null : v })} onBack={() => go({ event: null, view: null })} />;
+  if (event) return <Detail id={event} view={view} orderParam={view === 'orders' ? params.get('order') : null} onView={v => go({ view: v === 'review' ? null : v })} onBack={() => go({ event: null, view: null, order: null })} />;
   return <Queue tab={tab} onTab={v => go({ tab: v === 'submitted' ? null : v })} onOpen={id => go({ event: id })} />;
 }
 

@@ -1,8 +1,12 @@
 'use client';
+import Link from 'next/link';
 import { useEffect, useState } from 'react';
-import { RefreshCw, CheckCircle2, XCircle, Ban, Undo2, ShieldCheck, Pencil } from 'lucide-react';
+import { RefreshCw, CheckCircle2, XCircle, Ban, Undo2, ShieldCheck, Pencil, Wrench } from 'lucide-react';
 import { useApp } from '../../providers';
 import { api, ApiError, PaymentRequest, PaymentStatusValue } from '@/lib/api';
+import { EVENTS_MODULE } from '@/lib/flags';
+import { attentionReasonKey, eventDateTime, isEventPayment, orderStatusOf } from '@/lib/events';
+import { EventApproveDialog, EventRejectDialog, type EventDecisionResult } from '@/components/event-payment-dialogs';
 import { Badge, Button, PageHeader, Alert, Spinner, Card, Field, Select, ErrorState } from '@/components/shared';
 import { DataTable, ColumnDef } from '@/components/data-table';
 import { Dialog, DialogFooter, ConfirmDialog } from '@/components/dialog';
@@ -15,7 +19,7 @@ import {
 } from '@/lib/money-approval';
 
 type PaymentFilter = 'pending' | 'approved' | 'rejected' | 'cancelled' | 'all';
-type KindFilter = 'all' | 'trainer_pass';
+type KindFilter = 'all' | 'trainer_pass' | 'event_order';
 type Translate = (key: MessageKey) => string;
 
 /** A trainer pass is known by its subscription type; `note` can be edited. */
@@ -37,6 +41,8 @@ const upper = (s: string) => s.toLocaleUpperCase();
 
 /** What the payment is for, as the type badge shows it (kind only; the detail goes on the line below). */
 function paymentKindLabel(payment: PaymentRequest, t: Translate): string {
+  // Events S4 §6.2: the event check precedes the shop `orderId` branch.
+  if (isEventPayment(payment)) return upper(t('payments.kind.eventOrder'));
   if (upgradeOf(payment)) return upper(t('payments.kind.upgrade'));
   if (payment.bookingGroupId) return upper(t('payments.kind.trainerSession'));
   if (payment.orderId) return upper(t('payments.kind.shopOrder'));
@@ -69,8 +75,11 @@ function paymentLabel(payment: PaymentRequest, t: Translate): string {
 /** Sentence case for a line that may start with a filled-in name ("another admin asked…"). */
 const cap = (s: string) => (s ? s.charAt(0).toLocaleUpperCase() + s.slice(1) : s);
 
+/** Approving or rejecting an event-order payment goes through the event dialogs (amount received, reason code). */
+const isEventDecision = (target: { payment: PaymentRequest; action: string } | null) => !!target && isEventPayment(target.payment) && target.action !== 'cancelled';
+
 export default function PaymentsPage() {
-  const { token, user, t, locale } = useApp();
+  const { token, user, t, locale, hasPermission } = useApp();
   const [payments, setPayments] = useState<PaymentRequest[]>([]);
   const [loading, setLoading]   = useState(true);
   // Loading the list failing is shown as its own state; `error` is for actions on a row.
@@ -98,12 +107,15 @@ export default function PaymentsPage() {
   // Confirming a shop-order payment as approved needs the amount actually received.
   const [confirmAmount, setConfirmAmount] = useState('');
   const [dialogError, setDialogError] = useState<string | null>(null);
+  // Events S4: event-order payments have their own approve (amount received) and reject (reason code) dialogs.
+  const [eventNotice, setEventNotice] = useState<{ tone: 'success' | 'warning'; text: string; href?: string } | null>(null);
+  const [repairing, setRepairing] = useState<string | null>(null);
 
   const load = async () => {
     if (!token) return;
     setLoading(true);
     try {
-      setPayments(await api.paymentRequests(token));
+      setPayments(await api.paymentRequests(token, eventsOnly ? { productType: 'EVENT_ORDER' } : {}));
       setLoadFailed(false);
     } catch {
       setLoadFailed(true);
@@ -112,12 +124,18 @@ export default function PaymentsPage() {
     }
   };
 
+  // `?kind=event_order` (links from the admin order panel) opens the Event tickets filter.
+  useEffect(() => { if (EVENTS_MODULE && new URLSearchParams(window.location.search).get('kind') === 'event_order') setKind('event_order'); }, []);
+
+  // The Event tickets filter asks the server for event payments only (S4 §8 item 18), so a sale does not load the whole table.
+  const eventsOnly = kind === 'event_order';
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { load(); }, [token]);
+  useEffect(() => { load(); }, [token, eventsOnly]);
 
   const filtered = payments
     .filter(p => filter === 'all' || p.status === filter)
-    .filter(p => kind === 'all' || isTrainerPass(p));
+    .filter(p => kind === 'all' || (kind === 'event_order' ? isEventPayment(p) : isTrainerPass(p)))
+    .map(p => (isEventPayment(p) ? { ...p, holdEndsAt: p.eventOrder?.holdExpiresAt ?? null } : p));
 
   /** The full "slots were taken" message for a 409 group_slot_rebooked (with the booking ids it lists), or null. */
   const slotRebookedText = (e: unknown): string | null => {
@@ -163,6 +181,28 @@ export default function PaymentsPage() {
     } finally {
       setBusy(false);
     }
+  }
+
+  /** The outcome of an event decision (S4 §6.2): what happened to the order, shown as a notice, then the list reloads. */
+  function onEventDecided(target: PaymentRequest, r: EventDecisionResult) {
+    setActionTarget(null);
+    setError(null); setNotice(null);
+    const outcome = r.response.event?.outcome;
+    if (r.decision === 'reject') setEventNotice({ tone: 'success', text: t('payments.event.outcome.rejected') });
+    else if (outcome === 'refund_raised') setEventNotice({ tone: 'warning', text: t('payments.event.outcome.refund'), href: `/admin/refunds?order=${encodeURIComponent(target.eventOrder?.reference ?? '')}` });
+    else if (outcome === 'reheld') setEventNotice({ tone: 'success', text: t('payments.event.outcome.reheld') });
+    else setEventNotice({ tone: 'success', text: fill(t('payments.event.outcome.confirmed'), { n: target.eventOrder?.placesCount ?? 0 }) });
+    void load();
+  }
+  async function handleRepair(p: PaymentRequest) {
+    if (!token || !p.eventOrder) return;
+    setRepairing(p.id);
+    try {
+      await api.repairEventPayment(token, p.eventOrder.eventId, p.eventOrder.orderId);
+      setError(null); setEventNotice({ tone: 'success', text: t('payments.event.repair.done') });
+      await load();
+    } catch (e) { setError(t(moneyErrorKey(e))); }
+    finally { setRepairing(null); }
   }
 
   async function handleRefund() {
@@ -227,6 +267,7 @@ export default function PaymentsPage() {
 
   if (!token || user?.userType !== 'admin') return null;
 
+  const attentionCount = payments.filter(p => isEventPayment(p) && (p.eventOrder?.repairable || p.eventOrder?.paymentStatus === 'reconciliation_required')).length;
   const statusText = (s: string | null | undefined) =>
     s && (PAYMENT_STATUSES as string[]).includes(s) ? t(paymentStatusKey(s as PaymentStatusValue)) : (s || '—');
   const isMe = (id: string | null | undefined) => !!id && id === user.id;
@@ -245,7 +286,8 @@ export default function PaymentsPage() {
     ? fill(t('money2.approvedByYou'), { time: whenText(p.decidedAt, locale) })
     : fill(t('money2.approvedBy'), { who: otherAdmin(p.decidedByName), time: whenText(p.decidedAt, locale) }));
   const showApprovedBy = (p: PaymentRequest) => p.status === 'approved' && !p.changeRequestedBy && (!!p.decidedBy || !!p.decidedByName?.trim());
-  const needsAmount = (p: PaymentRequest | null) => !!p?.orderId && p.changeRequestedStatus === 'approved';
+  // Shop-order and event-order payments both need the amount actually received when a change to approved is confirmed.
+  const needsAmount = (p: PaymentRequest | null) => (!!p?.orderId || isEventPayment(p)) && p?.changeRequestedStatus === 'approved';
   const isDecided = (p: PaymentRequest) => (DECIDED_STATUSES as string[]).includes(p.status);
   /** Why Approve is not offered to this admin on a two-admin payment (full sentence, for the tooltip), or null. */
   const approveBlocked = (p: PaymentRequest): string | null => {
@@ -269,6 +311,28 @@ export default function PaymentsPage() {
     return ends ? fill(t('payments.upgradeNote'), { date: whenText(ends, locale) }) : t('payments.upgradeNoteNoDate');
   };
   const hintId = (p: PaymentRequest) => `payment-hint-${p.id}`;
+  /** Hold, late and attention states of an event row (S4 §6.2): which payments block places or will become refunds. */
+  const eventStateBadges = (p: PaymentRequest) => {
+    const eo = p.eventOrder!;
+    const soon = !!eo.holdExpiresAt && Date.parse(eo.holdExpiresAt) - Date.now() < 2 * 3_600_000;
+    return (
+      <div className="space-y-1" data-testid="payment-event-state">
+        {eo.eventStatus === 'cancelled' && <div><Badge tone="danger">{t('payments.event.cancelledEvent')}</Badge></div>}
+        {eo.eventStatus !== 'cancelled' && eo.status === 'expired' && <div><Badge tone="warning">{t('payments.event.holdEnded')}</Badge></div>}
+        {eo.eventStatus !== 'cancelled' && eo.status === 'awaiting_payment' && p.status === 'pending' && eo.holdExpiresAt && (
+          <div className={`text-xs ${soon ? 'font-medium text-[var(--color-warning-700)]' : 'text-[var(--color-fg-tertiary)]'}`} data-testid="payment-event-hold">{fill(t('payments.event.hold'), { time: eventDateTime(eo.holdExpiresAt, 'Africa/Dar_es_Salaam', locale) })}</div>
+        )}
+        {eo.paymentStatus === 'reconciliation_required' && (
+          <div className="space-y-0.5" data-testid="payment-event-attention">
+            <Badge tone="warning">{t('payments.event.attention')}</Badge>
+            <div className="text-xs text-[var(--color-fg-tertiary)]">{t(attentionReasonKey(eo.failureReason))}</div>
+            {eo.refundId && <Link href={`/admin/refunds?order=${encodeURIComponent(eo.reference)}`} className="text-xs font-medium text-[var(--color-brand-700)] underline">{t('events.order.refunds.open')}</Link>}
+          </div>
+        )}
+        {eo.repairable && <div data-testid="payment-event-repair-badge"><Badge tone="danger">{t('payments.event.repair.badge')}</Badge></div>}
+      </div>
+    );
+  };
   const twoAdminStage = (p: PaymentRequest) => p.secondApproverRequired && (p.approvalStage === 'awaiting_verification' || p.approvalStage === 'awaiting_second_approval');
 
   // Fits 1280px with the actions pinned: the date sits under the member, the note under the type.
@@ -291,6 +355,17 @@ export default function PaymentsPage() {
           <div className="max-w-[8.5rem]">
             <span className="whitespace-nowrap"><Badge tone={upgradeOf(p) ? 'gray' : isTrainerPass(p) ? 'warning' : 'brand'}>{paymentKindLabel(p, t)}</Badge></span>
             {paymentDetail(p) && <div className="mt-1 text-xs font-medium text-[var(--color-fg-secondary)]" data-testid="payment-detail">{paymentDetail(p)}</div>}
+            {isEventPayment(p) && p.eventOrder && (
+              <div className="mt-1 space-y-0.5 text-xs" data-testid="payment-event-detail">
+                <div className="truncate font-medium text-[var(--color-fg-secondary)]" title={p.eventOrder.eventTitle}>{p.eventOrder.eventTitle}</div>
+                <div className="font-mono text-[var(--color-fg-tertiary)]" data-testid="payment-event-ref">{p.eventOrder.reference}</div>
+                <div className="text-[var(--color-fg-tertiary)]">{fill(t('payments.event.places'), { n: p.eventOrder.placesCount })}</div>
+                {p.eventOrder.organizationName && <Badge tone="brand">{t('organizer.orders.organisation')}</Badge>}
+                {hasPermission('events') && (
+                  <div><Link href={`/admin/events?event=${encodeURIComponent(p.eventOrder.eventId)}&view=orders&order=${encodeURIComponent(p.eventOrder.orderId)}`} className="font-medium text-[var(--color-brand-700)] underline" data-testid="payment-open-order">{t('payments.event.openOrder')}</Link></div>
+                )}
+              </div>
+            )}
             {p.gym && <div className="mt-1 truncate text-xs text-[var(--color-fg-tertiary)]" title={p.gym.name}>{p.gym.name}</div>}
             {/* Long notes are cut to one line; the full text is in the tooltip and in Edit. */}
             {note && <div className="mt-1 truncate text-xs text-[var(--color-fg-quaternary)]" title={note} data-testid="payment-note">{note}</div>}
@@ -327,6 +402,7 @@ export default function PaymentsPage() {
           {showApprovedBy(p) && (
             <div className="text-xs text-[var(--color-fg-tertiary)]" data-testid="payment-approved-by">{approvedLine(p)}</div>
           )}
+          {isEventPayment(p) && p.eventOrder && eventStateBadges(p)}
           {/* Why Approve / Confirm change is not open to this admin: visible, not only a tooltip. */}
           {approveHint(p) && (
             <div id={hintId(p)} className="text-xs font-medium text-[var(--color-warning-700)]" data-testid="payment-approve-hint">{approveHint(p)}</div>
@@ -387,7 +463,7 @@ export default function PaymentsPage() {
       <PageHeader
         title={t('payments.title')}
         description={loadFailed && !payments.length ? undefined
-          : fill(t('payments.summary'), { total: payments.length, pending: payments.filter(p => p.status === 'pending').length })}
+          : `${fill(t('payments.summary'), { total: payments.length, pending: payments.filter(p => p.status === 'pending').length })}${attentionCount ? ` · ${fill(t('payments.event.attentionCount'), { n: attentionCount })}` : ''}`}
         actions={
           <Button variant="secondary" size="sm" onClick={load} disabled={loading}>
             <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} /> {t('payments.refresh')}
@@ -399,6 +475,11 @@ export default function PaymentsPage() {
       {loadFailed && payments.length > 0 && <Alert tone="error">{t('payments.loadFailedTitle')}. {t('payments.loadFailedBody')}</Alert>}
       {error && <Alert tone="error">{error}</Alert>}
       {notice && <Alert tone="success">{notice}</Alert>}
+      {eventNotice && (
+        <div data-testid="payments-event-notice">
+          <Alert tone={eventNotice.tone}>{eventNotice.text}{eventNotice.href && <> <Link href={eventNotice.href} className="underline" data-testid="payments-event-notice-link">{t('events.order.refunds.open')}</Link></>}</Alert>
+        </div>
+      )}
 
       {loading && !payments.length ? (
         <div className="flex h-64 items-center justify-center"><Spinner className="h-8 w-8" /></div>
@@ -417,7 +498,8 @@ export default function PaymentsPage() {
               label={t('payments.title')}
               stickyActions
               dense
-              defaultSort={{ key: 'requestedAt', dir: 'desc' }}
+              key={eventsOnly ? 'events' : 'all'}
+              defaultSort={eventsOnly ? { key: 'requestedAt', dir: 'asc' } : { key: 'requestedAt', dir: 'desc' }}
               filterPlaceholder={t('payments.search')}
               emptyState={t('payments.empty')}
               extraFilters={
@@ -428,8 +510,8 @@ export default function PaymentsPage() {
                     </button>
                   ))}
                   <span className="mx-1 w-px self-stretch bg-[var(--color-border-secondary)]" aria-hidden />
-                  {([['all', 'payments.type.all'], ['trainer_pass', 'payments.type.trainerPass']] as const).map(([k, label]) => (
-                    <button key={k} type="button" aria-pressed={kind === k} onClick={() => setKind(k)} className={filterButton(kind === k)}>
+                  {([['all', 'payments.type.all'], ['trainer_pass', 'payments.type.trainerPass'], ...(EVENTS_MODULE ? [['event_order', 'payments.event.filter'] as const] : [])] as const).map(([k, label]) => (
+                    <button key={k} type="button" aria-pressed={kind === k} onClick={() => setKind(k)} className={filterButton(kind === k)} data-testid={`payments-kind-${k}`}>
                       {t(label)}
                     </button>
                   ))}
@@ -471,7 +553,12 @@ export default function PaymentsPage() {
                       </Button>
                     </>
                   )}
-                  {payment.secondApproverRequired && isDecided(payment) && !payment.changeRequestedBy && !(payment.orderId && payment.status === 'approved') && (
+                  {isEventPayment(payment) && payment.eventOrder?.repairable && (
+                    <Button variant="secondary" size="sm" loading={repairing === payment.id} onClick={() => void handleRepair(payment)} data-testid="payment-repair">
+                      <Wrench aria-hidden="true" className="h-3.5 w-3.5" /> {t('payments.event.repair.action')}
+                    </Button>
+                  )}
+                  {payment.secondApproverRequired && isDecided(payment) && !payment.changeRequestedBy && !((payment.orderId || isEventPayment(payment)) && payment.status === 'approved') && (
                     <Button
                       variant="ghost" size="sm" data-testid="payment-request-change"
                       onClick={() => { setChangeTarget(payment); setDialogError(null); setNotice(null); setChangeFields({ status: '', reason: '' }); }}
@@ -500,7 +587,7 @@ export default function PaymentsPage() {
                       </Button>
                     </>
                   )}
-                  {payment.status === 'approved' && payment.subscriptionId && (
+                  {payment.status === 'approved' && payment.subscriptionId && !isEventPayment(payment) && (
                     <Button
                       variant="ghost" size="sm" title={t('payments.action.refund')} aria-label={t('payments.action.refund')} data-testid="payment-refund" className={iconBtn}
                       onClick={() => { setRefundTarget(payment); setRefundError(null); setNotice(null); setRefundFields({ amount: String(payment.amountTzs), note: '' }); }}
@@ -508,12 +595,14 @@ export default function PaymentsPage() {
                       <Undo2 aria-hidden="true" className="h-3.5 w-3.5" />
                     </Button>
                   )}
-                  <Button
-                    variant="ghost" size="sm" title={t('payments.action.edit')} aria-label={t('payments.action.edit')} data-testid="payment-edit" className={iconBtn}
-                    onClick={() => { setEditTarget(payment); setEditFields({ reference: payment.reference || '', note: upgradeOf(payment) ? '' : (payment.note || '') }); }}
-                  >
-                    <Pencil aria-hidden="true" className="h-3.5 w-3.5" />
-                  </Button>
+                  {!(isEventPayment(payment) && payment.status === 'approved') && (
+                    <Button
+                      variant="ghost" size="sm" title={t('payments.action.edit')} aria-label={t('payments.action.edit')} data-testid="payment-edit" className={iconBtn}
+                      onClick={() => { setEditTarget(payment); setEditFields({ reference: payment.reference || '', note: upgradeOf(payment) ? '' : (payment.note || '') }); }}
+                    >
+                      <Pencil aria-hidden="true" className="h-3.5 w-3.5" />
+                    </Button>
+                  )}
                 </>
               )}
             />
@@ -522,7 +611,7 @@ export default function PaymentsPage() {
       )}
 
       <ConfirmDialog
-        open={!!actionTarget && !approvesWithMemberReference(actionTarget)}
+        open={!!actionTarget && !approvesWithMemberReference(actionTarget) && !isEventDecision(actionTarget)}
         onClose={() => setActionTarget(null)}
         onConfirm={() => handleAction()}
         title={t(actionTarget?.action === 'approved' ? 'payments.dialog.approveTitle' : actionTarget?.action === 'rejected' ? 'payments.dialog.rejectTitle' : 'payments.dialog.cancelTitle')}
@@ -533,8 +622,19 @@ export default function PaymentsPage() {
         busy={busy}
       />
 
+      <EventApproveDialog
+        payment={actionTarget && isEventPayment(actionTarget.payment) && actionTarget.action === 'approved' ? actionTarget.payment : null}
+        verifiedText={actionTarget?.payment.secondApproverRequired && actionTarget.payment.verifiedBy ? verifiedLine(actionTarget.payment) : null}
+        onClose={() => setActionTarget(null)}
+        onDone={r => actionTarget && onEventDecided(actionTarget.payment, r)}
+      />
+      <EventRejectDialog
+        payment={actionTarget && isEventPayment(actionTarget.payment) && actionTarget.action === 'rejected' ? actionTarget.payment : null}
+        onClose={() => setActionTarget(null)}
+        onDone={r => actionTarget && onEventDecided(actionTarget.payment, r)}
+      />
       <ApproveWithReferenceDialog
-        payment={approvesWithMemberReference(actionTarget) ? actionTarget!.payment : null}
+        payment={approvesWithMemberReference(actionTarget) && !isEventDecision(actionTarget) ? actionTarget!.payment : null}
         verifiedText={actionTarget?.payment.secondApproverRequired && actionTarget.payment.verifiedBy ? verifiedLine(actionTarget.payment) : null}
         busy={busy}
         onClose={() => setActionTarget(null)}
@@ -588,6 +688,16 @@ export default function PaymentsPage() {
       >
         <div className="space-y-4">
           <p className="text-sm text-[var(--color-fg-secondary)]">{t(verifyTarget?.orderId ? 'money2.verifyBodyOrder' : 'money2.verifyBody')}</p>
+          {verifyTarget && isEventPayment(verifyTarget) && verifyTarget.eventOrder && (
+            <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 rounded-[var(--radius-lg)] border border-[var(--color-border-secondary)] px-3 py-2 text-xs" data-testid="verify-event-facts">
+              <dt className="text-[var(--color-fg-tertiary)]">{t('payments.kind.eventOrder')}</dt>
+              <dd className="font-medium text-[var(--color-fg-primary)]">{verifyTarget.eventOrder.eventTitle} · {verifyTarget.eventOrder.reference}</dd>
+              <dt className="text-[var(--color-fg-tertiary)]">{t('payments.col.status')}</dt>
+              <dd>{t(orderStatusOf(verifyTarget.eventOrder.status).key)}</dd>
+              <dt className="text-[var(--color-fg-tertiary)]">{t('payments.event.expected')}</dt>
+              <dd className="tabular-nums">{money(verifyTarget.eventOrder.expectedTzs)}</dd>
+            </dl>
+          )}
           {verifyTarget && (verifyTarget.memberReference || verifyTarget.payerPhone) && (
             // What the member says they paid with: match it against the till statement.
             <div className="rounded-[var(--radius-lg)] border border-[var(--color-info-200)] bg-[var(--color-info-50)] px-4 py-3 text-sm text-[var(--color-info-800)]" data-testid="verify-member-details">

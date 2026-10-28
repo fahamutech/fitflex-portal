@@ -1,8 +1,9 @@
 'use client';
 import type { ParticipantFieldKey, ParticipantFieldPolicy } from '@/lib/api';
-import { DUPLICATE_POLICIES, FIELD_POLICIES, PARTICIPANT_FIELD_KEYS, POLICY_PRESETS, effectiveParticipantFields, fmt, hasMinAge, minAgeCategory, newScheduleItem, newSponsor, type ScheduleForm, type SponsorForm } from '@/lib/events';
+import { DUPLICATE_POLICIES, FIELD_POLICIES, PARTICIPANT_FIELD_KEYS, effectiveParticipantFields, fmt, hasMinAge, minAgeCategory, newScheduleItem, newSponsor, type ScheduleForm, type SponsorForm } from '@/lib/events';
 import { Alert, Button, Field, Radio } from '@/components/shared';
 import { ImageUpload } from '@/components/image-upload';
+import { RefundPolicyEditor } from '@/components/event-refund-policy';
 import { CountedTextarea, DateField, RowCard, TextField, useErrorText, type StepProps } from './fields';
 import { useApp } from '../../../app/providers';
 
@@ -20,21 +21,7 @@ export function TermsStep({ form, update, errors, readOnly, token }: StepProps) 
       </div>
       <Alert tone="info">{t('events.terms.legalNote')}</Alert>
 
-      <fieldset>
-        <legend className="text-sm font-medium text-[var(--color-fg-secondary)]">{t('events.terms.policy')} <span aria-hidden="true" className="text-[var(--color-error-600)]">*</span></legend>
-        <div className="flex flex-col" id="ev-policyPreset">
-          {POLICY_PRESETS.map(p => (
-            <Radio key={p} name="refund-policy" value={p} checked={form.policyPreset === p} onChange={() => update({ policyPreset: p })} disabled={readOnly} label={t(`events.terms.policy.${p}` as 'events.terms.policy.custom')} invalid={!!errors.policyPreset} data-testid={`ev-policy-${p}`} />
-          ))}
-        </div>
-        {errors.policyPreset && <p className="text-xs text-[var(--color-error-700)]">{errText(errors.policyPreset)}</p>}
-      </fieldset>
-      {form.policyPreset === 'custom' && (
-        <div className="grid gap-4 lg:grid-cols-2">
-          <CountedTextarea path="policyEn" label={t('events.terms.policyEn')} value={form.policyEn} onChange={v => update({ policyEn: v })} error={errors.policyEn} required readOnly={readOnly} rows={5} max={5000} />
-          <CountedTextarea path="policySw" label={t('events.terms.policySw')} value={form.policySw} onChange={v => update({ policySw: v })} error={errors.policySw} required readOnly={readOnly} rows={5} max={5000} />
-        </div>
-      )}
+      <RefundPolicyEditor form={form} update={update} errors={errors} readOnly={readOnly} />
 
       <ParticipantFieldsSection form={form} update={update} errors={errors} readOnly={readOnly} />
 

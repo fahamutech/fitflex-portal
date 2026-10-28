@@ -280,7 +280,7 @@ export function EventWizard({ eventId, initialStep, view, onBack, onView }: {
   if (loadState === 'loading') return <PageLoading />;
   if (view === 'changes' && doc) return <EventChangeLog doc={doc} onBack={() => onView(doc.id, null)} />;
   // S3 §6.3: the roster and orders of this event, role-gated (§6.1); an unknown role falls back to the details.
-  if ((view === 'registrations' || view === 'orders') && doc) {
+  if ((view === 'registrations' || view === 'orders' || view === 'finance') && doc) {
     if (!canSeeView(view, org.role)) return <OrganizerForbidden backHref="/organizer/events" />;
     return <OrganizerEventView doc={doc} view={view} role={org.role} onView={v => onView(doc.id, v)} onBack={onBack} />;
   }

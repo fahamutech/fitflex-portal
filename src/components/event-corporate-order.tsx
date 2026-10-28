@@ -16,11 +16,13 @@ import {
 } from '@/lib/events';
 import type { MessageKey } from '@/lib/i18n';
 import { Alert, Badge, Button, Card, CardContent, Checkbox, EmptyState, Field, Input, MetricCard, PageHeader, Select, SkeletonTable, useToast } from '@/components/shared';
+import type { EventsOptions } from '@/lib/api';
 import { DataTable, type ColumnDef } from '@/components/data-table';
 import { Dialog, DialogFooter } from '@/components/dialog';
 import { SearchableSelect } from '@/components/searchable-select';
 import { Stepper } from '@/components/stepper';
 import { OrgFrame, useMyOrganization, type Mine } from '@/components/b2b-org';
+import { CorporateCancelDialog, CorporatePaymentSection, CorporateRefundCard, ResendInvitationDialog } from '@/components/event-payment-panel';
 import { EventRosterImport } from '@/components/event-roster-import';
 import { corporateEventsOpen, useEventsOptions } from '@/components/events-options';
 import { EventsUnavailable, PageError, PageLoading, useDocumentTitle } from '@/components/organizer/page-states';
@@ -73,7 +75,7 @@ export function CorporateEventOrders({ mine, token }: { mine: Mine; token: strin
   const active = mine.organization.status === 'active';
   const canPlace = canPlaceCorporateOrder(mine.role);
   const order = params.get('order');
-  if (order) return <CorporateOrderDetail token={token} orgId={orgId} orderId={order} onBack={() => go({ order: null })} />;
+  if (order) return <CorporateOrderDetail token={token} orgId={orgId} orderId={order} options={options} canBilling={canPlace} onBack={() => go({ order: null })} />;
   if (params.get('new')) {
     return <CorporateWizard token={token} orgId={orgId} orgName={orgName} canPlace={canPlace} holdTtlMinutes={options?.holdTtlMinutes ?? 30} consentVersion={options?.consentTextVersion ?? ''}
       onCancel={() => go({ new: null })} onPlaced={id => go({ new: null, order: id })} />;
@@ -416,12 +418,14 @@ function CorporateWizard({ token, orgId, orgName, canPlace, holdTtlMinutes, cons
 }
 
 // ── Order detail (§6.2 "Order detail") ──
-function CorporateOrderDetail({ token, orgId, orderId, onBack }: { token: string; orgId: string; orderId: string; onBack: () => void }) {
+function CorporateOrderDetail({ token, orgId, orderId, options, canBilling, onBack }: { token: string; orgId: string; orderId: string; options: EventsOptions | null | undefined; canBilling: boolean; onBack: () => void }) {
   const { t, locale } = useApp();
   const toast = useToast();
   const [doc, setDoc] = useState<CorporateEventOrderDetail | null>(null);
   const [state, setState] = useState<'ok' | 'error' | 'notfound'>('ok');
   const [cancelOpen, setCancelOpen] = useState(false);
+  const [refundCancelOpen, setRefundCancelOpen] = useState(false);
+  const [resendFor, setResendFor] = useState<{ id: string; name: string } | null>(null);
   const [reason, setReason] = useState('');
   const [busy, setBusy] = useState(false);
   const now = useNow(60_000);
@@ -460,6 +464,7 @@ function CorporateOrderDetail({ token, orgId, orderId, onBack }: { token: string
   const { order, event } = doc;
   const st = orderStatusOf(order.status);
   const minutes = holdMinutesLeft(order.holdExpiresAt, now);
+  const paymentOn = !!options?.payment && options.payment !== 'none';
   const tz = event.timezone;
   const columns: ColumnDef<CorporateEventOrderDetail['registrations'][number]>[] = [
     { key: 'name', header: t('corp.events.col.name'), sortable: true, cell: r => <span className="font-medium text-[var(--color-fg-primary)]">{r.firstName} {r.lastName}</span> },
@@ -470,7 +475,15 @@ function CorporateOrderDetail({ token, orgId, orderId, onBack }: { token: string
     { key: 'kit', header: t('corp.events.col.kit'), cell: r => (r.kitSize ? r.kitSize.toUpperCase() : '—') },
     { key: 'status', header: t('corp.events.col.status'), cell: r => { const s = registrationStatusOf(r.status); return <Badge tone={s.tone}>{t(s.key)}</Badge>; } },
     { key: 'claimed', header: t('corp.events.order.claimed'), cell: r => t(r.claimState === 'claimed' || r.claimState === 'self' ? 'common.yes' : 'common.no') },
+    // S4 §6.8: once paid, each person is invited to claim their place; the column says when (or that there is no contact).
+    ...(order.status === 'confirmed' ? [{
+      key: 'invitation', header: t('corp.events.col.invitation'),
+      cell: (r: CorporateEventOrderDetail['registrations'][number]) => (r.claimState === 'claimed' || r.claimState === 'self' ? '—'
+        : r.claimInvitedAt ? <span data-testid={`corp-invited-${r.id}`}>{eventDateTime(r.claimInvitedAt, tz, locale, event.timezoneAbbr)}</span>
+        : !r.phone && !r.email ? <span data-testid={`corp-nocontact-${r.id}`}>{t('corp.events.invite.noContact')}</span> : '—'),
+    }] : []),
   ];
+  const canResend = (r: CorporateEventOrderDetail['registrations'][number]) => canBilling && order.status === 'confirmed' && r.status === 'confirmed' && r.claimState === 'unclaimed' && (!!r.phone || !!r.email);
   return (
     <div className="space-y-4" data-testid="corp-order-detail" data-order-status={order.status}>
       <PageHeader title={fmt(t('corp.events.order.title'), { ref: order.reference, event: event.title })}
@@ -479,13 +492,17 @@ function CorporateOrderDetail({ token, orgId, orderId, onBack }: { token: string
       {order.status === 'awaiting_payment' && (
         <div className="space-y-3" data-testid="corp-order-awaiting">
           <Alert tone="warning">{fmt(t('corp.events.order.heldLeft'), { time: eventDateTime(order.holdExpiresAt, tz, locale, event.timezoneAbbr), n: minutes ?? 0 })}</Alert>
-          <div className="rounded-[var(--radius-xl)] border border-dashed border-[var(--color-border-primary)] p-4" data-testid="corp-order-pay-soon">
-            <p className="text-sm font-semibold text-[var(--color-fg-primary)]">{t('corp.events.order.paySoon.title')}</p>
-            <p className="text-sm text-[var(--color-fg-secondary)]">{t('corp.events.order.paySoon.body')}</p>
-          </div>
+          {/* S4: with payments off (options.payment 'none') the S3 placeholder stays exactly as shipped. */}
+          {!paymentOn && !doc.payment && (
+            <div className="rounded-[var(--radius-xl)] border border-dashed border-[var(--color-border-primary)] p-4" data-testid="corp-order-pay-soon">
+              <p className="text-sm font-semibold text-[var(--color-fg-primary)]">{t('corp.events.order.paySoon.title')}</p>
+              <p className="text-sm text-[var(--color-fg-secondary)]">{t('corp.events.order.paySoon.body')}</p>
+            </div>
+          )}
         </div>
       )}
       {order.status === 'expired' && <div data-testid="corp-order-expired"><Alert tone="info">{t('corp.events.order.expired')}</Alert></div>}
+      {(paymentOn || doc.payment) && <CorporatePaymentSection token={token} orgId={orgId} doc={doc} options={options} canBilling={canBilling} onChanged={() => void load()} />}
       {order.status === 'cancelled' && <div data-testid="corp-order-cancelled"><Alert tone="info">{fmt(t('corp.events.order.cancelled'), { date: eventDateTime(order.closedAt, tz, locale, event.timezoneAbbr), name: doc.createdBy?.name ?? order.createdBy?.name ?? '—' })}</Alert></div>}
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3" data-testid="corp-order-summary">
         <MetricCard label={t('corp.events.col.places')} value={doc.registrations.length} />
@@ -496,11 +513,19 @@ function CorporateOrderDetail({ token, orgId, orderId, onBack }: { token: string
         <MetricCard label={t('corp.events.teamName')} value={doc.team?.name ?? '—'} />
       </div>
       <Card><CardContent>
-        <DataTable columns={columns} data={doc.registrations} keyFn={r => r.id} label={t('corp.events.participants')} dense pageSize={50} defaultSort={{ key: 'name', dir: 'asc' }} emptyState={t('organizer.reg.empty')} />
+        <DataTable columns={columns} data={doc.registrations} keyFn={r => r.id} label={t('corp.events.participants')} dense pageSize={50} defaultSort={{ key: 'name', dir: 'asc' }} emptyState={t('organizer.reg.empty')}
+          actions={order.status === 'confirmed' && canBilling ? (r => (canResend(r)
+            ? <Button variant="ghost" size="sm" onClick={() => setResendFor({ id: r.id, name: `${r.firstName} ${r.lastName}`.trim() })} data-testid={`corp-resend-${r.id}`}>{t('corp.events.invite.resend')}</Button> : null)) : undefined} />
       </CardContent></Card>
+      <CorporateRefundCard refunds={doc.refunds} />
       {doc.allowedActions?.includes('cancel') && (
         <div><Button variant="destructive" onClick={() => setCancelOpen(true)} data-testid="corp-order-cancel">{t('corp.events.order.cancel')}</Button></div>
       )}
+      {!doc.allowedActions?.includes('cancel') && doc.allowedActions?.includes('cancel_refund') && canBilling && (
+        <div><Button variant="destructive" onClick={() => setRefundCancelOpen(true)} data-testid="corp-order-cancel-paid">{t('corp.events.order.cancel')}</Button></div>
+      )}
+      <CorporateCancelDialog open={refundCancelOpen} token={token} orgId={orgId} orderId={orderId} onClose={() => setRefundCancelOpen(false)} onDone={() => { setRefundCancelOpen(false); void load(); }} />
+      <ResendInvitationDialog target={resendFor} token={token} orgId={orgId} orderId={orderId} onClose={() => setResendFor(null)} onDone={() => { setResendFor(null); void load(); }} />
       {event.shareUrl && <Link href={event.shareUrl} target="_blank" className="text-sm underline" data-testid="corp-order-public">{t('corp.events.viewPublic')}</Link>}
 
       <Dialog open={cancelOpen} onClose={() => setCancelOpen(false)} title={t('corp.events.order.cancel')} description={t('corp.events.order.cancel.body')} size="sm">
