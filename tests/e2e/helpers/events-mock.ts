@@ -235,11 +235,13 @@ export type S4Opts = {
   /** MONEY_SECOND_APPROVER on: payment and refund rows carry secondApproverRequired and a stage. */
   secondApprover?: boolean;
   /** `bare` (default): the cancel answers `{ status }` only and the portal asks the batch route; `batch` includes the batch. */
-  cancelResponse?: 'batch' | 'bare';
+  cancelResponse?: 'batch' | 'bare' | 'batch_error';
   financeEmpty?: boolean;
   /** Trap: the finance answer carries payer fields; the portal must never render them. */
   financeLeak?: boolean;
   noOrgInstructions?: boolean;
+  /** `batch_error`: the cancel answers 200 with `batch.error` (the event is cancelled, raising refunds failed). */
+  failOneInBatch?: boolean;
 };
 export type S4State = {
   requests: Json[]; refunds: Json[]; adminOrders: Record<string, Json>; corp: Record<string, Json>;
@@ -439,10 +441,17 @@ function makeS4(user: Json, me: Json | null, orgRole: string, o: S4Opts, setup: 
       const b = c.body ?? {};
       const rows = state.refunds.filter(r => r.batchId === b.batchId && r.status === 'requested');
       if (b.decision !== 'approve' || !b.batchId || typeof b.expectedTotalTzs !== 'number' || typeof b.expectedCount !== 'number') return { status: 400, json: { error: 'invalid_body' } };
-      if (b.expectedCount !== rows.length || b.expectedTotalTzs !== rows.reduce((n, r) => n + r.amountTzs, 0)) return { status: 409, json: { error: 'refundable_changed' } };
-      if (two && rows.some(r => r.requestedBy === user.id)) return { status: 403, json: { error: 'cannot_approve_own_request' } };
-      rows.forEach(r => { r.status = 'approved'; r.decidedBy = user.id; r.decidedAt = '2026-10-28T08:00:00.000Z'; });
-      return { approved: rows.length };
+      // Real shapes (backend #270): expected totals are required; a stale pair is 409 batch_changed with the live totals; rows can fail one by one.
+      if (b.expectedTotalTzs == null || b.expectedCount == null) return { status: 400, json: { error: 'expected_totals_required' } };
+      const live = rows.reduce((n, r) => n + r.amountTzs, 0);
+      if (b.expectedCount !== rows.length || b.expectedTotalTzs !== live) return { status: 409, json: { error: 'batch_changed', totalTzs: live, count: rows.length } };
+      if (two && rows.every(r => r.requestedBy === user.id)) return { status: 403, json: { error: 'cannot_approve_own_request' } };
+      const results = rows.map(r => {
+        if (two && r.requestedBy === user.id) return { refundId: r.id, ok: false, error: 'cannot_approve_own_request' };
+        if (o.failOneInBatch && r.id === 'rf_b2') return { refundId: r.id, ok: false, error: 'refund_recipient_missing' };
+        r.status = 'approved'; r.decidedBy = user.id; r.decidedAt = '2026-10-28T08:00:00.000Z'; return { refundId: r.id, ok: true };
+      });
+      return { approved: results.filter(x => x.ok).length, failed: results.filter(x => !x.ok).length, results };
     }],
     ['POST', /^\/admin\/refunds\/batch-paid$/, c => {
       if (!hasScope('payments')) return forbidden();
@@ -492,8 +501,8 @@ function makeS4(user: Json, me: Json | null, orgRole: string, o: S4Opts, setup: 
       return { status: 201, json: { refund: state.refunds[state.refunds.length - 1] } };
     }],
     // ── admin event orders and cancellation (§3.12.3, §3.12.4) ──
-    ['GET', /^\/admin\/events\/([^/]+)\/orders\/([^/]+)\/cancel-preview$/, (_c, m) => (m[2] === 'ord_2' ? { eligible: true, mode: 'auto', percent: 50, paidTzs: 75000, refundTzs: 37500, currency: 'TZS', deadlineAt: null, policy: { preset: 'tiered', text: { en: '', sw: '' } }, releaseInventory: true, blocked: null }
-      : m[2] === 'ord_cust' ? { eligible: true, mode: 'manual_review', percent: 0, paidTzs: 60000, refundTzs: 0, currency: 'TZS', deadlineAt: null, policy: { preset: 'custom', text: { en: 'Ask us.', sw: 'Tuulize.' } }, releaseInventory: false, blocked: null }
+    ['GET', /^\/admin\/events\/([^/]+)\/orders\/([^/]+)\/cancel-preview$/, (_c, m) => (m[2] === 'ord_2' ? { eligible: true, blocked: null, paidTzs: 75000, currency: 'TZS', releaseInventory: true, modes: { full: { refundTzs: 75000 }, policy: { evaluable: true, mode: 'auto', percent: 50, refundTzs: 37500 }, none: { refundTzs: 0, requiresScope: 'payments' } }, policy: { preset: 'tiered' } }
+      : m[2] === 'ord_cust' ? { eligible: true, blocked: null, paidTzs: 60000, currency: 'TZS', releaseInventory: false, modes: { full: { refundTzs: 60000 }, policy: { evaluable: false, mode: 'manual_review', percent: 0, refundTzs: null, error: 'policy_not_evaluable' }, none: { refundTzs: 0, requiresScope: 'payments' } }, policy: { preset: 'custom' } }
       : { status: 404, json: { error: 'order_not_found' } })],
     ['GET', /^\/admin\/events\/([^/]+)\/orders\/([^/]+)$/, (_c, m) => adminOrder(m[2]) ?? { status: 404, json: { error: 'order_not_found' } }],
     ['GET', /^\/admin\/events\/([^/]+)\/orders$/, (c, m) => (m[1] !== 'evt_pub' ? pageOf([]) : pageOf(orderRows.map(r => ({ ...r, status: state.adminOrders[r.id]?.status ?? r.status })).filter(r => !c.query.status || r.status === c.query.status)))],
@@ -519,6 +528,7 @@ function makeS4(user: Json, me: Json | null, orgRole: string, o: S4Opts, setup: 
       // Real rule: `expectedRefundableTzs` is required when paid orders exist (the preview says 3), whatever refundPaidOrders is.
       if (b.expectedRefundableTzs === undefined) return { status: 400, json: { error: 'expected_refundable_required' } };
       if (b.expectedRefundableTzs !== state.liveRefundable) return { status: 409, json: { error: 'refundable_changed' } };
+      if (o.cancelResponse === 'batch_error' && b.refundPaidOrders) return { status: 'cancelled', batch: { error: 'batch_failed', status: null, resumeWith: `/admin/events/${m[1]}/refund-batch` } };
       return { status: 'cancelled', ...(o.cancelResponse === 'batch' && b.refundPaidOrders ? { batch: { batchId: 'evb_9', created: 3, existing: 0, remaining: 0, amountTzs: 350000 } } : {}), eventId: m[1] };
     }],
     ['POST', /^\/admin\/events\/([^/]+)\/refund-batch$/, c => {

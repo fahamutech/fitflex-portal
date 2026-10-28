@@ -1414,7 +1414,7 @@ export const api = {
     request<{ refund: Refund }>('/admin/refunds', { method: 'POST', body: JSON.stringify({ ...body, reasonCode: 'payment_error' }) }, token),
   /** §3.12.3 preview for the admin dialog (NOT IN THE SPEC as an admin route: the member-style preview, 404 = no amounts shown). */
   adminEventOrderCancelPreview: (token: string, eventId: string, orderId: string) =>
-    request<EventCancelPreview>(`/admin/events/${encodeURIComponent(eventId)}/orders/${encodeURIComponent(orderId)}/cancel-preview`, {}, token),
+    request<AdminOrderCancelPreview>(`/admin/events/${encodeURIComponent(eventId)}/orders/${encodeURIComponent(orderId)}/cancel-preview`, {}, token),
   adminEventCancelPreview: (token: string, eventId: string) => request<EventCancelImpact>(`/admin/events/${encodeURIComponent(eventId)}/cancel-preview`, {}, token),
   adminCancelEvent: (token: string, eventId: string, body: AdminEventCancelBody) =>
     request<AdminEventCancelResult>(`/admin/events/${encodeURIComponent(eventId)}/cancel`, { method: 'POST', body: JSON.stringify(body) }, token),
@@ -1422,7 +1422,7 @@ export const api = {
     request<EventRefundBatchResult>(`/admin/events/${encodeURIComponent(eventId)}/refund-batch`, { method: 'POST', body: JSON.stringify(body) }, token),
   /** §3.12.4 helpers: approve every requested refund of a batch (equality checks), record payouts row by row. */
   approveRefundBatch: (token: string, body: { batchId: string; expectedTotalTzs: number; expectedCount: number }) =>
-    request<unknown>('/admin/refunds/batch-decision', { method: 'POST', body: JSON.stringify({ ...body, decision: 'approve' }) }, token),
+    request<RefundBatchDecisionResult>('/admin/refunds/batch-decision', { method: 'POST', body: JSON.stringify({ ...body, decision: 'approve' }) }, token),
   recordRefundBatchPaid: (token: string, body: { batchId: string; items: Array<{ refundId: string; paymentReference: string; paidTo?: string }> }) =>
     request<Record<string, unknown>>('/admin/refunds/batch-paid', { method: 'POST', body: JSON.stringify(body) }, token),
   /** §3.14, roles finance | owner | admin. */
@@ -4305,7 +4305,15 @@ export interface EventCancelImpact {
 export interface EventRefundBatchResult { batchId: string; created: number; existing: number; remaining: number; amountTzs: number }
 export type AdminEventCancelBody = { reason?: string; note?: Bilingual; refundPaidOrders?: boolean; expectedRefundableTzs?: number };
 /** Cancel response: `{ status }` today; the batch fields are read when the backend adds them (NOT IN THE SPEC, see the PR). */
-export type AdminEventCancelResult = { status: EventStatus; batch?: EventRefundBatchResult | null } & Partial<EventRefundBatchResult>;
+/** `batch.error` (with `resumeWith`) when raising the refunds failed after the event was cancelled (backend #270). */
+export type AdminEventCancelResult = { status: EventStatus; batch?: (Partial<EventRefundBatchResult> & { error?: string; status?: string | null; resumeWith?: string; released?: number; failed?: number }) | null } & Partial<EventRefundBatchResult>;
+/** GET /admin/events/:id/orders/:orderId/cancel-preview (backend #270): the amount per refund mode. */
+export interface AdminOrderCancelPreview {
+  eligible: boolean; blocked: string | null; paidTzs: number; currency: string; releaseInventory: boolean;
+  modes: { full: { refundTzs: number }; policy: { evaluable: boolean; refundTzs: number | null; mode?: string; percent?: number; error?: string }; none: { refundTzs: number; requiresScope?: string } };
+  policy: { preset: RefundPolicyPreset | null; generated?: { en: string; sw: string } | null };
+}
+export type RefundBatchDecisionResult = { approved?: number; failed?: number; results?: Array<{ refundId: string; ok: boolean; error?: string }> };
 export type AdminCancelRefundMode = 'full' | 'policy' | 'none';
 /** NOT IN THE SPEC: the payment block of GET /admin/events/:eventId/orders/:id (the S3 detail grows these for the order panel, §6.4). */
 export interface AdminEventOrderPayment {

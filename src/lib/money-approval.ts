@@ -50,6 +50,8 @@ const KNOWN_ERRORS = [
   'order_not_found', 'payment_not_unfulfilled', 'refundable_changed', 'rate_limited',
   // Events S4 review: event change requests, scope refusals, custom policies
   'event_payment_change_not_allowed', 'forbidden', 'payments_scope_required', 'policy_not_evaluable', 'refund_changed',
+  'expected_refundable_required', 'payment_held_mismatch', 'payment_refunded_or_closed', 'places_not_cancelled', 'refund_recipient_missing', 'refund_already_exists',
+  'nothing_to_repair', 'event_not_cancelled', 'batch_changed', 'expected_totals_required', 'batch_failed', 'payment_mode_mismatch',
 ];
 
 /**

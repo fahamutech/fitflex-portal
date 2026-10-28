@@ -195,6 +195,18 @@ export const EVENTS_ERRORS: Record<string, MessageKey> = {
   payments_scope_required: 'money2.err.payments_scope_required',
   forbidden: 'money2.err.forbidden',
   event_payment_change_not_allowed: 'money2.err.event_payment_change_not_allowed',
+  // Backend #270 (final contract check)
+  expected_refundable_required: 'money2.err.expected_refundable_required',
+  payment_held_mismatch: 'money2.err.payment_held_mismatch',
+  payment_refunded_or_closed: 'money2.err.payment_refunded_or_closed',
+  places_not_cancelled: 'money2.err.places_not_cancelled',
+  refund_recipient_missing: 'money2.err.refund_recipient_missing',
+  refund_already_exists: 'money2.err.refund_already_exists',
+  nothing_to_repair: 'money2.err.nothing_to_repair',
+  event_not_cancelled: 'money2.err.event_not_cancelled',
+  batch_changed: 'money2.err.batch_changed',
+  expected_totals_required: 'money2.err.expected_totals_required',
+  batch_failed: 'money2.err.batch_failed',
   amount_required: 'money2.err.amount_required',
   amount_mismatch: 'money2.err.amount_mismatch',
 };
@@ -204,6 +216,8 @@ export const errorBody = <T = Record<string, unknown>>(err: unknown): (T & { err
   err instanceof ApiError ? ((err.body as (T & { error?: string }) | null) ?? null) : null;
 /** The i18n key for a refusal, else the generic one. */
 export const errorKey = (err: unknown): MessageKey => EVENTS_ERRORS[errorCode(err) ?? ''] ?? 'common.somethingWrong';
+/** The same for a bare code string (e.g. `batch.error` inside a 200 answer). */
+export const errorKeyOfCode = (code: string | null | undefined): MessageKey => EVENTS_ERRORS[code ?? ''] ?? 'common.somethingWrong';
 export const isForbidden = (err: unknown) => {
   const code = errorCode(err);
   return err instanceof ApiError && (err.status === 403 || code === 'not_your_organizer' || code === 'forbidden' || code === 'forbidden_role' || code === 'acl_forbidden');
@@ -911,7 +925,7 @@ export const CORPORATE_NOTE_MAX = 300;
 
 /** `failureReason` of an EventPayment (§3.3 and the backend's later codes) → the reason text; `rejected:<code>` reads as the reject reason. */
 export const ATTENTION_REASONS = [
-  'amount_mismatch', 'provider_unknown', 'transaction_mismatch', 'capacity_unavailable', 'order_cancelled', 'order_already_paid', 'event_unavailable', 'refunded_after_late_payment',
+  'amount_mismatch', 'provider_unknown', 'transaction_mismatch', 'capacity_unavailable', 'order_cancelled', 'order_already_paid', 'event_unavailable', 'refunded_after_late_payment', 'request_closed',
 ] as const;
 export const attentionReasonKey = (reason: string | null | undefined): MessageKey => {
   if (reason?.startsWith('rejected:')) return rejectCodeKey(reason.slice('rejected:'.length));

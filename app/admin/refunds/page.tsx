@@ -141,10 +141,23 @@ export default function RefundsPage() {
     const list = refunds.filter(r => r.batchId === batch && r.status === 'requested');
     setBusy(true); setBatchError(null);
     try {
-      await api.approveRefundBatch(token, { batchId: batch, expectedTotalTzs: list.reduce((sum, r) => sum + r.amountTzs, 0), expectedCount: list.length });
-      setApproveAllOpen(false); setNotice(t('refunds.batch.approved'));
+      const out = await api.approveRefundBatch(token, { batchId: batch, expectedTotalTzs: list.reduce((sum, r) => sum + r.amountTzs, 0), expectedCount: list.length });
+      setApproveAllOpen(false);
+      // Partial failure is shown, never full success (backend #270 answers `{ approved, failed, results }`).
+      const failed = Number(out?.failed) || 0;
+      if (failed > 0) {
+        const why = Array.from(new Set((out.results ?? []).filter(r => !r.ok && r.error).map(r => t(moneyErrorKey({ body: { error: r.error } }))))).join(' ');
+        setBatchError(`${fill(t('refunds.batch.partial'), { approved: Number(out.approved) || 0, failed })} ${why}`.trim());
+      } else setNotice(t('refunds.batch.approved'));
       await load();
-    } catch (e) { setApproveAllOpen(false); setBatchError(t(moneyErrorKey(e))); await load(); }
+    } catch (e) {
+      setApproveAllOpen(false);
+      const body = (e as { body?: { error?: string; totalTzs?: number; count?: number } } | null)?.body;
+      // batch_changed carries the live totals: say what the batch is now, then reload.
+      setBatchError(body?.error === 'batch_changed' && typeof body.totalTzs === 'number' && typeof body.count === 'number'
+        ? fill(t('refunds.batch.changed'), { count: body.count, total: formatNumber(body.totalTzs) }) : t(moneyErrorKey(e)));
+      await load();
+    }
     finally { setBusy(false); }
   }
   async function recordPayouts() {

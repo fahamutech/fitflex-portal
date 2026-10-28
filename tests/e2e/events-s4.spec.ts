@@ -104,12 +104,15 @@ test.describe('admin Payments: event orders (§6.2, P-P-1..5)', () => {
     await page.getByTestId('event-reject-reason').selectOption('other');
     await expect(page.getByTestId('event-reject-confirm')).toBeDisabled();
     await expect(page.getByTestId('event-reject-dialog')).toContainText('The member sees this.');
+    // Swahili note alone does not satisfy "Other": the English note is required (backend note_required).
+    await page.getByTestId('event-reject-member-note-sw').fill('Imelipwa kwa namba nyingine');
+    await expect(page.getByTestId('event-reject-confirm')).toBeDisabled();
     await page.getByTestId('event-reject-member-note').fill('Paid to another number');
     await page.getByTestId('event-reject-reason').selectOption('wrong_account');
     await expect(page.getByTestId('event-reject-confirm')).toBeEnabled();
     await page.getByTestId('event-reject-confirm').click();
     await expect.poll(() => mock.writes(/\/decision$/).length).toBe(1);
-    expect(mock.writes(/\/decision$/)[0].body).toEqual({ decision: 'reject', reasonCode: 'wrong_account', memberNote: 'Paid to another number' });
+    expect(mock.writes(/\/decision$/)[0].body).toEqual({ decision: 'reject', reasonCode: 'wrong_account', memberNote: 'Paid to another number', memberNoteSw: 'Imelipwa kwa namba nyingine' });
     await expect(page.getByTestId('payments-event-notice')).toContainText('Payment rejected');
   });
 
@@ -921,5 +924,62 @@ test.describe('review fixes: real backend shapes and scope rules', () => {
     await page.goto('/admin/events/?event=evt_pub');
     await page.getByTestId('admin-action-cancel').click();
     await expect(page.getByTestId('cancel-event-submitted')).toContainText('Oda 1 ina malipo yanayosubiri ukaguzi.');
+  });
+});
+
+test.describe('final contract check (backend #270 shapes)', () => {
+  test('a cancel answer with batch.error: the event is cancelled, the mapped error shows, Resume works, no NaN and no batch=undefined', async ({ page }) => {
+    const mock = await setupEvents(page, SUPER_ADMIN, { s4: { cancelResponse: 'batch_error' } });
+    await page.goto('/admin/events/?event=evt_pub');
+    await page.getByTestId('admin-action-cancel').click();
+    await page.getByTestId('cancel-confirm').click();
+    await page.getByRole('alertdialog').getByRole('button', { name: 'Cancel event and raise refunds' }).click();
+    const box = page.getByTestId('cancel-event-batch-error');
+    await expect(box).toContainText('The event is cancelled, but raising the refunds failed:');
+    await expect(box).toContainText('Raising the refunds failed. Resume it.');
+    await expect(page.getByTestId('cancel-event-result')).not.toContainText(/NaN|undefined/);
+    await expect(page.getByTestId('cancel-event-review')).toHaveCount(0);
+    expect(mock.writes(/refund-batch$/)).toHaveLength(0); // no silent retry
+    await page.getByTestId('cancel-event-continue').click();
+    await expect.poll(() => mock.writes(/refund-batch$/).length).toBe(1);
+    expect(mock.writes(/refund-batch$/)[0].body).toEqual({});
+    await expect(page.getByTestId('cancel-event-batch-error')).toHaveCount(0);
+    await expect(page.getByTestId('cancel-event-review')).toHaveAttribute('href', /batch=evb_9$/);
+  });
+
+  test('approve-all: a stale batch shows the live totals (batch_changed); a partial failure is not shown as full success', async ({ page }) => {
+    const mock = await setupEvents(page, ADMIN_2, { s4: { failOneInBatch: true } });
+    await page.goto('/admin/refunds/?batch=evb_1');
+    await expect(page.getByTestId('refund-batch-summary')).toBeVisible();
+    // Someone else changed the batch after the page loaded.
+    mock.s4!.refunds.find(r => r.id === 'rf_b2')!.amountTzs = 30000;
+    await page.getByTestId('refund-approve-all').click();
+    await page.getByRole('alertdialog').getByRole('button', { name: 'Approve all requested' }).click();
+    await expect(page.getByTestId('refund-batch-error')).toContainText('The batch changed: now 2 refunds, TSh 55,000.');
+    await page.getByTestId('refund-approve-all').click();
+    await page.getByRole('alertdialog').getByRole('button', { name: 'Approve all requested' }).click();
+    const err = page.getByTestId('refund-batch-error');
+    await expect(err).toContainText('1 approved, 1 could not be approved.');
+    await expect(err).toContainText('There is no recipient to send this refund to.');
+    await expect(page.locator('main')).not.toContainText('Refunds approved.');
+    expect(mock.writes(/batch-decision$/)).toHaveLength(2);
+  });
+
+  test('the admin order preview reads modes.policy: a custom policy shows no amount and is disabled', async ({ page }) => {
+    await setupEvents(page, SUPER_ADMIN, { s4: {} });
+    await page.goto('/admin/events/?event=evt_pub&view=orders');
+    await page.getByTestId('order-open-ord_cust').click();
+    await expect(page.getByTestId('admin-refund-mode-policy')).toBeDisabled();
+    await expect(page.getByTestId('admin-refund-mode-policy').locator('..')).not.toContainText('TSh');
+    await expect(page.getByTestId('admin-refund-mode-full').locator('..')).toContainText('TSh 60,000');
+  });
+
+  test('the new backend refusal codes read as sentences in English and Swahili', async ({ page }) => {
+    const mock = await setupEvents(page, SUPER_ADMIN, { s4: {}, locale: 'sw' });
+    await page.goto('/admin/events/?event=evt_pub&view=orders');
+    await page.getByTestId('order-open-ord_rep').click();
+    mock.on('POST', /repair-payment$/, () => ({ status: 409, json: { error: 'nothing_to_repair' } }));
+    await page.getByTestId('order-payment-repair').click();
+    await expect(page.getByText('Hakuna cha kurekebisha kwenye oda hii.')).toBeVisible();
   });
 });

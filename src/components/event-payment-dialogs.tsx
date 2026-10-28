@@ -98,7 +98,7 @@ export function EventRejectDialog({ payment, onClose, onDone }: { payment: Payme
   useEffect(() => { setCode(''); setMemberNote(''); setMemberNoteSw(''); setNote(''); setError(null); }, [payment]);
   if (!payment) return null;
   const needsNote = code === 'other';
-  const ok = !!code && (!needsNote || memberNote.trim().length > 0 || memberNoteSw.trim().length > 0);
+  const ok = !!code && (!needsNote || memberNote.trim().length > 0);
   async function reject() {
     if (!token || !code || !payment) return;
     setBusy(true); setError(null);

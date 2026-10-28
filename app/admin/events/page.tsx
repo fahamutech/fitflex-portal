@@ -2,7 +2,7 @@
 import Link from 'next/link';
 import { Suspense, useCallback, useEffect, useState } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
-import { api, type AdminCancelRefundMode, type AdminEventDetail, type AdminEventOrderDetail, type AdminEventRow, type Bilingual, type EventAuditRow, type EventCancelPreview, type EventOrderRow } from '@/lib/api';
+import { api, type AdminCancelRefundMode, type AdminEventDetail, type AdminEventOrderDetail, type AdminEventRow, type Bilingual, type EventAuditRow, type AdminOrderCancelPreview, type EventOrderRow } from '@/lib/api';
 import { money } from '@/lib/admin-utils';
 import { EVENTS_MODULE } from '@/lib/flags';
 import { AUDIT_ACTIONS, AUDIT_ACTION_PREFIX, ORGANIZER_STATUS, REJECT_REASONS, auditActionLabel, distanceLabel, errorCode, errorKey, eventDateTime, eventStatusOf, closeReasonKey, isFeatureOff, maskContact, orderStatusOf, registrationStatusOf, rejectReasonKey, relativeTime, typeKey } from '@/lib/events';
@@ -266,7 +266,7 @@ function AdminOrderDialog({ eventId, row, timezone, timezoneAbbr, onClose, onCha
   const [busy, setBusy] = useState(false);
   // S4 §6.4: cancelling a paid order picks how much is refunded (full, per the event's policy, none); a second admin approves it.
   const [mode, setMode] = useState<AdminCancelRefundMode>('policy');
-  const [preview, setPreview] = useState<EventCancelPreview | null>(null);
+  const [preview, setPreview] = useState<AdminOrderCancelPreview | null>(null);
   const orderId = row?.id ?? null;
   const load = useCallback(async () => {
     if (!token || !orderId) { setDoc(null); return; }
@@ -282,7 +282,7 @@ function AdminOrderDialog({ eventId, row, timezone, timezoneAbbr, onClose, onCha
     api.adminEventOrderCancelPreview(token, eventId, orderId).then(setPreview).catch(() => setPreview(null));
   }, [token, eventId, orderId, cancellablePaid]);
   // A custom policy cannot be evaluated by a machine (409 policy_not_evaluable): the "per policy" mode is off and 'full' is the default.
-  const policyOff = preview?.policy?.preset === 'custom';
+  const policyOff = !!preview && !preview.modes.policy.evaluable;
   useEffect(() => { if (policyOff) setMode(m => (m === 'policy' ? 'full' : m)); }, [policyOff]);
   async function cancel() {
     if (!token || !orderId || note.trim().length < 5) return;
@@ -344,7 +344,7 @@ function AdminOrderDialog({ eventId, row, timezone, timezoneAbbr, onClose, onCha
               <fieldset className="space-y-1" data-testid="admin-order-refund-mode">
                 <legend className="text-sm font-medium text-[var(--color-fg-secondary)]">{t('events.order.cancelPaid.mode')}</legend>
                 {(['full', 'policy', 'none'] as const).filter(m => m !== 'none' || canNoRefund).map(m => {
-                  const amount = m === 'full' ? preview?.paidTzs : m === 'none' ? 0 : preview?.refundTzs;
+                  const amount = !preview ? undefined : m === 'full' ? preview.modes.full.refundTzs : m === 'none' ? preview.modes.none.refundTzs : preview.modes.policy.refundTzs;
                   return (
                     <Radio key={m} name="admin-refund-mode" value={m} checked={mode === m} onChange={() => setMode(m)} disabled={m === 'policy' && policyOff} data-testid={`admin-refund-mode-${m}`}
                       label={`${t(`events.order.cancelPaid.mode.${m}` as 'events.order.cancelPaid.mode.full')}${amount != null ? ` · ${money(amount, o.currency)}` : ''}`} />

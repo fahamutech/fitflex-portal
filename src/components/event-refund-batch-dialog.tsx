@@ -7,7 +7,7 @@ import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
 import { api, type EventCancelImpact, type EventRefundBatchResult } from '@/lib/api';
 import { money } from '@/lib/admin-utils';
-import { CANCEL_REASONS, cancelReasonKey, errorCode, errorKey, fmt, pluralKey, trackEventsS4Analytics } from '@/lib/events';
+import { CANCEL_REASONS, cancelReasonKey, errorCode, errorKey, errorKeyOfCode, fmt, pluralKey, trackEventsS4Analytics } from '@/lib/events';
 import { Alert, Button, Checkbox, Field, Select, Textarea } from '@/components/shared';
 import { ConfirmDialog, Dialog, DialogFooter } from '@/components/dialog';
 import { useApp } from '../../app/providers';
@@ -29,6 +29,8 @@ export function EventCancelWithRefundsDialog({ open, eventId, onClose, onCancell
   const [error, setError] = useState<string | null>(null);
   const [batch, setBatch] = useState<EventRefundBatchResult | null>(null);
   const [raised, setRaised] = useState(false);
+  // Raising the refunds failed after the event was cancelled (200 answer with `batch.error`): the admin resumes.
+  const [batchError, setBatchError] = useState<string | null>(null);
 
   const loadImpact = useCallback(async () => {
     if (!token) return;
@@ -40,7 +42,7 @@ export function EventCancelWithRefundsDialog({ open, eventId, onClose, onCancell
   }, [token, eventId]);
   useEffect(() => {
     if (!open) return;
-    setPhase('form'); setError(null); setBatch(null); setRaised(false); setRaise(true); setReason('organizer_decision'); setNoteEn(''); setNoteSw('');
+    setPhase('form'); setError(null); setBatch(null); setBatchError(null); setRaised(false); setRaise(true); setReason('organizer_decision'); setNoteEn(''); setNoteSw('');
     void loadImpact();
   }, [open, loadImpact]);
 
@@ -53,13 +55,21 @@ export function EventCancelWithRefundsDialog({ open, eventId, onClose, onCancell
     try {
       const body = { reason, note: { en: noteEn.trim(), sw: noteSw.trim() }, ...(impact && paid > 0 ? { refundPaidOrders: raise, expectedRefundableTzs: impact.refundableTzs } : {}) };
       const out = await api.adminCancelEvent(token, eventId, body);
-      let result: EventRefundBatchResult | null = out.batch ?? (out.batchId ? { batchId: out.batchId, created: out.created ?? 0, existing: out.existing ?? 0, remaining: out.remaining ?? 0, amountTzs: out.amountTzs ?? 0 } : null);
+      const ob = out.batch;
+      const n = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
+      const asBatch = (b: { batchId?: string; created?: number; existing?: number; remaining?: number; amountTzs?: number }): EventRefundBatchResult | null =>
+        (b.batchId ? { batchId: b.batchId, created: n(b.created), existing: n(b.existing), remaining: n(b.remaining), amountTzs: n(b.amountTzs) } : null);
+      let result: EventRefundBatchResult | null = null;
+      let failedCode: string | null = null;
+      if (ob?.error) failedCode = ob.error;
+      else result = (ob ? asBatch(ob) : null) ?? asBatch(out);
       // The cancel answer does not always carry the batch (the spec names only `{ status }`); the batch route is idempotent, so ask it for the numbers.
       // No expected total on this call: the pre-cancel figure is stale once the cancel ran (the server compares to a live total).
-      if (!result && willRaise && impact && canPayments) {
+      if (!result && !failedCode && willRaise && impact && canPayments) {
         try { result = await api.adminEventRefundBatch(token, eventId, {}); } catch (err) { setError(t(errorKey(err))); }
       }
       setBatch(result); setRaised(willRaise);
+      if (failedCode) setBatchError(t(errorKeyOfCode(failedCode)));
       if (result) trackEventsS4Analytics('refund_batch_created', { count: result.created });
       setPhase('done');
       onCancelled();
@@ -73,7 +83,7 @@ export function EventCancelWithRefundsDialog({ open, eventId, onClose, onCancell
     if (!token || !impact) return;
     setBusy(true); setError(null);
     // Resume without `expectedRefundableTzs`: the figure read before the cancel is stale after the first chunk (409 refundable_changed).
-    try { setBatch(await api.adminEventRefundBatch(token, eventId, {})); }
+    try { const b = await api.adminEventRefundBatch(token, eventId, {}); setBatch({ batchId: b.batchId, created: Number(b.created) || 0, existing: Number(b.existing) || 0, remaining: Number(b.remaining) || 0, amountTzs: Number(b.amountTzs) || 0 }); setBatchError(null); }
     catch (err) { setError(t(errorKey(err))); }
     finally { setBusy(false); }
   }
@@ -90,6 +100,14 @@ export function EventCancelWithRefundsDialog({ open, eventId, onClose, onCancell
             <Alert tone="success">
               {raised && batch ? fmt(t('events.cancel.done'), { created: batch.created + batch.existing }) : t('events.cancel.doneOnly')}
             </Alert>
+            {batchError && (
+              <div className="space-y-2" data-testid="cancel-event-batch-error">
+                <Alert tone="warning">{t('events.cancel.batchFailed')} {batchError}</Alert>
+                {canPayments
+                  ? <Button variant="secondary" size="sm" loading={busy} onClick={() => void continueBatch()} data-testid="cancel-event-continue">{t('events.cancel.continue')}</Button>
+                  : <p className="text-sm">{t('events.cancel.batchNeedsPayments')}</p>}
+              </div>
+            )}
             {raised && batch && batch.remaining > 0 && canPayments && (
               <div className="flex flex-wrap items-center gap-2" data-testid="cancel-event-remaining">
                 <span className="text-sm">{fmt(t(pluralKey('events.cancel.remaining', batch.remaining)), { n: batch.remaining })}</span>
