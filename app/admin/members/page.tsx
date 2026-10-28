@@ -8,6 +8,7 @@ import { Badge, Button, PageHeader, Alert, Spinner, Card, Field, Input, Select, 
 import { DataTable, ColumnDef } from '@/components/data-table';
 import { Dialog, DialogFooter, ConfirmDialog } from '@/components/dialog';
 import { statusTone, statusLabel, money, formatDateTime } from '@/lib/admin-utils';
+import { DOB_MIN, dobMax, dateOfBirthProblem, isDateOfBirthRefusal } from '@/lib/date-of-birth';
 
 const FITNESS_GOALS = ['build_muscle', 'lose_weight', 'stay_fit', 'flexibility', 'endurance'];
 const FITNESS_LEVELS = ['beginner', 'intermediate', 'advanced'];
@@ -25,7 +26,7 @@ const BLANK_MEMBER: Partial<MemberSummary> = {
 };
 
 export default function MembersPage() {
-  const { token, user } = useApp();
+  const { token, user, t } = useApp();
   const [members, setMembers]   = useState<MemberSummary[]>([]);
   const [loading, setLoading]   = useState(true);
   const [error, setError]       = useState<string | null>(null);
@@ -135,7 +136,19 @@ export default function MembersPage() {
     if (!draft.displayName?.trim()) errs.displayName = 'Display name is required';
     if (!draft.email?.trim() && !draft.phone?.trim()) errs.email = 'Email or phone is required';
     if (!draft.accountStatus) errs.accountStatus = 'Status is required';
+    const dob = draft.memberProfile?.dateOfBirth;
+    // A stored date in an old format the admin did not touch is left out of the save (kept as it is).
+    if (!storedDobUntouched()) {
+      const problem = dateOfBirthProblem(dob);
+      if (problem) errs.dateOfBirth = t(problem === 'future' ? 'admin.member.dobFuture' : 'admin.member.dobInvalid');
+    }
     return errs;
+  }
+
+  /** The member's saved date of birth is not valid and the admin has not changed it. */
+  function storedDobUntouched(): boolean {
+    const stored = editing?.memberProfile?.dateOfBirth;
+    return !!editing && dateOfBirthProblem(stored) !== null && draft.memberProfile?.dateOfBirth === stored;
   }
 
   async function handleSave() {
@@ -144,17 +157,23 @@ export default function MembersPage() {
     if (Object.keys(errs).length > 0) { setFormErrors(errs); return; }
     setFormErrors({});
     setBusy(true);
+    // null tells the server to keep the stored date of birth.
+    const payload: Partial<MemberSummary> = storedDobUntouched()
+      ? { ...draft, memberProfile: { ...draft.memberProfile, dateOfBirth: null } }
+      : draft;
     try {
       if (editing) {
-        await api.saveMember(token, { ...draft, id: editing.id });
+        await api.saveMember(token, { ...payload, id: editing.id });
       } else {
-        await api.saveMember(token, draft);
+        await api.saveMember(token, payload);
       }
       setDialogOpen(false);
       await load();
     } catch (e: any) {
       const msg = e?.body?.error || (e instanceof Error ? e.message : 'Save failed');
-      if (e?.status === 409) {
+      if (isDateOfBirthRefusal(e)) {
+        setFormErrors({ dateOfBirth: t('admin.member.dobInvalid') });
+      } else if (e?.status === 409) {
         setFormErrors({ email: msg === 'email_already_used' ? 'This email is already in use by another user' : msg });
       } else {
         setError(msg);
@@ -387,8 +406,19 @@ export default function MembersPage() {
                 {GENDERS.map(g => <option key={g} value={g}>{g.charAt(0).toUpperCase() + g.slice(1)}</option>)}
               </Select>
             </Field>
-            <Field label="Date of birth">
-              <Input type="date" value={draft.memberProfile?.dateOfBirth || ''} onChange={e => setDraft({ ...draft, memberProfile: { ...draft.memberProfile, dateOfBirth: e.target.value } })} />
+            <Field
+              label={t('admin.member.dateOfBirth')}
+              error={formErrors.dateOfBirth}
+              hint={storedDobUntouched() ? t('admin.member.dobStoredInvalid').replace('{value}', () => String(editing?.memberProfile?.dateOfBirth ?? '')) : undefined}
+            >
+              <Input
+                type="date"
+                data-testid="member-dob"
+                min={DOB_MIN}
+                max={dobMax()}
+                value={draft.memberProfile?.dateOfBirth || ''}
+                onChange={e => { setDraft({ ...draft, memberProfile: { ...draft.memberProfile, dateOfBirth: e.target.value } }); setFormErrors(prev => { const { dateOfBirth, ...rest } = prev; return rest; }); }}
+              />
             </Field>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -470,7 +500,7 @@ export default function MembersPage() {
         <DialogFooter>
           <Button variant="secondary" size="md" onClick={() => setDialogOpen(false)} disabled={busy}>Cancel</Button>
           <Button variant="primary" size="md" onClick={handleSave} disabled={busy}>
-            {busy ? 'Saving...' : editing ? 'Update' : 'Create'}
+            {busy ? 'Saving...' : editing ? t('admin.member.update') : 'Create'}
           </Button>
         </DialogFooter>
       </Dialog>

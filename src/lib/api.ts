@@ -4,6 +4,15 @@ const BASE = process.env.NEXT_PUBLIC_API_BASE || 'https://fitflex-faas.bfast.sma
 /** The API server address (for feature modules that build their own requests, e.g. src/lib/shop-banners.ts). */
 export const API_BASE = BASE;
 
+/** Admin view-only read of a partner's declared details (GET /admin/{trainers|gym-owners}/:id/personal-details). */
+export interface PartnerPersonalDetails {
+  dateOfBirth: string | null;
+  age: number | null;
+  gender: 'male' | 'female' | 'other' | null;
+  genderFrom: 'trainer_profile' | 'person' | null;
+  source: 'person' | 'member' | null;
+}
+
 export class ApiError extends Error {
   status: number;
   body: unknown;
@@ -70,9 +79,14 @@ const PORTAL_SIGN_IN_ROLES = [
   // A business that sells on FitFlex, and its staff (vendor portal, S2). Never created here.
   { requestedRole: 'vendor', existingOnly: true },
   { requestedRole: 'vendor_staff', existingOnly: true },
+  // Running-event organizers and their staff (events S2, decision D3). Never created here: POST /me/organizer does.
+  { requestedRole: 'event_organizer', existingOnly: true },
+  { requestedRole: 'organizer_staff', existingOnly: true },
 ];
 /** Session user types that open the vendor area (/vendor). */
 export const VENDOR_USER_TYPES = new Set(['vendor', 'vendor_staff']);
+/** Session user types that open the organizer area (/organizer) — events S2 (D3). */
+export const ORGANIZER_USER_TYPES = new Set(['event_organizer', 'organizer_staff']);
 const NO_SUCH_PROFILE = new Set(['admin_self_registration_not_allowed', 'profile_not_found']);
 /** Roles in a B2B organisation that see its billing (invoices, payments, statement). */
 export const ORG_BILLING_ROLES = new Set(['owner', 'admin', 'finance']);
@@ -271,7 +285,10 @@ export type CampaignAnalytics = {
   campaign: { id: string; name: string; status: string; startsAt: string; endsAt: string }; range: PromotionAnalyticsRange;
   totals: PromotionMetrics; items: PromotionAnalyticsItem[]; notTracked: string[]; unverifiedEvents?: number;
 };
-export type GeoArea = { id: string; level: 'country' | 'region' | 'city' | 'district'; name: string; parentId: string | null };
+export type GeoArea = { id: string; level: 'country' | 'region' | 'city' | 'district'; name: string; parentId: string | null; active?: boolean;
+  /** /shop/areas: place name per language (sw = nameSw or name). */ names?: { en?: string | null; sw?: string | null } | null;
+  /** /admin/geo-areas (raw row): Swahili place name, null = same as name. */ nameSw?: string | null;
+  /** /shop/areas: can stand for "where you are"; vendors may still pick any area. */ locatable?: boolean };
 export type EntityMatch = {
   entityType: ModerationEntityType; id: string; name: string; subtitle: string | null; status: string; moderationStatus: ModerationStatus;
   promotable: boolean; reasons: string[]; placements: PromotionPlacement[];
@@ -436,9 +453,9 @@ export const api = {
   // and FitFlex-wide messages (scope 'admin'). Same shapes for both. ──
   commsOverview: (token: string, scope: CommsScope, gymId?: string) =>
     request<CommsOverview>(`/${scope}/communications/overview${gymId ? `?gymId=${encodeURIComponent(gymId)}` : ''}`, {}, token),
-  /** FitFlex (admin) can ask for the trainer audiences with recipients 'trainers'. */
+  /** FitFlex (admin) can ask for the trainer or vendor audiences with recipients 'trainers' / 'vendors'. */
   commsSegments: (token: string, scope: CommsScope, recipients: CommsRecipients = 'members') =>
-    request<CommsCatalog>(`/${scope}/communications/segments${recipients === 'trainers' ? '?recipients=trainers' : ''}`, {}, token),
+    request<CommsCatalog>(`/${scope}/communications/segments${recipients !== 'members' ? `?recipients=${recipients}` : ''}`, {}, token),
   commsAudiencePreview: (token: string, scope: CommsScope, body: { gymId?: string; recipients?: CommsRecipients; preset?: string | null; filter?: unknown; purpose?: string }) =>
     request<CommsAudiencePreview>(`/${scope}/communications/audience/preview`, { method: 'POST', body: JSON.stringify(body) }, token),
   /** Campaign history. Filters: gymId, status, purpose, channel, from, to, search; cursor paging. */
@@ -650,6 +667,8 @@ export const api = {
   searchPromotionPartners: (token: string, q: string) =>
     request<{ items: PartnerMatch[]; total: number }>(`/admin/promotion-partners?q=${encodeURIComponent(q)}`, {}, token),
   geoAreas: (token: string) => request<{ areas: GeoArea[] }>('/admin/geo-areas', {}, token),
+  /** Usable areas for any signed-in role (docs/shop-near-you-api.md); 404 feature_disabled while SHOP_NEAR_YOU is off. */
+  shopAreas: (token: string) => request<{ areas: GeoArea[] }>('/shop/areas', {}, token),
   placementLimits: (token: string) => request<{ limits: PlacementLimit[] }>('/admin/promotion-limits', {}, token),
   setPlacementLimit: (token: string, placement: PromotionPlacement, type: PromotionType, body: { maxSlots: number; maxBoostFraction?: number | null; rotationMode?: 'none' | 'time_slice'; rotationWindowMinutes?: number }) =>
     request<{ limit: PlacementLimit }>(`/admin/promotion-limits/${placement}/${type}`, { method: 'PUT', body: JSON.stringify(body) }, token),
@@ -989,6 +1008,9 @@ export const api = {
   deleteGym: (token: string, id: string) =>
     request<{ ok: boolean; gym: Gym }>(`/admin/gyms/${id}`, { method: 'DELETE' }, token),
   gymOwners: (token: string) => request<GymOwner[]>('/admin/gym-owners', {}, token),
+  /** View only, audited server-side: call only when an admin opens this owner's personal details. `id` is the owner user id. */
+  adminGymOwnerPersonalDetails: (token: string, id: string) =>
+    request<{ ownerId: string; personalDetails: PartnerPersonalDetails }>(`/admin/gym-owners/${encodeURIComponent(id)}/personal-details`, {}, token),
   /** Lightweight owner refs (id/displayName/email/gymIds) — use for owner-name lookups instead of the full gymOwners() list. */
   gymOwnerRefs: (token: string) => request<GymOwnerRef[]>('/admin/gym-owners?refs=true', {}, token),
   saveGymOwner: (token: string, owner: Partial<GymOwner>) =>
@@ -996,13 +1018,23 @@ export const api = {
   deleteGymOwner: (token: string, id: string) =>
     request<{ ok: boolean; owner: GymOwner }>(`/admin/gym-owners/${id}`, { method: 'DELETE' }, token),
   adminTrainers: (token: string) => request<TrainerProfile[]>('/admin/trainers', {}, token),
+  /** View only, audited server-side: call only when an admin opens this trainer's personal details. `id` is the trainer profile id. */
+  adminTrainerPersonalDetails: (token: string, id: string) =>
+    request<{ trainerId: string; userId: string | null; personalDetails: PartnerPersonalDetails }>(`/admin/trainers/${encodeURIComponent(id)}/personal-details`, {}, token),
   /** Lightweight trainer refs (id/displayName/email/gymIds) — use for trainer-name/assignment lookups instead of the full adminTrainers() list. */
   adminTrainerRefs: (token: string) => request<TrainerRef[]>('/admin/trainers?refs=true', {}, token),
   saveTrainer: (token: string, trainer: Partial<TrainerProfile>) =>
     request<TrainerProfile>('/admin/trainers', { method: 'POST', body: JSON.stringify(trainer) }, token),
   deleteTrainer: (token: string, id: string) =>
     request<{ ok: boolean; trainer: TrainerProfile }>(`/admin/trainers/${id}`, { method: 'DELETE' }, token),
-  adminProducts: (token: string) => request<ShopProduct[]>('/admin/products', {}, token),
+  /** Target filters (S2) are sent only when set; older backends ignore them. */
+  adminProducts: (token: string, filters: AdminProductFilters = {}) => {
+    const q = new URLSearchParams();
+    if (filters.targetGender) q.set('targetGender', filters.targetGender);
+    if (filters.targetAgeBand) q.set('targetAgeBand', filters.targetAgeBand);
+    const qs = q.toString();
+    return request<ShopProduct[]>(`/admin/products${qs ? `?${qs}` : ''}`, {}, token);
+  },
   createAdminProduct: (token: string, product: AdminProductDraft) =>
     request<ShopProduct>('/admin/products', { method: 'POST', body: JSON.stringify(product) }, token),
   /** With the stock ledger on the server also takes the private fields (null clears one). */
@@ -1016,7 +1048,7 @@ export const api = {
   recomputeProductStats: (token: string, body: { apply?: boolean; productIds?: string[] } = {}) =>
     request<ProductStatsRecompute>('/admin/shop/product-stats/recompute', { method: 'POST', body: JSON.stringify(body) }, token),
   adminVendors: (token: string) => request<VendorSummary[]>('/admin/vendors', {}, token),
-  updateAdminVendor: (token: string, id: string, patch: Partial<Pick<VendorSummary, 'approvalStatus' | 'accountStatus' | 'approvalNote' | 'commissionPct'>>) =>
+  updateAdminVendor: (token: string, id: string, patch: Partial<Pick<VendorSummary, 'approvalStatus' | 'accountStatus' | 'approvalNote' | 'commissionPct'>> & VendorAreasPatch) =>
     request<VendorSummary>(`/admin/vendors/${id}`, { method: 'PUT', body: JSON.stringify(patch) }, token),
   trainerBookings: (token: string) => request<TrainerBooking[]>('/admin/trainer-bookings', {}, token),
   /** `no_show` only with TRAINER_SESSION_OUTCOMES on (functions#231); flag off it is 400 invalid_status. */
@@ -1261,6 +1293,76 @@ export const api = {
     // the portal domain.
     return { ...body, url: `${BASE}${body.url}`, thumbnailUrl: `${BASE}${body.thumbnailUrl}` } as UploadedFile;
   },
+
+  // ─── Events S2: public options, organizer self-service, partner KYC self-service, admin moderation (spec §14) ───
+  /** Public, no auth; answers with the server flag off too (`discovery: false`). */
+  eventsOptions: () => request<EventsOptions>('/events/options'),
+
+  /** 404 `no_organizer` when this person has none; 404 `feature_disabled` with the server flag off. */
+  organizerMe: (token: string) => request<OrganizerMe>('/organizer/me', {}, token),
+  /** Creates the organizer (draft), its owner staff row and the KYC case. Auth-touching (rule 6, D3). */
+  createOrganizer: (token: string, body: { name: string; timezone: string; contactPhone: string; contactEmail?: string }) =>
+    request<{ organizer: OrganizerMe['organizer']; kycCaseId: string; personaId: string }>('/me/organizer', { method: 'POST', body: JSON.stringify(body) }, token),
+  organizerSummary: (token: string) => request<OrganizerSummary>('/organizer/summary', {}, token),
+  organizerEvents: (token: string, query: { status?: string; type?: string; cursor?: string | null; limit?: number } = {}) =>
+    request<EventsPage<OrganizerEventRow>>(`/organizer/events${qs(query)}`, {}, token),
+  createOrganizerEvent: (token: string, body: { title: string }) =>
+    request<{ id: string; version: number }>('/organizer/events', { method: 'POST', body: JSON.stringify(body) }, token),
+  organizerEvent: (token: string, id: string) => request<EventDocument>(`/organizer/events/${encodeURIComponent(id)}`, {}, token),
+  patchOrganizerEvent: (token: string, id: string, body: EventPatch) =>
+    request<{ version: number; updatedAt: string; material: boolean }>(`/organizer/events/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(body) }, token),
+  /** submit · withdraw · cancel {reason, note{en,sw}} · complete · archive → { status }. */
+  organizerEventAction: (token: string, id: string, action: EventOrganizerAction, body?: { reason?: string; note?: Bilingual }) =>
+    request<{ status: EventStatus }>(`/organizer/events/${encodeURIComponent(id)}/${action}`, { method: 'POST', body: JSON.stringify(body ?? {}) }, token),
+  deleteOrganizerEvent: (token: string, id: string) => request<null>(`/organizer/events/${encodeURIComponent(id)}`, { method: 'DELETE' }, token),
+  organizerEventChanges: (token: string, id: string, cursor?: string | null) =>
+    request<EventsPage<EventChange>>(`/organizer/events/${encodeURIComponent(id)}/changes${qs({ cursor })}`, {}, token),
+  organizerStaff: (token: string) => request<{ items: OrganizerStaffRow[] }>('/organizer/staff', {}, token),
+  /** Phone or email only (no userId): 400 `invalid_contact` otherwise. */
+  inviteOrganizerStaff: (token: string, body: { email?: string; phone?: string; role: OrganizerRole }) =>
+    request<{ invitation: OrganizerStaffRow }>('/organizer/staff', { method: 'POST', body: JSON.stringify(body) }, token),
+  changeOrganizerStaffRole: (token: string, id: string, role: OrganizerRole) =>
+    request<OrganizerStaffRow>(`/organizer/staff/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify({ role }) }, token),
+  removeOrganizerStaff: (token: string, id: string) => request<null>(`/organizer/staff/${encodeURIComponent(id)}`, { method: 'DELETE' }, token),
+
+  // Partner KYC self-service (existing functions/partner-kyc.mjs routes; the organizer onboarding checklist sits on them).
+  myKyc: (token: string) => request<MyKyc>('/me/kyc', {}, token),
+  myKycBusiness: (token: string, body: Record<string, unknown>) => request<MyKyc>('/me/kyc/business', { method: 'PUT', body: JSON.stringify(body) }, token),
+  myKycPerson: (token: string, role: string, body: Record<string, unknown>) =>
+    request<MyKyc>(`/me/kyc/people/${encodeURIComponent(role)}`, { method: 'PUT', body: JSON.stringify(body) }, token),
+  /** multipart/form-data, field "file" (PDF, JPEG, PNG or WebP, up to 10 MB). */
+  myKycUploadDocument: async (token: string, requirementKey: string, file: File): Promise<MyKyc> => {
+    const form = new FormData();
+    form.append('file', file, file.name);
+    const res = await fetch(`${BASE}/me/kyc/documents/${encodeURIComponent(requirementKey)}/file`, {
+      method: 'POST', headers: { authorization: `Bearer ${token}`, 'x-fitflex-client': IDENTITY_V2_CLIENT }, body: form,
+    });
+    const body = await res.json().catch(() => null);
+    if (res.status === 401) notifyUnauthorized();
+    if (!res.ok) throw new ApiError(res.status, body);
+    return body as MyKyc;
+  },
+  myKycAddSettlementAccount: (token: string, body: { method: 'bank' | 'mobile_money'; provider: string; accountName: string; accountNumber: string; branch?: string }) =>
+    request<MyKyc>('/me/kyc/settlement-accounts', { method: 'POST', body: JSON.stringify(body) }, token),
+  myKycAgreements: (token: string, lang: 'en' | 'sw') => request<{ agreements: MyKycAgreement[] }>(`/me/kyc/agreements${qs({ lang })}`, {}, token),
+  myKycAcceptAgreement: (token: string, body: { agreementType: string; version: string }) =>
+    request<MyKyc>('/me/kyc/agreements', { method: 'POST', body: JSON.stringify(body) }, token),
+  /** 409 `kyc_incomplete { missing }` until the checklist is ready. */
+  myKycSubmit: (token: string) => request<MyKyc>('/me/kyc/submit', { method: 'POST' }, token),
+  myKycWithdraw: (token: string) => request<MyKyc>('/me/kyc/withdraw', { method: 'POST' }, token),
+
+  // Admin, scope `events`.
+  adminEvents: (token: string, query: { status?: string; cursor?: string | null; limit?: number } = {}) =>
+    request<EventsPage<AdminEventRow>>(`/admin/events${qs(query)}`, {}, token),
+  adminEventsSummary: (token: string) => request<{ submitted: number }>('/admin/events/summary', {}, token),
+  adminEvent: (token: string, id: string) => request<AdminEventDetail>(`/admin/events/${encodeURIComponent(id)}`, {}, token),
+  adminEventDecision: (token: string, id: string, body: { decision: 'approve' | 'reject'; reason?: string; note?: string }) =>
+    request<{ status: EventStatus }>(`/admin/events/${encodeURIComponent(id)}/decision`, { method: 'POST', body: JSON.stringify(body) }, token),
+  adminEventAction: (token: string, id: string, action: 'cancel' | 'archive' | 'complete', body?: { reason?: string; note?: Bilingual }) =>
+    request<{ status: EventStatus }>(`/admin/events/${encodeURIComponent(id)}/${action}`, { method: 'POST', body: JSON.stringify(body ?? {}) }, token),
+  adminEventAudit: (token: string, id: string) => request<EventsPage<EventAuditRow>>(`/admin/events/${encodeURIComponent(id)}/audit`, {}, token),
+  adminEventsAudit: (token: string, query: { action?: string; cursor?: string | null } = {}) =>
+    request<EventsPage<EventAuditRow>>(`/admin/events/audit${qs(query)}`, {}, token),
 };
 
 // ─── App photos (design spec photo-hero-screens §36–§37; backend functions#216) ───
@@ -1939,7 +2041,20 @@ export interface ShopProduct {
   /** Private, stock ledger on only (absent otherwise). */
   reorderLevel?: number | null;
   variants?: ProductVariant[] | unknown;
+  /** Shop personalisation (S2), set by the vendor in the app. Absent on older backends. null = everyone. */
+  targetGender?: ProductTargetGender | null;
+  /** Shop personalisation (S2). Absent on older backends. Empty = all ages. */
+  targetAgeBands?: ProductAgeBand[];
 }
+
+export type ProductTargetGender = 'women' | 'men';
+export type ProductAgeBand = '18_29' | '30_44' | '45_59' | '60_plus';
+/** GET /admin/products filters (S2). 'everyone' = untagged gender, 'all' = no age bands. */
+export interface AdminProductFilters {
+  targetGender?: ProductTargetGender | 'everyone';
+  targetAgeBand?: ProductAgeBand | 'all';
+}
+export const PRODUCT_AGE_BANDS: ProductAgeBand[] = ['18_29', '30_44', '45_59', '60_plus'];
 
 /** A product option ("variant"). Private and effective fields come only with the stock ledger on. */
 export interface ProductVariant {
@@ -2365,8 +2480,21 @@ export interface VendorSummary {
     businessCategory?: string | null;
     address?: string | null;
     status?: string | null;
+    /** Free text the vendor typed (list or comma text); shown so admins can map it to areas. */
+    deliveryRegions?: string[] | string | null;
+    /** "Based in": a city or district GeoArea id (docs/shop-near-you-api.md). Absent when not set. */
+    cityId?: string | null;
+    /** The region the vendor is based in; the server fills it from cityId. */
+    regionId?: string | null;
+    /** "Delivers to": GeoArea ids of any level; the country id = nationwide; [] = doesn't deliver. */
+    deliveryAreaIds?: string[] | null;
+    /** Read-only: who set the area fields last. */
+    areasSource?: 'vendor' | 'admin' | 'backfill' | null;
   } | null;
 }
+
+/** Admin vendor area mapping (PUT /admin/vendors/:id): null clears cityId/regionId, [] clears deliveryAreaIds. */
+export type VendorAreasPatch = { cityId?: string | null; regionId?: string | null; deliveryAreaIds?: string[] };
 
 /** Lightweight owner projection (id/displayName/email/gymIds) for pages that only need owner names, e.g. the gyms table's owner column and owner-select dropdown. */
 export interface GymOwnerRef {
@@ -2987,7 +3115,8 @@ export interface CommsTemplatePreview {
   needsValues: string[];
 }
 /** Who a FitFlex message goes to; gym messages always go to members. */
-export type CommsRecipients = 'members' | 'trainers';
+/** 'trainers' and 'vendors' are FitFlex (admin) only: a gym sending to them gets 400 invalid_recipients. */
+export type CommsRecipients = 'members' | 'trainers' | 'vendors';
 export interface CommsAudience { preset?: string | null; filter?: unknown; recipients?: CommsRecipients }
 export interface CommsDraft {
   gymId?: string; name?: string; purpose?: CommsPurpose; audience?: CommsAudience;
@@ -3075,19 +3204,26 @@ export interface CommsOverview {
   senderType: 'gym' | 'platform'; members: number | null;
   /** FitFlex only: active trainers FitFlex can message. */
   trainers?: number | null;
+  /** FitFlex only: people FitFlex can message at vendors (vendor accounts and their admin staff). */
+  vendors?: number | null;
   campaigns: Partial<Record<CommsStatus, number>>;
   recent: CommsCampaign[]; channels: Record<CommsChannel, boolean>;
   limits: { largeSendThreshold: number; marketingWeeklyCap: number };
 }
 export interface CommsCatalog {
-  scope: 'gym' | 'platform' | 'trainers';
+  scope: 'gym' | 'platform' | 'trainers' | 'vendors';
   presets: Array<{ key: string; filter: unknown }>;
   fields: Array<{ key: string; type: string; ops: string[]; values?: string[] }>;
+  limits?: { maxDepth: number; maxConditions: number };
 }
 export interface CommsAudiencePreview {
   count: number; category: string;
   channels: Record<CommsChannel, { eligible: number; excluded: Record<string, number> }>;
-  sample: Array<{ id: string; displayName: string | null; status: string }>;
+  sample: Array<{
+    id: string; displayName: string | null; status: string;
+    /** Vendor audiences only: which shop, and whether this is the vendor account or one of its admin staff. */
+    businessName?: string | null; vendorId?: string; vendorRecipient?: 'account' | 'admin_staff';
+  }>;
 }
 export interface CommsPreview {
   category: string; counts: CommsCounts; largeSendThreshold: number;
@@ -3790,4 +3926,97 @@ export interface ExerciseOptions {
   equipment: string[];
   environments: string[];
   goals: string[];
+}
+
+// ─── Events S2 (design spec events-s2-organizer-and-discovery §14; decisions D3, D4, D5) ───
+export type Bilingual = { en: string; sw: string };
+export type OrganizerStatus = 'draft' | 'pending_review' | 'active' | 'rejected' | 'suspended';
+export type OrganizerRole = 'owner' | 'admin' | 'ops' | 'finance' | 'timing';
+export type EventType = 'road' | 'trail' | 'fun' | 'charity' | 'virtual';
+export type EventStatus = 'draft' | 'submitted' | 'published' | 'registration_closed' | 'in_progress' | 'completed' | 'cancelled' | 'archived';
+export type EventAvailability = 'open' | 'closing_soon' | 'sold_out' | 'closed' | 'not_yet_open' | 'cancelled' | 'in_progress' | 'completed';
+export type RefundPolicyPreset = 'no_refund' | 'refund_until_close' | 'custom';
+/** POST /organizer/events/:id/<action> (§7.2); approve/reject are the admin's decision route. */
+export type EventOrganizerAction = 'submit' | 'withdraw' | 'cancel' | 'complete' | 'archive';
+/** `allowedActions` vocabulary on organizer and admin event documents (§7.2, §16.5). */
+export type EventAllowedAction = EventOrganizerAction | 'delete' | 'edit' | 'approve' | 'reject';
+export type EventsPage<T> = { items: T[]; nextCursor: string | null; total?: number };
+
+export interface EventsOptions {
+  discovery: boolean; favourites: boolean; registration: boolean; currency: string; closingSoonHours: number;
+  regions: Array<{ code: string; name: Bilingual }>; timezones: string[];
+}
+export interface OrganizerMe {
+  organizer: { id: string; name: string; status: OrganizerStatus; timezone: string; kycCaseId: string | null; kycStatus: KycCaseStatus | null; statusReason: string | null };
+  role: OrganizerRole;
+  permissions: string[];
+}
+export interface EventSummary {
+  id: string; slug: string; title: string; type: EventType; status: EventStatus;
+  startsAt: string; endsAt: string; timezone: string; utcOffsetMinutes: number; timezoneAbbr: string;
+  registrationOpensAt: string | null; registrationClosesAt: string | null; availability: EventAvailability | null;
+  venue: { name: string | null; city: string | null; region: string | null };
+  heroThumbUrl: string | null; heroImageAlt: string | null; distancesM: number[]; fromPriceTzs: number | null; currency: string;
+  organizer: { id: string; name: string; verified: boolean }; isSaved?: boolean; updatedAt: string;
+}
+export interface OrganizerEventRow extends EventSummary { categoriesCount: number; allowedActions: EventAllowedAction[] }
+export interface OrganizerSummary {
+  eventsTotal: number; publishedTotal: number; registrationsTotal: number; awaitingPaymentTotal: number; confirmedTotal: number;
+  nextEvents: OrganizerEventRow[];
+}
+export interface EventTicketType {
+  id?: string; name: string; priceTzs: number; currency: string; capacity: number | null;
+  saleOpensAt: string | null; saleClosesAt: string | null; minPerOrder: number; maxPerOrder: number; availability?: EventAvailability;
+}
+export interface EventCategory {
+  id?: string; name: string; distanceM: number; startsAt: string | null; capacity: number | null; availability?: EventAvailability;
+  remaining?: number | null; eligibility: Bilingual | null; minAge: number | null; ticketTypes: EventTicketType[];
+}
+export interface EventCollectionPoint {
+  id?: string; name: string; address: string; lat: number | null; lng: number | null;
+  windows: Array<{ opensAt: string; closesAt: string }>; instructions: Bilingual;
+}
+export interface EventScheduleItem { id?: string; at: string; label: Bilingual }
+export interface EventSponsor { id?: string; name: string; logoUrl: string | null; url: string | null }
+/** The organizer's full editable document (GET /organizer/events/:id), both languages always. */
+export interface EventDocument extends EventSummary {
+  description: Bilingual; heroImageUrl: string | null; coverAlt: string | null;
+  routeUrl: string | null; routeImageUrl: string | null; routeImageAlt: string | null;
+  venue: { name: string | null; address: string | null; city: string | null; region: string | null; lat: number | null; lng: number | null };
+  accessibility: Bilingual | null; inclusions: Bilingual | null;
+  /** Whether a race kit is handed out (the submit rule keys on it); collection points are required when true. */
+  kitProvided: boolean;
+  categories: EventCategory[]; collectionPoints: EventCollectionPoint[]; schedule: EventScheduleItem[]; sponsors: EventSponsor[];
+  contact: { email: string | null; phone: string | null; whatsapp: string | null };
+  terms: Bilingual; refundPolicy: { preset: RefundPolicyPreset | null; text: Bilingual | null };
+  cancellation: { reason: string; note: Bilingual } | null;
+  shareUrl: string | null; publishedAt: string | null; version: number; allowedActions: EventAllowedAction[];
+  submittedAt: string | null; rejection: { reason: string; note: string; at: string } | null; changeLogCount: number;
+}
+/** PATCH /organizer/events/:id: the current version plus the fields that changed (nested lists carry ids for upsert). */
+export type EventPatch = { version: number; changeNote?: Bilingual } & Partial<Omit<EventDocument, 'id' | 'slug' | 'status' | 'version' | 'allowedActions' | 'organizer' | 'updatedAt'>>;
+export interface EventChange {
+  id: string; at: string; actor: { name: string | null; role: string }; fields: string[]; material: boolean; note: Bilingual | null;
+  before: Record<string, unknown> | null; after: Record<string, unknown> | null;
+}
+export interface OrganizerStaffRow {
+  id: string; userId: string | null; displayName: string | null; maskedContact: string | null; role: OrganizerRole;
+  status: 'invited' | 'active' | 'removed'; addedAt: string;
+}
+export interface AdminEventRow extends OrganizerEventRow {
+  organizer: EventSummary['organizer'] & { status: OrganizerStatus; kycCaseId: string | null }; permitOnFile: boolean; submittedAt: string | null;
+}
+export interface AdminEventDetail extends EventDocument {
+  organizer: EventSummary['organizer'] & { status: OrganizerStatus; kycCaseId: string | null }; permitOnFile: boolean;
+}
+export interface EventAuditRow { id?: string; at: string; actor: { id: string; name: string | null }; action: string; target: string | null; reason: string | null; note: string | null }
+
+/** GET /me/kyc: the partner's own case, details and checklist (functions partner-kyc-service overview()). */
+export interface MyKyc {
+  partnerType: string; case: KycCase | null; people: KycPerson[]; documents: KycDocument[];
+  settlementAccounts: KycSettlementAccount[]; checklist: KycChecklist;
+}
+export interface MyKycAgreement {
+  agreementType: string; version: string; reference: string; title: string; lang: 'en' | 'sw';
+  sections: Array<{ heading: string; text: string }>; acceptedAt: string | null;
 }
