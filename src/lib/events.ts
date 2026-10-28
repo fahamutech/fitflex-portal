@@ -2,11 +2,11 @@
 // §14, §15). Pure helpers for the organizer area and the admin queue: no strings here, only i18n keys.
 import {
   ApiError, type Bilingual, type DuplicatePolicy, type EventAllowedAction, type EventCategory, type EventCollectionPoint, type EventDocument,
-  type EventOrderStatus, type EventPatch, type EventRegistrationStatus, type EventStatus, type EventTicketType, type EventType, type OrganizerRole,
+  type EventOrderStatus, type EventPatch, type EventRefundPolicy, type EventRejectCode, type EventRegistrationStatus, type EventStatus, type EventTicketType, type EventType, type OrganizerRole,
   type OrganizerStatus, type ParticipantFieldKey, type ParticipantFieldPolicy, type ParticipantFields, type RefundPolicyPreset,
 } from '@/lib/api';
 import type { BadgeTone } from '@/lib/admin-utils';
-import type { Locale, MessageKey } from '@/lib/i18n';
+import { messages, type Locale, type MessageKey } from '@/lib/i18n';
 
 /** Fill `{name}` placeholders. */
 export const fmt = (text: string, vars: Record<string, string | number>) =>
@@ -77,7 +77,11 @@ export const auditActionLabel = (code: string, t: (k: MessageKey) => string) => 
   const name = auditActionName(code);
   return (AUDIT_ACTIONS as readonly string[]).includes(name) ? t(`admin.events.audit.action.${name}` as MessageKey) : code;
 };
-export const POLICY_PRESETS: RefundPolicyPreset[] = ['no_refund', 'refund_until_close', 'custom'];
+/** D24 (S4 §6.7): all five presets are offered. */
+export const POLICY_PRESETS: RefundPolicyPreset[] = ['no_refund', 'refund_until_close', 'full_until_days', 'tiered', 'custom'];
+/** Server-side bounds (S4 §3.12.1): `days` 1..365; `tiered` 1..3 steps. */
+export const POLICY_DAYS_MAX = 365;
+export const POLICY_TIERS_MAX = 3;
 
 /** `allowedActions` vocabulary (§7.2) and the i18n key of each button. */
 export const ACTION_KEYS: Record<EventAllowedAction, MessageKey> = {
@@ -163,6 +167,48 @@ export const EVENTS_ERRORS: Record<string, MessageKey> = {
   invalid_text: 'events.error.invalid_text',
   expected_total_required: 'events.error.price_changed',
   hold_limit_reached: 'events.error.capacity_unavailable',
+  // S4 §3.17 (payments, cancellation and refunds) that a portal surface can receive.
+  payment_mode_mismatch: 'events.error.payment_mode_mismatch',
+  order_not_payable: 'events.error.order_not_payable',
+  hold_expired: 'events.error.hold_expired',
+  payment_in_progress: 'events.error.payment_in_progress',
+  payment_submitted: 'events.error.payment_submitted',
+  unsupported_currency: 'events.error.unsupported_currency',
+  tickets_unavailable: 'events.error.tickets_unavailable',
+  payment_reference_required: 'events.error.payment_reference_required',
+  payment_reference_invalid: 'events.error.payment_reference_invalid',
+  payment_reference_duplicate: 'events.error.payment_reference_duplicate',
+  too_many_attempts: 'events.error.too_many_attempts',
+  event_unavailable: 'events.error.event_unavailable',
+  refund_changed: 'events.error.refund_changed',
+  refund_in_progress: 'events.error.refund_in_progress',
+  cancellation_window_closed: 'events.error.cancellation_window_closed',
+  event_cancelled: 'events.error.event_cancelled',
+  purchaser_only: 'events.error.purchaser_only',
+  refundable_changed: 'events.error.refundable_changed',
+  payment_not_unfulfilled: 'events.error.payment_not_unfulfilled',
+  resend_limit_reached: 'events.error.resend_limit_reached',
+  not_payable_by_role: 'events.error.not_payable_by_role',
+  order_not_confirmed: 'events.error.order_not_confirmed',
+  note_required: 'events.error.note_required',
+  policy_not_evaluable: 'money2.err.policy_not_evaluable',
+  payments_scope_required: 'money2.err.payments_scope_required',
+  forbidden: 'money2.err.forbidden',
+  event_payment_change_not_allowed: 'money2.err.event_payment_change_not_allowed',
+  // Backend #270 (final contract check)
+  expected_refundable_required: 'money2.err.expected_refundable_required',
+  payment_held_mismatch: 'money2.err.payment_held_mismatch',
+  payment_refunded_or_closed: 'money2.err.payment_refunded_or_closed',
+  places_not_cancelled: 'money2.err.places_not_cancelled',
+  refund_recipient_missing: 'money2.err.refund_recipient_missing',
+  refund_already_exists: 'money2.err.refund_already_exists',
+  nothing_to_repair: 'money2.err.nothing_to_repair',
+  event_not_cancelled: 'money2.err.event_not_cancelled',
+  batch_changed: 'money2.err.batch_changed',
+  expected_totals_required: 'money2.err.expected_totals_required',
+  batch_failed: 'money2.err.batch_failed',
+  amount_required: 'money2.err.amount_required',
+  amount_mismatch: 'money2.err.amount_mismatch',
 };
 export const errorCode = (err: unknown): string | null =>
   err instanceof ApiError ? ((err.body as { error?: string } | null)?.error ?? null) : null;
@@ -170,6 +216,8 @@ export const errorBody = <T = Record<string, unknown>>(err: unknown): (T & { err
   err instanceof ApiError ? ((err.body as (T & { error?: string }) | null) ?? null) : null;
 /** The i18n key for a refusal, else the generic one. */
 export const errorKey = (err: unknown): MessageKey => EVENTS_ERRORS[errorCode(err) ?? ''] ?? 'common.somethingWrong';
+/** The same for a bare code string (e.g. `batch.error` inside a 200 answer). */
+export const errorKeyOfCode = (code: string | null | undefined): MessageKey => EVENTS_ERRORS[code ?? ''] ?? 'common.somethingWrong';
 export const isForbidden = (err: unknown) => {
   const code = errorCode(err);
   return err instanceof ApiError && (err.status === 403 || code === 'not_your_organizer' || code === 'forbidden' || code === 'forbidden_role' || code === 'acl_forbidden');
@@ -183,6 +231,15 @@ const safeTz = (tz: string | null | undefined) => {
   try { new Intl.DateTimeFormat('en-GB', { timeZone: tz || undefined }); return tz || 'Africa/Dar_es_Salaam'; } catch { return 'Africa/Dar_es_Salaam'; }
 };
 /** "EAT" from the zone when the payload has no abbreviation. */
+/** Swahili clock: 12-hour with the part of the day ("2:05 mchana"); English keeps the 24-hour clock. */
+export function clock(d: Date, zone: string | undefined, locale: Locale): string {
+  if (locale !== 'sw') return d.toLocaleTimeString(intlLocale(locale), { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: zone });
+  const parts = new Intl.DateTimeFormat('en-GB', { hour: 'numeric', minute: '2-digit', hourCycle: 'h23', timeZone: zone }).formatToParts(d);
+  const h = Number(parts.find(p => p.type === 'hour')?.value ?? 0) % 24;
+  const m = parts.find(p => p.type === 'minute')?.value ?? '00';
+  const part = h >= 5 && h < 12 ? 'asubuhi' : h >= 12 && h < 16 ? 'mchana' : h >= 16 && h < 19 ? 'jioni' : 'usiku';
+  return `${h % 12 || 12}:${m} ${part}`;
+}
 export function tzAbbr(tz: string | null | undefined, at: Date = new Date(), given?: string | null) {
   if (given) return given;
   const parts = new Intl.DateTimeFormat('en-GB', { timeZone: safeTz(tz), timeZoneName: 'short' }).formatToParts(at);
@@ -196,7 +253,7 @@ export function eventDateTime(iso: string | null | undefined, tz: string | null 
   const zone = safeTz(tz);
   // "Sat 14 Mar 2027" (no comma after the weekday, as the spec writes it).
   const day = d.toLocaleDateString(intlLocale(locale), { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric', timeZone: zone }).replace(/^([^\d,]+),\s*/, '$1 ');
-  const time = d.toLocaleTimeString(intlLocale(locale), { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: zone });
+  const time = clock(d, zone, locale);
   return `${day}, ${time} ${tzAbbr(zone, d, abbr)}`.trim();
 }
 /** "06:30" in the event's zone, for the "= 06:30 EAT" hint next to a local-time field. */
@@ -204,7 +261,7 @@ export function eventTime(iso: string | null | undefined, tz: string | null | un
   if (!iso) return '';
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return '';
-  return d.toLocaleTimeString(intlLocale(locale), { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: safeTz(tz) });
+  return clock(d, safeTz(tz), locale);
 }
 export function eventDay(iso: string | null | undefined, tz: string | null | undefined, locale: Locale) {
   if (!iso) return '—';
@@ -225,7 +282,7 @@ export function relativeTime(iso: string | null | undefined, locale: Locale, now
   if (abs < 86_400 * 30) return rtf.format(Math.round(diff / 86_400), 'day');
   return rtf.format(Math.round(diff / (86_400 * 30)), 'month');
 }
-export const clockTime = (d: Date, locale: Locale) => d.toLocaleTimeString(intlLocale(locale), { hour: '2-digit', minute: '2-digit', hour12: false });
+export const clockTime = (d: Date, locale: Locale) => clock(d, undefined, locale);
 /** "5K 10K 21K" from metres. */
 export const distanceLabel = (m: number) => {
   const km = m / 1000;
@@ -274,6 +331,7 @@ export type CategoryForm = { id?: string; uid: string; name: string; distanceKm:
 export type PointForm = { id?: string; uid: string; name: string; address: string; lat: number | null; lng: number | null; windows: Array<{ opensAt: string; closesAt: string }>; instructionsEn: string; instructionsSw: string };
 export type SponsorForm = { id?: string; uid: string; name: string; logoUrl: string; url: string };
 export type ScheduleForm = { id?: string; uid: string; at: string; labelEn: string; labelSw: string };
+export type PolicyTierForm = { uid: string; daysBefore: string; percent: string };
 export type EventForm = {
   title: string; type: EventType | ''; descriptionEn: string; descriptionSw: string; timezone: string;
   startsAt: string; endsAt: string; registrationOpensAt: string; registrationClosesAt: string; heroImageUrl: string; heroThumbUrl: string; coverAlt: string;
@@ -282,6 +340,8 @@ export type EventForm = {
   categories: CategoryForm[];
   hasKit: boolean; collectionPoints: PointForm[]; inclusionsEn: string; inclusionsSw: string;
   termsEn: string; termsSw: string; policyPreset: RefundPolicyPreset | ''; policyEn: string; policySw: string;
+  /** S4 §6.7: `full_until_days` and `tiered` inputs, kept as typed. */
+  policyDays: string; policyTiers: PolicyTierForm[];
   contactEmail: string; contactPhone: string; contactWhatsapp: string; sponsors: SponsorForm[]; schedule: ScheduleForm[];
   /** S3 §6.4: the organizer's choices as typed; `effectiveParticipantFields` applies the locked rules. */
   participantFields: Required<ParticipantFields>; duplicatePolicy: DuplicatePolicy;
@@ -308,6 +368,7 @@ const fieldsFromDoc = (doc: Pick<EventDocument, 'participantFields' | 'categorie
   return typed;
 };
 
+export const newPolicyTier = (previous?: PolicyTierForm): PolicyTierForm => ({ uid: uid(), daysBefore: '', percent: previous?.percent ?? '' });
 export const newTicket = (): TicketForm => ({ uid: uid(), name: '', priceText: '', capacity: '', noLimit: true, saleOpensAt: '', saleClosesAt: '', minPerOrder: '1', maxPerOrder: '10' });
 export const newCategory = (): CategoryForm => ({ uid: uid(), name: '', distanceKm: '', startsAt: '', capacity: '', noLimit: true, eligibilityEn: '', eligibilitySw: '', minAge: '', ticketTypes: [newTicket()] });
 export const newPoint = (): PointForm => ({ uid: uid(), name: '', address: '', lat: null, lng: null, windows: [{ opensAt: '', closesAt: '' }], instructionsEn: '', instructionsSw: '' });
@@ -319,7 +380,7 @@ export function emptyForm(timezone = 'Africa/Dar_es_Salaam'): EventForm {
     title: '', type: '', descriptionEn: '', descriptionSw: '', timezone, startsAt: '', endsAt: '', registrationOpensAt: '', registrationClosesAt: '',
     heroImageUrl: '', heroThumbUrl: '', coverAlt: '', venueName: '', venueAddress: '', venueCity: '', venueRegion: '', lat: null, lng: null, outsideTz: false,
     routeUrl: '', routeImageUrl: '', routeImageAlt: '', accessEn: '', accessSw: '', categories: [], hasKit: false, collectionPoints: [],
-    inclusionsEn: '', inclusionsSw: '', termsEn: '', termsSw: '', policyPreset: '', policyEn: '', policySw: '', contactEmail: '', contactPhone: '',
+    inclusionsEn: '', inclusionsSw: '', termsEn: '', termsSw: '', policyPreset: '', policyEn: '', policySw: '', policyDays: '', policyTiers: [], contactEmail: '', contactPhone: '',
     contactWhatsapp: '', sponsors: [], schedule: [], participantFields: { ...DEFAULT_PARTICIPANT_FIELDS }, duplicatePolicy: 'one_per_category',
   };
 }
@@ -351,6 +412,8 @@ export function formFromDoc(doc: EventDocument): EventForm {
     })),
     inclusionsEn: s(doc.inclusions?.en), inclusionsSw: s(doc.inclusions?.sw),
     termsEn: s(doc.terms?.en), termsSw: s(doc.terms?.sw), policyPreset: doc.refundPolicy?.preset ?? '', policyEn: s(doc.refundPolicy?.text?.en), policySw: s(doc.refundPolicy?.text?.sw),
+    policyDays: doc.refundPolicy?.days == null ? '' : String(doc.refundPolicy.days),
+    policyTiers: (doc.refundPolicy?.tiers ?? []).map(tier => ({ uid: uid(), daysBefore: String(tier.daysBefore), percent: String(tier.percent) })),
     contactEmail: s(doc.contact?.email), contactPhone: s(doc.contact?.phone), contactWhatsapp: s(doc.contact?.whatsapp),
     sponsors: (doc.sponsors ?? []).map(sp => ({ id: sp.id, uid: sp.id ?? uid(), name: s(sp.name), logoUrl: s(sp.logoUrl), url: s(sp.url) })),
     schedule: (doc.schedule ?? []).map(it => ({ id: it.id, uid: it.id ?? uid(), at: s(it.at), labelEn: s(it.label?.en), labelSw: s(it.label?.sw) })),
@@ -362,6 +425,15 @@ export const inTanzania = (lat: number, lng: number) => lat >= -12 && lat <= -0.
 const nul = (v: string) => (v.trim() ? v.trim() : null);
 const bi = (en: string, sw: string): Bilingual | null => (en.trim() || sw.trim() ? { en: en.trim(), sw: sw.trim() } : null);
 const int = (v: string) => { const n = Number(v.trim()); return v.trim() && Number.isInteger(n) ? n : null; };
+
+/** `refundPolicy` as the server takes it (S4 §6.7): `days` only for full_until_days, `tiers` only for tiered, `text` only for custom. */
+export function refundPolicyPayload(form: Pick<EventForm, 'policyPreset' | 'policyEn' | 'policySw' | 'policyDays' | 'policyTiers'>): EventRefundPolicy {
+  const preset = form.policyPreset || null;
+  const out: EventRefundPolicy = { preset, text: preset === 'custom' ? bi(form.policyEn, form.policySw) : null };
+  if (preset === 'full_until_days') out.days = int(form.policyDays);
+  if (preset === 'tiered') out.tiers = form.policyTiers.map(tier => ({ daysBefore: int(tier.daysBefore) ?? 0, percent: int(tier.percent) ?? 0 }));
+  return out;
+}
 
 /** The fields of one step, as PATCH /organizer/events/:id takes them (nested rows keep their ids for upsert). */
 export function stepPayload(form: EventForm, step: WizardStep): Omit<EventPatch, 'version'> {
@@ -392,7 +464,7 @@ export function stepPayload(form: EventForm, step: WizardStep): Omit<EventPatch,
     case 'terms':
       return {
         terms: { en: form.termsEn, sw: form.termsSw },
-        refundPolicy: { preset: form.policyPreset || null, text: form.policyPreset === 'custom' ? bi(form.policyEn, form.policySw) : null },
+        refundPolicy: refundPolicyPayload(form),
         contact: { email: nul(form.contactEmail), phone: nul(form.contactPhone), whatsapp: nul(form.contactWhatsapp) },
         sponsors: form.sponsors.map(sp => ({ id: sp.id, name: sp.name.trim(), logoUrl: nul(sp.logoUrl), url: nul(sp.url) })),
         schedule: form.schedule.map(it => ({ id: it.id, at: it.at, label: { en: it.labelEn.trim(), sw: it.labelSw.trim() } })),
@@ -430,7 +502,7 @@ export function docFromForm(form: EventForm, base: Partial<EventDocument> = {}):
     description: p.description!, heroImageUrl: nul(form.heroImageUrl), coverAlt: nul(form.coverAlt), routeUrl: p.routeUrl ?? null, routeImageUrl: p.routeImageUrl ?? null,
     routeImageAlt: p.routeImageAlt ?? null, accessibility: p.accessibility ?? null, inclusions: p.inclusions ?? null, kitProvided: form.hasKit, categories: p.categories ?? [],
     collectionPoints: p.collectionPoints ?? [], schedule: p.schedule ?? [], sponsors: p.sponsors ?? [], contact: p.contact!, terms: p.terms!,
-    refundPolicy: p.refundPolicy!, cancellation: base.cancellation ?? null, shareUrl: base.shareUrl ?? null, publishedAt: base.publishedAt ?? null,
+    refundPolicy: { ...p.refundPolicy!, generated: base.refundPolicy?.generated ?? null }, cancellation: base.cancellation ?? null, shareUrl: base.shareUrl ?? null, publishedAt: base.publishedAt ?? null,
     version: base.version ?? 0, allowedActions: base.allowedActions ?? [], submittedAt: base.submittedAt ?? null, rejection: base.rejection ?? null, changeLogCount: base.changeLogCount ?? 0,
     participantFields: p.participantFields ?? null, duplicatePolicy: p.duplicatePolicy ?? null,
   };
@@ -449,7 +521,7 @@ const STEP_OF_PATH: Array<[RegExp, WizardStep]> = [
   [/^categories(\.\d+\.(?!ticketTypes).*)?$/, 'categories'],
   [/^categories\.\d+\.ticketTypes/, 'tickets'],
   [/^(collectionPoints|inclusions|hasKit)/, 'kit'],
-  [/^(termsEn|termsSw|terms|policyPreset|policyEn|policySw|refundPolicy|contactEmail|contactPhone|contactWhatsapp|contact|sponsors|schedule|participantFields|duplicatePolicy)/, 'terms'],
+  [/^(termsEn|termsSw|terms|policyPreset|policyEn|policySw|policyDays|policyTiers|refundPolicy|contactEmail|contactPhone|contactWhatsapp|contact|sponsors|schedule|participantFields|duplicatePolicy)/, 'terms'],
 ];
 export const stepOfPath = (path: string): WizardStep => STEP_OF_PATH.find(([re]) => re.test(path))?.[1] ?? 'basics';
 const ms = (iso: string) => Date.parse(iso);
@@ -569,6 +641,7 @@ export function validateEvent(form: EventForm, opts: { forSubmit?: boolean; now?
   length('termsSw', form.termsSw, 100, 20_000, true);
   req('policyPreset', !!form.policyPreset);
   if (form.policyPreset === 'custom') { length('policyEn', form.policyEn, 50, 5000, true); length('policySw', form.policySw, 50, 5000, true); }
+  Object.assign(e, validateRefundPolicy(form));
   if (!form.contactEmail.trim()) e.contactEmail = { key: 'events.validation.required' };
   else if (!isEmail(form.contactEmail)) e.contactEmail = { key: 'events.validation.email' };
   if (form.contactPhone.trim() && !isTzPhone(form.contactPhone)) e.contactPhone = { key: 'events.validation.phone' };
@@ -589,6 +662,43 @@ export function validateEvent(form: EventForm, opts: { forSubmit?: boolean; now?
   if (form.participantFields.phone === 'off' && form.participantFields.email === 'off') e['participantFields.contact'] = { key: 'events.validation.contact_policy' };
   return e;
 }
+/**
+ * S4 §3.12.1 / §6.7 client mirror: `full_until_days` needs whole days 1..365; `tiered` needs 1..3 steps with `daysBefore`
+ * strictly decreasing (1..365) and `percent` 1..100 and not rising. The server validates again (`event_invalid`).
+ */
+export function validateRefundPolicy(form: Pick<EventForm, 'policyPreset' | 'policyDays' | 'policyTiers'>): Errors {
+  const e: Errors = {};
+  if (form.policyPreset === 'full_until_days') {
+    const d = int(form.policyDays);
+    if (!form.policyDays.trim()) e.policyDays = { key: 'events.validation.required' };
+    else if (d == null || d < 1 || d > POLICY_DAYS_MAX || !/^\d+$/.test(form.policyDays.trim())) e.policyDays = { key: 'events.validation.range', vars: { min: 1, max: POLICY_DAYS_MAX } };
+  }
+  if (form.policyPreset === 'tiered') {
+    if (form.policyTiers.length < 1 || form.policyTiers.length > POLICY_TIERS_MAX) e.policyTiers = { key: 'events.validation.range', vars: { min: 1, max: POLICY_TIERS_MAX } };
+    let prevDays: number | null = null; let prevPercent: number | null = null;
+    form.policyTiers.forEach((tier, i) => {
+      const days = int(tier.daysBefore); const percent = int(tier.percent);
+      const dk = `policyTiers.${i}.daysBefore`; const pk = `policyTiers.${i}.percent`;
+      if (!tier.daysBefore.trim()) e[dk] = { key: 'events.validation.required' };
+      else if (days == null || days < 1 || days > POLICY_DAYS_MAX || !/^\d+$/.test(tier.daysBefore.trim())) e[dk] = { key: 'events.validation.range', vars: { min: 1, max: POLICY_DAYS_MAX } };
+      else if (prevDays != null && days >= prevDays) e[dk] = { key: 'events.validation.policyTierDays' };
+      if (!tier.percent.trim()) e[pk] = { key: 'events.validation.required' };
+      else if (percent == null || percent < 1 || percent > 100 || !/^\d+$/.test(tier.percent.trim())) e[pk] = { key: 'events.validation.range', vars: { min: 1, max: 100 } };
+      else if (prevPercent != null && percent > prevPercent) e[pk] = { key: 'events.validation.policyTierPercent' };
+      if (days != null && !e[dk]) prevDays = days;
+      if (percent != null && !e[pk]) prevPercent = percent;
+    });
+  }
+  return e;
+}
+
+/**
+ * The refund-policy sentence members read is built by the server (`refundPolicy.generated` / `policy.generated`, S4 review
+ * item 15): the portal never words a policy itself. Null until the server has one (a policy just edited and not saved yet).
+ */
+export type GeneratedPolicy = { en?: string; sw?: string } | null | undefined;
+export const generatedPolicyLine = (generated: GeneratedPolicy, locale: Locale): string => generated?.[locale] ?? '';
+
 /** Errors per step, for the stepper badge and `maxReached`. */
 export function errorsByStep(errors: Errors): Record<WizardStep, number> {
   const out = Object.fromEntries(WIZARD_STEPS.map(sk => [sk, 0])) as Record<WizardStep, number>;
@@ -600,7 +710,8 @@ const SERVER_PATHS: Array<[RegExp, string]> = [
   [/^description\.en$/, 'descriptionEn'], [/^description\.sw$/, 'descriptionSw'], [/^heroImageAlt$/, 'coverAlt'], [/^coverAlt$/, 'coverAlt'],
   [/^venue\.name$/, 'venueName'], [/^venue\.address$/, 'venueAddress'], [/^venue\.city$/, 'venueCity'], [/^venue\.region$/, 'venueRegion'], [/^venue\.(lat|lng)$/, 'pin'],
   [/^accessibility\.en$/, 'accessEn'], [/^accessibility\.sw$/, 'accessSw'], [/^inclusions\.en$/, 'inclusionsEn'], [/^inclusions\.sw$/, 'inclusionsSw'],
-  [/^terms\.en$/, 'termsEn'], [/^terms\.sw$/, 'termsSw'], [/^refundPolicy\.preset$/, 'policyPreset'], [/^refundPolicy\.text\.en$/, 'policyEn'], [/^refundPolicy\.text\.sw$/, 'policySw'],
+  [/^terms\.en$/, 'termsEn'], [/^terms\.sw$/, 'termsSw'], [/^refundPolicy\.preset$/, 'policyPreset'], [/^refundPolicy\.days$/, 'policyDays'], [/^refundPolicy\.tiers(\.\d+)?$/, 'policyTiers'],
+  [/^refundPolicy\.tiers\.(\d+)\.daysBefore$/, 'policyTiers.$1.daysBefore'], [/^refundPolicy\.tiers\.(\d+)\.percent$/, 'policyTiers.$1.percent'], [/^refundPolicy\.text\.en$/, 'policyEn'], [/^refundPolicy\.text\.sw$/, 'policySw'],
   [/^contact\.email$/, 'contactEmail'], [/^contact\.phone$/, 'contactPhone'], [/^contact\.whatsapp$/, 'contactWhatsapp'],
   [/^(categories\.\d+)\.distanceM$/, '$1.distanceKm'], [/^(categories\.\d+)\.eligibility\.en$/, '$1.eligibilityEn'], [/^(categories\.\d+)\.eligibility\.sw$/, '$1.eligibilitySw'],
   [/^(categories\.\d+\.ticketTypes\.\d+)\.priceTzs$/, '$1.priceText'],
@@ -622,7 +733,9 @@ export function serverErrors(fields: Array<{ path: string; code: string }> | und
   for (const f of fields ?? []) {
     const raw = f.code.replace(/^events\.validation\./, '');
     const code = CODE_ALIASES[raw] ?? raw;
-    out[normaliseServerPath(f.path)] = { key: `events.validation.${code}` as MessageKey };
+    const key = `events.validation.${code}`;
+    // S4: a refund-policy code the portal has no text for still shows a sentence (never a raw key).
+    out[normaliseServerPath(f.path)] = { key: (key in messages.en ? key : /^refundPolicy/.test(f.path) ? 'events.validation.policyInvalid' : key) as MessageKey };
   }
   return out;
 }
@@ -645,6 +758,8 @@ export function materialDiff(doc: EventDocument, payload: Omit<EventPatch, 'vers
   // S3: a document that never saved these carries the §3.3 defaults; only a real change is material.
   if ('participantFields' in payload) scope.participantFields = effectiveParticipantFields({ participantFields: fieldsFromDoc(doc), categories: formFromDoc(doc).categories, hasKit: !!doc.kitProvided });
   if ('duplicatePolicy' in payload) scope.duplicatePolicy = doc.duplicatePolicy ?? 'one_per_category';
+  // The server-built sentence (`generated`) is output, never an edit: it is not a change.
+  if (scope.refundPolicy && typeof scope.refundPolicy === 'object') { const { generated: _g, ...rest } = scope.refundPolicy as EventRefundPolicy; void _g; scope.refundPolicy = rest; }
   flat(scope, '', before); flat(payload, '', after);
   const generic = (p: string) => p.replace(/\.\d+\./g, '.').replace(/\.\d+$/, '');
   const out: Diff[] = [];
@@ -675,18 +790,23 @@ export function trackEventsAnalytics(_name: EventsAnalyticsName, _payload: Recor
 export const ORDER_STATUS: Record<EventOrderStatus, { key: MessageKey; tone: Tone }> = {
   awaiting_payment: { key: 'events.orderStatus.awaiting_payment', tone: 'warning' },
   confirmed: { key: 'events.orderStatus.confirmed', tone: 'success' },
+  // S4 §3.3: a paid order that is later cancelled, refunded or part-cancelled.
+  partially_cancelled: { key: 'events.orderStatus.partially_cancelled', tone: 'warning' },
+  refund_pending: { key: 'events.orderStatus.refund_pending', tone: 'warning' },
+  refunded: { key: 'events.orderStatus.refunded', tone: 'gray' },
   cancelled: { key: 'events.orderStatus.cancelled', tone: 'gray' },
   expired: { key: 'events.orderStatus.expired', tone: 'gray' },
 };
-export const ORDER_STATUSES: EventOrderStatus[] = ['awaiting_payment', 'confirmed', 'cancelled', 'expired'];
+export const ORDER_STATUSES: EventOrderStatus[] = ['awaiting_payment', 'confirmed', 'partially_cancelled', 'refund_pending', 'refunded', 'cancelled', 'expired'];
 export const orderStatusOf = (status: string | null | undefined) => ORDER_STATUS[(status ?? 'awaiting_payment') as EventOrderStatus] ?? ORDER_STATUS.awaiting_payment;
 /** Registration status (§5.10): `reserved` reads "Awaiting payment" (the order is unpaid). */
 export const REGISTRATION_STATUS: Record<EventRegistrationStatus, { key: MessageKey; tone: Tone }> = {
   reserved: { key: 'events.regStatus.reserved', tone: 'warning' },
   confirmed: { key: 'events.regStatus.confirmed', tone: 'success' },
   cancelled: { key: 'events.regStatus.cancelled', tone: 'gray' },
+  refunded: { key: 'events.regStatus.refunded', tone: 'gray' },
 };
-export const REGISTRATION_STATUSES: EventRegistrationStatus[] = ['reserved', 'confirmed', 'cancelled'];
+export const REGISTRATION_STATUSES: EventRegistrationStatus[] = ['reserved', 'confirmed', 'cancelled', 'refunded'];
 export const registrationStatusOf = (status: string | null | undefined) => REGISTRATION_STATUS[(status ?? 'reserved') as EventRegistrationStatus] ?? REGISTRATION_STATUS.reserved;
 
 /** §3.8 closed set a purchaser (member or organisation) may give. */
@@ -789,3 +909,56 @@ export type EventsS3AnalyticsName = 'registration_started' | 'registration_roste
 export function trackEventsS3Analytics(_name: EventsS3AnalyticsName, _payload: Record<string, string | number | boolean>) {
   // Intentionally empty (reuse map: no portal analytics hook). No personal data may ever be put in `_payload`.
 }
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════════
+// Events S4: payments, refunds and finance (design spec docs/design/events-s4-payments-and-tickets.md §3, §6;
+// decisions D23-D28). Pure helpers: no strings here, only i18n keys.
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+/** §3.7.5 closed set of rejection reasons; `other` needs the member note. */
+export const REJECT_CODES: EventRejectCode[] = ['reference_not_found', 'amount_mismatch', 'wrong_account', 'duplicate_reference', 'other'];
+export const rejectCodeKey = (code: string | null | undefined) => `payments.event.reject.${REJECT_CODES.includes(code as EventRejectCode) ? code : 'other'}` as MessageKey;
+/** The member-visible rejection note limit (§3.7.5). */
+export const MEMBER_NOTE_MAX = 140;
+/** Corporate payment note limit (§3.4.3). */
+export const CORPORATE_NOTE_MAX = 300;
+
+/** `failureReason` of an EventPayment (§3.3 and the backend's later codes) → the reason text; `rejected:<code>` reads as the reject reason. */
+export const ATTENTION_REASONS = [
+  'amount_mismatch', 'provider_unknown', 'transaction_mismatch', 'capacity_unavailable', 'order_cancelled', 'order_already_paid', 'event_unavailable', 'refunded_after_late_payment', 'request_closed',
+] as const;
+export const attentionReasonKey = (reason: string | null | undefined): MessageKey => {
+  if (reason?.startsWith('rejected:')) return rejectCodeKey(reason.slice('rejected:'.length));
+  return (reason && (ATTENTION_REASONS as readonly string[]).includes(reason) ? `payments.event.attention.${reason}` : 'payments.event.attention.unknown') as MessageKey;
+};
+
+/** Refund scope labels (§6.3). */
+export const REFUND_SCOPES = ['registration', 'order', 'event_cancelled', 'unfulfilled_payment'] as const;
+export const refundScopeKey = (scope: string | null | undefined) => (scope && (REFUND_SCOPES as readonly string[]).includes(scope) ? `refunds.scope.${scope}` : null) as MessageKey | null;
+
+/** Whole TZS from typed text (digits and thousands commas only); null when blank or not a positive whole number. */
+export function parseAmountReceived(text: string): number | null {
+  const n = parseShillings(text);
+  return n == null || Number.isNaN(n) || n <= 0 ? null : n;
+}
+
+/** A payment-request row is an event order payment (the check precedes the shop `orderId` branch, §6.2). */
+export const isEventPayment = (p: { productType?: string | null; eventOrderId?: string | null } | null | undefined) => p?.productType === 'EVENT_ORDER' || !!p?.eventOrderId;
+
+/** `YYYY-MM-DD` for today in East Africa Time (the "paid on" day may not be in the future, §3.4.3). */
+export const todayEat = (now = Date.now()) => new Date(now + 3 * 3_600_000).toISOString().slice(0, 10);
+
+/** `Idempotency-Key` for a corporate payment notice (§3.4.3): `pay_` + UUID, 8-100 chars of [A-Za-z0-9._:-]; reused on retry. */
+export const newPaymentIdempotencyKey = () => `pay_${typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 12)}`}`;
+
+/** Finance tab roles (§6.1): finance, owner and admin only. */
+export const FINANCE_ROLES = new Set<OrganizerRole>(['owner', 'admin', 'finance']);
+
+// ── Analytics names reserved for S4 (§6.9); the same no-op as S2/S3. No personal data, no amounts below the order level. ──
+export type EventsS4AnalyticsName = 'payment_panel_viewed' | 'event_payment_decided' | 'refund_batch_created' | 'finance_viewed';
+export function trackEventsS4Analytics(_name: EventsS4AnalyticsName, _payload: Record<string, string | number | boolean> = {}) {
+  // Intentionally empty (reuse map: no portal analytics hook). No personal data may ever be put in `_payload`.
+}
+
+/** One/other plural for strings with a count: `base.one` when n is 1, else `base.other`. */
+export const pluralKey = (base: string, n: number) => `${base}.${n === 1 ? 'one' : 'other'}` as MessageKey;

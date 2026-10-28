@@ -47,3 +47,20 @@ test('/org/events and /hr/events render the not-available state and no Events na
   await expect(page.getByTestId('events-unavailable')).toBeVisible();
   await expect(page.getByRole('navigation', { name: 'Main navigation' }).getByRole('link', { name: 'Events' })).toHaveCount(0);
 });
+
+// Events S4 (spec §6.1, §7.1): with the build flag off the money pages render exactly as before: no Event tickets filter,
+// no productType query, and the organizer Finance tab / corporate payment panel are unreachable (not-available states above).
+test('/admin/payments has no Event tickets filter and asks for the whole list', async ({ page }) => {
+  const mock = await setupEvents(page, SUPER_ADMIN, { s4: {} });
+  await page.goto('/admin/payments/');
+  await expect(page.getByRole('button', { name: 'Trainer pass' })).toBeVisible();
+  await expect(page.getByTestId('payments-kind-event_order')).toHaveCount(0);
+  expect(mock.reads(/^\/admin\/payment-requests$/).every(c => !c.query.productType)).toBe(true);
+});
+
+test('the organizer Finance link and the admin event cancel preview are not reachable with the flag off', async ({ page }) => {
+  const mock = await setupEvents(page, OWNER, { s4: {} });
+  await page.goto('/organizer/events/?event=evt_pub&view=finance');
+  await expect(page.getByTestId('events-unavailable')).toBeVisible();
+  expect(mock.reads(/\/finance$/)).toHaveLength(0);
+});

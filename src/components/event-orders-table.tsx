@@ -81,7 +81,7 @@ export function EventOrdersTable({ eventId, timezone, timezoneAbbr, fieldPolicy,
           defaultSort={{ key: 'createdAt', dir: 'desc' }} emptyState={t('organizer.orders.empty')} onRowClick={onOpen}
           actions={onOpen ? r => <Button variant="ghost" size="sm" onClick={e => { e.stopPropagation(); onOpen(r); }} data-testid={`order-open-${r.id}`}>{t('events.list.open')}</Button> : undefined} />
       </CardContent></Card>
-      {fieldPolicy === 'organizer' && <p className="text-xs text-[var(--color-fg-quaternary)]" data-testid="orders-footer">{t('organizer.orders.footer')}</p>}
+      {fieldPolicy === 'organizer' && <p className="text-xs text-[var(--color-fg-quaternary)]" data-testid="orders-footer">{t('events.orders.footer')}</p>}
     </div>
   );
 }

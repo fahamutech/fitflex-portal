@@ -45,6 +45,13 @@ const KNOWN_ERRORS = [
   'reference_locked_provider',
   // the flag is off on the server, or the row is gone
   'feature_disabled', 'not_found',
+  // Events S4 (spec §3.7, §3.17): event payment decisions and event refunds
+  'order_amount_mismatch', 'order_buyer_mismatch', 'currency_mismatch', 'payment_row_mismatch', 'reason_code_required', 'note_required',
+  'order_not_found', 'payment_not_unfulfilled', 'refundable_changed', 'rate_limited',
+  // Events S4 review: event change requests, scope refusals, custom policies
+  'event_payment_change_not_allowed', 'forbidden', 'payments_scope_required', 'policy_not_evaluable', 'refund_changed',
+  'expected_refundable_required', 'payment_held_mismatch', 'payment_refunded_or_closed', 'places_not_cancelled', 'refund_recipient_missing', 'refund_already_exists',
+  'nothing_to_repair', 'event_not_cancelled', 'batch_changed', 'expected_totals_required', 'batch_failed', 'payment_mode_mismatch',
 ];
 
 /**
