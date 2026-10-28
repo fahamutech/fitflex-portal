@@ -11,8 +11,8 @@ import { ChallengeManager } from '@/components/challenge-manager';
 import { PeopleImport } from '@/components/b2b-people-import';
 import { RewardQueue } from '@/components/reward-queue';
 import { GroupManager } from '@/components/group-manager';
-import type { MessageKey } from '@/lib/i18n';
-import { MEMBER_REQUEST_ERRORS, PendingMemberStatus, WithdrawRequestButton, fill, requestName, requestSentNotice } from '@/components/b2b-member-requests';
+import type { Locale, MessageKey } from '@/lib/i18n';
+import { PendingMemberStatus, WithdrawRequestButton, fill, memberRequestError, requestLabel, requestSentNotice, shownRequests } from '@/components/b2b-member-requests';
 
 /**
  * The organisation's own screens for the people it covers and its
@@ -41,9 +41,10 @@ const ERRORS: Record<string, string> = {
 // Codes whose text lives in i18n (English + Swahili).
 const I18N_ERRORS: Partial<Record<string, MessageKey>> = {
   user_not_found: 'b2b.errors.userNotFound',
-  ...MEMBER_REQUEST_ERRORS,
 };
-const said = (e: unknown, fallback: string, t: (k: MessageKey) => string) => {
+const said = (e: unknown, fallback: string, t: (k: MessageKey) => string, locale: Locale = 'en') => {
+  const request = memberRequestError(e, t, locale);
+  if (request) return request;
   const code = e instanceof ApiError ? (e.body as { error?: string } | null)?.error : undefined;
   const i18nKey = code ? I18N_ERRORS[code] : undefined;
   if (i18nKey) return t(i18nKey);
@@ -128,7 +129,7 @@ export function OrgPeoplePage() {
 }
 
 function Beneficiaries({ token, mine, readOnlyNote }: { token: string; mine: Mine; readOnlyNote?: string }) {
-  const { t } = useApp();
+  const { t, locale } = useApp();
   const orgId = mine.organization.id;
   const canManage = mine.permissions.includes('beneficiaries.manage') && !readOnlyNote;
   const [people, setPeople] = useState<B2BBeneficiary[] | null>(null);
@@ -144,7 +145,7 @@ function Beneficiaries({ token, mine, readOnlyNote }: { token: string; mine: Min
 
   const load = async () => {
     const r = await api.b2bBeneficiaries(token, orgId, { search: search.trim() || undefined, limit: 100 });
-    setPeople(r.items); setTotal(r.total); setPending(r.pendingMemberAcceptance ?? []);
+    setPeople(r.items); setTotal(r.total); setPending(shownRequests(r.pendingMemberAcceptance));
   };
   useEffect(() => {
     load().catch(() => { setError('Could not load the list.'); setPeople([]); });
@@ -159,7 +160,7 @@ function Beneficiaries({ token, mine, readOnlyNote }: { token: string; mine: Min
       if (told) setNotice(told);
       await load();
     } catch (e) {
-      setError(said(e, fallback, t));
+      setError(said(e, fallback, t, locale));
     } finally {
       setBusy(false);
     }
@@ -172,14 +173,15 @@ function Beneficiaries({ token, mine, readOnlyNote }: { token: string; mine: Min
         groupName: form.groupName.trim() || undefined, externalReference: form.externalReference.trim() || undefined,
       });
       setForm({ ...form, contact: '', externalReference: '' });
-      // Named by user ID: nobody is added until the member accepts in the app.
-      if (isPendingMemberAcceptance(out)) return requestSentNotice(t, out.memberRequest);
+      // Named by user ID: nobody is added until the member accepts in the app. Same text whether or not
+      // anything was stored (memberRequest.id null), so the screen can't reveal whether the id exists.
+      if (isPendingMemberAcceptance(out)) return requestSentNotice(t);
       return `${out.beneficiary.displayName ?? 'They'} can now use your programmes.`;
     }, 'Could not add them.');
   };
 
-  const withdraw = (r: B2BMemberRequest) => run(async () => {
-    await api.cancelB2BMemberRequest(token, orgId, r.id);
+  const withdraw = (r: B2BMemberRequest) => r.id && run(async () => {
+    await api.cancelB2BMemberRequest(token, orgId, r.id as string);
     return t('b2b.memberRequest.withdrawn');
   }, t('b2b.memberRequest.withdrawFailed'));
 
@@ -229,7 +231,7 @@ function Beneficiaries({ token, mine, readOnlyNote }: { token: string; mine: Min
               <TBody>
                 {pending.map(r => (
                   <Tr key={`request-${r.id}`} data-testid={`org-people-request-${r.id}`}>
-                    <Td className="font-medium">{requestName(t, r)}</Td>
+                    <Td className="font-medium">{requestLabel(t, r)}</Td>
                     <Td>{r.beneficiaryType ? (types[r.beneficiaryType] ?? r.beneficiaryType) : ''}</Td>
                     <Td>{r.groupName ?? ''}</Td>
                     <Td>{r.externalReference ?? ''}</Td>
@@ -269,7 +271,7 @@ function Beneficiaries({ token, mine, readOnlyNote }: { token: string; mine: Min
 
 /** A company's staff list (the Companies side): add an employee, link them to their FitFlex account, change their status. */
 function CompanyStaff({ token }: { token: string }) {
-  const { t } = useApp();
+  const { t, locale } = useApp();
   const [staff, setStaff] = useState<CorporateEmployee[] | null>(null);
   const [form, setForm] = useState({ displayName: '', contact: '', department: '' });
   const [link, setLink] = useState<Record<string, string>>({});
@@ -289,7 +291,7 @@ function CompanyStaff({ token }: { token: string }) {
       if (told) setNotice(told);
       await load();
     } catch (e) {
-      setError(said(e, fallback, t));
+      setError(said(e, fallback, t, locale));
     } finally {
       setBusy(false);
     }
@@ -310,11 +312,11 @@ function CompanyStaff({ token }: { token: string }) {
         const linked = await api.linkCorporateStaff(token, employee.id, contact);
         // Named by user ID: the member must accept in the app before the record is linked.
         if (isPendingMemberAcceptance(linked)) {
-          return fill(t('b2b.memberRequest.employeeAddedSent'), { employee: employee.displayName, name: requestName(t, linked.memberRequest) });
+          return fill(t('b2b.memberRequest.employeeAddedSent'), { employee: employee.displayName });
         }
         return `${employee.displayName} added and linked to their FitFlex account.`;
       } catch (err) {
-        return `${employee.displayName} added, but not linked yet: ${said(err, 'their FitFlex account wasn’t found.', t)}`;
+        return `${employee.displayName} added, but not linked yet: ${said(err, 'their FitFlex account wasn’t found.', t, locale)}`;
       }
     }, 'Could not add the employee.');
   };
@@ -357,9 +359,9 @@ function CompanyStaff({ token }: { token: string }) {
                         <span className="flex items-center gap-2"><Badge tone="success">Linked</Badge>
                           <Button variant="link" className="h-auto px-0 text-xs font-normal text-[var(--color-fg-quaternary)] underline" disabled={busy} onClick={() => run(async () => { await api.linkCorporateStaff(token, s.id, null); }, 'Could not unlink.')}>Unlink</Button>
                         </span>
-                      ) : s.pendingLink ? (
+                      ) : s.pendingLink?.id ? (
                         <span className="flex flex-wrap items-center gap-2" data-testid={`company-staff-request-${s.id}`}>
-                          <span className="text-sm">{requestName(t, s.pendingLink)}</span>
+                          <span className="text-sm">{requestLabel(t, s.pendingLink)}</span>
                           <PendingMemberStatus request={s.pendingLink} />
                           {/* HR withdraws a link request by unlinking the record (the backend closes the request). */}
                           <WithdrawRequestButton request={s.pendingLink} disabled={busy}
@@ -372,7 +374,7 @@ function CompanyStaff({ token }: { token: string }) {
                             onClick={() => run(async () => {
                               const linked = await api.linkCorporateStaff(token, s.id, userContact(link[s.id]));
                               setLink({ ...link, [s.id]: '' });
-                              if (isPendingMemberAcceptance(linked)) return requestSentNotice(t, linked.memberRequest);
+                              if (isPendingMemberAcceptance(linked)) return requestSentNotice(t);
                               return `${s.displayName} is linked to their FitFlex account.`;
                             }, 'Could not link them.')}>Link</Button>
                         </span>

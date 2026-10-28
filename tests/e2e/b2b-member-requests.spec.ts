@@ -1,17 +1,21 @@
 // Adds by user ID wait for the member to accept in the app (fitflex-functions#241): the add answers
 // 202 { outcome: 'pending_member_acceptance', memberRequest }, lists carry pendingMemberAcceptance[]
 // (HR staff: pendingLink), and the organisation can withdraw a request it made.
+// Privacy (security review): no name until the member accepts (displayName null), and an unknown id or a
+// non-member gets the same 202 with id null; the screens must look the same either way.
 import { expect, test } from '@playwright/test';
 import { ADMIN, HR, Json, orgUser, setupB2B } from './helpers/b2b-mock';
 
 const BENEFICIARIES_PATH = /^\/b2b\/organizations\/([^/]+)\/beneficiaries$/;
 const request = (extra: Json = {}): Json => ({
   id: 'mr-1', kind: 'beneficiary', status: 'pending_member_acceptance', organizationId: 'org-1', corporateId: null, employeeId: null,
-  userId: 'usr_zuhura', displayName: 'Zuhura Said', role: null, permissions: null, beneficiaryType: 'employee', groupName: 'Head office',
+  userId: 'usr_zuhura', displayName: null, role: null, permissions: null, beneficiaryType: 'employee', groupName: 'Head office',
   externalReference: null, beneficiaryStatus: 'active', expiresAt: '2026-11-05T09:00:00.000Z', createdAt: '2026-10-22T09:00:00.000Z',
   decidedAt: null, reason: null, ...extra,
 });
 const ASHA = { id: 'ben-1', organizationId: 'org-1', userId: 'usr-10', displayName: 'Asha Juma', externalReference: 'POL-1', beneficiaryType: 'policyholder', groupName: 'Head office', status: 'active', enrolledAt: '2026-09-01', source: 'b2b', readOnly: false };
+const SENT = 'Request sent. The member must accept in the FitFlex app before they\'re added.';
+const stub = (extra: Json = {}) => ({ outcome: 'pending_member_acceptance', memberRequest: request({ id: null, ...extra }) });
 const list = (pending?: Json[]) => ({ items: [ASHA], total: 1, nextCursor: null, ...(pending ? { pendingMemberAcceptance: pending } : {}) });
 
 test.describe('organisation user', () => {
@@ -25,11 +29,11 @@ test.describe('organisation user', () => {
     await page.getByTestId('org-people-contact').fill('usr_zuhura');
     await page.getByTestId('org-people-add-button').click();
 
-    await expect(page.getByText('Request sent. Zuhura Said must accept in the FitFlex app before they\'re added.')).toBeVisible();
+    await expect(page.getByText(SENT)).toBeVisible();
     await expect(page.getByText(/can now use your programmes/)).toHaveCount(0);
     expect(mock.writes(/\/org-1\/beneficiaries$/).at(-1)?.body).toMatchObject({ userId: 'usr_zuhura' });
     const row = page.getByTestId('org-people-request-mr-1');
-    await expect(row).toContainText('Zuhura Said');
+    await expect(row).toContainText('User ID usr_zuhura');
     await expect(row).toContainText('Waiting for member');
     await expect(row).toContainText('Request expires 5 Nov 2026');
     await expect(row).not.toContainText('active');
@@ -46,7 +50,7 @@ test.describe('organisation user', () => {
     await expect(page.getByTestId('org-people-request-mr-1')).toBeVisible();
 
     // Dismissing the confirm does nothing.
-    page.once('dialog', d => { expect(d.message()).toBe('Withdraw the request to Zuhura Said? They won\'t be added.'); void d.dismiss(); });
+    page.once('dialog', d => { expect(d.message()).toBe('Withdraw the request to User ID usr_zuhura? They won\'t be added.'); void d.dismiss(); });
     await page.getByTestId('member-request-withdraw-mr-1').click();
     expect(mock.writes(/member-requests/)).toHaveLength(0);
 
@@ -77,6 +81,57 @@ test.describe('organisation user', () => {
     await expect(page.getByText('New Person can now use your programmes.')).toBeVisible();
   });
 
+  test('an id with nothing stored (id: null) gets the same message, no row and no withdraw', async ({ page }) => {
+    const mock = await setupB2B(page, orgUser(['admin']));
+    mock.on('GET', BENEFICIARIES_PATH, () => list([]));
+    mock.on('POST', BENEFICIARIES_PATH, () => ({ status: 202, json: stub({ userId: 'usr_nobody' }) }));
+    await page.goto('/org/people');
+    await page.getByTestId('org-people-contact').fill('usr_nobody');
+    await page.getByTestId('org-people-add-button').click();
+    await expect(page.getByText(SENT)).toBeVisible();
+    await expect(page.getByText('Waiting for member')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Withdraw' })).toHaveCount(0);
+    await expect(page.getByText('usr_nobody')).toHaveCount(0);
+    // A stub that sneaks into a list is not shown either.
+    mock.on('GET', BENEFICIARIES_PATH, () => list([request({ id: null })]));
+    await page.reload();
+    await expect(page.getByTestId('org-people-list')).toContainText('Asha Juma');
+    await expect(page.getByText('Waiting for member')).toHaveCount(0);
+  });
+
+  const TOO_MANY: Array<[string, Json, string]> = [
+    ['member_request_cooldown', { error: 'member_request_cooldown', retryAfter: '2026-11-05T09:00:00.000Z', retryAfterSeconds: 1209600 },
+      'This member was asked recently. You can ask again after 5 Nov 2026.'],
+    ['member_request_limit', { error: 'member_request_limit', maxPending: 50 },
+      'Too many requests are waiting for members. Wait for some to be answered or withdraw old ones.'],
+    ['rate_limited', { error: 'rate_limited', retryAfterSeconds: 600 }, 'Too many requests. Try again in a few minutes.'],
+  ];
+  for (const [code, json, text] of TOO_MANY) {
+    test(`429 ${code} is explained`, async ({ page }) => {
+      const mock = await setupB2B(page, orgUser(['admin']));
+      mock.on('POST', BENEFICIARIES_PATH, () => ({ status: 429, json }));
+      await page.goto('/org/people');
+      await page.getByTestId('org-people-contact').fill('usr_zuhura');
+      await page.getByTestId('org-people-add-button').click();
+      await expect(page.getByText(text)).toBeVisible();
+    });
+  }
+
+  test('Swahili: the 429 texts', async ({ page }) => {
+    const mock = await setupB2B(page, orgUser(['admin']));
+    await page.addInitScript(() => { localStorage.setItem('locale', 'sw'); });
+    let answer: Json = TOO_MANY[0][1];
+    mock.on('POST', BENEFICIARIES_PATH, () => ({ status: 429, json: answer }));
+    await page.goto('/org/people');
+    const add = async () => { await page.getByTestId('org-people-contact').fill('usr_zuhura'); await page.getByTestId('org-people-add-button').click(); };
+    await add();
+    await expect(page.getByText(/^Mwanachama huyu aliulizwa hivi karibuni\. Unaweza kuuliza tena baada ya .+\.$/)).toBeVisible();
+    answer = TOO_MANY[1][1]; await add();
+    await expect(page.getByText('Maombi mengi yanasubiri wanachama. Subiri baadhi yajibiwe au futa ya zamani.')).toBeVisible();
+    answer = TOO_MANY[2][1]; await add();
+    await expect(page.getByText('Maombi mengi mno. Jaribu tena baada ya dakika chache.')).toBeVisible();
+  });
+
   test('Swahili: badge, expiry and request-sent message', async ({ page }) => {
     const mock = await setupB2B(page, orgUser(['admin']));
     await page.addInitScript(() => { localStorage.setItem('locale', 'sw'); });
@@ -86,8 +141,9 @@ test.describe('organisation user', () => {
     await page.goto('/org/people');
     await page.getByTestId('org-people-contact').fill('usr_zuhura');
     await page.getByTestId('org-people-add-button').click();
-    await expect(page.getByText('Ombi limetumwa. Zuhura Said lazima akubali kwenye programu ya FitFlex kabla ya kuongezwa.')).toBeVisible();
+    await expect(page.getByText('Ombi limetumwa. Mwanachama lazima akubali kwenye programu ya FitFlex kabla ya kuongezwa.')).toBeVisible();
     const row = page.getByTestId('org-people-request-mr-1');
+    await expect(row).toContainText('Kitambulisho usr_zuhura');
     await expect(row).toContainText('Inasubiri mwanachama');
     await expect(row).toContainText('Ombi linaisha');
     await expect(page.getByTestId('member-request-withdraw-mr-1')).toHaveText('Futa ombi');
@@ -99,7 +155,7 @@ test.describe('company HR', () => {
     { id: 'emp-1', displayName: 'Fatuma Hassan', email: 'fatuma@mwenge.test', phone: null, department: 'Sales', userId: 'usr-20', status: 'active', pendingLink: null },
     { id: 'emp-2', displayName: 'Juma Kileo', email: null, phone: null, department: null, userId: null, status: 'pending' },
   ];
-  const linkRequest = request({ id: 'mr-9', kind: 'employee_link', organizationId: null, corporateId: 'corp-1', employeeId: 'emp-2', displayName: 'Juma K.', beneficiaryType: null, groupName: null });
+  const linkRequest = request({ id: 'mr-9', kind: 'employee_link', organizationId: null, corporateId: 'corp-1', employeeId: 'emp-2', userId: 'usr_juma', beneficiaryType: null, groupName: null });
 
   test('linking by user ID sends a request; the staff list shows it waiting and HR can withdraw it', async ({ page }) => {
     const mock = await setupB2B(page, HR);
@@ -115,9 +171,10 @@ test.describe('company HR', () => {
     await page.getByTestId('company-staff-link-emp-2').fill('usr_juma');
     await page.getByTestId('company-staff-list').getByRole('button', { name: 'Link', exact: true }).click();
 
-    await expect(page.getByText('Request sent. Juma K. must accept in the FitFlex app before they\'re added.')).toBeVisible();
+    await expect(page.getByText(SENT)).toBeVisible();
     expect(mock.writes(/\/corporate\/staff\/emp-2\/link$/).at(-1)?.body).toEqual({ userId: 'usr_juma' });
     const cell = page.getByTestId('company-staff-request-emp-2');
+    await expect(cell).toContainText('User ID usr_juma');
     await expect(cell).toContainText('Waiting for member');
     await expect(cell).toContainText('Request expires 5 Nov 2026');
     await expect(page.getByTestId('company-staff-link-emp-2')).toHaveCount(0);
@@ -128,6 +185,30 @@ test.describe('company HR', () => {
     expect(mock.writes(/\/corporate\/staff\/emp-2\/link$/).at(-1)?.body).toEqual({ userId: null });
     await expect(page.getByTestId('company-staff-request-emp-2')).toHaveCount(0);
     await expect(page.getByTestId('company-staff-link-emp-2')).toBeVisible();
+  });
+
+  test('a link by an id with nothing stored (id: null) looks the same and leaves the link box', async ({ page }) => {
+    const mock = await setupB2B(page, HR);
+    mock.on('GET', /^\/b2b\/me\/organizations$/, () => ({ organizations: [{ id: 'org-3', legalName: 'Mwenge Textiles', tradingName: null, role: 'hr', status: 'active' }] }));
+    mock.on('GET', /^\/corporate\/staff$/, () => ({ employees: STAFF.map(e => ({ ...e, pendingLink: null })) }));
+    mock.on('POST', /^\/corporate\/staff\/([^/]+)\/link$/, () => ({ status: 202, json: stub({ kind: 'employee_link', employeeId: 'emp-2', userId: 'usr_nobody' }) }));
+    await page.goto('/hr/people');
+    await page.getByTestId('company-staff-link-emp-2').fill('usr_nobody');
+    await page.getByTestId('company-staff-list').getByRole('button', { name: 'Link', exact: true }).click();
+    await expect(page.getByText(SENT)).toBeVisible();
+    await expect(page.getByTestId('company-staff-request-emp-2')).toHaveCount(0);
+    await expect(page.getByTestId('company-staff-link-emp-2')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Withdraw' })).toHaveCount(0);
+  });
+
+  test('HR: 429 cooldown is explained', async ({ page }) => {
+    const mock = await setupB2B(page, HR);
+    mock.on('GET', /^\/b2b\/me\/organizations$/, () => ({ organizations: [{ id: 'org-3', legalName: 'Mwenge Textiles', tradingName: null, role: 'hr', status: 'active' }] }));
+    mock.on('POST', /^\/corporate\/staff\/([^/]+)\/link$/, () => ({ status: 429, json: { error: 'member_request_cooldown', retryAfter: '2026-11-05T09:00:00.000Z', retryAfterSeconds: 1209600 } }));
+    await page.goto('/hr/people');
+    await page.getByTestId('company-staff-link-emp-2').fill('usr_juma');
+    await page.getByTestId('company-staff-list').getByRole('button', { name: 'Link', exact: true }).click();
+    await expect(page.getByText('This member was asked recently. You can ask again after 5 Nov 2026.')).toBeVisible();
   });
 
   test('a repeat link by user ID explains the request is already waiting', async ({ page }) => {
@@ -144,7 +225,7 @@ test.describe('company HR', () => {
 test.describe('admin B2B', () => {
   test('requests made by the organisation show in its users and beneficiaries, and can be withdrawn', async ({ page }) => {
     const mock = await setupB2B(page, ADMIN);
-    const userRequest = request({ id: 'mr-2', kind: 'org_user', displayName: 'Grace M.', role: 'finance', beneficiaryType: null, groupName: null, beneficiaryStatus: null });
+    const userRequest = request({ id: 'mr-2', kind: 'org_user', userId: 'usr_grace', role: 'finance', beneficiaryType: null, groupName: null, beneficiaryStatus: null });
     mock.on('GET', /^\/b2b\/organizations\/([^/]+)\/users$/, () => ({ items: [], total: 0, nextCursor: null, pendingMemberAcceptance: [userRequest] }));
     mock.on('GET', BENEFICIARIES_PATH, () => list([request()]));
     mock.on('DELETE', /^\/b2b\/organizations\/([^/]+)\/member-requests\/([^/]+)$/, (_c, m) => ({ memberRequest: { ...(m[2] === 'mr-2' ? userRequest : request()), status: 'cancelled' } }));
@@ -152,7 +233,7 @@ test.describe('admin B2B', () => {
     await page.getByTestId('b2b-org-org-1').click();
 
     const userRow = page.getByTestId('b2b-user-request-mr-2');
-    await expect(userRow).toContainText('Grace M.');
+    await expect(userRow).toContainText('User ID usr_grace');
     await expect(userRow).toContainText('Role: finance');
     await expect(userRow).toContainText('Waiting for member');
     await expect(page.getByTestId('b2b-ben-request-mr-1')).toContainText('Waiting for member');

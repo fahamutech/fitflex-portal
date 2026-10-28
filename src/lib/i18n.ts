@@ -3377,9 +3377,11 @@ export const messages = {
     "b2b.errors.userNotFound": "Nobody has confirmed that email or number in FitFlex. They need to sign up in the app, or confirm it under Mobile number and email.",
     "b2b.errors.userIdNotFound": "No FitFlex account has that ID.",
     // Adds by user ID wait for the member to accept (fitflex-functions#241).
-    "b2b.memberRequest.sent": "Request sent. {name} must accept in the FitFlex app before they're added.",
-    "b2b.memberRequest.employeeAddedSent": "{employee} added. Request sent. {name} must accept in the FitFlex app before they're linked.",
+    // The member's name is not shown until they accept (fitflex-functions#241 security review).
+    "b2b.memberRequest.sent": "Request sent. The member must accept in the FitFlex app before they're added.",
+    "b2b.memberRequest.employeeAddedSent": "{employee} added. Request sent. The member must accept in the FitFlex app before they're linked.",
     "b2b.memberRequest.someone": "The member",
+    "b2b.memberRequest.userId": "User ID {userId}",
     "b2b.memberRequest.waiting": "Waiting for member",
     "b2b.memberRequest.expires": "Request expires {date}",
     "b2b.memberRequest.withdraw": "Withdraw",
@@ -3391,6 +3393,9 @@ export const messages = {
     "b2b.errors.memberRequestNotPending": "That request has already been answered or has expired.",
     "b2b.errors.memberRequestNotFound": "That request no longer exists.",
     "b2b.errors.memberConsentUnavailable": "Adding someone by user ID isn't available right now. Use their confirmed email or mobile number.",
+    "b2b.errors.memberRequestCooldown": "This member was asked recently. You can ask again after {date}.",
+    "b2b.errors.memberRequestLimit": "Too many requests are waiting for members. Wait for some to be answered or withdraw old ones.",
+    "b2b.errors.rateLimited": "Too many requests. Try again in a few minutes.",
   },
   sw: {
     'app.title': 'FitFlex Af — Portal ya Waendeshaji',
@@ -6769,9 +6774,10 @@ export const messages = {
     "b2b.errors.userNotFound": "Hakuna aliyethibitisha barua pepe au namba hiyo kwenye FitFlex. Wanahitaji kujisajili kwenye programu, au kuithibitisha katika Namba ya simu na barua pepe.",
     "b2b.errors.userIdNotFound": "Hakuna akaunti ya FitFlex yenye kitambulisho hicho.",
     // Adds by user ID wait for the member to accept (fitflex-functions#241). Swahili drafted 2026-10-22: DRAFT, needs native review.
-    "b2b.memberRequest.sent": "Ombi limetumwa. {name} lazima akubali kwenye programu ya FitFlex kabla ya kuongezwa.",
-    "b2b.memberRequest.employeeAddedSent": "{employee} ameongezwa. Ombi limetumwa. {name} lazima akubali kwenye programu ya FitFlex kabla ya kuunganishwa.",
+    "b2b.memberRequest.sent": "Ombi limetumwa. Mwanachama lazima akubali kwenye programu ya FitFlex kabla ya kuongezwa.",
+    "b2b.memberRequest.employeeAddedSent": "{employee} ameongezwa. Ombi limetumwa. Mwanachama lazima akubali kwenye programu ya FitFlex kabla ya kuunganishwa.",
     "b2b.memberRequest.someone": "Mwanachama",
+    "b2b.memberRequest.userId": "Kitambulisho {userId}",
     "b2b.memberRequest.waiting": "Inasubiri mwanachama",
     "b2b.memberRequest.expires": "Ombi linaisha {date}",
     "b2b.memberRequest.withdraw": "Futa ombi",
@@ -6783,6 +6789,9 @@ export const messages = {
     "b2b.errors.memberRequestNotPending": "Ombi hilo tayari limejibiwa au muda wake umekwisha.",
     "b2b.errors.memberRequestNotFound": "Ombi hilo halipo tena.",
     "b2b.errors.memberConsentUnavailable": "Kuongeza mtu kwa kitambulisho cha mtumiaji hakupatikani kwa sasa. Tumia barua pepe au namba ya simu yake iliyothibitishwa.",
+    "b2b.errors.memberRequestCooldown": "Mwanachama huyu aliulizwa hivi karibuni. Unaweza kuuliza tena baada ya {date}.",
+    "b2b.errors.memberRequestLimit": "Maombi mengi yanasubiri wanachama. Subiri baadhi yajibiwe au futa ya zamani.",
+    "b2b.errors.rateLimited": "Maombi mengi mno. Jaribu tena baada ya dakika chache.",
   }
 } as const;
 

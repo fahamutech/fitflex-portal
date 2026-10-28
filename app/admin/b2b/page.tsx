@@ -9,8 +9,8 @@ import {
 import { Alert, Badge, Button, Card, CardContent, CardHeader, Field, Input, PageHeader, Select, Spinner } from '@/components/shared';
 import { B2BPrograms } from '@/components/b2b-programs';
 import { tierErrorKey } from '@/lib/pass-tiers';
-import type { MessageKey } from '@/lib/i18n';
-import { MEMBER_REQUEST_ERRORS, PendingMemberStatus, WithdrawRequestButton, fill, requestName, requestSentNotice } from '@/components/b2b-member-requests';
+import type { Locale, MessageKey } from '@/lib/i18n';
+import { PendingMemberStatus, WithdrawRequestButton, fill, memberRequestError, requestLabel, requestSentNotice, shownRequests } from '@/components/b2b-member-requests';
 
 const ERRORS: Record<string, string> = {
   invalid_organization_type: 'Choose an organisation type.',
@@ -33,10 +33,11 @@ const ERRORS: Record<string, string> = {
 // Codes whose text lives in i18n (English + Swahili).
 const I18N_ERRORS: Partial<Record<string, MessageKey>> = {
   user_not_found: 'b2b.errors.userNotFound',
-  ...MEMBER_REQUEST_ERRORS,
 };
 // byId: the request named the person by user ID, so user_not_found means the ID matched no account.
-const message = (err: unknown, fallback: string, t: (k: MessageKey) => string, byId = false) => {
+const message = (err: unknown, fallback: string, t: (k: MessageKey) => string, byId = false, locale: Locale = 'en') => {
+  const request = memberRequestError(err, t, locale);
+  if (request) return request;
   const code = err instanceof ApiError ? (err.body as { error?: string } | null)?.error : undefined;
   if (code === 'user_not_found' && byId) return t('b2b.errors.userIdNotFound');
   const i18nKey = code ? I18N_ERRORS[code] : undefined;
@@ -59,7 +60,7 @@ const EMPTY_ORG = { organizationType: 'insurer', legalName: '', tradingName: '',
  * staff, which show read-only.
  */
 export default function AdminB2BPage() {
-  const { token, t } = useApp();
+  const { token, t, locale } = useApp();
   const [ref, setRef] = useState<B2BReference | null>(null);
   const [filter, setFilter] = useState({ type: '', status: '' });
   const [orgs, setOrgs] = useState<B2BOrganization[] | null>(null);
@@ -111,8 +112,8 @@ export default function AdminB2BPage() {
     ]);
     setOrgUsers(u.status === 'fulfilled' ? u.value.items : []);
     setBeneficiaries(b.status === 'fulfilled' ? b.value.items : []);
-    setPendingUsers(u.status === 'fulfilled' ? u.value.pendingMemberAcceptance ?? [] : []);
-    setPendingBeneficiaries(b.status === 'fulfilled' ? b.value.pendingMemberAcceptance ?? [] : []);
+    setPendingUsers(u.status === 'fulfilled' ? shownRequests(u.value.pendingMemberAcceptance) : []);
+    setPendingBeneficiaries(b.status === 'fulfilled' ? shownRequests(b.value.pendingMemberAcceptance) : []);
   };
 
   const run = async (fn: () => Promise<void>, fallback: string, byId = false) => {
@@ -122,7 +123,7 @@ export default function AdminB2BPage() {
     try {
       await fn();
     } catch (err) {
-      setError(message(err, fallback, t, byId));
+      setError(message(err, fallback, t, byId, locale));
     } finally {
       setBusy(false);
     }
@@ -169,8 +170,9 @@ export default function AdminB2BPage() {
       setUserForm({ userId: '', role: userForm.role });
       // Platform admins add directly today; should the backend ask the member first, show it as a request, not a user.
       if (isPendingMemberAcceptance(out)) {
-        setPendingUsers(list => [out.memberRequest, ...list.filter(r => r.id !== out.memberRequest.id)]);
-        setNotice(requestSentNotice(t, out.memberRequest));
+        // id null: nothing was stored; same message, no row.
+        setPendingUsers(list => shownRequests([out.memberRequest, ...list.filter(r => r.id !== out.memberRequest.id)]));
+        setNotice(requestSentNotice(t));
         return;
       }
       setOrgUsers(list => [...(list ?? []), out.organizationUser]);
@@ -194,16 +196,16 @@ export default function AdminB2BPage() {
       const out = await api.enrollB2BBeneficiary(token, selected.id, body);
       setBenForm({ userId: '', beneficiaryType: benForm.beneficiaryType, externalReference: '', groupName: '' });
       if (isPendingMemberAcceptance(out)) {
-        setPendingBeneficiaries(list => [out.memberRequest, ...list.filter(r => r.id !== out.memberRequest.id)]);
-        setNotice(requestSentNotice(t, out.memberRequest));
+        setPendingBeneficiaries(list => shownRequests([out.memberRequest, ...list.filter(r => r.id !== out.memberRequest.id)]));
+        setNotice(requestSentNotice(t));
         return;
       }
       setBeneficiaries(list => [...(list ?? []), out.beneficiary]);
     }, 'Could not enrol the member.', 'userId' in contact);
   };
 
-  const withdrawRequest = (r: B2BMemberRequest) => token && selected && run(async () => {
-    await api.cancelB2BMemberRequest(token, selected.id, r.id);
+  const withdrawRequest = (r: B2BMemberRequest) => token && selected && r.id && run(async () => {
+    await api.cancelB2BMemberRequest(token, selected.id, r.id as string);
     if (r.kind === 'org_user') setPendingUsers(list => list.filter(x => x.id !== r.id));
     else setPendingBeneficiaries(list => list.filter(x => x.id !== r.id));
     setNotice(t('b2b.memberRequest.withdrawn'));
@@ -377,7 +379,7 @@ export default function AdminB2BPage() {
                       {pendingUsers.map(r => (
                         <li key={`request-${r.id}`} className="flex flex-wrap items-center justify-between gap-2 py-2 text-sm" data-testid={`b2b-user-request-${r.id}`}>
                           <span>
-                            <span className="font-medium">{requestName(t, r)}</span>{' '}
+                            <span className="font-medium">{requestLabel(t, r)}</span>{' '}
                             {r.role && <span className="text-[var(--color-fg-quaternary)]">{fill(t('b2b.memberRequest.role'), { role: r.role })}</span>}
                           </span>
                           <span className="flex items-center gap-2">
@@ -433,7 +435,7 @@ export default function AdminB2BPage() {
                       {pendingBeneficiaries.map(r => (
                         <li key={`request-${r.id}`} className="flex flex-wrap items-center justify-between gap-2 py-2 text-sm" data-testid={`b2b-ben-request-${r.id}`}>
                           <span>
-                            <span className="font-medium">{requestName(t, r)}</span>{' '}
+                            <span className="font-medium">{requestLabel(t, r)}</span>{' '}
                             <span className="text-[var(--color-fg-quaternary)]">
                               {[r.beneficiaryType ? ref?.beneficiaryTypes[r.beneficiaryType] ?? r.beneficiaryType : null, r.groupName, r.externalReference].filter(Boolean).join(' · ')}
                             </span>

@@ -2659,13 +2659,15 @@ export interface CorporateEmployee {
  * view: never the member's contact details.
  */
 export interface B2BMemberRequest {
-  id: string;
+  /** null when nothing was stored (unknown id or not a member): the answer looks the same on purpose. */
+  id: string | null;
   kind: 'beneficiary' | 'org_user' | 'employee_link';
   status: 'pending_member_acceptance' | 'accepted' | 'declined' | 'expired' | 'cancelled';
   organizationId: string | null;
   corporateId: string | null;
   employeeId: string | null;
   userId: string;
+  /** null until the member accepts: the organisation never learns who the id belongs to before that. */
   displayName: string | null;
   role: string | null;
   permissions: string[] | null;
