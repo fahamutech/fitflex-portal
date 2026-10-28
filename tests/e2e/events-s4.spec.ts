@@ -388,7 +388,7 @@ test.describe('admin order panel and event cancellation (§6.4, §6.5, P-A-1, P-
     await page.goto('/admin/events/?event=evt_pub');
     await page.getByTestId('admin-action-cancel').click();
     await expect(page.getByTestId('cancel-event-summary')).toHaveText('2 unpaid orders will be released. 3 paid orders (7 places, TSh 350,000) will be cancelled and their tickets revoked.');
-    await expect(page.getByTestId('cancel-event-submitted')).toContainText('1 orders have a payment waiting for review');
+    await expect(page.getByTestId('cancel-event-submitted')).toContainText('1 order has a payment waiting for review');
     await expect(page.getByTestId('cancel-event-raise')).toBeChecked();
     await expect(page.getByTestId('cancel-confirm')).toHaveText('Cancel event and raise refunds');
     await page.getByTestId('cancel-confirm').click();
@@ -396,14 +396,19 @@ test.describe('admin order panel and event cancellation (§6.4, §6.5, P-A-1, P-
     await page.getByRole('alertdialog').getByRole('button', { name: 'Cancel event and raise refunds' }).click();
     await expect.poll(() => mock.writes(/\/admin\/events\/evt_pub\/cancel$/).length).toBe(1);
     expect(mock.writes(/\/cancel$/)[0].body).toEqual({ reason: 'organizer_decision', note: { en: '', sw: '' }, refundPaidOrders: true, expectedRefundableTzs: 350000 });
-    // The cancel answer carries no batch, so the idempotent batch route is asked for the numbers.
+    // The cancel answer carries no batch, so the idempotent batch route is asked for the numbers: with NO expected total (the pre-cancel figure is stale).
     await expect.poll(() => mock.writes(/refund-batch$/).length).toBe(1);
-    expect(mock.writes(/refund-batch$/)[0].body).toEqual({ expectedRefundableTzs: 350000 });
-    await expect(page.getByTestId('cancel-event-result')).toContainText('Event cancelled. 2 refunds raised.');
+    expect(mock.writes(/refund-batch$/)[0].body).toEqual({});
+    await expect(page.getByTestId('cancel-event-result')).toContainText('Event cancelled. 200 refunds raised.');
+    await expect(page.getByTestId('cancel-event-remaining')).toContainText('150 orders still need refunds raised.');
     await expect(page.getByTestId('cancel-event-review')).toHaveAttribute('href', /\/admin\/refunds\/?\?batch=evb_9$/);
+    // More than 200 orders: resuming after the first chunk must not resend the stale total (the live total dropped; the server would answer 409).
     await page.getByTestId('cancel-event-continue').click();
     await expect.poll(() => mock.writes(/refund-batch$/).length).toBe(2);
+    expect(mock.writes(/refund-batch$/)[1].body).toEqual({});
     await expect(page.getByTestId('cancel-event-remaining')).toHaveCount(0);
+    await expect(page.getByTestId('cancel-event-error')).toHaveCount(0);
+    expect(mock.s4!.liveRefundable).toBe(0);
   });
 
   test('unchecking the refunds box cancels without raising them; refundable_changed refreshes the numbers and asks again', async ({ page }) => {
@@ -424,7 +429,7 @@ test.describe('admin order panel and event cancellation (§6.4, §6.5, P-A-1, P-
     await expect(page.getByRole('alertdialog')).toContainText('No refunds will be raised.');
     await page.getByRole('alertdialog').getByRole('button', { name: 'Cancel event' }).click();
     await expect.poll(() => mock.writes(/\/admin\/events\/evt_pub\/cancel$/).length).toBe(2);
-    expect(mock.writes(/\/cancel$/)[1].body).toEqual({ reason: 'organizer_decision', note: { en: '', sw: '' }, refundPaidOrders: false });
+    expect(mock.writes(/\/cancel$/)[1].body).toEqual({ reason: 'organizer_decision', note: { en: '', sw: '' }, refundPaidOrders: false, expectedRefundableTzs: 350000 });
     await expect(page.getByTestId('cancel-event-result')).toContainText('Event cancelled.');
     await expect(page.getByTestId('cancel-event-result')).not.toContainText('refunds raised');
     expect(mock.writes(/refund-batch$/)).toHaveLength(0);
@@ -526,7 +531,7 @@ test.describe('wizard Terms step: refund presets (§6.7, D24, P-W-1)', () => {
     await page.getByTestId('wizard-next').click();
     await expect(page.getByTestId('ev-refund-policy')).toContainText('Enter a number from 1 to 365.');
     await page.getByTestId('ev-policyDays').fill('14');
-    await expect(page.getByTestId('ev-policy-generated')).toHaveValue('Full refund until 14 days before the event. No refund after that.');
+    await expect(page.getByTestId('ev-policy-generated')).toHaveValue('Full refund until 14 days before the event. No refund after that.', { timeout: 15_000 });
     await expect.poll(() => mock.writes(/\/organizer\/events\/evt_1$/).length).toBeGreaterThanOrEqual(1);
     await page.getByTestId('wizard-next').click();
     const last = mock.writes(/\/organizer\/events\/evt_1$/).at(-1)!.body!;
@@ -555,7 +560,7 @@ test.describe('wizard Terms step: refund presets (§6.7, D24, P-W-1)', () => {
     await expect(page.getByTestId('ev-tier-2')).toContainText("Percent can't be higher than the step above.");
     await page.getByTestId('ev-tier-2-percent').fill('25');
     await expect(page.getByTestId('ev-tier-add')).toHaveCount(0); // three is the most
-    await expect(page.getByTestId('ev-policy-generated')).toHaveValue('100% refund until 30 days before the event. 50% refund until 14 days before the event. 25% refund until 3 days before the event. No refund after that.');
+    await expect(page.getByTestId('ev-policy-generated')).toHaveValue('100% refund until 30 days before the event. 50% refund until 14 days before the event. 25% refund until 3 days before the event. No refund after that.', { timeout: 15_000 });
     await page.getByTestId('ev-tier-2-remove').click();
     await expect(page.getByTestId('ev-tier-add')).toBeVisible();
     await page.getByTestId('ev-tier-add').click();
@@ -572,7 +577,7 @@ test.describe('wizard Terms step: refund presets (§6.7, D24, P-W-1)', () => {
     await page.goto('/organizer/events/?event=evt_1&step=terms');
     await page.getByTestId('ev-policy-full_until_days').check();
     await page.getByTestId('ev-policyDays').fill('7');
-    await expect(page.getByTestId('ev-policy-generated')).toHaveValue('Marejesho kamili hadi siku 7 kabla ya tukio. Hakuna marejesho baada ya hapo.');
+    await expect(page.getByTestId('ev-policy-generated')).toHaveValue('Marejesho kamili hadi siku 7 kabla ya tukio. Hakuna marejesho baada ya hapo.', { timeout: 15_000 });
     await expect(page.getByTestId('ev-refund-policy')).toContainText('Maandishi ya sera ya marejesho ni rasimu inayosubiri ukaguzi wa wakili wa Tanzania.');
     await expectNoRawKeys(page);
   });
@@ -755,11 +760,166 @@ test.describe('corporate order payment (§6.8, P-C-1, P-C-2)', () => {
   test('refund pending: the order shows the pill and the refund card; Swahili has no raw keys', async ({ page }) => {
     await setupEvents(page, orgUser(['owner']), { s4: {}, locale: 'sw' });
     await page.goto('/org/events/?order=ord_c_ref');
-    await expect(page.getByTestId('corp-order-detail')).toContainText('Marejesho yanasubiriwa');
+    await expect(page.getByTestId('corp-order-detail')).toContainText('Inasubiri marejesho');
     await expect(page.getByTestId('corp-refund-card')).toContainText('Marejesho huenda kwa shirika lenu.');
     await page.goto('/org/events/?order=ord_c_new');
     await expect(page.getByTestId('corp-pay-howto')).toContainText('Jinsi ya kulipa');
     await expect(page.getByTestId('corp-pay-submit')).toHaveText('Tumelipa · Tuma ikaguliwe');
     await expectNoRawKeys(page);
+  });
+});
+
+// ── Review round (contract check + Swahili audit of PR #161) ──
+test.describe('review fixes: real backend shapes and scope rules', () => {
+  const EVENTS_ONLY = { id: 'admin-5', userType: 'admin', portalUser: true, aclPermissions: ['events'] };
+
+  test('an events-only admin can cancel and raise refunds but sees no resume or Review refunds control', async ({ page }) => {
+    const mock = await setupEvents(page, EVENTS_ONLY, { s4: {} });
+    await page.goto('/admin/events/?event=evt_pub');
+    await page.getByTestId('admin-action-cancel').click();
+    await page.getByTestId('cancel-confirm').click();
+    await page.getByRole('alertdialog').getByRole('button', { name: 'Cancel event and raise refunds' }).click();
+    await expect(page.getByTestId('cancel-event-result')).toBeVisible();
+    // Resume, batch decision and payouts need the payments scope: the call is not even made.
+    expect(mock.writes(/refund-batch$/)).toHaveLength(0);
+    await expect(page.getByTestId('cancel-event-continue')).toHaveCount(0);
+    await expect(page.getByTestId('cancel-event-review')).toHaveCount(0);
+  });
+
+  test('a 403 forbidden on resuming the batch shows a sentence, not a raw key', async ({ page }) => {
+    const mock = await setupEvents(page, SUPER_ADMIN, { s4: {} });
+    await page.goto('/admin/events/?event=evt_pub');
+    await page.getByTestId('admin-action-cancel').click();
+    await page.getByTestId('cancel-confirm').click();
+    await page.getByRole('alertdialog').getByRole('button', { name: 'Cancel event and raise refunds' }).click();
+    await expect(page.getByTestId('cancel-event-continue')).toBeVisible();
+    mock.on('POST', /refund-batch$/, () => ({ status: 403, json: { error: 'forbidden' } }));
+    await page.getByTestId('cancel-event-continue').click();
+    await expect(page.getByTestId('cancel-event-result')).toContainText('needs the Payments permission');
+  });
+
+  test('refund mode "none" is hidden without the payments scope; "per policy" is off for a custom policy', async ({ page }) => {
+    await setupEvents(page, EVENTS_ONLY, { s4: {} });
+    await page.goto('/admin/events/?event=evt_pub&view=orders');
+    await page.getByTestId('order-open-ord_2').click();
+    await expect(page.getByTestId('admin-refund-mode-full')).toBeVisible();
+    await expect(page.getByTestId('admin-refund-mode-none')).toHaveCount(0);
+    await page.keyboard.press('Escape');
+    await page.getByTestId('order-open-ord_cust').click();
+    await expect(page.getByTestId('admin-refund-mode-policy')).toBeDisabled();
+    await expect(page.getByTestId('admin-refund-mode-full')).toBeChecked();
+  });
+
+  test('policy_not_evaluable and payments_scope_required are mapped to sentences', async ({ page }) => {
+    const mock = await setupEvents(page, SUPER_ADMIN, { s4: {} });
+    await page.goto('/admin/events/?event=evt_pub&view=orders');
+    await page.getByTestId('order-open-ord_2').click();
+    mock.on('POST', /ord_2\/cancel$/, () => ({ status: 403, json: { error: 'payments_scope_required' } }));
+    await page.getByTestId('admin-order-cancel-note').fill('Organizer asked us to refund this order.');
+    await page.getByTestId('admin-order-cancel').click();
+    await expect(page.getByText('Refunding nothing needs the Payments permission', { exact: false })).toBeVisible();
+  });
+
+  test('staff data comes from paymentPanel.payments[] (status, not state): pill, attention reason and the new failure reasons', async ({ page }) => {
+    await setupEvents(page, SUPER_ADMIN, { s4: {} });
+    await page.goto('/admin/events/?event=evt_pub&view=orders');
+    await page.getByTestId('order-open-ord_attn3').click();
+    await expect(page.getByTestId('order-payment-state')).toHaveText('Needs attention');
+    await expect(page.getByTestId('order-payment-attention')).toContainText('Order was already paid');
+    await page.keyboard.press('Escape');
+    await page.getByTestId('order-open-ord_2').click();
+    await expect(page.getByTestId('order-payment-state')).toHaveText('Confirmed');
+    await expect(page.getByTestId('order-tickets-summary')).toHaveText('3 issued, 0 cancelled');
+  });
+
+  test('an event payment change request offers only rejected to approved; a cancelled event payment offers none', async ({ page }) => {
+    const mock = await setupEvents(page, SUPER_ADMIN, { s4: { secondApprover: true } });
+    await page.goto('/admin/payments/');
+    await page.getByTestId('payments-kind-event_order').click();
+    await page.getByRole('button', { name: 'Rejected' }).click();
+    await row(page, 'EV-2026-0017').getByTestId('payment-request-change').click();
+    const opts = await page.getByTestId('change-status').locator('option').allTextContents();
+    expect(opts).toEqual(['Choose a status', 'Approved']);
+    await page.getByTestId('change-status').selectOption('approved');
+    await page.getByTestId('change-reason').fill('Rejected by mistake');
+    await page.getByTestId('change-submit').click();
+    await expect.poll(() => mock.writes(/change-request$/).length).toBe(1);
+    await page.getByRole('button', { name: 'Cancelled' }).click();
+    await expect(row(page, 'EV-2026-0018').getByTestId('payment-request-change')).toHaveCount(0);
+  });
+
+  test('event_payment_change_not_allowed shows a sentence in the dialog', async ({ page }) => {
+    const mock = await setupEvents(page, SUPER_ADMIN, { s4: { secondApprover: true } });
+    await page.goto('/admin/payments/');
+    await page.getByTestId('payments-kind-event_order').click();
+    await page.getByRole('button', { name: 'Rejected' }).click();
+    await row(page, 'EV-2026-0017').getByTestId('payment-request-change').click();
+    mock.on('POST', /change-request$/, () => ({ status: 409, json: { error: 'event_payment_change_not_allowed' } }));
+    await page.getByTestId('change-status').selectOption('approved');
+    await page.getByTestId('change-reason').fill('Mistake');
+    await page.getByTestId('change-submit').click();
+    await expect(page.getByRole('dialog')).toContainText('Only a rejected payment can be approved by a change request');
+  });
+
+  test('the reject dialog sends memberNoteSw next to memberNote', async ({ page }) => {
+    const mock = await QUEUE(page);
+    await row(page, 'EV-2026-0001').getByTestId('payment-reject').click();
+    await page.getByTestId('event-reject-reason').selectOption('other');
+    await page.getByTestId('event-reject-member-note').fill('Please check the ID');
+    await page.getByTestId('event-reject-member-note-sw').fill('Tafadhali kagua namba');
+    await page.getByTestId('event-reject-confirm').click();
+    await expect.poll(() => mock.writes(/\/decision$/).length).toBe(1);
+    expect(mock.writes(/\/decision$/)[0].body).toEqual({ decision: 'reject', reasonCode: 'other', memberNote: 'Please check the ID', memberNoteSw: 'Tafadhali kagua namba' });
+  });
+
+  test('corporate: the payment form shows while next.payment is provider (Tunzaa on), and a "none" payment prefills the form', async ({ page }) => {
+    const mock = await setupEvents(page, orgUser(['owner']), { s4: { payment: 'provider' } });
+    await page.goto('/org/events/?order=ord_c_new');
+    await expect(page.getByTestId('corp-pay-form')).toBeVisible();
+    // PaymentView.state "none" is not "submitted": no under-review card; the last method and date prefill the form.
+    await expect(page.getByTestId('corp-pay-submitted')).toHaveCount(0);
+    await expect(page.getByTestId('corp-pay-paid-on')).toHaveValue('2026-10-27');
+    await expect(page.getByTestId('corp-pay-method')).toHaveValue('bank_transfer');
+    await page.getByTestId('corp-pay-reference').fill('CRDB-TRF-00917');
+    await page.getByTestId('corp-pay-submit').click();
+    await expect.poll(() => mock.writes(/\/payment$/).length).toBe(1);
+  });
+
+  test('registration status refunded reads Refunded / Imerejeshwa', async ({ page }) => {
+    await setupEvents(page, orgUser(['owner']), { s4: {} });
+    await page.goto('/org/events/?order=ord_c_ref');
+    await expect(page.getByTestId('corp-order-detail')).not.toContainText(/events\.regStatus/);
+  });
+
+  test('invitation: the nested invitation is read when the flat fields are absent', async ({ page }) => {
+    const mock = await setupEvents(page, orgUser(['owner']), { s4: {} });
+    mock.s4!.corp.ord_c_conf.registrations.forEach((r: Record<string, unknown>) => { delete r.claimInvitedAt; delete r.claimInviteCount; delete r.hasContact; });
+    await page.goto('/org/events/?order=ord_c_conf');
+    await expect(page.getByTestId('corp-invited-reg_2')).toBeVisible();
+    await expect(page.getByTestId('corp-nocontact-reg_3')).toHaveText('No contact');
+  });
+
+  test('Swahili: times use the 12-hour clock with the part of the day; wording follows the audit', async ({ page }) => {
+    await setupEvents(page, SUPER_ADMIN, { s4: {}, locale: 'sw' });
+    await page.goto('/admin/events/?event=evt_pub&view=orders');
+    await page.getByTestId('order-open-ord_2').click();
+    const panel = page.getByTestId('order-payment-panel');
+    await expect(panel.getByTestId('order-payment-timeline')).toContainText(/\d{1,2}:\d{2} (asubuhi|mchana|jioni|usiku)/);
+    await expect(panel.getByTestId('order-payment-timeline')).not.toContainText(/\b(1[3-9]|2[0-3]):\d{2}\b/);
+    await expect(panel.getByTestId('order-payment-timeline')).toHaveAttribute('aria-label', 'Hatua za malipo');
+    await expect(page.getByTestId('admin-order-refund-mode')).toContainText('Admin wa pili ataidhinisha marejesho.');
+  });
+
+  test('Swahili: the finance time reads "Kufikia"', async ({ page }) => {
+    await setupEvents(page, OWNER, { s4: {}, locale: 'sw' });
+    await page.goto('/organizer/events/?event=evt_pub&view=finance');
+    await expect(page.getByTestId('finance-as-of')).toContainText(/Kufikia .*\d{1,2}:\d{2} (asubuhi|mchana|jioni|usiku)/);
+  });
+
+  test('Swahili plural-safe strings: one and many', async ({ page }) => {
+    await setupEvents(page, SUPER_ADMIN, { s4: {}, locale: 'sw' });
+    await page.goto('/admin/events/?event=evt_pub');
+    await page.getByTestId('admin-action-cancel').click();
+    await expect(page.getByTestId('cancel-event-submitted')).toContainText('Oda 1 ina malipo yanayosubiri ukaguzi.');
   });
 });

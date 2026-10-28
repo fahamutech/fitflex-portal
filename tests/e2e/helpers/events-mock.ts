@@ -29,6 +29,18 @@ export const organizerMe = (status = 'active', role = 'owner', extra: Json = {})
   organizer: { id: 'org_1', name: 'Dar Runners', status, timezone: 'Africa/Dar_es_Salaam', kycCaseId: 'kyc_1', kycStatus: status === 'active' ? 'approved' : status === 'pending_review' ? 'submitted' : status === 'draft' ? 'draft' : status, statusReason: status === 'suspended' || status === 'rejected' ? 'Duplicate partner' : null, ...extra },
   role, permissions: role === 'owner' || role === 'admin' ? ['events', 'staff'] : [],
 });
+/** The sentence members read, built by the server in both languages (the mock plays the server; the portal never words a policy). */
+export function serverPolicyLine(p: Json): { en: string; sw: string } | null {
+  const d = (n: number, l: 'en' | 'sw') => (l === 'en' ? (n === 1 ? '1 day' : `${n} days`) : `siku ${n}`);
+  if (p.preset === 'no_refund') return { en: 'No refunds.', sw: 'Hakuna marejesho.' };
+  if (p.preset === 'refund_until_close') return { en: 'Full refund until registration closes. No refund after that.', sw: 'Marejesho kamili hadi usajili ufungwe. Hakuna marejesho baada ya hapo.' };
+  if (p.preset === 'full_until_days') return { en: `Full refund until ${d(p.days, 'en')} before the event. No refund after that.`, sw: `Marejesho kamili hadi ${d(p.days, 'sw')} kabla ya tukio. Hakuna marejesho baada ya hapo.` };
+  if (p.preset === 'tiered') return {
+    en: `${p.tiers.map((t: Json) => `${t.percent}% refund until ${d(t.daysBefore, 'en')} before the event.`).join(' ')} No refund after that.`,
+    sw: `${p.tiers.map((t: Json) => `Marejesho ya ${t.percent}% hadi ${d(t.daysBefore, 'sw')} kabla ya tukio.`).join(' ')} Hakuna marejesho baada ya hapo.`,
+  };
+  return null;
+}
 const T0 = '2027-03-14T03:30:00.000Z'; // 06:30 EAT
 const summary = (over: Json = {}) => ({
   id: 'evt_1', slug: 'dar-half-marathon-2027', title: 'Dar Half Marathon 2027', type: 'road', status: 'draft',
@@ -53,7 +65,7 @@ export const DOC = (over: Json = {}) => ({
     { id: 'cat_2', name: '10K', distanceM: 10000, startsAt: null, capacity: null, eligibility: null, minAge: null, ticketTypes: [{ id: 'tt_2', name: 'Standard', priceTzs: 0, currency: 'TZS', capacity: null, saleOpensAt: null, saleClosesAt: null, minPerOrder: 1, maxPerOrder: 10 }] },
   ],
   collectionPoints: [], schedule: [], sponsors: [], contact: { email: 'race@runs.test', phone: null, whatsapp: null },
-  terms: { en: 'T'.repeat(120), sw: 'M'.repeat(120) }, refundPolicy: { preset: 'no_refund', text: null }, cancellation: null, shareUrl: null, publishedAt: null,
+  terms: { en: 'T'.repeat(120), sw: 'M'.repeat(120) }, refundPolicy: { preset: 'no_refund', text: null, generated: { en: 'No refunds.', sw: 'Hakuna marejesho.' } }, cancellation: null, shareUrl: null, publishedAt: null,
   version: 3, allowedActions: ['edit', 'submit', 'delete'], submittedAt: null, rejection: null, changeLogCount: 0, ...over,
 });
 export const PUBLISHED = DOC({ id: 'evt_pub', slug: 'arusha-trail-10k', title: 'Arusha Trail 10K', type: 'trail', status: 'published', publishedAt: '2026-10-19T08:00:00.000Z', allowedActions: ['edit', 'cancel'], changeLogCount: 1, version: 7 });
@@ -231,7 +243,7 @@ export type S4Opts = {
 };
 export type S4State = {
   requests: Json[]; refunds: Json[]; adminOrders: Record<string, Json>; corp: Record<string, Json>;
-  batchRemaining: number; resendCount: Record<string, number>; idem: Record<string, { body: string; payment: Json }>;
+  batchRemaining: number; liveRefundable: number; resendCount: Record<string, number>; idem: Record<string, { body: string; payment: Json }>;
 };
 const hoursFromNow = (h: number) => new Date(Date.now() + h * 3_600_000).toISOString();
 const evOrder = (over: Json = {}) => ({
@@ -266,7 +278,8 @@ function makeS4(user: Json, me: Json | null, orgRole: string, o: S4Opts, setup: 
   const hasScope = (scope: string) => scopes === null || scopes.includes(scope);
   const forbidden = () => ({ status: 403, json: { error: 'acl_forbidden' } });
   const twoRow = (r: Json): Json => {
-    if (!two || r.status !== 'pending') return r;
+    if (!two) return r;
+    if (r.status !== 'pending') return { ...r, secondApproverRequired: true };
     const stage = r.verifiedBy ? 'awaiting_second_approval' : 'awaiting_verification';
     return { ...r, secondApproverRequired: true, approvalStage: stage, ...(r.verifiedBy ? { approveNotBy: r.verifiedBy } : {}) };
   };
@@ -279,6 +292,8 @@ function makeS4(user: Json, me: Json | null, orgRole: string, o: S4Opts, setup: 
       EVENT_PAYMENT_REQUEST({ id: 'pr_ev_cancelled_event', memberReference: 'CANC000001', note: 'event_order:EV-2026-0008' }, { orderId: 'ord_cev', reference: 'EV-2026-0008', eventStatus: 'cancelled' }),
       EVENT_PAYMENT_REQUEST({ id: 'pr_ev_repair', status: 'approved', decidedAt: '2026-10-27T11:00:00.000Z', reference: 'QGH7XK2L9P', memberReference: 'QGH7XK2L9P', note: 'event_order:EV-2026-0005' }, { orderId: 'ord_rep', reference: 'EV-2026-0005', repairable: true }),
       EVENT_PAYMENT_REQUEST({ id: 'pr_ev_attn', status: 'approved', decidedAt: '2026-10-27T11:00:00.000Z', reference: 'ATTN000001', memberReference: 'ATTN000001', note: 'event_order:EV-2026-0006' }, { orderId: 'ord_attn', reference: 'EV-2026-0006', status: 'expired', paymentStatus: 'reconciliation_required', failureReason: 'capacity_unavailable', refundId: 'rf_unf' }),
+      EVENT_PAYMENT_REQUEST({ id: 'pr_ev_rej', status: 'rejected', decidedAt: '2026-10-27T11:00:00.000Z', memberReference: 'REJ0000001', note: 'event_order:EV-2026-0017' }, { orderId: 'ord_rej', reference: 'EV-2026-0017' }),
+      EVENT_PAYMENT_REQUEST({ id: 'pr_ev_canc', status: 'cancelled', decidedAt: '2026-10-27T11:00:00.000Z', memberReference: 'CAN0000001', note: 'event_order:EV-2026-0018' }, { orderId: 'ord_canc', reference: 'EV-2026-0018' }),
       { id: 'pr_pass', memberId: 'mem_2', subscriptionId: 'sub_1', orderId: null, tier: 'pro', plan: 'monthly', currency: 'TZS', amountTzs: 90000, status: 'approved', provider: 'admin_approved', reference: 'PASS000001', memberReference: 'PASS000001', requestedAt: '2026-10-20T08:00:00.000Z', decidedAt: '2026-10-20T09:00:00.000Z', member: { displayName: 'Baraka Mushi', phone: '+255755000111', email: null }, subscription: { type: 'platform_pass', status: 'active' } },
     ],
     refunds: [
@@ -291,7 +306,7 @@ function makeS4(user: Json, me: Json | null, orgRole: string, o: S4Opts, setup: 
       REFUND({ id: 'rf_unf', status: 'approved', decidedBy: 'policy', scope: 'unfulfilled_payment', amountTzs: 50000, orderReference: 'EV-2026-0006', requestedBy: 'system', requestedRole: 'system', reasonCode: 'payment_error', policySnapshot: null }),
       REFUND({ id: 'rf_paid', status: 'paid', decidedBy: 'admin-2', paidAt: '2026-10-26T10:00:00.000Z', paymentReference: 'MPESA QX12AB34', paidTo: '+255712345678', scope: 'registration', orderReference: 'EV-2026-0013' }),
     ],
-    adminOrders: {}, corp: {}, batchRemaining: 1, resendCount: {}, idem: {},
+    adminOrders: {}, corp: {}, batchRemaining: 1, liveRefundable: 350000, resendCount: {}, idem: {},
   };
   const refundOut = (r: Json): Json => {
     if (!two) return r;
@@ -307,6 +322,8 @@ function makeS4(user: Json, me: Json | null, orgRole: string, o: S4Opts, setup: 
       ord_2: { ref: 'EV-2026-0014', status: 'confirmed', total: 75000, pay: { state: 'confirmed', method: 'manual', amountTzs: 75000, expectedTzs: 75000, reference: 'DONE000001', payerPhone: '+255712345678', submittedAt: '2026-10-26T08:00:00.000Z', verifiedAt: '2026-10-26T09:00:00.000Z', verifiedByName: 'Grace Finance', decidedAt: '2026-10-26T10:00:00.000Z', decidedByName: 'Admin One', ticketsIssuedAt: '2026-10-26T10:00:01.000Z' }, tickets: { issued: 3, cancelled: 0 } },
       ord_rep: { ref: 'EV-2026-0005', status: 'awaiting_payment', total: 50000, pay: { state: 'confirmed', method: 'manual', amountTzs: 50000, expectedTzs: 50000, reference: 'QGH7XK2L9P', payerPhone: '+255712345678', submittedAt: '2026-10-27T08:00:00.000Z', decidedAt: '2026-10-27T11:00:00.000Z', decidedByName: 'Admin One', repairable: true }, tickets: null },
       ord_attn: { ref: 'EV-2026-0006', status: 'expired', total: 50000, pay: { id: 'evp_attn', state: 'needs_attention', method: 'manual', amountTzs: 50000, expectedTzs: 50000, reference: 'ATTN000001', payerPhone: '+255712345678', submittedAt: '2026-10-27T08:00:00.000Z', failureReason: 'capacity_unavailable', refundId: 'rf_unf' }, tickets: null },
+      ord_cust: { ref: 'EV-2026-0019', status: 'confirmed', total: 60000, pay: { state: 'confirmed', method: 'manual', amountTzs: 60000, expectedTzs: 60000, reference: 'CUST000001', payerPhone: '+255712345678', submittedAt: '2026-10-26T08:00:00.000Z', decidedAt: '2026-10-26T10:00:00.000Z', decidedByName: 'Admin One' }, tickets: { issued: 2, cancelled: 0 } },
+      ord_attn3: { ref: 'EV-2026-0020', status: 'confirmed', total: 50000, pay: { id: 'evp_attn3', state: 'needs_attention', method: 'manual', amountTzs: 50000, expectedTzs: 50000, reference: 'ATTN000003', payerPhone: '+255712345678', submittedAt: '2026-10-27T09:00:00.000Z', failureReason: 'order_already_paid' }, tickets: null },
       ord_attn2: { ref: 'EV-2026-0015', status: 'expired', total: 50000, pay: { id: 'evp_attn2', state: 'needs_attention', method: 'manual', amountTzs: 50000, expectedTzs: 50000, reference: 'ATTN000002', payerPhone: '+255712345678', submittedAt: '2026-10-27T08:00:00.000Z', failureReason: 'order_cancelled' }, tickets: null },
     };
     const b = base[id]; if (!b) return null;
@@ -314,18 +331,25 @@ function makeS4(user: Json, me: Json | null, orgRole: string, o: S4Opts, setup: 
     const pay = { ...b.pay, ...(state.adminOrders[id]?.pay ?? {}) };
     // The server masks the payer's number and hides the transaction ID without the `payments` scope.
     const masked = hasScope('payments') ? pay : { ...pay, payerPhone: '+255 7•• ••• 678', reference: null };
+    // Real shape (backend #270): staff data is `paymentPanel.payments[]` with the EventPayment `status`, not `payment.state`.
+    const { state: memberState, ...rest } = masked;
+    const epStatus: Record<string, string> = { submitted: 'pending', confirmed: 'succeeded', needs_attention: 'reconciliation_required' };
+    const panelPay = { ...rest, status: epStatus[memberState as string] ?? memberState };
     const d = ADMIN_ORDER_DETAIL('ord_1');
     return {
       ...d, order: { ...d.order, id, reference: b.ref, status: st, totalTzs: b.total, subtotalTzs: b.total, closedAt: st === 'expired' || st === 'cancelled' ? '2026-10-27T10:00:00.000Z' : null, closeReason: st === 'expired' ? 'expired' : null },
       purchaser: { type: 'member', id: 'mem_1', label: 'Asha Mollel' }, allowedActions: st === 'awaiting_payment' || st === 'confirmed' ? ['cancel'] : [],
-      payment: masked, tickets: b.tickets, refunds: refundViews(b.ref),
+      paymentPanel: { payments: [panelPay], tickets: b.tickets, refunds: refundViews(b.ref) }, refunds: refundViews(b.ref),
     };
   };
-  const orderRows = ['ord_1', 'ord_2', 'ord_rep', 'ord_attn', 'ord_attn2'].map(id => { const d = adminOrder(id)!; return { id, reference: d.order.reference, status: d.order.status, purchaser: { type: 'member', label: 'Asha Mollel' }, placesCount: 2, totalTzs: d.order.totalTzs, feesTzs: 0, currency: 'TZS', createdAt: '2026-10-26T08:00:00.000Z', holdExpiresAt: d.order.status === 'awaiting_payment' ? hoursFromNow(20) : null, closedAt: d.order.closedAt, closeReason: d.order.closeReason }; });
+  const orderRows = ['ord_1', 'ord_2', 'ord_rep', 'ord_attn', 'ord_attn2', 'ord_cust', 'ord_attn3'].map(id => { const d = adminOrder(id)!; return { id, reference: d.order.reference, status: d.order.status, purchaser: { type: 'member', label: 'Asha Mollel' }, placesCount: 2, totalTzs: d.order.totalTzs, feesTzs: 0, currency: 'TZS', createdAt: '2026-10-26T08:00:00.000Z', holdExpiresAt: d.order.status === 'awaiting_payment' ? hoursFromNow(20) : null, closedAt: d.order.closedAt, closeReason: d.order.closeReason }; });
 
   // ── corporate orders (§6.8) ──
   const regs = (status: string, invited: boolean) => ORDER_DETAIL({}, []).registrations.map((r: Json, i: number) => ({
-    ...r, status, claimState: i === 0 ? 'claimed' : 'unclaimed', claimInvitedAt: invited && i === 1 ? '2026-10-27T12:00:00.000Z' : null, ...(i === 2 ? { phone: null, email: null } : {}),
+    ...r, status, claimState: i === 0 ? 'claimed' : 'unclaimed', ...(i === 2 ? { phone: null, email: null } : {}),
+    // Real shape (backend S4): flat claimInvitedAt / claimInviteCount alongside the nested invitation.
+    claimInvitedAt: invited && i === 1 ? '2026-10-27T12:00:00.000Z' : null, claimInviteCount: invited && i === 1 ? 1 : 0,
+    invitation: { sentAt: invited && i === 1 ? '2026-10-27T12:00:00.000Z' : null, count: invited && i === 1 ? 1 : 0, hasContact: i !== 2 },
   }));
   const corpDoc = (id: string, ref: string, st: string, extra: Json = {}, regStatus = st === 'confirmed' ? 'confirmed' : st === 'awaiting_payment' ? 'reserved' : 'cancelled'): Json => {
     const d = ORDER_DETAIL({ id, reference: ref, status: st, holdExpiresAt: st === 'awaiting_payment' ? hoursFromNow(20) : null, closedAt: st === 'expired' ? hoursFromNow(-2) : st === 'cancelled' ? hoursFromNow(-1) : null, closeReason: st === 'expired' ? 'expired' : st === 'cancelled' ? 'cancelled' : null });
@@ -336,7 +360,7 @@ function makeS4(user: Json, me: Json | null, orgRole: string, o: S4Opts, setup: 
     };
   };
   state.corp = {
-    ord_c_new: corpDoc('ord_c_new', 'EV-2026-0021', 'awaiting_payment', { allowedActions: ['cancel'] }),
+    ord_c_new: corpDoc('ord_c_new', 'EV-2026-0021', 'awaiting_payment', { allowedActions: ['cancel'], payment: { ...PAYMENT_VIEW({ state: 'none', reference: null, submittedAt: null, confirmTargetAt: null }), id: null } }),
     ord_c_rej: corpDoc('ord_c_rej', 'EV-2026-0022', 'awaiting_payment', { allowedActions: ['cancel'], payment: PAYMENT_VIEW({ state: 'rejected', rejectCode: 'reference_not_found', memberNote: 'No such transfer on the statement', canRetry: true, decidedAt: '2026-10-27T11:00:00.000Z' }) }),
     ord_c_sub: corpDoc('ord_c_sub', 'EV-2026-0023', 'awaiting_payment', { payment: PAYMENT_VIEW() }),
     ord_c_exp: corpDoc('ord_c_exp', 'EV-2026-0024', 'expired', { next: { payment: 'manual', instructions: o.noOrgInstructions ? null : ORG_INSTRUCTIONS('EV-2026-0024', 50000) } }),
@@ -385,6 +409,14 @@ function makeS4(user: Json, me: Json | null, orgRole: string, o: S4Opts, setup: 
       if (String(b.memberNote ?? '').length > 140) return { status: 400, json: { error: 'invalid_body' } };
       r.status = 'rejected'; r.decidedAt = '2026-10-28T08:00:00.000Z'; r.rejectCode = b.reasonCode;
       return { paymentRequest: r, event: { outcome: 'rejected' } };
+    }],
+    ['POST', /^\/admin\/payment-requests\/([^/]+)\/change-request$/, (c, m) => {
+      if (!hasScope('payments')) return forbidden();
+      const r = state.requests.find(x => x.id === m[1]); if (!r) return { status: 404, json: { error: 'not_found' } };
+      // Real rule (backend S4 review 7): an event payment can only go rejected -> approved by a change request.
+      if (r.eventOrderId && !(r.status === 'rejected' && c.body?.status === 'approved')) return { status: 409, json: { error: 'event_payment_change_not_allowed' } };
+      r.changeRequestedStatus = c.body?.status; r.changeRequestedBy = user.id; r.changeRequestReason = c.body?.reason;
+      return twoRow(r);
     }],
     ['POST', /^\/admin\/payment-requests\/([^/]+)$/, (c, m) => {
       const r = state.requests.find(x => x.id === m[1]); if (!r) return { status: 404, json: { error: 'not_found' } };
@@ -460,7 +492,9 @@ function makeS4(user: Json, me: Json | null, orgRole: string, o: S4Opts, setup: 
       return { status: 201, json: { refund: state.refunds[state.refunds.length - 1] } };
     }],
     // ── admin event orders and cancellation (§3.12.3, §3.12.4) ──
-    ['GET', /^\/admin\/events\/([^/]+)\/orders\/([^/]+)\/cancel-preview$/, (_c, m) => (m[2] === 'ord_2' ? { eligible: true, mode: 'auto', percent: 50, paidTzs: 75000, refundTzs: 37500, currency: 'TZS', deadlineAt: null, policy: { preset: 'tiered', text: { en: '', sw: '' } }, releaseInventory: true, blocked: null } : { status: 404, json: { error: 'order_not_found' } })],
+    ['GET', /^\/admin\/events\/([^/]+)\/orders\/([^/]+)\/cancel-preview$/, (_c, m) => (m[2] === 'ord_2' ? { eligible: true, mode: 'auto', percent: 50, paidTzs: 75000, refundTzs: 37500, currency: 'TZS', deadlineAt: null, policy: { preset: 'tiered', text: { en: '', sw: '' } }, releaseInventory: true, blocked: null }
+      : m[2] === 'ord_cust' ? { eligible: true, mode: 'manual_review', percent: 0, paidTzs: 60000, refundTzs: 0, currency: 'TZS', deadlineAt: null, policy: { preset: 'custom', text: { en: 'Ask us.', sw: 'Tuulize.' } }, releaseInventory: false, blocked: null }
+      : { status: 404, json: { error: 'order_not_found' } })],
     ['GET', /^\/admin\/events\/([^/]+)\/orders\/([^/]+)$/, (_c, m) => adminOrder(m[2]) ?? { status: 404, json: { error: 'order_not_found' } }],
     ['GET', /^\/admin\/events\/([^/]+)\/orders$/, (c, m) => (m[1] !== 'evt_pub' ? pageOf([]) : pageOf(orderRows.map(r => ({ ...r, status: state.adminOrders[r.id]?.status ?? r.status })).filter(r => !c.query.status || r.status === c.query.status)))],
     ['POST', /^\/admin\/events\/([^/]+)\/orders\/([^/]+)\/cancel$/, (c, m) => {
@@ -469,6 +503,9 @@ function makeS4(user: Json, me: Json | null, orgRole: string, o: S4Opts, setup: 
       if (String(c.body?.note ?? '').trim().length < 5) return { status: 400, json: { error: 'note_required' } };
       const paid = d.order.status === 'confirmed';
       if (paid && !['full', 'policy', 'none'].includes(c.body?.refundMode)) return { status: 400, json: { error: 'refund_mode_required' } };
+      // Real rules (backend S4 review): 'none' on a paid order needs `payments`; 'policy' cannot work out a custom preset.
+      if (paid && c.body.refundMode === 'none' && !hasScope('payments')) return { status: 403, json: { error: 'payments_scope_required' } };
+      if (paid && c.body.refundMode === 'policy' && m[2] === 'ord_cust') return { status: 409, json: { error: 'policy_not_evaluable' } };
       if (!paid && 'refundMode' in (c.body ?? {})) return { status: 400, json: { error: 'invalid_body' } };
       state.adminOrders[m[2]] = { status: paid && c.body.refundMode !== 'none' ? 'refund_pending' : 'cancelled', pay: {} };
       return { order: { ...d.order, status: state.adminOrders[m[2]].status }, registrations: [] };
@@ -479,14 +516,18 @@ function makeS4(user: Json, me: Json | null, orgRole: string, o: S4Opts, setup: 
       const b = c.body ?? {};
       if (!['weather', 'permit', 'safety', 'low_turnout', 'organizer_decision', 'other'].includes(b.reason)) return { status: 400, json: { error: 'reason_code_required' } };
       if ('refundPaidOrders' in b && typeof b.refundPaidOrders !== 'boolean') return { status: 400, json: { error: 'invalid_body' } };
-      if (b.refundPaidOrders === true && b.expectedRefundableTzs !== 350000) return { status: 409, json: { error: 'refundable_changed' } };
+      // Real rule: `expectedRefundableTzs` is required when paid orders exist (the preview says 3), whatever refundPaidOrders is.
+      if (b.expectedRefundableTzs === undefined) return { status: 400, json: { error: 'expected_refundable_required' } };
+      if (b.expectedRefundableTzs !== state.liveRefundable) return { status: 409, json: { error: 'refundable_changed' } };
       return { status: 'cancelled', ...(o.cancelResponse === 'batch' && b.refundPaidOrders ? { batch: { batchId: 'evb_9', created: 3, existing: 0, remaining: 0, amountTzs: 350000 } } : {}), eventId: m[1] };
     }],
     ['POST', /^\/admin\/events\/([^/]+)\/refund-batch$/, c => {
-      if (!hasScope('payments') && !hasScope('events')) return forbidden();
-      if (c.body?.expectedRefundableTzs !== 350000) return { status: 409, json: { error: 'refundable_changed' } };
-      const first = state.batchRemaining === 1; state.batchRemaining = 0;
-      return { batchId: 'evb_9', created: first ? 2 : 1, existing: first ? 0 : 2, remaining: first ? 1 : 0, amountTzs: 350000 };
+      // Real rules: resume needs `payments`; the server compares an expected total to the LIVE total, which drops after each 200-order chunk.
+      if (!hasScope('payments')) return { status: 403, json: { error: 'forbidden' } };
+      if (c.body?.expectedRefundableTzs !== undefined && c.body.expectedRefundableTzs !== state.liveRefundable) return { status: 409, json: { error: 'refundable_changed' } };
+      const first = state.batchRemaining > 0; const created = first ? 200 : 150;
+      state.batchRemaining = first ? 0 : 0; state.liveRefundable = first ? 120000 : 0;
+      return { batchId: 'evb_9', created, existing: first ? 0 : 200, remaining: first ? 150 : 0, amountTzs: 350000 };
     }],
     // ── organizer finance (§3.14): totals only ──
     ['GET', /^\/organizer\/events\/([^/]+)\/finance$/, (_c, m) => {
@@ -666,7 +707,9 @@ export async function setupEvents(page_: Page, user: Json = OWNER, opts: { me?: 
     ['POST', /^\/organizer\/events$/, c => { docs.evt_new = DOC({ id: 'evt_new', slug: 'new-event', title: c.body?.title, categories: [], terms: { en: '', sw: '' }, refundPolicy: { preset: null, text: null }, contact: { email: null, phone: null, whatsapp: null }, description: { en: '', sw: '' }, version: 1 }); return { status: 201, json: { id: 'evt_new', version: 1 } }; }],
     ['GET', /^\/organizer\/events\/([^/]+)\/changes$/, () => pageOf(CHANGES)],
     ['GET', /^\/organizer\/events\/([^/]+)$/, (_c, m) => (m[1] === 'evt_other' ? { status: 403, json: { error: 'not_your_organizer' } } : docs[m[1]] ? docs[m[1]] : { status: 404, json: { error: 'event_not_found' } })],
-    ['PATCH', /^\/organizer\/events\/([^/]+)$/, c => { if ('collectionPoints' in (c.body ?? {}) && typeof c.body?.kitProvided !== 'boolean') return { status: 400, json: { error: 'kit_provided_required' } }; version = Number(c.body?.version ?? version) + 1; return { version, updatedAt: '2026-10-22T10:00:00.000Z', material: !!c.body?.changeNote }; }],
+    ['PATCH', /^\/organizer\/events\/([^/]+)$/, (c, m) => {
+      if (c.body?.refundPolicy && docs[m[1]]) docs[m[1]] = { ...docs[m[1]], refundPolicy: { ...c.body.refundPolicy, generated: serverPolicyLine(c.body.refundPolicy) } };
+      if ('collectionPoints' in (c.body ?? {}) && typeof c.body?.kitProvided !== 'boolean') return { status: 400, json: { error: 'kit_provided_required' } }; version = Number(c.body?.version ?? version) + 1; return { version, updatedAt: '2026-10-22T10:00:00.000Z', material: !!c.body?.changeNote }; }],
     ['POST', /^\/organizer\/events\/([^/]+)\/(submit|withdraw|cancel|complete|archive)$/, (_c, m) => { const next = { submit: 'submitted', withdraw: 'draft', cancel: 'cancelled', complete: 'completed', archive: 'archived' }[m[2]]!; if (docs[m[1]]) docs[m[1]] = { ...docs[m[1]], status: next, allowedActions: next === 'submitted' ? ['withdraw'] : [] }; return { status: next }; }],
     ['DELETE', /^\/organizer\/events\/([^/]+)$/, () => ({ status: 204 })],
     ['GET', /^\/organizer\/staff$/, () => ({ items: staff })],

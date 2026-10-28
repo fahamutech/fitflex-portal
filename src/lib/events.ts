@@ -2,7 +2,7 @@
 // §14, §15). Pure helpers for the organizer area and the admin queue: no strings here, only i18n keys.
 import {
   ApiError, type Bilingual, type DuplicatePolicy, type EventAllowedAction, type EventCategory, type EventCollectionPoint, type EventDocument,
-  type EventOrderStatus, type EventPatch, type EventRefundPolicy, type EventRejectCode, type RefundPolicyTier, type EventRegistrationStatus, type EventStatus, type EventTicketType, type EventType, type OrganizerRole,
+  type EventOrderStatus, type EventPatch, type EventRefundPolicy, type EventRejectCode, type EventRegistrationStatus, type EventStatus, type EventTicketType, type EventType, type OrganizerRole,
   type OrganizerStatus, type ParticipantFieldKey, type ParticipantFieldPolicy, type ParticipantFields, type RefundPolicyPreset,
 } from '@/lib/api';
 import type { BadgeTone } from '@/lib/admin-utils';
@@ -191,6 +191,10 @@ export const EVENTS_ERRORS: Record<string, MessageKey> = {
   not_payable_by_role: 'events.error.not_payable_by_role',
   order_not_confirmed: 'events.error.order_not_confirmed',
   note_required: 'events.error.note_required',
+  policy_not_evaluable: 'money2.err.policy_not_evaluable',
+  payments_scope_required: 'money2.err.payments_scope_required',
+  forbidden: 'money2.err.forbidden',
+  event_payment_change_not_allowed: 'money2.err.event_payment_change_not_allowed',
   amount_required: 'money2.err.amount_required',
   amount_mismatch: 'money2.err.amount_mismatch',
 };
@@ -213,6 +217,15 @@ const safeTz = (tz: string | null | undefined) => {
   try { new Intl.DateTimeFormat('en-GB', { timeZone: tz || undefined }); return tz || 'Africa/Dar_es_Salaam'; } catch { return 'Africa/Dar_es_Salaam'; }
 };
 /** "EAT" from the zone when the payload has no abbreviation. */
+/** Swahili clock: 12-hour with the part of the day ("2:05 mchana"); English keeps the 24-hour clock. */
+export function clock(d: Date, zone: string | undefined, locale: Locale): string {
+  if (locale !== 'sw') return d.toLocaleTimeString(intlLocale(locale), { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: zone });
+  const parts = new Intl.DateTimeFormat('en-GB', { hour: 'numeric', minute: '2-digit', hourCycle: 'h23', timeZone: zone }).formatToParts(d);
+  const h = Number(parts.find(p => p.type === 'hour')?.value ?? 0) % 24;
+  const m = parts.find(p => p.type === 'minute')?.value ?? '00';
+  const part = h >= 5 && h < 12 ? 'asubuhi' : h >= 12 && h < 16 ? 'mchana' : h >= 16 && h < 19 ? 'jioni' : 'usiku';
+  return `${h % 12 || 12}:${m} ${part}`;
+}
 export function tzAbbr(tz: string | null | undefined, at: Date = new Date(), given?: string | null) {
   if (given) return given;
   const parts = new Intl.DateTimeFormat('en-GB', { timeZone: safeTz(tz), timeZoneName: 'short' }).formatToParts(at);
@@ -226,7 +239,7 @@ export function eventDateTime(iso: string | null | undefined, tz: string | null 
   const zone = safeTz(tz);
   // "Sat 14 Mar 2027" (no comma after the weekday, as the spec writes it).
   const day = d.toLocaleDateString(intlLocale(locale), { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric', timeZone: zone }).replace(/^([^\d,]+),\s*/, '$1 ');
-  const time = d.toLocaleTimeString(intlLocale(locale), { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: zone });
+  const time = clock(d, zone, locale);
   return `${day}, ${time} ${tzAbbr(zone, d, abbr)}`.trim();
 }
 /** "06:30" in the event's zone, for the "= 06:30 EAT" hint next to a local-time field. */
@@ -234,7 +247,7 @@ export function eventTime(iso: string | null | undefined, tz: string | null | un
   if (!iso) return '';
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return '';
-  return d.toLocaleTimeString(intlLocale(locale), { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: safeTz(tz) });
+  return clock(d, safeTz(tz), locale);
 }
 export function eventDay(iso: string | null | undefined, tz: string | null | undefined, locale: Locale) {
   if (!iso) return '—';
@@ -255,7 +268,7 @@ export function relativeTime(iso: string | null | undefined, locale: Locale, now
   if (abs < 86_400 * 30) return rtf.format(Math.round(diff / 86_400), 'day');
   return rtf.format(Math.round(diff / (86_400 * 30)), 'month');
 }
-export const clockTime = (d: Date, locale: Locale) => d.toLocaleTimeString(intlLocale(locale), { hour: '2-digit', minute: '2-digit', hour12: false });
+export const clockTime = (d: Date, locale: Locale) => clock(d, undefined, locale);
 /** "5K 10K 21K" from metres. */
 export const distanceLabel = (m: number) => {
   const km = m / 1000;
@@ -475,7 +488,7 @@ export function docFromForm(form: EventForm, base: Partial<EventDocument> = {}):
     description: p.description!, heroImageUrl: nul(form.heroImageUrl), coverAlt: nul(form.coverAlt), routeUrl: p.routeUrl ?? null, routeImageUrl: p.routeImageUrl ?? null,
     routeImageAlt: p.routeImageAlt ?? null, accessibility: p.accessibility ?? null, inclusions: p.inclusions ?? null, kitProvided: form.hasKit, categories: p.categories ?? [],
     collectionPoints: p.collectionPoints ?? [], schedule: p.schedule ?? [], sponsors: p.sponsors ?? [], contact: p.contact!, terms: p.terms!,
-    refundPolicy: p.refundPolicy!, cancellation: base.cancellation ?? null, shareUrl: base.shareUrl ?? null, publishedAt: base.publishedAt ?? null,
+    refundPolicy: { ...p.refundPolicy!, generated: base.refundPolicy?.generated ?? null }, cancellation: base.cancellation ?? null, shareUrl: base.shareUrl ?? null, publishedAt: base.publishedAt ?? null,
     version: base.version ?? 0, allowedActions: base.allowedActions ?? [], submittedAt: base.submittedAt ?? null, rejection: base.rejection ?? null, changeLogCount: base.changeLogCount ?? 0,
     participantFields: p.participantFields ?? null, duplicatePolicy: p.duplicatePolicy ?? null,
   };
@@ -665,32 +678,12 @@ export function validateRefundPolicy(form: Pick<EventForm, 'policyPreset' | 'pol
   return e;
 }
 
-/** Days as words ("1 day", "30 days"). */
-export const dayCountText = (n: number, t: (k: MessageKey) => string) => (n === 1 ? t('events.refund.day1') : fmt(t('events.refund.days'), { n }));
 /**
- * The plain sentence generated from the structured policy (S4 §3.12.1, §6.7): what members read, so the preset and the
- * words cannot disagree. A custom policy shows its own text in the active language. Empty until the inputs are valid.
+ * The refund-policy sentence members read is built by the server (`refundPolicy.generated` / `policy.generated`, S4 review
+ * item 15): the portal never words a policy itself. Null until the server has one (a policy just edited and not saved yet).
  */
-export function refundPolicyLine(policy: { preset: RefundPolicyPreset | null; text?: { en: string; sw: string } | null; days?: number | null; tiers?: RefundPolicyTier[] | null } | null | undefined, locale: Locale, t: (k: MessageKey) => string): string {
-  if (!policy?.preset) return '';
-  switch (policy.preset) {
-    case 'no_refund': return t('events.refund.line.no_refund');
-    case 'refund_until_close': return t('events.refund.line.refund_until_close');
-    case 'full_until_days': return policy.days ? fmt(t('events.refund.line.full_until_days'), { days: dayCountText(policy.days, t) }) : '';
-    case 'tiered': {
-      const tiers = policy.tiers ?? [];
-      if (!tiers.length) return '';
-      return `${tiers.map(tier => fmt(t('events.refund.line.tier'), { percent: tier.percent, days: dayCountText(tier.daysBefore, t) })).join(' ')} ${t('events.refund.line.then_none')}`;
-    }
-    case 'custom': return policy.text?.[locale] ?? '';
-    default: return '';
-  }
-}
-/** The policy the form currently describes, only when its inputs pass (else no sentence is shown). */
-export function policyFromForm(form: EventForm): EventRefundPolicy | null {
-  if (!form.policyPreset || Object.keys(validateRefundPolicy(form)).length) return null;
-  return refundPolicyPayload(form);
-}
+export type GeneratedPolicy = { en?: string; sw?: string } | null | undefined;
+export const generatedPolicyLine = (generated: GeneratedPolicy, locale: Locale): string => generated?.[locale] ?? '';
 
 /** Errors per step, for the stepper badge and `maxReached`. */
 export function errorsByStep(errors: Errors): Record<WizardStep, number> {
@@ -751,6 +744,8 @@ export function materialDiff(doc: EventDocument, payload: Omit<EventPatch, 'vers
   // S3: a document that never saved these carries the §3.3 defaults; only a real change is material.
   if ('participantFields' in payload) scope.participantFields = effectiveParticipantFields({ participantFields: fieldsFromDoc(doc), categories: formFromDoc(doc).categories, hasKit: !!doc.kitProvided });
   if ('duplicatePolicy' in payload) scope.duplicatePolicy = doc.duplicatePolicy ?? 'one_per_category';
+  // The server-built sentence (`generated`) is output, never an edit: it is not a change.
+  if (scope.refundPolicy && typeof scope.refundPolicy === 'object') { const { generated: _g, ...rest } = scope.refundPolicy as EventRefundPolicy; void _g; scope.refundPolicy = rest; }
   flat(scope, '', before); flat(payload, '', after);
   const generic = (p: string) => p.replace(/\.\d+\./g, '.').replace(/\.\d+$/, '');
   const out: Diff[] = [];
@@ -795,8 +790,9 @@ export const REGISTRATION_STATUS: Record<EventRegistrationStatus, { key: Message
   reserved: { key: 'events.regStatus.reserved', tone: 'warning' },
   confirmed: { key: 'events.regStatus.confirmed', tone: 'success' },
   cancelled: { key: 'events.regStatus.cancelled', tone: 'gray' },
+  refunded: { key: 'events.regStatus.refunded', tone: 'gray' },
 };
-export const REGISTRATION_STATUSES: EventRegistrationStatus[] = ['reserved', 'confirmed', 'cancelled'];
+export const REGISTRATION_STATUSES: EventRegistrationStatus[] = ['reserved', 'confirmed', 'cancelled', 'refunded'];
 export const registrationStatusOf = (status: string | null | undefined) => REGISTRATION_STATUS[(status ?? 'reserved') as EventRegistrationStatus] ?? REGISTRATION_STATUS.reserved;
 
 /** §3.8 closed set a purchaser (member or organisation) may give. */
@@ -913,9 +909,14 @@ export const MEMBER_NOTE_MAX = 140;
 /** Corporate payment note limit (§3.4.3). */
 export const CORPORATE_NOTE_MAX = 300;
 
-/** `failureReason` of a `reconciliation_required` payment (§3.3) → the "needs attention" reason key. */
-export const ATTENTION_REASONS = ['amount_mismatch', 'provider_unknown', 'capacity_unavailable', 'order_cancelled', 'event_unavailable'] as const;
-export const attentionReasonKey = (reason: string | null | undefined) => (reason && (ATTENTION_REASONS as readonly string[]).includes(reason) ? `payments.event.attention.${reason}` : 'payments.event.attention') as MessageKey;
+/** `failureReason` of an EventPayment (§3.3 and the backend's later codes) → the reason text; `rejected:<code>` reads as the reject reason. */
+export const ATTENTION_REASONS = [
+  'amount_mismatch', 'provider_unknown', 'transaction_mismatch', 'capacity_unavailable', 'order_cancelled', 'order_already_paid', 'event_unavailable', 'refunded_after_late_payment',
+] as const;
+export const attentionReasonKey = (reason: string | null | undefined): MessageKey => {
+  if (reason?.startsWith('rejected:')) return rejectCodeKey(reason.slice('rejected:'.length));
+  return (reason && (ATTENTION_REASONS as readonly string[]).includes(reason) ? `payments.event.attention.${reason}` : 'payments.event.attention.unknown') as MessageKey;
+};
 
 /** Refund scope labels (§6.3). */
 export const REFUND_SCOPES = ['registration', 'order', 'event_cancelled', 'unfulfilled_payment'] as const;
@@ -944,3 +945,6 @@ export type EventsS4AnalyticsName = 'payment_panel_viewed' | 'event_payment_deci
 export function trackEventsS4Analytics(_name: EventsS4AnalyticsName, _payload: Record<string, string | number | boolean> = {}) {
   // Intentionally empty (reuse map: no portal analytics hook). No personal data may ever be put in `_payload`.
 }
+
+/** One/other plural for strings with a count: `base.one` when n is 1, else `base.other`. */
+export const pluralKey = (base: string, n: number) => `${base}.${n === 1 ? 'one' : 'other'}` as MessageKey;

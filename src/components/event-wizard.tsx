@@ -149,6 +149,11 @@ export function EventWizard({ eventId, initialStep, view, onBack, onView }: {
       versionRef.current = res.version;
       setDoc(d => (d ? { ...d, ...(payload as Partial<EventDocument>), version: res.version, updatedAt: res.updatedAt } : d));
       setServerErrs({}); setSaveState('saved'); setSavedAt(new Date());
+      // The server words the refund policy: fetch its sentence after a save that carried the policy (S4 review item 15).
+      if ('refundPolicy' in payload && idRef.current) {
+        const savedId = idRef.current;
+        api.organizerEvent(token, savedId).then(f => setDoc(d => (d && d.id === f.id ? { ...d, refundPolicy: f.refundPolicy } : d))).catch(() => undefined);
+      }
       return true;
     } catch (err) {
       steps.forEach(s => dirtyRef.current.add(s));
@@ -292,7 +297,7 @@ export function EventWizard({ eventId, initialStep, view, onBack, onView }: {
   const indicator = saveState === 'saving' ? t('events.wizard.saving')
     : saveState === 'saved' && savedAt ? fmt(t('events.wizard.savedAt'), { time: clockTime(savedAt, locale) })
     : saveState === 'error' ? t('events.wizard.notSaved') : '';
-  const stepProps = { form, update, errors: shownErrors, readOnly, token: token ?? '', options, onTitleBlur: () => { if (!idRef.current && autosaveOn) void createDraft(); } };
+  const stepProps = { form, update, errors: shownErrors, savedPolicy: doc?.refundPolicy ?? null, readOnly, token: token ?? '', options, onTitleBlur: () => { if (!idRef.current && autosaveOn) void createDraft(); } };
 
   return (
     <div className="space-y-4" data-testid="event-wizard" data-event-id={id ?? 'new'}>

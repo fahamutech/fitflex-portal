@@ -55,7 +55,7 @@ export default function RefundsPage() {
   const [loadFailed, setLoadFailed] = useState(false);
   const [filter, setFilter] = useState<Filter>('approved');
   const [action, setAction] = useState<Action | null>(null);
-  const [fields, setFields] = useState({ amount: '', note: '', endAccess: false, reference: '', paidTo: '' });
+  const [fields, setFields] = useState({ amount: '', note: '', noteSw: '', endAccess: false, reference: '', paidTo: '' });
   const [actionError, setActionError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   // Events S4 (spec §6.3): filter by batch / scope / order reference (also set from the URL), batch approve and payouts.
@@ -104,7 +104,7 @@ export default function RefundsPage() {
     setActionError(null);
     // An event refund goes back to the number the payer paid from; an organisation's account is typed by the admin (S4 §6.3).
     const paidTo = refund.kind === 'event_order' ? (refund.organizationName ? '' : (refund.payerPhone || refund.member?.phone || '')) : (refund.member?.phone || '');
-    setFields({ amount: String(refund.amountTzs), note: '', endAccess: false, reference: '', paidTo });
+    setFields({ amount: String(refund.amountTzs), note: '', noteSw: '', endAccess: false, reference: '', paidTo });
   }
 
   async function submit() {
@@ -120,7 +120,7 @@ export default function RefundsPage() {
           endAccess: refund.kind === 'subscription' ? fields.endAccess : undefined,
         });
       } else {
-        await api.decideRefund(token, refund.id, { decision: 'reject', note: fields.note.trim() });
+        await api.decideRefund(token, refund.id, { decision: 'reject', note: fields.note.trim(), ...(refund.kind === 'event_order' && fields.noteSw.trim() ? { noteSw: fields.noteSw.trim() } : {}) });
       }
       setAction(null);
       await load();
@@ -472,6 +472,9 @@ export default function RefundsPage() {
           )}
           {action?.kind === 'approve' && (
             <>
+              {action.refund.kind === 'event_order' && action.refund.policy?.generated?.[locale] && (
+                <p className="text-xs text-[var(--color-fg-tertiary)]" data-testid="refund-policy-generated">{action.refund.policy.generated[locale]}</p>
+              )}
               {action.refund.kind === 'event_order' && action.refund.policySnapshot?.preset && action.refund.policySnapshot.percent != null && (
                 <p className="text-xs text-[var(--color-fg-tertiary)]" data-testid="refund-policy-line">{fill(t('refunds.policy.line'), {
                   preset: t(`events.terms.policy.${action.refund.policySnapshot.preset}` as 'events.terms.policy.custom'), percent: action.refund.policySnapshot.percent ?? 0,
@@ -494,9 +497,16 @@ export default function RefundsPage() {
             </>
           )}
           {action?.kind === 'reject' && (
-            <Field label={t('money2.reason')} hint={t('refunds.dialog.reasonHint')}>
-              <textarea className="ui-input min-h-[90px]" value={fields.note} onChange={e => setFields({ ...fields, note: e.target.value })} />
-            </Field>
+            <>
+              <Field label={t('money2.reason')} hint={t('refunds.dialog.reasonHint')}>
+                <textarea className="ui-input min-h-[90px]" value={fields.note} onChange={e => setFields({ ...fields, note: e.target.value })} />
+              </Field>
+              {action.refund.kind === 'event_order' && (
+                <Field label={t('refunds.dialog.reasonSw')} hint={t('refunds.dialog.reasonHint')}>
+                  <textarea className="ui-input min-h-[70px]" data-testid="refund-reject-note-sw" value={fields.noteSw} onChange={e => setFields({ ...fields, noteSw: e.target.value })} />
+                </Field>
+              )}
+            </>
           )}
         </div>
         <DialogFooter>

@@ -8,7 +8,7 @@ import { CountedTextarea, DateField, RowCard, TextField, useErrorText, type Step
 import { useApp } from '../../../app/providers';
 
 /** Step 6 Terms & refund policy, contacts, sponsors, schedule (spec §6.2). */
-export function TermsStep({ form, update, errors, readOnly, token }: StepProps) {
+export function TermsStep({ form, update, errors, readOnly, token, savedPolicy }: StepProps) {
   const { t } = useApp();
   const errText = useErrorText();
   const setSponsor = (i: number, patch: Partial<SponsorForm>) => update(f => ({ sponsors: f.sponsors.map((s, j) => (j === i ? { ...s, ...patch } : s)) }));
@@ -21,7 +21,7 @@ export function TermsStep({ form, update, errors, readOnly, token }: StepProps) 
       </div>
       <Alert tone="info">{t('events.terms.legalNote')}</Alert>
 
-      <RefundPolicyEditor form={form} update={update} errors={errors} readOnly={readOnly} />
+      <RefundPolicyEditor form={form} update={update} errors={errors} readOnly={readOnly} savedPolicy={savedPolicy} />
 
       <ParticipantFieldsSection form={form} update={update} errors={errors} readOnly={readOnly} />
 

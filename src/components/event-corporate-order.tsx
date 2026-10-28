@@ -464,8 +464,13 @@ function CorporateOrderDetail({ token, orgId, orderId, options, canBilling, onBa
   const { order, event } = doc;
   const st = orderStatusOf(order.status);
   const minutes = holdMinutesLeft(order.holdExpiresAt, now);
-  const paymentOn = !!options?.payment && options.payment !== 'none';
+  const paymentOn = (doc.next?.payment ?? options?.payment ?? 'none') !== 'none';
+  const hasPayment = !!doc.payment && doc.payment.state !== 'none';
   const tz = event.timezone;
+  // Flat fields first, then the nested `invitation` (backend S4 sends both).
+  type Reg = CorporateEventOrderDetail['registrations'][number];
+  const invitedAt = (r: Reg) => r.claimInvitedAt ?? r.invitation?.sentAt ?? null;
+  const hasContact = (r: Reg) => r.hasContact ?? r.invitation?.hasContact ?? (!!r.phone || !!r.email);
   const columns: ColumnDef<CorporateEventOrderDetail['registrations'][number]>[] = [
     { key: 'name', header: t('corp.events.col.name'), sortable: true, cell: r => <span className="font-medium text-[var(--color-fg-primary)]">{r.firstName} {r.lastName}</span> },
     { key: 'phone', header: t('corp.events.col.phone'), cell: r => maskPhoneLast3(r.phone) },
@@ -479,11 +484,11 @@ function CorporateOrderDetail({ token, orgId, orderId, options, canBilling, onBa
     ...(order.status === 'confirmed' ? [{
       key: 'invitation', header: t('corp.events.col.invitation'),
       cell: (r: CorporateEventOrderDetail['registrations'][number]) => (r.claimState === 'claimed' || r.claimState === 'self' ? '—'
-        : r.claimInvitedAt ? <span data-testid={`corp-invited-${r.id}`}>{eventDateTime(r.claimInvitedAt, tz, locale, event.timezoneAbbr)}</span>
-        : !r.phone && !r.email ? <span data-testid={`corp-nocontact-${r.id}`}>{t('corp.events.invite.noContact')}</span> : '—'),
+        : invitedAt(r) ? <span data-testid={`corp-invited-${r.id}`}>{eventDateTime(invitedAt(r), tz, locale, event.timezoneAbbr)}</span>
+        : !hasContact(r) ? <span data-testid={`corp-nocontact-${r.id}`}>{t('corp.events.invite.noContact')}</span> : '—'),
     }] : []),
   ];
-  const canResend = (r: CorporateEventOrderDetail['registrations'][number]) => canBilling && order.status === 'confirmed' && r.status === 'confirmed' && r.claimState === 'unclaimed' && (!!r.phone || !!r.email);
+  const canResend = (r: CorporateEventOrderDetail['registrations'][number]) => canBilling && order.status === 'confirmed' && r.status === 'confirmed' && r.claimState === 'unclaimed' && hasContact(r);
   return (
     <div className="space-y-4" data-testid="corp-order-detail" data-order-status={order.status}>
       <PageHeader title={fmt(t('corp.events.order.title'), { ref: order.reference, event: event.title })}
@@ -493,7 +498,7 @@ function CorporateOrderDetail({ token, orgId, orderId, options, canBilling, onBa
         <div className="space-y-3" data-testid="corp-order-awaiting">
           <Alert tone="warning">{fmt(t('corp.events.order.heldLeft'), { time: eventDateTime(order.holdExpiresAt, tz, locale, event.timezoneAbbr), n: minutes ?? 0 })}</Alert>
           {/* S4: with payments off (options.payment 'none') the S3 placeholder stays exactly as shipped. */}
-          {!paymentOn && !doc.payment && (
+          {!paymentOn && !hasPayment && (
             <div className="rounded-[var(--radius-xl)] border border-dashed border-[var(--color-border-primary)] p-4" data-testid="corp-order-pay-soon">
               <p className="text-sm font-semibold text-[var(--color-fg-primary)]">{t('corp.events.order.paySoon.title')}</p>
               <p className="text-sm text-[var(--color-fg-secondary)]">{t('corp.events.order.paySoon.body')}</p>
@@ -502,7 +507,7 @@ function CorporateOrderDetail({ token, orgId, orderId, options, canBilling, onBa
         </div>
       )}
       {order.status === 'expired' && <div data-testid="corp-order-expired"><Alert tone="info">{t('corp.events.order.expired')}</Alert></div>}
-      {(paymentOn || doc.payment) && <CorporatePaymentSection token={token} orgId={orgId} doc={doc} options={options} canBilling={canBilling} onChanged={() => void load()} />}
+      {(paymentOn || hasPayment) && <CorporatePaymentSection token={token} orgId={orgId} doc={doc} options={options} canBilling={canBilling} onChanged={() => void load()} />}
       {order.status === 'cancelled' && <div data-testid="corp-order-cancelled"><Alert tone="info">{fmt(t('corp.events.order.cancelled'), { date: eventDateTime(order.closedAt, tz, locale, event.timezoneAbbr), name: doc.createdBy?.name ?? order.createdBy?.name ?? '—' })}</Alert></div>}
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3" data-testid="corp-order-summary">
         <MetricCard label={t('corp.events.col.places')} value={doc.registrations.length} />

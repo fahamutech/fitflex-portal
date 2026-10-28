@@ -11,7 +11,7 @@ import {
 } from '@/lib/api';
 import { money } from '@/lib/admin-utils';
 import {
-  CORPORATE_NOTE_MAX, MEMBER_CANCEL_REASONS, attentionReasonKey, errorBody, errorCode, errorKey, eventDateTime, fmt, memberCancelReasonKey, newPaymentIdempotencyKey, rejectCodeKey,
+  CORPORATE_NOTE_MAX, MEMBER_CANCEL_REASONS, attentionReasonKey, errorBody, errorCode, errorKey, eventDateTime, fmt, memberCancelReasonKey, newPaymentIdempotencyKey, pluralKey, rejectCodeKey,
   maskContact, refundScopeKey, todayEat, trackEventsS4Analytics, type Tone,
 } from '@/lib/events';
 import type { MessageKey } from '@/lib/i18n';
@@ -28,8 +28,29 @@ export const PAYMENT_STATE: Record<EventPaymentState, { key: MessageKey; tone: T
   failed: { key: 'events.order.payment.state.failed', tone: 'danger' },
   expired: { key: 'events.order.payment.state.expired', tone: 'gray' },
   needs_attention: { key: 'payments.event.attention', tone: 'warning' },
+  none: { key: 'events.order.payment.state.none', tone: 'gray' },
 };
-const paymentStateOf = (state: string | null | undefined) => PAYMENT_STATE[(state ?? 'submitted') as EventPaymentState] ?? PAYMENT_STATE.submitted;
+const EXTRA_STATE: Record<string, { key: MessageKey; tone: Tone }> = { cancelled: { key: 'events.order.payment.state.cancelled', tone: 'gray' } };
+const paymentStateOf = (state: string | null | undefined) => EXTRA_STATE[state ?? ''] ?? PAYMENT_STATE[(state ?? 'submitted') as EventPaymentState] ?? PAYMENT_STATE.submitted;
+
+/** EventPayment `status` (what the staff panel sends, backend #270) → the pill state. Member states pass through. */
+const STATUS_TO_STATE: Record<string, string> = { pending: 'submitted', created: 'submitted', succeeded: 'confirmed', reconciliation_required: 'needs_attention', reversed: 'failed' };
+export function panelPayment(p: AdminEventOrderPayment): AdminEventOrderPayment & { state: EventPaymentState } {
+  const status = p.status ?? p.state ?? '';
+  const state = status === 'failed' && p.rejectCode ? 'rejected' : STATUS_TO_STATE[status] ?? status;
+  return { ...p, state: state as EventPaymentState };
+}
+/** Latest payment of `paymentPanel.payments[]` (newest first by the server; sorted again by submit time to be safe). */
+export function latestPanelPayment(panel: { payments?: AdminEventOrderPayment[] } | null | undefined) {
+  const list = [...(panel?.payments ?? [])].sort((a, b) => Date.parse(b.submittedAt ?? '') - Date.parse(a.submittedAt ?? '') || 0);
+  return list[0] ? panelPayment(list[0]) : null;
+}
+/** `paymentPanel.tickets` as counts: `{issued, cancelled}` or a list of tickets with a `status`. */
+export function panelTickets(t: unknown): { issued: number; cancelled: number } | null {
+  if (Array.isArray(t)) return { issued: t.filter(x => x?.status === 'active').length, cancelled: t.filter(x => x?.status === 'revoked').length };
+  if (t && typeof t === 'object' && 'issued' in t) return { issued: Number((t as { issued: number }).issued) || 0, cancelled: Number((t as { cancelled?: number }).cancelled) || 0 };
+  return null;
+}
 const REFUND_STATUS_TONE: Record<string, Tone> = { requested: 'warning', approved: 'brand', paid: 'success', rejected: 'gray' };
 
 /** Refund rows of an order: status, scope, amount and the payout reference once sent (§6.4). */
@@ -62,13 +83,16 @@ export function EventRefundList({ refunds, refundsHref }: { refunds: EventRefund
  * "Payment" section of the admin order dialog: status, expected vs received, the payer details (full with the `payments`
  * scope, masked without), a timeline, the hold history, repair and a way to raise a refund for an unfulfilled payment.
  */
-export function AdminOrderPaymentPanel({ eventId, orderId, orderReference, orderStatus, payment, tickets, refunds, timezone, timezoneAbbr, onChanged }: {
-  eventId: string; orderId: string; orderReference: string; orderStatus: string; payment: AdminEventOrderPayment | null | undefined;
-  tickets: { issued: number; cancelled: number } | null | undefined; refunds: EventRefundView[] | undefined; timezone: string; timezoneAbbr?: string | null; onChanged: () => void;
+export function AdminOrderPaymentPanel({ eventId, orderId, orderReference, orderStatus, panel, refunds: orderRefunds, timezone, timezoneAbbr, onChanged }: {
+  eventId: string; orderId: string; orderReference: string; orderStatus: string; panel: { payments?: AdminEventOrderPayment[]; tickets?: unknown; refunds?: EventRefundView[] } | null | undefined;
+  refunds?: EventRefundView[]; timezone: string; timezoneAbbr?: string | null; onChanged: () => void;
 }) {
   const { t, token, locale, hasPermission } = useApp();
   const toast = useToast();
   const canPayments = hasPermission('payments');
+  const payment = latestPanelPayment(panel);
+  const tickets = panelTickets(panel?.tickets);
+  const refunds = panel?.refunds ?? orderRefunds;
   const [busy, setBusy] = useState<'repair' | 'refund' | null>(null);
   const [refundOpen, setRefundOpen] = useState(false);
   const [note, setNote] = useState('');
@@ -153,7 +177,7 @@ export function AdminOrderPaymentPanel({ eventId, orderId, orderReference, order
           </div>
         </>
       )}
-      {tickets && <p className="text-sm" data-testid="order-tickets-summary">{fmt(t('events.order.tickets.summary'), { n: tickets.issued, m: tickets.cancelled })}</p>}
+      {tickets && <p className="text-sm" data-testid="order-tickets-summary">{fmt(t(pluralKey('events.order.tickets.summary', tickets.issued)), { n: tickets.issued, m: tickets.cancelled })}</p>}
       {!!refunds?.length && <EventRefundList refunds={refunds} refundsHref={canPayments ? `/admin/refunds?order=${encodeURIComponent(orderReference)}` : undefined} />}
 
       <Dialog open={refundOpen} onClose={() => setRefundOpen(false)} title={t('events.order.payment.raiseRefund')} description={t('events.order.payment.raiseRefund.body')} size="sm">
@@ -221,7 +245,9 @@ export function CorporatePaymentSection({ token, orgId, doc, options, canBilling
   const { t, locale } = useApp();
   const toast = useToast();
   const { order, event } = doc;
-  const payment = doc.payment ?? null;
+  // State 'none' (backend S4) means no payment yet; it may still carry the last method / date to prefill the form.
+  const raw = doc.payment ?? null;
+  const payment = raw && raw.state !== 'none' ? raw : null;
   const tz = event.timezone;
   const [method, setMethod] = useState<'bank_transfer' | 'mobile_money'>('bank_transfer');
   const [reference, setReference] = useState('');
@@ -233,18 +259,21 @@ export function CorporatePaymentSection({ token, orgId, doc, options, canBilling
   const keyRef = useRef(newPaymentIdempotencyKey());
   const prefilled = useRef<string | null>(null);
 
-  const paymentOn = options?.payment === 'manual';
+  // The form follows the order's own mode (`next.payment`): the backend takes corporate manual notices while the mode is 'provider' too.
+  const paymentOn = (doc.next?.payment ?? options?.payment ?? 'none') !== 'none';
   const graceHours = options?.hold?.lateGraceHours ?? 24;
   const withinGrace = order.status === 'expired' && !!order.closedAt && Date.now() - Date.parse(order.closedAt) < graceHours * 3_600_000;
   const submitted = payment?.state === 'submitted' || payment?.state === 'processing';
 
   // After a rejection the form returns prefilled with what was sent (§6.8 "Try again").
+  const seed = payment?.state === 'rejected' ? payment : raw?.state === 'none' ? raw : null;
   useEffect(() => {
-    if (payment?.state === 'rejected' && prefilled.current !== payment.id) {
-      prefilled.current = payment.id;
-      setReference(payment.reference ?? ''); if (payment.payerMethod) setMethod(payment.payerMethod); if (payment.paidOn) setPaidOn(payment.paidOn);
+    const key = seed ? `${seed.id}:${seed.reference}:${seed.payerMethod}:${seed.paidOn}` : null;
+    if (seed && prefilled.current !== key) {
+      prefilled.current = key;
+      if (seed.reference) setReference(seed.reference); if (seed.payerMethod) setMethod(seed.payerMethod); if (seed.paidOn) setPaidOn(seed.paidOn);
     }
-  }, [payment]);
+  }, [seed]);
 
   // Poll the cheap status route every 30 s while the payment is under review (§3.5); reload the page data when it moved.
   const known = useRef({ pay: payment?.state ?? null, order: order.status });
@@ -404,7 +433,8 @@ export function CorporateCancelDialog({ open, token, orgId, orderId, onClose, on
   const blocked = !!preview && (!preview.eligible || preview.mode === 'closed' || !!preview.blocked);
   const noRefund = preview?.mode === 'none' || (preview?.mode === 'auto' && preview.refundTzs === 0);
   const needsAck = !!preview && !blocked && noRefund;
-  const policyText = preview?.policy?.text?.[locale] ?? '';
+  // The sentence is the server's (policy.generated); the organizer's own text only for a custom policy without one.
+  const policyText = preview?.policy?.generated?.[locale] ?? preview?.policy?.text?.[locale] ?? '';
   return (
     <Dialog open={open} onClose={onClose} title={t('corp.events.order.cancel')} description={t('corp.events.order.cancel.paidBody')} size="md">
       <div className="space-y-4 text-sm" data-testid="corp-cancel-dialog">

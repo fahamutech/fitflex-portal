@@ -7,7 +7,7 @@ import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
 import { api, type EventCancelImpact, type EventRefundBatchResult } from '@/lib/api';
 import { money } from '@/lib/admin-utils';
-import { CANCEL_REASONS, cancelReasonKey, errorCode, errorKey, fmt, trackEventsS4Analytics } from '@/lib/events';
+import { CANCEL_REASONS, cancelReasonKey, errorCode, errorKey, fmt, pluralKey, trackEventsS4Analytics } from '@/lib/events';
 import { Alert, Button, Checkbox, Field, Select, Textarea } from '@/components/shared';
 import { ConfirmDialog, Dialog, DialogFooter } from '@/components/dialog';
 import { useApp } from '../../app/providers';
@@ -15,7 +15,9 @@ import { useApp } from '../../app/providers';
 type Phase = 'form' | 'confirm' | 'done';
 
 export function EventCancelWithRefundsDialog({ open, eventId, onClose, onCancelled }: { open: boolean; eventId: string; onClose: () => void; onCancelled: () => void }) {
-  const { t, token } = useApp();
+  const { t, token, hasPermission } = useApp();
+  // Resuming the batch, repairs and batch decisions need the `payments` scope; raising refunds on cancel needs only `events`.
+  const canPayments = hasPermission('payments');
   const [impact, setImpact] = useState<EventCancelImpact | null>(null);
   const [loading, setLoading] = useState(true);
   const [reason, setReason] = useState<string>('organizer_decision');
@@ -49,12 +51,13 @@ export function EventCancelWithRefundsDialog({ open, eventId, onClose, onCancell
     if (!token) return;
     setBusy(true); setError(null);
     try {
-      const body = { reason, note: { en: noteEn.trim(), sw: noteSw.trim() }, ...(impact && paid > 0 ? { refundPaidOrders: raise, ...(raise ? { expectedRefundableTzs: impact.refundableTzs } : {}) } : {}) };
+      const body = { reason, note: { en: noteEn.trim(), sw: noteSw.trim() }, ...(impact && paid > 0 ? { refundPaidOrders: raise, expectedRefundableTzs: impact.refundableTzs } : {}) };
       const out = await api.adminCancelEvent(token, eventId, body);
       let result: EventRefundBatchResult | null = out.batch ?? (out.batchId ? { batchId: out.batchId, created: out.created ?? 0, existing: out.existing ?? 0, remaining: out.remaining ?? 0, amountTzs: out.amountTzs ?? 0 } : null);
       // The cancel answer does not always carry the batch (the spec names only `{ status }`); the batch route is idempotent, so ask it for the numbers.
-      if (!result && willRaise && impact) {
-        try { result = await api.adminEventRefundBatch(token, eventId, { expectedRefundableTzs: impact.refundableTzs }); } catch (err) { setError(t(errorKey(err))); }
+      // No expected total on this call: the pre-cancel figure is stale once the cancel ran (the server compares to a live total).
+      if (!result && willRaise && impact && canPayments) {
+        try { result = await api.adminEventRefundBatch(token, eventId, {}); } catch (err) { setError(t(errorKey(err))); }
       }
       setBatch(result); setRaised(willRaise);
       if (result) trackEventsS4Analytics('refund_batch_created', { count: result.created });
@@ -69,7 +72,8 @@ export function EventCancelWithRefundsDialog({ open, eventId, onClose, onCancell
   async function continueBatch() {
     if (!token || !impact) return;
     setBusy(true); setError(null);
-    try { setBatch(await api.adminEventRefundBatch(token, eventId, { expectedRefundableTzs: impact.refundableTzs })); }
+    // Resume without `expectedRefundableTzs`: the figure read before the cancel is stale after the first chunk (409 refundable_changed).
+    try { setBatch(await api.adminEventRefundBatch(token, eventId, {})); }
     catch (err) { setError(t(errorKey(err))); }
     finally { setBusy(false); }
   }
@@ -86,13 +90,13 @@ export function EventCancelWithRefundsDialog({ open, eventId, onClose, onCancell
             <Alert tone="success">
               {raised && batch ? fmt(t('events.cancel.done'), { created: batch.created + batch.existing }) : t('events.cancel.doneOnly')}
             </Alert>
-            {raised && batch && batch.remaining > 0 && (
+            {raised && batch && batch.remaining > 0 && canPayments && (
               <div className="flex flex-wrap items-center gap-2" data-testid="cancel-event-remaining">
-                <span className="text-sm">{fmt(t('events.cancel.remaining'), { n: batch.remaining })}</span>
+                <span className="text-sm">{fmt(t(pluralKey('events.cancel.remaining', batch.remaining)), { n: batch.remaining })}</span>
                 <Button variant="secondary" size="sm" loading={busy} onClick={() => void continueBatch()} data-testid="cancel-event-continue">{t('events.cancel.continue')}</Button>
               </div>
             )}
-            {raised && batch && (
+            {raised && batch && canPayments && (
               <Link href={`/admin/refunds?batch=${encodeURIComponent(batch.batchId)}`} className="inline-flex" data-testid="cancel-event-review"><Button variant="primary" size="sm">{t('events.cancel.reviewRefunds')}</Button></Link>
             )}
           </div>
@@ -109,7 +113,7 @@ export function EventCancelWithRefundsDialog({ open, eventId, onClose, onCancell
             {loading ? <p className="text-sm text-[var(--color-fg-quaternary)]" aria-busy="true">{t('common.loading')}</p> : impact && (impact.awaitingOrders > 0 || paid > 0) && (
               <div className="space-y-3 rounded-[var(--radius-lg)] border border-[var(--color-border-secondary)] p-3" data-testid="cancel-event-impact">
                 <p className="text-sm" data-testid="cancel-event-summary">{summary}</p>
-                {impact.awaitingWithSubmittedPayment > 0 && <div data-testid="cancel-event-submitted"><Alert tone="warning">{fmt(t('events.cancel.submittedWarning'), { n: impact.awaitingWithSubmittedPayment })}</Alert></div>}
+                {impact.awaitingWithSubmittedPayment > 0 && <div data-testid="cancel-event-submitted"><Alert tone="warning">{fmt(t(pluralKey('events.cancel.submittedWarning', impact.awaitingWithSubmittedPayment)), { n: impact.awaitingWithSubmittedPayment })}</Alert></div>}
                 {paid > 0 && (
                   <>
                     <Checkbox checked={raise} onChange={e => setRaise(e.target.checked)} data-testid="cancel-event-raise"

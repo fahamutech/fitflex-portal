@@ -256,8 +256,10 @@ function Detail({ id, view, orderParam, onView, onBack }: { id: string; view: De
 
 /** §6.5: one order with lines, participants (name, masked contact), consent timestamps, hold info, and admin cancel with a note (≥ 5 chars). */
 function AdminOrderDialog({ eventId, row, timezone, timezoneAbbr, onClose, onChanged }: { eventId: string; row: EventOrderRow | null; timezone: string; timezoneAbbr?: string | null; onClose: () => void; onChanged: () => void }) {
-  const { t, token, locale } = useApp();
+  const { t, token, locale, hasPermission } = useApp();
   const toast = useToast();
+  // `refundMode: 'none'` on a paid order needs the `payments` scope (403 payments_scope_required otherwise).
+  const canNoRefund = hasPermission('payments');
   const [doc, setDoc] = useState<AdminEventOrderDetail | null>(null);
   const [error, setError] = useState(false);
   const [note, setNote] = useState('');
@@ -279,6 +281,9 @@ function AdminOrderDialog({ eventId, row, timezone, timezoneAbbr, onClose, onCha
     if (!token || !orderId || !cancellablePaid) return;
     api.adminEventOrderCancelPreview(token, eventId, orderId).then(setPreview).catch(() => setPreview(null));
   }, [token, eventId, orderId, cancellablePaid]);
+  // A custom policy cannot be evaluated by a machine (409 policy_not_evaluable): the "per policy" mode is off and 'full' is the default.
+  const policyOff = preview?.policy?.preset === 'custom';
+  useEffect(() => { if (policyOff) setMode(m => (m === 'policy' ? 'full' : m)); }, [policyOff]);
   async function cancel() {
     if (!token || !orderId || note.trim().length < 5) return;
     setBusy(true);
@@ -287,7 +292,9 @@ function AdminOrderDialog({ eventId, row, timezone, timezoneAbbr, onClose, onCha
       toast.success(t('admin.events.audit.order_cancelled'));
       onChanged(); onClose();
     } catch (err) {
-      if (errorCode(err) === 'invalid_transition' || errorCode(err) === 'already_closed') { toast.error(t('events.error.invalid_transition_order')); onChanged(); }
+      const code = errorCode(err);
+      if (code === 'invalid_transition' || code === 'already_closed') { toast.error(t('events.error.invalid_transition_order')); onChanged(); }
+      else if (code === 'refund_changed' || code === 'refundable_changed') { toast.error(t(errorKey(err))); void load(); if (token && orderId) api.adminEventOrderCancelPreview(token, eventId, orderId).then(setPreview).catch(() => undefined); }
       else toast.error(t(errorKey(err)));
     } finally { setBusy(false); }
   }
@@ -331,15 +338,15 @@ function AdminOrderDialog({ eventId, row, timezone, timezoneAbbr, onClose, onCha
               </tbody>
             </table>
             {/* S4 §6.4: payment timeline, tickets and refunds of the order (read-only; payer details masked without `payments`). */}
-            <AdminOrderPaymentPanel eventId={eventId} orderId={o.id} orderReference={o.reference} orderStatus={o.status} payment={doc.payment} tickets={doc.tickets} refunds={doc.refunds}
+            <AdminOrderPaymentPanel eventId={eventId} orderId={o.id} orderReference={o.reference} orderStatus={o.status} panel={doc.paymentPanel} refunds={doc.refunds}
               timezone={timezone} timezoneAbbr={timezoneAbbr} onChanged={() => { void load(); onChanged(); }} />
             {paidCancel && (
               <fieldset className="space-y-1" data-testid="admin-order-refund-mode">
                 <legend className="text-sm font-medium text-[var(--color-fg-secondary)]">{t('events.order.cancelPaid.mode')}</legend>
-                {(['full', 'policy', 'none'] as const).map(m => {
+                {(['full', 'policy', 'none'] as const).filter(m => m !== 'none' || canNoRefund).map(m => {
                   const amount = m === 'full' ? preview?.paidTzs : m === 'none' ? 0 : preview?.refundTzs;
                   return (
-                    <Radio key={m} name="admin-refund-mode" value={m} checked={mode === m} onChange={() => setMode(m)} data-testid={`admin-refund-mode-${m}`}
+                    <Radio key={m} name="admin-refund-mode" value={m} checked={mode === m} onChange={() => setMode(m)} disabled={m === 'policy' && policyOff} data-testid={`admin-refund-mode-${m}`}
                       label={`${t(`events.order.cancelPaid.mode.${m}` as 'events.order.cancelPaid.mode.full')}${amount != null ? ` · ${money(amount, o.currency)}` : ''}`} />
                   );
                 })}

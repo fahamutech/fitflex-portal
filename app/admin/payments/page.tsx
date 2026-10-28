@@ -5,7 +5,7 @@ import { RefreshCw, CheckCircle2, XCircle, Ban, Undo2, ShieldCheck, Pencil, Wren
 import { useApp } from '../../providers';
 import { api, ApiError, PaymentRequest, PaymentStatusValue } from '@/lib/api';
 import { EVENTS_MODULE } from '@/lib/flags';
-import { attentionReasonKey, eventDateTime, isEventPayment, orderStatusOf } from '@/lib/events';
+import { attentionReasonKey, eventDateTime, isEventPayment, orderStatusOf, pluralKey } from '@/lib/events';
 import { EventApproveDialog, EventRejectDialog, type EventDecisionResult } from '@/components/event-payment-dialogs';
 import { Badge, Button, PageHeader, Alert, Spinner, Card, Field, Select, ErrorState } from '@/components/shared';
 import { DataTable, ColumnDef } from '@/components/data-table';
@@ -463,7 +463,7 @@ export default function PaymentsPage() {
       <PageHeader
         title={t('payments.title')}
         description={loadFailed && !payments.length ? undefined
-          : `${fill(t('payments.summary'), { total: payments.length, pending: payments.filter(p => p.status === 'pending').length })}${attentionCount ? ` · ${fill(t('payments.event.attentionCount'), { n: attentionCount })}` : ''}`}
+          : `${fill(t('payments.summary'), { total: payments.length, pending: payments.filter(p => p.status === 'pending').length })}${attentionCount ? ` · ${fill(t(pluralKey('payments.event.attentionCount', attentionCount)), { n: attentionCount })}` : ''}`}
         actions={
           <Button variant="secondary" size="sm" onClick={load} disabled={loading}>
             <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} /> {t('payments.refresh')}
@@ -558,7 +558,7 @@ export default function PaymentsPage() {
                       <Wrench aria-hidden="true" className="h-3.5 w-3.5" /> {t('payments.event.repair.action')}
                     </Button>
                   )}
-                  {payment.secondApproverRequired && isDecided(payment) && !payment.changeRequestedBy && !((payment.orderId || isEventPayment(payment)) && payment.status === 'approved') && (
+                  {payment.secondApproverRequired && isDecided(payment) && !payment.changeRequestedBy && !((payment.orderId || isEventPayment(payment)) && payment.status === 'approved') && (!isEventPayment(payment) || payment.status === 'rejected') && (
                     <Button
                       variant="ghost" size="sm" data-testid="payment-request-change"
                       onClick={() => { setChangeTarget(payment); setDialogError(null); setNotice(null); setChangeFields({ status: '', reason: '' }); }}
@@ -747,7 +747,7 @@ export default function PaymentsPage() {
           <Field label={t('money2.newStatus')} required>
             <Select data-testid="change-status" value={changeFields.status} onChange={e => setChangeFields({ ...changeFields, status: e.target.value as PaymentStatusValue | '' })}>
               <option value="">{t('money2.chooseStatus')}</option>
-              {PAYMENT_STATUSES.filter(s => s !== changeTarget?.status).map(s => <option key={s} value={s}>{t(paymentStatusKey(s))}</option>)}
+              {PAYMENT_STATUSES.filter(s => s !== changeTarget?.status).filter(s => !changeTarget || !isEventPayment(changeTarget) || s === 'approved').map(s => <option key={s} value={s}>{t(paymentStatusKey(s))}</option>)}
             </Select>
           </Field>
           <Field label={t('money2.reason')} hint={t('money2.reasonHint')} required>

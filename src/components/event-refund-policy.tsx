@@ -1,6 +1,7 @@
 'use client';
 import { Plus, Trash2 } from 'lucide-react';
-import { POLICY_PRESETS, POLICY_TIERS_MAX, fieldId, newPolicyTier, policyFromForm, refundPolicyLine, type Errors, type EventForm } from '@/lib/events';
+import type { EventRefundPolicy } from '@/lib/api';
+import { POLICY_PRESETS, POLICY_TIERS_MAX, fieldId, generatedPolicyLine, newPolicyTier, refundPolicyPayload, validateRefundPolicy, type Errors, type EventForm } from '@/lib/events';
 import { Alert, Button, Field, Input, Radio } from '@/components/shared';
 import { CountedTextarea, TextField, useErrorText } from '@/components/event-wizard-steps/fields';
 import { useApp } from '../../app/providers';
@@ -10,6 +11,7 @@ type Props = {
   update: (patch: Partial<EventForm> | ((f: EventForm) => Partial<EventForm>)) => void;
   errors: Errors;
   readOnly: boolean;
+  savedPolicy?: EventRefundPolicy | null;
 };
 
 /**
@@ -17,10 +19,14 @@ type Props = {
  * days (1 to 365); `tiered` takes up to three steps (days before the event strictly decreasing, percent not rising);
  * `custom` keeps the English and Swahili text. A read-only sentence generated from the inputs shows what members will read.
  */
-export function RefundPolicyEditor({ form, update, errors, readOnly }: Props) {
+export function RefundPolicyEditor({ form, update, errors, readOnly, savedPolicy }: Props) {
   const { t, locale } = useApp();
   const errText = useErrorText();
-  const generated = refundPolicyLine(policyFromForm(form), locale, t);
+  // The sentence is the server's, shown once the saved policy matches the inputs; until then a short note says it follows the save.
+  const current = refundPolicyPayload(form);
+  const same = !!savedPolicy && !Object.keys(validateRefundPolicy(form)).length && savedPolicy.preset === current.preset
+    && (savedPolicy.days ?? null) === (current.days ?? null) && JSON.stringify(savedPolicy.tiers ?? null) === JSON.stringify(current.tiers ?? null);
+  const generated = same ? generatedPolicyLine(savedPolicy?.generated, locale) : '';
   const setTier = (i: number, patch: Partial<EventForm['policyTiers'][number]>) => update(f => ({ policyTiers: f.policyTiers.map((tier, j) => (j === i ? { ...tier, ...patch } : tier)) }));
   const choose = (p: (typeof POLICY_PRESETS)[number]) => update(f => ({
     policyPreset: p,
@@ -86,7 +92,7 @@ export function RefundPolicyEditor({ form, update, errors, readOnly }: Props) {
 
       {form.policyPreset && (
         <Field label={t('events.terms.policy.generated')}>
-          <Input id={fieldId('policyGenerated')} readOnly value={generated} placeholder="—" aria-live="polite" data-testid="ev-policy-generated" />
+          <Input id={fieldId('policyGenerated')} readOnly value={generated} placeholder={t('events.terms.policy.generatedPending')} aria-live="polite" data-testid="ev-policy-generated" />
         </Field>
       )}
       <Alert tone="info">{t('events.terms.policy.draft')}</Alert>

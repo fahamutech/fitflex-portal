@@ -91,19 +91,20 @@ export function EventRejectDialog({ payment, onClose, onDone }: { payment: Payme
   const { t, token } = useApp();
   const [code, setCode] = useState<EventRejectCode | ''>('');
   const [memberNote, setMemberNote] = useState('');
+  const [memberNoteSw, setMemberNoteSw] = useState('');
   const [note, setNote] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  useEffect(() => { setCode(''); setMemberNote(''); setNote(''); setError(null); }, [payment]);
+  useEffect(() => { setCode(''); setMemberNote(''); setMemberNoteSw(''); setNote(''); setError(null); }, [payment]);
   if (!payment) return null;
   const needsNote = code === 'other';
-  const ok = !!code && (!needsNote || memberNote.trim().length > 0);
+  const ok = !!code && (!needsNote || memberNote.trim().length > 0 || memberNoteSw.trim().length > 0);
   async function reject() {
     if (!token || !code || !payment) return;
     setBusy(true); setError(null);
     try {
       const response = await api.decideEventPayment(token, payment.id, {
-        decision: 'reject', reasonCode: code, ...(memberNote.trim() ? { memberNote: memberNote.trim() } : {}), ...(note.trim() ? { note: note.trim() } : {}),
+        decision: 'reject', reasonCode: code, ...(memberNote.trim() ? { memberNote: memberNote.trim() } : {}), ...(memberNoteSw.trim() ? { memberNoteSw: memberNoteSw.trim() } : {}), ...(note.trim() ? { note: note.trim() } : {}),
       });
       trackEventsS4Analytics('event_payment_decided', { outcome: 'rejected' });
       onDone({ decision: 'reject', response });
@@ -123,6 +124,9 @@ export function EventRejectDialog({ payment, onClose, onDone }: { payment: Payme
         </Field>
         <Field label={t('payments.event.reject.memberNote')} hint={`${t('payments.event.reject.memberNote.hint')} · ${fmt(t('events.basics.counter'), { n: memberNote.length, max: MEMBER_NOTE_MAX })}`} required={needsNote}>
           <Textarea rows={2} value={memberNote} onChange={e => setMemberNote(e.target.value.slice(0, MEMBER_NOTE_MAX))} data-testid="event-reject-member-note" />
+        </Field>
+        <Field label={t('payments.event.reject.memberNoteSw')} hint={`${t('payments.event.reject.memberNote.hint')} · ${fmt(t('events.basics.counter'), { n: memberNoteSw.length, max: MEMBER_NOTE_MAX })}`}>
+          <Textarea rows={2} value={memberNoteSw} onChange={e => setMemberNoteSw(e.target.value.slice(0, MEMBER_NOTE_MAX))} data-testid="event-reject-member-note-sw" />
         </Field>
         <Field label={t('money2.noteOptional')}>
           <Textarea rows={2} value={note} onChange={e => setNote(e.target.value)} maxLength={500} data-testid="event-reject-note" />

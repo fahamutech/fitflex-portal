@@ -1069,7 +1069,7 @@ export const api = {
     request<{ refunds: Refund[] }>(`/admin/refunds${status ? `?status=${status}` : ''}`, {}, token),
   raiseRefund: (token: string, body: { paymentRequestId: string; amountTzs?: number; note?: string }) =>
     request<{ refund: Refund }>('/admin/refunds', { method: 'POST', body: JSON.stringify(body) }, token),
-  decideRefund: (token: string, id: string, body: { decision: 'approve' | 'reject'; note?: string; amountTzs?: number; endAccess?: boolean }) =>
+  decideRefund: (token: string, id: string, body: { decision: 'approve' | 'reject'; note?: string; noteSw?: string; amountTzs?: number; endAccess?: boolean }) =>
     request<{ refund: Refund }>(`/admin/refunds/${encodeURIComponent(id)}/decision`, { method: 'POST', body: JSON.stringify(body) }, token),
   markRefundPaid: (token: string, id: string, body: { paymentReference: string; paidTo?: string }) =>
     request<{ refund: Refund }>(`/admin/refunds/${encodeURIComponent(id)}/paid`, { method: 'POST', body: JSON.stringify(body) }, token),
@@ -1404,7 +1404,7 @@ export const api = {
   // ─── Events S4 (spec events-s4-payments-and-tickets §3.4-§3.14) ───
   /** Approve (amountTzs = what actually arrived, mandatory for event payments, §3.7.3) or reject (reasonCode, §3.7.5). */
   decideEventPayment: (token: string, id: string, body:
-    { decision: 'approve'; amountTzs: number; reference?: string; note?: string } | { decision: 'reject'; reasonCode: EventRejectCode; memberNote?: string; note?: string }) =>
+    { decision: 'approve'; amountTzs: number; reference?: string; note?: string } | { decision: 'reject'; reasonCode: EventRejectCode; memberNote?: string; memberNoteSw?: string; note?: string }) =>
     request<EventPaymentDecision & Partial<PaymentRequest>>(`/admin/payment-requests/${encodeURIComponent(id)}/decision`, { method: 'POST', body: JSON.stringify(body) }, token),
   /** §3.7.8: re-applies an approved payment whose order was not confirmed (scope payments); idempotent. */
   repairEventPayment: (token: string, eventId: string, orderId: string) =>
@@ -1418,7 +1418,7 @@ export const api = {
   adminEventCancelPreview: (token: string, eventId: string) => request<EventCancelImpact>(`/admin/events/${encodeURIComponent(eventId)}/cancel-preview`, {}, token),
   adminCancelEvent: (token: string, eventId: string, body: AdminEventCancelBody) =>
     request<AdminEventCancelResult>(`/admin/events/${encodeURIComponent(eventId)}/cancel`, { method: 'POST', body: JSON.stringify(body) }, token),
-  adminEventRefundBatch: (token: string, eventId: string, body: { note?: string; expectedRefundableTzs: number }) =>
+  adminEventRefundBatch: (token: string, eventId: string, body: { note?: string; expectedRefundableTzs?: number }) =>
     request<EventRefundBatchResult>(`/admin/events/${encodeURIComponent(eventId)}/refund-batch`, { method: 'POST', body: JSON.stringify(body) }, token),
   /** §3.12.4 helpers: approve every requested refund of a batch (equality checks), record payouts row by row. */
   approveRefundBatch: (token: string, body: { batchId: string; expectedTotalTzs: number; expectedCount: number }) =>
@@ -1963,6 +1963,8 @@ export interface Refund {
   policySnapshot?: { preset?: string | null; percent?: number | null; deadlineAt?: string | null; evaluatedAt?: string | null } | null;
   payerPhone?: string | null;
   organizationName?: string | null;
+  /** The server-built policy sentence for this refund (both languages), when it carries one. */
+  policy?: { generated?: { en: string; sw: string } | null } | null;
 }
 
 /** A1 second approver: where a payment or refund stands (flag MONEY_SECOND_APPROVER on only). */
@@ -4043,7 +4045,8 @@ export type EventAvailability = 'open' | 'closing_soon' | 'sold_out' | 'closed' 
 export type RefundPolicyPreset = 'no_refund' | 'refund_until_close' | 'full_until_days' | 'tiered' | 'custom';
 /** Events S4 (spec §3.12.1, §6.7): `days` for full_until_days; up to three steps for tiered. */
 export type RefundPolicyTier = { daysBefore: number; percent: number };
-export type EventRefundPolicy = { preset: RefundPolicyPreset | null; text: Bilingual | null; days?: number | null; tiers?: RefundPolicyTier[] | null };
+/** `generated` is the sentence members read, built by the server in both languages (the portal never words a policy). */
+export type EventRefundPolicy = { preset: RefundPolicyPreset | null; text: Bilingual | null; days?: number | null; tiers?: RefundPolicyTier[] | null; generated?: { en: string; sw: string } | null };
 /** POST /organizer/events/:id/<action> (§7.2); approve/reject are the admin's decision route. */
 export type EventOrganizerAction = 'submit' | 'withdraw' | 'cancel' | 'complete' | 'archive';
 /** `allowedActions` vocabulary on organizer and admin event documents (§7.2, §16.5). */
@@ -4144,7 +4147,7 @@ export type ParticipantFieldKey = 'phone' | 'email' | 'dateOfBirth' | 'gender' |
 export type ParticipantFields = Partial<Record<ParticipantFieldKey, ParticipantFieldPolicy>>;
 export type DuplicatePolicy = 'one_per_category' | 'allow';
 export type EventOrderStatus = 'awaiting_payment' | 'confirmed' | 'partially_cancelled' | 'refund_pending' | 'refunded' | 'cancelled' | 'expired';
-export type EventRegistrationStatus = 'reserved' | 'confirmed' | 'cancelled';
+export type EventRegistrationStatus = 'reserved' | 'confirmed' | 'cancelled' | 'refunded';
 export type EventClaimState = 'self' | 'unclaimed' | 'claimed';
 export type EventConsentBasis = 'self' | 'purchaser_authorised' | 'organisation';
 export type EventKitSize = 'xs' | 's' | 'm' | 'l' | 'xl' | 'xxl' | 'xxxl';
@@ -4189,7 +4192,10 @@ export interface EventOrderRegistration {
   id: string; ticketTypeId: string; categoryId: string; firstName: string; lastName: string; status: EventRegistrationStatus; consentBasis: EventConsentBasis;
   isSelf?: boolean; claimState: EventClaimState;
   /** NOT IN THE SPEC: when the claim invitation was sent (S3 column `claimInvitedAt`) and how often; null = none sent. */
-  claimInvitedAt?: string | null; claimInviteCount?: number; hasContact?: boolean; phone?: string | null; email?: string | null; dateOfBirth?: string | null; gender?: string | null;
+  claimInvitedAt?: string | null; claimInviteCount?: number; hasContact?: boolean;
+  /** Same data nested (backend S4): the portal reads the flat fields first, then this. */
+  invitation?: { sentAt: string | null; count: number; hasContact: boolean } | null;
+  phone?: string | null; email?: string | null; dateOfBirth?: string | null; gender?: string | null;
   kitSize?: string | null; groupLabel?: string | null; cancelReason?: string | null; categoryName?: string; ticketTypeName?: string;
 }
 export type EventOrderEvent = { id: string; slug: string; title: string; startsAt: string; timezone: string; utcOffsetMinutes: number; timezoneAbbr: string; heroThumbUrl: string | null };
@@ -4236,12 +4242,15 @@ export interface AdminEventOrderDetail {
   event?: EventSummary | null; team?: { id: string; name: string; teamType: string; memberCount: number } | null;
   next?: { payment: 'none' | 'manual' | 'provider'; instructions: unknown | null }; allowedActions?: string[];
   purchaser?: { type: 'member' | 'organization'; id?: string | null; label: string | null }; createdBy?: { id?: string; name: string | null } | null;
-  /** Events S4 (NOT IN THE SPEC for this route, §6.4 needs them): payment timeline, ticket counts and the order's refunds. */
-  payment?: AdminEventOrderPayment | null; tickets?: { issued: number; cancelled: number } | null; refunds?: EventRefundView[];
+  /**
+   * Events S4 (backend #270): the staff view of the order's money is `paymentPanel` (payments newest first, with the EventPayment
+   * `status`), its ticket counts and refunds. The member-style `payment` is not used for staff data.
+   */
+  paymentPanel?: { payments?: AdminEventOrderPayment[]; tickets?: unknown; refunds?: EventRefundView[] } | null; refunds?: EventRefundView[];
 }
 // ─── Events S4: payments, refunds and finance (design spec events-s4-payments-and-tickets §3, §6; decisions D23-D28) ───
 // Whole TZS integers everywhere (D4). Fields marked "NOT IN THE SPEC" are read defensively (optional) and listed in the PR.
-export type EventPaymentState = 'submitted' | 'processing' | 'confirmed' | 'rejected' | 'failed' | 'expired' | 'needs_attention';
+export type EventPaymentState = 'none' | 'submitted' | 'processing' | 'confirmed' | 'rejected' | 'failed' | 'expired' | 'needs_attention';
 export type EventPaymentMethod = 'manual' | 'provider' | 'free';
 export type EventRejectCode = 'reference_not_found' | 'amount_mismatch' | 'wrong_account' | 'duplicate_reference' | 'other';
 /** PaymentView (§3.5): what the purchaser (and a corporate billing user) sees about their own payment. */
@@ -4272,7 +4281,7 @@ export interface CorporateEventPaymentBody { method: 'bank_transfer' | 'mobile_m
 export type EventCancelBlock = 'payment_submitted' | 'refund_in_progress' | 'cancellation_window_closed' | 'event_cancelled' | 'purchaser_only' | 'kit_collected';
 export interface EventCancelPreview {
   eligible: boolean; mode: 'auto' | 'none' | 'manual_review' | 'closed'; percent: number; paidTzs: number; refundTzs: number; currency: string;
-  deadlineAt: string | null; policy: { preset: RefundPolicyPreset | null; text: Bilingual | null }; places?: Array<{ registrationId: string; name: string; paidTzs: number; refundTzs: number }>;
+  deadlineAt: string | null; policy: { preset: RefundPolicyPreset | null; text: Bilingual | null; generated?: { en: string; sw: string } | null }; places?: Array<{ registrationId: string; name: string; paidTzs: number; refundTzs: number }>;
   releaseInventory: boolean; blocked: EventCancelBlock | null;
 }
 /** Decision of an event payment: the request (or the row spread) plus the confirmation outcome (§3.9.4). */
@@ -4300,7 +4309,7 @@ export type AdminEventCancelResult = { status: EventStatus; batch?: EventRefundB
 export type AdminCancelRefundMode = 'full' | 'policy' | 'none';
 /** NOT IN THE SPEC: the payment block of GET /admin/events/:eventId/orders/:id (the S3 detail grows these for the order panel, §6.4). */
 export interface AdminEventOrderPayment {
-  id?: string; state: EventPaymentState; method: EventPaymentMethod; amountTzs: number; expectedTzs?: number | null; currency?: string;
+  id?: string; status: string; state?: EventPaymentState; method: EventPaymentMethod; amountTzs: number; expectedTzs?: number | null; currency?: string;
   reference?: string | null; payerPhone?: string | null; submittedAt?: string | null; verifiedAt?: string | null; verifiedByName?: string | null;
   decidedAt?: string | null; decidedByName?: string | null; rejectCode?: EventRejectCode | null; memberNote?: string | null; late?: boolean;
   repairable?: boolean; failureReason?: string | null; refundId?: string | null; paymentRequestId?: string | null;
