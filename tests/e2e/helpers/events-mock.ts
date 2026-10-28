@@ -115,7 +115,7 @@ export const PUBLIC_EVENTS = [
 ];
 export const PUBLIC_DETAIL = { ...PUBLISHED, availability: 'open', shareUrl: 'https://fitflex.test/e/arusha-trail-10k', participantFields: { phone: 'required', email: 'optional', dateOfBirth: 'required', gender: 'off', emergencyContact: 'optional', kitSize: 'off' }, duplicatePolicy: 'one_per_category',
   categories: PUBLISHED.categories.map((c: Json) => ({ ...c, availability: 'open', remaining: null, ticketTypes: c.ticketTypes.map((tt: Json) => ({ ...tt, availability: 'open' })) })) };
-const CONSENT = { version: '2026-10-draft', en: 'We confirm our organisation has each listed person\'s permission to register them for this event and to share their details with FitFlex and the organizer.', sw: 'Tunathibitisha shirika letu lina ruhusa ya kila mtu aliyeorodheshwa kumsajili kwenye tukio hili na kushiriki taarifa zake na FitFlex na mwandaaji.' };
+const CONSENT = { version: '2026-10-draft', versionLabel: '2026-10', organisation: { en: 'We confirm our organisation has each listed person\'s permission to register them for this event and to share their details with FitFlex and the organizer.', sw: 'Tunathibitisha shirika letu lina ruhusa ya kila mtu aliyeorodheshwa kumsajili kwenye tukio hili na kushirikisha taarifa zake na FitFlex na mwandaaji.' } };
 const participant = (first: string, last: string, phone: string, email: string | null, ticketTypeId: string, extra: Json = {}) => ({ ticketTypeId, firstName: first, lastName: last, phone, email, dateOfBirth: '1990-01-01', gender: null, emergencyContact: null, kitSize: null, groupLabel: null, consentBasis: 'organisation', ...extra });
 const quoteFor = (lines: Array<{ ticketTypeId: string; quantity: number }>, discountPct = 0) => {
   const price: Record<string, [string, string, string, number]> = { tt_1: ['Early bird', 'cat_1', '21K Half Marathon', 25000], tt_2: ['Standard', 'cat_2', '10K', 0] };
@@ -138,7 +138,7 @@ function parseRoster(rawText: string) {
   });
 }
 /** The roster dry run (§3.10): per-row problems, duplicates, lines and a quote for the ok rows. */
-export function validateRoster(rawText: string, opts: { capacityShort?: Json[]; alreadyRegistered?: string[]; discountPct?: number } = {}) {
+export function validateRoster(rawText: string, opts: { capacityShort?: Json[]; alreadyRegistered?: string[]; discountPct?: number; warnFirst?: boolean } = {}) {
   const parsed = parseRoster(rawText);
   const seen = new Map<string, number>();
   const duplicates: Json[] = [];
@@ -155,7 +155,10 @@ export function validateRoster(rawText: string, opts: { capacityShort?: Json[]; 
     if (key && seen.has(key)) duplicates.push({ index: p.index, kind: 'in_list', otherIndex: seen.get(key) }); else if (key) seen.set(key, p.index);
     if (opts.alreadyRegistered?.includes(digits)) { duplicates.push({ index: p.index, kind: 'already_registered', registrationStatus: 'confirmed' }); problems.push({ field: 'phone', code: 'duplicate_participant' }); }
     const ticketTypeId = cat === 'cat_1' ? 'tt_1' : cat === 'cat_2' ? 'tt_2' : null;
-    return { index: p.index, ok: problems.length === 0, participant: participant(p.first, p.last, p.phone || null, p.email || null, ticketTypeId ?? '', { dateOfBirth: p.dob || null, groupLabel: p.group || null }), categoryId: cat, ticketTypeId, problems };
+    // Real shape (events-roster-service rowOut): ids sit on the row, never on `participant`; warnings are their own array.
+    const { ticketTypeId: _omit, ...wire } = participant(p.first, p.last, p.phone || null, p.email || null, '', { dateOfBirth: p.dob || null, groupLabel: p.group || null });
+    void _omit;
+    return { index: p.index, line: p.index + 1, ok: problems.length === 0, participant: wire, categoryId: cat, ticketTypeId, problems, ...(problems.length === 0 && opts.warnFirst && p.index === 0 ? { warnings: [{ field: 'emergencyContact', code: 'not_collected' }] } : {}) };
   });
   const dupIdx = new Set(duplicates.map(d => d.index));
   const okRows = rows.filter(r => r.ok && !dupIdx.has(r.index));
@@ -185,6 +188,7 @@ export const ORDER_DETAIL = (over: Json = {}, regsOver: Json[] = []) => {
 };
 /** Organizer roster rows (§3.13): the server masks reserved names and never returns contact fields. */
 export const REG_ROWS = [
+  { id: 'reg_6', participant: { name: 'Z***** K**' }, categoryName: '10K', ticketTypeName: 'Standard', status: 'cancelled', orderReference: 'EV-2026-0004', teamName: null, kitSize: null, createdAt: '2026-10-19T08:00:00.000Z', claimed: false },
   { id: 'reg_1', participant: { name: 'A*** M*****' }, categoryName: '21K Half Marathon', ticketTypeName: 'Early bird', status: 'reserved', orderReference: 'EV-2026-0001', teamName: 'Safari Cover', kitSize: null, createdAt: '2026-10-22T08:00:00.000Z', claimed: true },
   { id: 'reg_4', participant: { name: 'Baraka Mushi' }, categoryName: '10K', ticketTypeName: 'Standard', status: 'confirmed', orderReference: 'EV-2026-0002', teamName: null, kitSize: 'l', createdAt: '2026-10-21T08:00:00.000Z', claimed: true },
   { id: 'reg_5', participant: { name: 'Neema Ally' }, categoryName: '10K', ticketTypeName: 'Standard', status: 'cancelled', orderReference: 'EV-2026-0003', teamName: null, kitSize: null, createdAt: '2026-10-20T08:00:00.000Z', claimed: false },
@@ -196,7 +200,16 @@ export const ORG_ORDER_ROWS = [
   { id: 'ord_2', reference: 'EV-2026-0002', status: 'confirmed', purchaser: { type: 'member', label: 'B***** M****' }, placesCount: 1, totalTzs: 0, feesTzs: 0, currency: 'TZS', createdAt: '2026-10-21T08:00:00.000Z', holdExpiresAt: null, closedAt: '2026-10-21T08:10:00.000Z', closeReason: null },
 ];
 export const ORG_ORDER_ROWS_ADMIN = ORG_ORDER_ROWS.map(r => (r.id === 'ord_2' ? { ...r, purchaser: { type: 'member', label: 'Baraka Mushi' } } : r));
-export const ADMIN_ORDER_DETAIL = (id = 'ord_1') => ({ ...(ORG_ORDER_ROWS_ADMIN.find(r => r.id === id) ?? ORG_ORDER_ROWS_ADMIN[0]), ...ORDER_DETAIL({ id }).order, ...{ lines: ORDER_DETAIL().lines, registrations: ORDER_DETAIL().registrations }, holdCycle: 1, createdBy: { name: 'Neema People' } });
+export const ADMIN_ORDER_DETAIL = (id = 'ord_1') => {
+  // Real shape (adminGetOrder): { order, lines, registrations, event, team, next, allowedActions, purchaser, createdBy }; no contact fields.
+  const d = ORDER_DETAIL({ id }); const row = ORG_ORDER_ROWS_ADMIN.find(r => r.id === id) ?? ORG_ORDER_ROWS_ADMIN[0];
+  return {
+    order: { ...d.order, status: row.status, closedAt: row.closedAt, closeReason: row.closeReason }, lines: d.lines,
+    registrations: d.registrations.map((r: Json) => { const { phone, email, dateOfBirth, gender, emergencyContact, ...rest } = r; void phone; void email; void dateOfBirth; void gender; void emergencyContact; return rest; }),
+    event: d.event, team: d.team, next: d.next, allowedActions: row.status === 'awaiting_payment' ? ['cancel'] : [],
+    purchaser: { ...row.purchaser, id: 'org-1' }, createdBy: { id: 'usr_x', name: 'Neema People' },
+  };
+};
 
 export type EventsMock = {
   calls: Call[]; unmatched: Call[];
@@ -241,11 +254,19 @@ export async function setupEvents(page_: Page, user: Json = OWNER, opts: { me?: 
     ['GET', /^\/b2b\/organizations\/org-1$/, () => ({ organization: { ...ORG, status: opts.orgStatus ?? 'active' }, access: { role: orgRole, permissions: opts.orgPermissions ?? PERMS_BILLING } })],
     ['GET', /^\/events$/, () => (opts.s3 ? pageOf(PUBLIC_EVENTS) : { status: 404, json: { error: 'feature_disabled' } })],
     ['GET', /^\/events\/evt_pub$/, () => PUBLIC_DETAIL],
-    ['POST', /^\/b2b\/organizations\/org-1\/event-orders\/roster\/validate$/, c => (!opts.s3 ? { status: 404, json: { error: 'feature_disabled' } } : c.body?.eventId !== 'evt_pub' ? { status: 404, json: { error: 'event_not_found' } } : validateRoster(String(c.body?.rawText ?? '')))],
+    ['POST', /^\/b2b\/organizations\/org-1\/event-orders\/roster\/validate$/, c => (!opts.s3 ? { status: 404, json: { error: 'feature_disabled' } } : c.body?.eventId !== 'evt_pub' ? { status: 404, json: { error: 'event_not_found' } } : String(c.body?.rawText ?? '').length > 1_000_000 ? { status: 413, json: { error: 'raw_text_too_long', max: 1_000_000 } } : validateRoster(String(c.body?.rawText ?? '')))],
     ['POST', /^\/b2b\/organizations\/org-1\/event-orders$/, c => {
       if (!opts.s3) return { status: 404, json: { error: 'feature_disabled' } };
       if (c.body?.acceptedTerms !== true) return { status: 400, json: { error: 'terms_not_accepted' } };
-      const places = (c.body?.rows ?? []).length;
+      const placeRows: Json[] = c.body?.rows ?? [];
+      if (c.body?.expectedTotalTzs === undefined || c.body?.expectedTotalTzs === null) return { status: 400, json: { error: 'expected_total_required' } };
+      // Strict like the real route: every row names its category (id or name) and ticket (id or name), ids must exist in the event,
+      // and a row that is not a participant object (e.g. a validate row echoed with its ids at row level only) is refused.
+      const bad = placeRows.map((r, index) => ({ index, r })).filter(({ r }) => !(r.categoryId ? ['cat_1', 'cat_2'].includes(r.categoryId) : !!r.category) || !(r.ticketTypeId ? ['tt_1', 'tt_2'].includes(r.ticketTypeId) : !!r.ticketType || !!r.category));
+      if (bad.length) return { status: 422, json: { error: 'participant_invalid', participants: bad.map(({ index }) => ({ index, ok: false, problems: [{ field: 'category', code: 'category_unknown' }] })), duplicates: [] } };
+      const big = placeRows.findIndex(r => String(r.firstName ?? '').length > 80 || String(r.lastName ?? '').length > 80);
+      if (big >= 0) return { status: 400, json: { error: 'field_too_long', index: big, field: 'firstName', max: 80 } };
+      const places = placeRows.length;
       const created = ORDER_DETAIL({ id: 'ord_new', reference: 'EV-2026-0009', placesCount: places, costCentre: c.body?.costCentre ?? null, purchaserReference: c.body?.purchaserReference ?? null, totalTzs: c.body?.expectedTotalTzs ?? 0 });
       orders.ord_new = created;
       return { status: 201, json: { order: created.order, lines: created.lines, registrations: created.registrations, holdExpiresAt: created.order.holdExpiresAt, next: { payment: 'none', instructions: null }, event: PUBLISHED, replayed: false, organizationId: 'org-1' } };
@@ -263,8 +284,7 @@ export async function setupEvents(page_: Page, user: Json = OWNER, opts: { me?: 
     ['GET', /^\/organizer\/events\/([^/]+)\/registrations$/, (c, m) => (m[1] === 'evt_other' ? { status: 404, json: { error: 'event_not_found' } } : m[1] !== 'evt_pub' ? pageOf([]) : pageOf(REG_ROWS.filter(r => (!c.query.status || r.status === c.query.status) && (!c.query.q || (r.status === 'confirmed' && r.participant.name.toLowerCase().includes(c.query.q.toLowerCase()))))))],
     ['GET', /^\/organizer\/events\/([^/]+)\/orders$/, (c, m) => (m[1] === 'evt_other' ? { status: 404, json: { error: 'event_not_found' } } : m[1] !== 'evt_pub' ? pageOf([]) : pageOf(ORG_ORDER_ROWS.filter(r => !c.query.status || r.status === c.query.status)))],
     ['GET', /^\/admin\/events\/([^/]+)\/registrations$/, (c, m) => (m[1] !== 'evt_pub' ? pageOf([]) : pageOf(REG_ROWS_ADMIN.filter(r => !c.query.status || r.status === c.query.status)))],
-    // #265: the admin order detail no longer returns phone/email/DOB/gender.
-    ['GET', /^\/admin\/events\/([^/]+)\/orders\/([^/]+)$/, (_c, m) => { const d = ADMIN_ORDER_DETAIL(m[2]); return { ...d, closeReason: m[2] === 'ord_2' ? 'admin' : d.closeReason, registrations: d.registrations.map((r: Json) => { const { phone, email, dateOfBirth, gender, ...rest } = r; void phone; void email; void dateOfBirth; void gender; return rest; }) }; }],
+    ['GET', /^\/admin\/events\/([^/]+)\/orders\/([^/]+)$/, (_c, m) => ADMIN_ORDER_DETAIL(m[2])],
     ['GET', /^\/admin\/events\/([^/]+)\/orders$/, (c, m) => (m[1] !== 'evt_pub' ? pageOf([]) : pageOf(ORG_ORDER_ROWS_ADMIN.filter(r => !adminCancelled.has(r.id) && (!c.query.status || r.status === c.query.status))))],
     ['POST', /^\/admin\/events\/([^/]+)\/orders\/([^/]+)\/cancel$/, (c, m) => {
       if (!c.body?.note || String(c.body.note).length < 5) return { status: 400, json: { error: 'note_required' } };

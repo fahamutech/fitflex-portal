@@ -2,10 +2,11 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api, type EventOrderRow, type EventsPage } from '@/lib/api';
 import { money } from '@/lib/admin-utils';
-import { ORDER_STATUSES, eventDateTime, orderStatusOf } from '@/lib/events';
+import { ORDER_STATUSES, eventDateTime, isFeatureOff, orderStatusOf } from '@/lib/events';
 import { Badge, Button, Card, CardContent, EmptyState, Select, SkeletonTable } from '@/components/shared';
 import { DataTable, type ColumnDef } from '@/components/data-table';
-import { PageError } from '@/components/organizer/page-states';
+import { EventsUnavailable, PageError } from '@/components/organizer/page-states';
+import { useEventsOptions } from '@/components/events-options';
 import { useApp } from '../../app/providers';
 
 export type OrdersFieldPolicy = 'organizer' | 'admin';
@@ -21,6 +22,9 @@ export function EventOrdersTable({ eventId, timezone, timezoneAbbr, fieldPolicy,
   const { t, token, locale } = useApp();
   const [rows, setRows] = useState<EventOrderRow[] | null>(null);
   const [error, setError] = useState(false);
+  // S3 §7.1: the table exists only while the server says registration is on; a 404 feature_disabled says the same.
+  const options = useEventsOptions();
+  const [off, setOff] = useState(false);
   const [status, setStatus] = useState('');
 
   const load = useCallback(async () => {
@@ -37,10 +41,12 @@ export function EventOrdersTable({ eventId, timezone, timezoneAbbr, fieldPolicy,
         if (!cursor) break;
       }
       setRows(out);
-    } catch { setError(true); }
+    } catch (err) { if (isFeatureOff(err)) setOff(true); else setError(true); }
   }, [token, eventId, status, fieldPolicy, published]);
   useEffect(() => { void load(); }, [load, reloadKey]);
 
+  if (options === undefined) return <div aria-busy="true"><SkeletonTable /></div>;
+  if (!options?.registration || off) return <EventsUnavailable />;
   if (!published) return <div data-testid="orders-not-published"><EmptyState title={t('organizer.reg.notPublished')} /></div>;
   if (error) return <PageError onRetry={() => void load()} />;
   if (!rows) return <div aria-busy="true"><SkeletonTable /></div>;

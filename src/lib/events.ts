@@ -158,6 +158,8 @@ export const EVENTS_ERRORS: Record<string, MessageKey> = {
   participants_mismatch: 'events.error.participant_invalid',
   invalid_participant: 'events.error.participant_invalid',
   already_closed: 'events.error.invalid_transition_order',
+  raw_text_too_long: 'events.error.raw_text_too_long',
+  field_too_long: 'events.error.field_too_long',
   invalid_text: 'events.error.invalid_text',
   expected_total_required: 'events.error.price_changed',
   hold_limit_reached: 'events.error.capacity_unavailable',
@@ -699,7 +701,8 @@ export const GENDERS = ['male', 'female', 'other'] as const;
 export const ROSTER_PERMISSION = 'beneficiaries.manage';
 export const ORG_BILLING_ROLES = new Set(['owner', 'admin', 'finance']);
 export const canValidateRoster = (permissions: string[]) => permissions.includes(ROSTER_PERMISSION);
-export const canPlaceCorporateOrder = (role: string | null | undefined, permissions: string[]) => ORG_BILLING_ROLES.has(role ?? '') || permissions.includes('billing.pay');
+/** The backend allows owner | admin | finance only (functions events-roster-service `ORG_BILLING_ROLES`). */
+export const canPlaceCorporateOrder = (role: string | null | undefined) => ORG_BILLING_ROLES.has(role ?? '');
 
 /** Per-participant validation codes (§3.11 + roster codes of §3.10) → `events.validation.<code>`. Unknown codes fall back to a generic text. */
 export const PARTICIPANT_CODES = [
@@ -750,7 +753,8 @@ export const ROSTER_EXAMPLE_CSV = `${ROSTER_HEADER}\nAsha,Mollel,0712 345 678,as
 /** Free text the server rejects (`invalid_text`): a leading = + - @ would be read as a spreadsheet formula. */
 export const startsWithFormulaChar = (v: string) => /^\s*[=+\-@]/.test(v);
 export const ROSTER_MAX_ROWS = 500;
-export const ROSTER_MAX_BYTES = 2_000_000;
+/** Under the backend's 1,000,000-character `rawText` cap (413 `raw_text_too_long`). */
+export const ROSTER_MAX_BYTES = 900_000;
 const csvCell = (v: string) => (/[",\n\r]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v);
 /** One CSV line in `ROSTER_COLUMNS` order. */
 export const rosterCsvLine = (values: Record<(typeof ROSTER_COLUMNS)[number], string>) => ROSTER_COLUMNS.map(c => csvCell((values[c] ?? '').trim())).join(',');

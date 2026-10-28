@@ -4050,7 +4050,10 @@ export type EventAvailabilityMap = Record<string, { availability: EventAvailabil
 export type EventConsentText = { version?: string; en?: string; sw?: string; organisation?: Bilingual; self?: Bilingual; purchaser_authorised?: Bilingual };
 export interface EventRosterProblem { field: string; code: string; minAge?: number; ageOnEventDay?: number; registrationId?: string }
 export interface EventRosterRow {
-  index: number; ok: boolean; participant: Partial<EventParticipantInput>; categoryId: string | null; ticketTypeId: string | null; problems: EventRosterProblem[];
+  index: number; line?: number; ok: boolean; participant: Partial<EventParticipantInput> & { categoryId?: string | null }; categoryId: string | null; ticketTypeId: string | null;
+  problems: EventRosterProblem[];
+  /** Real backend: notes on an ok row (e.g. `not_collected`); ok rows carry no problems. */
+  warnings?: EventRosterProblem[];
 }
 export interface EventRosterDuplicate { index: number; kind: 'in_list' | 'already_registered'; otherIndex?: number; registrationStatus?: string }
 /** POST /b2b/organizations/:id/event-orders/roster/validate (§3.10). */
@@ -4091,7 +4094,7 @@ export interface CorporateEventOrderCreated {
   next: { payment: 'none' | 'manual' | 'provider'; instructions: unknown | null }; event: EventSummary; replayed: boolean; organizationId?: string;
 }
 export interface CorporateEventOrderBody {
-  eventId: string; rows: Array<Partial<EventParticipantInput> & { ticketTypeId?: string | null; categoryId?: string | null }>;
+  eventId: string; rows: Array<Partial<EventParticipantInput> & { ticketTypeId?: string | null; categoryId?: string | null; category?: string; ticketType?: string; group?: string | null }>;
   costCentre?: string; purchaserReference?: string; team?: { create: { name: string } }; acceptedTerms: true; consentTextVersion: string; expectedTotalTzs: number;
 }
 /** Organizer and admin registration rows (§3.13): the server masks reserved names for organizers; never contact fields. */
@@ -4107,9 +4110,12 @@ export interface EventOrderRow {
   id: string; reference: string; status: EventOrderStatus; purchaser: { type: 'member' | 'organization'; label: string }; placesCount: number;
   totalTzs: number; feesTzs: number; currency: string; createdAt: string; holdExpiresAt: string | null; closedAt: string | null; closeReason: string | null;
 }
-export interface AdminEventOrderDetail extends EventOrderRow {
-  lines: EventQuoteLine[]; registrations: EventOrderRegistration[]; termsAcceptedAt?: string | null; consentTextVersion?: string | null;
-  holdCycle?: number; costCentre?: string | null; purchaserReference?: string | null; createdBy?: { name: string | null } | null; allowedActions?: string[];
+/** GET /admin/events/:id/orders/:orderId (functions events-registration adminGetOrder): the order detail is nested, not flat. */
+export interface AdminEventOrderDetail {
+  order: EventOrder; lines: EventQuoteLine[]; registrations: EventOrderRegistration[];
+  event?: EventSummary | null; team?: { id: string; name: string; teamType: string; memberCount: number } | null;
+  next?: { payment: 'none' | 'manual' | 'provider'; instructions: unknown | null }; allowedActions?: string[];
+  purchaser?: { type: 'member' | 'organization'; id?: string | null; label: string | null }; createdBy?: { id?: string; name: string | null } | null;
 }
 /** GET /events/:id (S2 §14.2): the public detail a corporate coordinator reads before registering staff. */
 export type PublicEventDetail = Omit<EventDocument, 'allowedActions' | 'submittedAt' | 'rejection' | 'changeLogCount' | 'version'> & { version?: number };

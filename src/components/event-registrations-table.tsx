@@ -2,10 +2,11 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Check } from 'lucide-react';
 import { api, type EventRegistrationRow, type EventRegistrationsSummary, type EventsPage } from '@/lib/api';
-import { REGISTRATION_STATUSES, eventDateTime, fmt, registrationStatusOf } from '@/lib/events';
+import { REGISTRATION_STATUSES, eventDateTime, fmt, isFeatureOff, registrationStatusOf } from '@/lib/events';
 import { Alert, Badge, Button, Card, CardContent, EmptyState, Input, MetricCard, Select, SkeletonTable } from '@/components/shared';
 import { DataTable, type ColumnDef } from '@/components/data-table';
-import { PageError } from '@/components/organizer/page-states';
+import { EventsUnavailable, PageError } from '@/components/organizer/page-states';
+import { useEventsOptions } from '@/components/events-options';
 import { useApp } from '../../app/providers';
 
 /** Who reads the table (S3 §3.13, §6.3, §6.5): the server masks reserved names for organizers; admins get full names. */
@@ -23,6 +24,9 @@ export function EventRegistrationsTable({ eventId, timezone, timezoneAbbr, field
   const [rows, setRows] = useState<EventRegistrationRow[] | null>(null);
   const [summary, setSummary] = useState<EventRegistrationsSummary | null>(null);
   const [error, setError] = useState(false);
+  // S3 §7.1: the table exists only while the server says registration is on; a 404 feature_disabled says the same.
+  const options = useEventsOptions();
+  const [off, setOff] = useState(false);
   const [status, setStatus] = useState('');
   const [categoryId, setCategoryId] = useState('');
   const [search, setSearch] = useState('');
@@ -47,7 +51,7 @@ export function EventRegistrationsTable({ eventId, timezone, timezoneAbbr, field
         if (!cursor) break;
       }
       setRows(out);
-    } catch { setError(true); }
+    } catch (err) { if (isFeatureOff(err)) setOff(true); else setError(true); }
   }, [token, eventId, status, categoryId, q, fieldPolicy, published]);
   useEffect(() => { void load(); }, [load]);
   useEffect(() => {
@@ -58,13 +62,16 @@ export function EventRegistrationsTable({ eventId, timezone, timezoneAbbr, field
   const anyGroup = useMemo(() => (rows ?? []).some(r => !!r.groupLabel), [rows]);
   const dismiss = () => { setBanner(false); try { sessionStorage.setItem(BANNER_KEY, '1'); } catch { /* private mode */ } };
 
+  if (options === undefined) return <div aria-busy="true"><SkeletonTable /></div>;
+  if (!options?.registration || off) return <EventsUnavailable />;
   if (!published) return <div data-testid="reg-not-published"><EmptyState title={t('organizer.reg.notPublished')} /></div>;
   if (error) return <PageError onRetry={() => void load()} />;
   if (!rows) return <div aria-busy="true"><SkeletonTable /></div>;
 
   const columns: ColumnDef<EventRegistrationRow>[] = [
     { key: 'name', header: t('organizer.reg.col.name'), sortable: true, cell: r => (
-      r.status === 'reserved' && fieldPolicy === 'organizer'
+      // The server masks names of never-confirmed registrations (reserved, and cancelled before payment): style whatever came back masked.
+      fieldPolicy === 'organizer' && /\*/.test(r.participant?.name ?? '')
         ? <span title={t('organizer.reg.masked')} className="font-medium text-[var(--color-fg-secondary)]" data-testid="reg-name-masked">{r.participant?.name ?? '—'}</span>
         : <span className="font-medium text-[var(--color-fg-primary)]">{r.participant?.name ?? '—'}</span>
     ) },

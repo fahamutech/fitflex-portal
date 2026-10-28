@@ -71,7 +71,7 @@ export function CorporateEventOrders({ mine, token }: { mine: Mine; token: strin
   const orgId = mine.organization.id;
   const orgName = mine.organization.tradingName || mine.organization.legalName;
   const active = mine.organization.status === 'active';
-  const canPlace = canPlaceCorporateOrder(mine.role, mine.permissions);
+  const canPlace = canPlaceCorporateOrder(mine.role);
   const order = params.get('order');
   if (order) return <CorporateOrderDetail token={token} orgId={orgId} orderId={order} onBack={() => go({ order: null })} />;
   if (params.get('new')) {
@@ -131,7 +131,7 @@ function CorporateOrdersList({ token, orgId, active, onNew, onOpen }: { token: s
 }
 
 // ── Wizard (§6.2 steps 1–4) ──
-type RowView = { row: EventRosterRow; kind: 'ok' | 'fix' | 'duplicate'; problems: string[] };
+type RowView = { row: EventRosterRow; kind: 'ok' | 'fix' | 'duplicate'; problems: string[]; warnings: string[] };
 
 function CorporateWizard({ token, orgId, orgName, canPlace, holdTtlMinutes, consentVersion, onCancel, onPlaced }: {
   token: string; orgId: string; orgName: string; canPlace: boolean; holdTtlMinutes: number; consentVersion: string; onCancel: () => void; onPlaced: (orderId: string) => void;
@@ -154,7 +154,7 @@ function CorporateWizard({ token, orgId, orgName, canPlace, holdTtlMinutes, cons
   const [consent, setConsent] = useState(false);
   const [terms, setTerms] = useState(false);
   const [placing, setPlacing] = useState(false);
-  const [notice, setNotice] = useState<{ tone: 'error' | 'warning' | 'info'; key: MessageKey } | null>(null);
+  const [notice, setNotice] = useState<{ tone: 'error' | 'warning' | 'info'; text: string } | null>(null);
   const [uncertain, setUncertain] = useState(false);
   const keyRef = useRef(newCorporateIdempotencyKey());
   const headingRef = useRef<HTMLHeadingElement>(null);
@@ -183,6 +183,18 @@ function CorporateWizard({ token, orgId, orgName, canPlace, holdTtlMinutes, cons
   const maxReached = !eventId ? 0 : !validation ? 1 : clean ? 3 : 2;
   const goTo = (i: number) => { setStep(Math.max(0, Math.min(STEPS.length - 1, i))); setTimeout(() => headingRef.current?.focus(), 50); };
 
+  /** The message for a refusal: rate limit, `field_too_long` (row index from the server), else the §3.17 map. */
+  const errorText = (err: unknown) => {
+    const code = errorCode(err);
+    if (code === 'rate_limited') return t('corp.events.rateLimited');
+    if (code === 'field_too_long') {
+      const b = errorBody<{ index?: number; field?: string; max?: number }>(err);
+      const label = rosterFieldKey(b?.field);
+      return fmt(t('events.error.field_too_long'), { row: (b?.index ?? 0) + 1, field: label ? t(label) : b?.field ?? '', max: b?.max ?? '' });
+    }
+    return t(errorKey(err));
+  };
+
   const check = async () => {
     if (!eventId || !text.trim()) return;
     setChecking(true); setCheckError(null); setNotice(null);
@@ -193,7 +205,7 @@ function CorporateWizard({ token, orgId, orgName, canPlace, holdTtlMinutes, cons
       if (v.quote) trackEventsS3Analytics('checkout_quote_created', { eventId, placesCount: v.summary.ok, totalTzs: v.quote.totalTzs, mode: 'corporate' });
       goTo(2);
     } catch (err) {
-      setCheckError(t(errorCode(err) === 'rate_limited' ? 'corp.events.rateLimited' : errorKey(err)));
+      setCheckError(errorText(err));
     } finally { setChecking(false); }
   };
 
@@ -209,6 +221,7 @@ function CorporateWizard({ token, orgId, orgName, canPlace, holdTtlMinutes, cons
     return validation.rows.map(row => {
       const dup = validation.duplicates.find(d => d.index === row.index);
       const problems = row.problems.map(problemText);
+      const warnings = (row.warnings ?? []).map(problemText);
       if (dup) {
         problems.push(dup.kind === 'already_registered'
           ? (dup.registrationStatus
@@ -217,20 +230,28 @@ function CorporateWizard({ token, orgId, orgName, canPlace, holdTtlMinutes, cons
           : `${t('events.validation.listed_twice')}${dup.otherIndex != null ? ` (#${dup.otherIndex + 1})` : ''}`);
       }
       // The server decides (`ok`): problems on an ok row are warnings (e.g. a required field the event cannot collect).
-      return { row, kind: dup ? 'duplicate' : !row.ok ? 'fix' : 'ok', problems };
+      return { row, kind: dup ? 'duplicate' : !row.ok ? 'fix' : 'ok', problems, warnings };
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [validation, event, locale]);
 
   const place = async (retried = false) => {
     if (!validation?.quote || !eventId || !canPlace) return;
+    if (validation.rows.some(r => !(r.categoryId ?? r.participant.categoryId))) { setNotice({ tone: 'error', text: t('events.error.participant_invalid') }); goTo(2); return; }
     setPlacing(true); setNotice(null); setUncertain(false);
     const v = validation;
     const quoted = validation.quote;
     try {
       const out = await api.createCorporateEventOrder(token, orgId, {
         eventId,
-        rows: v.rows.map(r => ({ ...r.participant, ticketTypeId: r.ticketTypeId ?? undefined, categoryId: r.categoryId ?? undefined })),
+        // The validate output's participant verbatim (whatever resolved ids it carries), plus the wizard's own category and
+        // ticket references by id and by name: a row without a category reference is never sent (the backend resolves either).
+        rows: v.rows.map(r => {
+          const categoryId = r.categoryId ?? r.participant.categoryId ?? undefined;
+          const ticketTypeId = r.ticketTypeId ?? r.participant.ticketTypeId ?? undefined;
+          const { groupLabel, ...rest } = r.participant;
+          return { ...rest, ...(groupLabel ? { groupLabel, group: groupLabel } : {}), categoryId, ticketTypeId, category: catName(categoryId) !== '—' ? catName(categoryId) : undefined, ticketType: ticketName(ticketTypeId) || undefined };
+        }),
         ...(costCentre.trim() ? { costCentre: costCentre.trim() } : {}),
         ...(reference.trim() ? { purchaserReference: reference.trim() } : {}),
         ...(teamName.trim() ? { team: { create: { name: teamName.trim() } } } : {}),
@@ -248,14 +269,14 @@ function CorporateWizard({ token, orgId, orgName, canPlace, holdTtlMinutes, cons
           rows: cur.rows.map(r => (byIndex.has(r.index) ? { ...r, ok: false, problems: byIndex.get(r.index)! } : r)),
           summary: { ...cur.summary, problems: byIndex.size, ok: Math.max(0, cur.summary.total - byIndex.size) },
         } : cur);
-        setNotice({ tone: 'error', key: 'events.error.participant_invalid' }); goTo(2);
+        setNotice({ tone: 'error', text: t('events.error.participant_invalid') }); goTo(2);
       } else if (code === 'capacity_unavailable') {
         const body = errorBody<{ ticketTypeId?: string; requested?: number; remaining?: number }>(err);
         setValidation(cur => cur ? { ...cur, capacityShort: body?.ticketTypeId ? [{ ticketTypeId: body.ticketTypeId, requested: body.requested ?? 0, remaining: body.remaining ?? 0 }] : cur.capacityShort } : cur);
-        setNotice({ tone: 'error', key: 'events.error.capacity_unavailable' }); goTo(2);
+        setNotice({ tone: 'error', text: t('events.error.capacity_unavailable') }); goTo(2);
       } else if (code === 'price_changed' || code === 'consent_version_stale') {
         try { setValidation(await api.validateEventRoster(token, orgId, { eventId, rawText: text })); } catch { /* keep the old quote; the notice says to review */ }
-        setNotice({ tone: 'warning', key: code === 'price_changed' ? 'events.error.price_changed' : 'events.error.consent_version_stale' });
+        setNotice({ tone: 'warning', text: t(code === 'price_changed' ? 'events.error.price_changed' : 'events.error.consent_version_stale') });
       } else if (code === 'idempotency_key_reused' && !retried) {
         keyRef.current = newCorporateIdempotencyKey();
         setPlacing(false);
@@ -263,8 +284,8 @@ function CorporateWizard({ token, orgId, orgName, canPlace, holdTtlMinutes, cons
       } else if (!(err instanceof ApiError) || err.status >= 500) {
         setUncertain(true);
       } else {
-        setNotice({ tone: 'error', key: errorKey(err) });
-        toast.error(t(errorKey(err)));
+        setNotice({ tone: 'error', text: errorText(err) });
+        toast.error(errorText(err));
       }
     } finally { setPlacing(false); }
   };
@@ -286,14 +307,19 @@ function CorporateWizard({ token, orgId, orgName, canPlace, holdTtlMinutes, cons
     { key: 'kit', header: t('corp.events.col.kit'), cell: v => (v.row.participant.kitSize ? String(v.row.participant.kitSize).toUpperCase() : '—') },
     { key: 'group', header: t('corp.events.col.group'), cell: v => v.row.participant.groupLabel ?? '—' },
     { key: 'status', header: t('corp.events.col.status'), cell: v => <Badge tone={v.kind === 'ok' ? 'success' : v.kind === 'fix' ? 'danger' : 'warning'}>{t(v.kind === 'ok' ? 'corp.events.row.ok' : v.kind === 'fix' ? 'corp.events.row.fix' : 'corp.events.row.duplicate')}</Badge> },
-    { key: 'problem', header: t('corp.events.col.problem'), cell: v => (v.problems.length ? <ul className="list-disc pl-4">{v.problems.map((p, i) => <li key={i}>{p}</li>)}</ul> : '—') },
+    { key: 'problem', header: t('corp.events.col.problem'), cell: v => (v.problems.length || v.warnings.length ? (
+      <ul className="list-disc pl-4">
+        {v.problems.map((p, i) => <li key={`p${i}`}>{p}</li>)}
+        {v.warnings.map((w, i) => <li key={`w${i}`} className="text-[var(--color-fg-quaternary)]" data-testid="corp-row-warning">{t('corp.events.warning')}: {w}</li>)}
+      </ul>
+    ) : '—') },
   ];
 
   return (
     <div className="space-y-4" data-testid="corp-wizard">
       <PageHeader title={t('corp.events.register')} actions={<Button variant="ghost" size="sm" onClick={onCancel}>{t('events.wizard.back')}</Button>} />
       <Stepper steps={STEPS.map(s => ({ key: s, label: t(`corp.events.step.${s}` as 'corp.events.step.event') }))} current={step} maxReached={maxReached} onStep={goTo} />
-      {notice && <div data-testid="corp-notice"><Alert tone={notice.tone}>{t(notice.key)}</Alert></div>}
+      {notice && <div data-testid="corp-notice"><Alert tone={notice.tone}>{notice.text}</Alert></div>}
       {uncertain && (
         <div data-testid="corp-uncertain"><Alert tone="error"><span className="flex flex-wrap items-center gap-2">{t('corp.events.uncertain')}<Button variant="link" size="sm" onClick={onCancel}>{t('corp.events.title')}</Button></span></Alert></div>
       )}

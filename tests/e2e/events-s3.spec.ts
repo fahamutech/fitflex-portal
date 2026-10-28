@@ -66,7 +66,9 @@ test.describe('corporate bulk registration (§6.2, D18, D19)', () => {
     expect(placed).toHaveLength(1);
     expect(placed[0].body).toMatchObject({ eventId: 'evt_pub', costCentre: 'CC-12', purchaserReference: 'PO-77', team: { create: { name: 'Safari Cover' } }, acceptedTerms: true, consentTextVersion: '2026-10-draft', expectedTotalTzs: 25000 });
     expect(placed[0].body?.rows).toHaveLength(3);
-    expect(placed[0].body?.rows[0]).toMatchObject({ firstName: 'Asha', lastName: 'Mollel', ticketTypeId: 'tt_1', consentBasis: 'organisation', groupLabel: 'Finance' });
+    expect(placed[0].body?.rows[0]).toMatchObject({ firstName: 'Asha', lastName: 'Mollel', ticketTypeId: 'tt_1', categoryId: 'cat_1', category: '21K Half Marathon', ticketType: 'Early bird', consentBasis: 'organisation', groupLabel: 'Finance', group: 'Finance' });
+    // Never a row without a category reference (the strict mock would have answered 422 category_unknown).
+    for (const row of placed[0].body!.rows) { expect(row.categoryId || row.category).toBeTruthy(); expect(row.ticketTypeId || row.ticketType).toBeTruthy(); }
     // Order page: awaiting state, countdown, masked contacts, the labelled payment placeholder and no Lipa Namba.
     await expect(page).toHaveURL(/order=ord_new/);
     await expect(page.getByTestId('corp-order-detail')).toHaveAttribute('data-order-status', 'awaiting_payment');
@@ -146,7 +148,8 @@ test.describe('corporate bulk registration (§6.2, D18, D19)', () => {
   });
 
   test('billing-role gate (D18): a people-only role validates but cannot place; the ask-your-billing-admin state shows', async ({ page }) => {
-    const mock = await setupEvents(page, orgUser(['hr']), { s3: true, orgPermissions: PERMS_PEOPLE });
+    // Even with billing.pay: only owner | admin | finance place (functions ORG_BILLING_ROLES).
+    const mock = await setupEvents(page, orgUser(['hr']), { s3: true, orgPermissions: [...PERMS_PEOPLE, 'billing.pay'] });
     await page.goto('/org/events/?new=1');
     await page.getByRole('button', { name: 'Choose a published event' }).click();
     await page.getByRole('option', { name: /Arusha Trail 10K/ }).click();
@@ -208,8 +211,7 @@ test.describe('corporate bulk registration (§6.2, D18, D19)', () => {
     let limited = true;
     await setupEvents(page, orgUser(['owner']), { s3: true, extra: [['POST', /\/roster\/validate$/, c => {
       if (limited) { limited = false; return { status: 429, json: { error: 'rate_limited' } }; }
-      const v = validateRoster(String(c.body?.rawText ?? ''));
-      return { ...v, rows: v.rows.map(r => (r.index === 0 ? { ...r, problems: [{ field: 'emergencyContact', code: 'not_collected' }] } : r)), duplicates: [{ index: 1, kind: 'already_registered' }].slice(0, 0) };
+      return validateRoster(String(c.body?.rawText ?? ''), { warnFirst: true });
     }]] });
     await page.goto('/org/events/?new=1');
     await page.getByRole('button', { name: 'Choose a published event' }).click();
@@ -220,7 +222,7 @@ test.describe('corporate bulk registration (§6.2, D18, D19)', () => {
     await expect(page.getByTestId('roster-server-error')).toContainText('Too many list checks. Wait a minute, then check again.');
     await page.getByTestId('roster-check').click();
     await expect(page.getByTestId('corp-next')).toBeEnabled();
-    await expect(page.getByRole('region', { name: 'Check' })).toContainText('Not collected for this event (ignored)');
+    await expect(page.getByTestId('corp-row-warning')).toContainText('Note: Emergency contact: Not collected for this event (ignored)');
     await page.getByTestId('corp-next').click();
     await page.getByTestId('corp-consent').check();
     await page.getByTestId('corp-terms').check();
@@ -229,6 +231,25 @@ test.describe('corporate bulk registration (§6.2, D18, D19)', () => {
     await expect(page.getByTestId('corp-place')).toBeDisabled();
     await page.getByTestId('corp-cost-centre').fill('CC-12');
     await expect(page.getByTestId('corp-place')).toBeEnabled();
+  });
+
+  test('size caps: a list over 900,000 characters is refused inline; field_too_long names the row (#265)', async ({ page }) => {
+    await setupEvents(page, orgUser(['owner']), { s3: true });
+    await page.goto('/org/events/?new=1');
+    await page.getByRole('button', { name: 'Choose a published event' }).click();
+    await page.getByRole('option', { name: /Arusha Trail 10K/ }).click();
+    await page.getByTestId('corp-next').click();
+    await page.getByTestId('roster-text').fill('x'.repeat(900_001));
+    await expect(page.getByText('The list is too long. Split it into smaller lists.')).toBeVisible();
+    await expect(page.getByTestId('roster-check')).toBeDisabled();
+    const long = 'A'.repeat(90);
+    await page.getByTestId('roster-text').fill(`first name,last name,phone,email,category,date of birth\nAsha,Mollel,0712 345 678,,21K,1990-01-01\n${long},Omari,0755 000 111,,10K,`);
+    await page.getByTestId('roster-check').click();
+    await page.getByTestId('corp-next').click();
+    await page.getByTestId('corp-consent').check();
+    await page.getByTestId('corp-terms').check();
+    await page.getByTestId('corp-place').click();
+    await expect(page.getByTestId('corp-notice')).toContainText('Row 2: First name is too long (at most 80 characters)');
   });
 
   test('the HR page renders the same component for a company HR login', async ({ page }) => {
@@ -282,9 +303,12 @@ test.describe('organizer roster and orders (§6.3)', () => {
     await expect(page.getByTestId('reg-privacy-banner')).toContainText('Names of unpaid registrations are masked.');
     await expect(page.getByTestId('reg-summary')).toContainText('0 / 500 sold');
     const table = page.getByRole('region', { name: 'Registrations' });
-    await expect(table.getByRole('row')).toHaveCount(4);
-    await expect(page.getByTestId('reg-name-masked')).toHaveText('A*** M*****');
-    await expect(page.getByTestId('reg-name-masked')).toHaveAttribute('title', 'Full name shows once paid');
+    await expect(table.getByRole('row')).toHaveCount(5);
+    // Names the server masked are styled and explained, whether the registration is reserved or was cancelled before payment.
+    await expect(page.getByTestId('reg-name-masked')).toHaveCount(2);
+    await expect(page.getByTestId('reg-name-masked').first()).toHaveAttribute('title', 'Full name shows once paid');
+    await expect(table).toContainText('A*** M*****');
+    await expect(table).toContainText('Z***** K**');
     await expect(table).toContainText('Baraka Mushi');
     await expect(table).toContainText('Awaiting payment');
     await expect(table).not.toContainText('0712');
@@ -329,6 +353,19 @@ test.describe('organizer roster and orders (§6.3)', () => {
     await page.goto('/organizer/events/?event=evt_pub&view=registrations');
     await expect(page.getByTestId('organizer-registrations')).toBeVisible();
     await expect(page.getByTestId('event-view-tabs').getByRole('button', { name: 'Orders' })).toHaveCount(0);
+  });
+
+  test('registration off (options) hides the tabs and the views; a 404 feature_disabled shows the not-available state (#265)', async ({ page }) => {
+    await setupEvents(page, OWNER);
+    await page.goto('/organizer/events/?event=evt_pub');
+    await expect(page.getByTestId('event-wizard')).toBeVisible();
+    await expect(page.getByTestId('event-view-tabs')).toHaveCount(0);
+    await page.goto('/organizer/events/?event=evt_pub&view=registrations');
+    await expect(page.getByTestId('events-unavailable')).toBeVisible();
+    await setupEvents(page, OWNER, { s3: true, extra: [['GET', /\/evt_pub\/orders$/, () => ({ status: 404, json: { error: 'feature_disabled' } })]] });
+    await page.goto('/organizer/events/?event=evt_pub&view=orders');
+    await expect(page.getByTestId('events-unavailable')).toBeVisible();
+    await expect(page.getByTestId('organizer-page-loading')).toHaveCount(0);
   });
 
   test('a draft event shows the once-published empty state; another organizer\'s event renders not-found (P-O-2)', async ({ page }) => {

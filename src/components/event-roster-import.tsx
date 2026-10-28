@@ -22,7 +22,7 @@ export function EventRosterImport({ text, onText, event, fields, busy, onCheck, 
   const [row, setRow] = useState<RowValues>({ ...EMPTY_ROW });
   const [adding, setAdding] = useState(false);
   const rows = rosterRowCount(text);
-  const tooMany = rows > ROSTER_MAX_ROWS;
+  const tooMany = rows > ROSTER_MAX_ROWS || text.length > ROSTER_MAX_BYTES;
   const categories = (event?.categories ?? []).filter(c => c.ticketTypes?.length);
   const ageRuled = categories.filter(c => c.minAge != null && c.minAge > 0).map(c => c.name);
 
@@ -40,6 +40,7 @@ export function EventRosterImport({ text, onText, event, fields, busy, onCheck, 
     setFileError(null);
     if (file.size > ROSTER_MAX_BYTES) { setFileError(t('corp.events.fileTooBig')); return; }
     const content = await file.text();
+    if (content.length > ROSTER_MAX_BYTES) { setFileError(t('corp.events.fileTooBig')); return; }
     onText(content);
   };
   const download = () => {
@@ -66,7 +67,7 @@ export function EventRosterImport({ text, onText, event, fields, busy, onCheck, 
         <p className="mt-1">{fmt(t('corp.events.requiredFor'), { list: required.join(', ') })}{ageRuled.length ? ` (${fmt(t('corp.events.ageRule'), { categories: ageRuled.join(', ') })})` : ''}</p>
         {categories.length > 0 && <p className="mt-1">{fmt(t('corp.events.categoriesAre'), { list: categories.map(c => c.name).join(', ') })}</p>}
       </div>
-      <Field label={t('corp.events.paste')} hint={fmt(t('corp.events.rowCount'), { n: rows, max: ROSTER_MAX_ROWS })} error={tooMany ? t('events.error.too_many_rows') : undefined}>
+      <Field label={t('corp.events.paste')} hint={fmt(t('corp.events.rowCount'), { n: rows, max: ROSTER_MAX_ROWS })} error={rows > ROSTER_MAX_ROWS ? t('events.error.too_many_rows') : text.length > ROSTER_MAX_BYTES ? t('events.error.raw_text_too_long') : undefined}>
         <Textarea className="font-mono text-xs" rows={8} value={text} onChange={e => onText(e.target.value)} placeholder={ROSTER_EXAMPLE_CSV} data-testid="roster-text" />
       </Field>
       <p className="-mt-2 text-xs text-[var(--color-fg-quaternary)]" data-testid="roster-headers-note">{t('corp.events.headersEnglish')}</p>

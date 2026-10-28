@@ -13,6 +13,7 @@ import { EventReviewSummary } from '@/components/event-review-summary';
 import { EventRegistrationsTable } from '@/components/event-registrations-table';
 import { EventOrdersTable } from '@/components/event-orders-table';
 import { hasRegistrationData } from '@/components/organizer/event-views';
+import { useEventsOptions } from '@/components/events-options';
 import { LifecycleButtons, LifecycleDialogs, type LifecycleAction } from '@/components/event-lifecycle';
 import { EventsUnavailable, PageError, PageLoading, useDocumentTitle } from '@/components/organizer/page-states';
 import { useApp } from '../../providers';
@@ -130,6 +131,8 @@ function Detail({ id, view, onView, onBack }: { id: string; view: DetailView; on
   const [auditKey, setAuditKey] = useState(0);
   const [order, setOrder] = useState<EventOrderRow | null>(null);
   const [ordersKey, setOrdersKey] = useState(0);
+  // S3 §6.5: the orders and registrations tabs exist only while the server says registration is on.
+  const registrationOn = !!useEventsOptions()?.registration;
   useDocumentTitle(doc?.title ? `${doc.title} · ${t('admin.events.title')}` : t('admin.events.title'));
   const load = useCallback(async () => {
     if (!token) return;
@@ -170,14 +173,16 @@ function Detail({ id, view, onView, onBack }: { id: string; view: DetailView; on
         actions={<Button variant="ghost" onClick={onBack}>{t('admin.events.backToQueue')}</Button>} />
       {!doc.permitOnFile && <div data-testid="admin-permit-missing"><Alert tone="warning">{t('events.review.permitMissing')}</Alert></div>}
       {/* S3 §6.5: orders and registrations of the event, full names (scope events). */}
-      <Segmented className="w-fit" value={view} onChange={v => onView(v as DetailView)} options={DETAIL_VIEWS.map(v => [v, t(v === 'review' ? 'admin.events.view.review' : v === 'orders' ? 'admin.events.view.orders' : 'admin.events.view.registrations')] as [string, string])} />
-      {view === 'orders' && (
+      {registrationOn && <Segmented className="w-fit" value={view} onChange={v => onView(v as DetailView)} options={DETAIL_VIEWS.map(v => [v, t(v === 'review' ? 'admin.events.view.review' : v === 'orders' ? 'admin.events.view.orders' : 'admin.events.view.registrations')] as [string, string])} />}
+      {view === 'orders' && !registrationOn && <EventsUnavailable />}
+      {view === 'registrations' && !registrationOn && <EventsUnavailable />}
+      {view === 'orders' && registrationOn && (
         <>
           <EventOrdersTable eventId={id} timezone={doc.timezone} timezoneAbbr={doc.timezoneAbbr} fieldPolicy="admin" published={hasRegistrationData(doc)} onOpen={setOrder} reloadKey={ordersKey} />
           <AdminOrderDialog eventId={id} row={order} timezone={doc.timezone} timezoneAbbr={doc.timezoneAbbr} onClose={() => setOrder(null)} onChanged={() => { setOrdersKey(k => k + 1); setAuditKey(k => k + 1); }} />
         </>
       )}
-      {view === 'registrations' && <EventRegistrationsTable eventId={id} timezone={doc.timezone} timezoneAbbr={doc.timezoneAbbr} fieldPolicy="admin" published={hasRegistrationData(doc)} />}
+      {view === 'registrations' && registrationOn && <EventRegistrationsTable eventId={id} timezone={doc.timezone} timezoneAbbr={doc.timezoneAbbr} fieldPolicy="admin" published={hasRegistrationData(doc)} />}
       {view === 'review' && <div className="grid gap-6 lg:grid-cols-3">
         <div className="space-y-4 lg:col-span-2">
           <Checkbox label={t('admin.events.previewAsMember')} checked={preview} onChange={e => setPreview(e.target.checked)} data-testid="admin-preview-member" />
@@ -271,31 +276,35 @@ function AdminOrderDialog({ eventId, row, timezone, timezoneAbbr, onClose, onCha
       else toast.error(t(errorKey(err)));
     } finally { setBusy(false); }
   }
-  const st = orderStatusOf(doc?.status ?? row?.status);
-  const unpaid = (doc?.status ?? row?.status) === 'awaiting_payment';
-  // The admin order detail no longer returns contact fields: the column only shows when some row has one.
+  const o = doc?.order;
+  const status = o?.status ?? row?.status;
+  const st = orderStatusOf(status);
+  const unpaid = status === 'awaiting_payment';
+  const purchaser = doc?.purchaser ?? row?.purchaser;
+  const createdBy = doc?.createdBy?.name ?? o?.createdBy?.name ?? null;
+  // The admin order detail returns no contact fields (#265): the column only shows when some row has one.
   const hasContact = (doc?.registrations ?? []).some(r => !!r.phone || !!r.email);
   return (
     <Dialog open={!!row} onClose={onClose} title={row ? `${row.reference} · ${row.purchaser?.label ?? ''}` : ''} size="lg">
       <div className="space-y-4 text-sm" data-testid="admin-order-dialog">
-        {error ? <PageError onRetry={() => void load()} /> : !doc ? <div aria-busy="true"><SkeletonTable rows={3} /></div> : (
+        {error ? <PageError onRetry={() => void load()} /> : !doc || !o ? <div aria-busy="true"><SkeletonTable rows={3} /></div> : (
           <>
             <div className="flex flex-wrap items-center gap-2">
               <Badge tone={st.tone}>{t(st.key)}</Badge>
-              {doc.purchaser?.type === 'organization' && <Badge tone="brand">{t('organizer.orders.organisation')}</Badge>}
-              <span>{money(doc.totalTzs, doc.currency)}</span>
-              {doc.feesTzs > 0 && <span className="text-[var(--color-fg-quaternary)]">{t('organizer.orders.col.fees')}: {money(doc.feesTzs, doc.currency)}</span>}
+              {purchaser?.type === 'organization' && <Badge tone="brand">{t('organizer.orders.organisation')}</Badge>}
+              <span>{money(o.totalTzs, o.currency)}</span>
+              {o.feesTzs > 0 && <span className="text-[var(--color-fg-quaternary)]">{t('organizer.orders.col.fees')}: {money(o.feesTzs, o.currency)}</span>}
             </div>
             <dl className="grid gap-x-6 gap-y-1 sm:grid-cols-2" data-testid="admin-order-meta">
-              <dt className="text-[var(--color-fg-quaternary)]">{t('corp.events.col.created')}</dt><dd>{eventDateTime(doc.createdAt, timezone, locale, timezoneAbbr)}</dd>
-              <dt className="text-[var(--color-fg-quaternary)]">{t('corp.events.col.heldUntil')}</dt><dd>{unpaid ? eventDateTime(doc.holdExpiresAt, timezone, locale, timezoneAbbr) : '—'}{doc.holdCycle != null ? ` · ${t('admin.events.order.holdCycle')} ${doc.holdCycle}` : ''}</dd>
-              <dt className="text-[var(--color-fg-quaternary)]">{t('organizer.orders.col.closed')}</dt><dd>{doc.closedAt ? `${eventDateTime(doc.closedAt, timezone, locale, timezoneAbbr)}${doc.closeReason ? ` · ${t(closeReasonKey(doc.closeReason))}` : ''}` : '—'}</dd>
-              <dt className="text-[var(--color-fg-quaternary)]">{t('admin.events.order.terms')}</dt><dd>{doc.termsAcceptedAt ? `${eventDateTime(doc.termsAcceptedAt, timezone, locale, timezoneAbbr)}${doc.consentTextVersion ? ` · ${doc.consentTextVersion}` : ''}` : '—'}</dd>
-              {(doc.costCentre || doc.purchaserReference) && <><dt className="text-[var(--color-fg-quaternary)]">{t('corp.events.costCentre')} / {t('corp.events.reference')}</dt><dd>{[doc.costCentre, doc.purchaserReference].filter(Boolean).join(' · ')}</dd></>}
+              <dt className="text-[var(--color-fg-quaternary)]">{t('corp.events.col.created')}</dt><dd>{eventDateTime(o.createdAt, timezone, locale, timezoneAbbr)}{createdBy ? ` · ${createdBy}` : ''}</dd>
+              <dt className="text-[var(--color-fg-quaternary)]">{t('corp.events.col.heldUntil')}</dt><dd>{unpaid ? eventDateTime(o.holdExpiresAt, timezone, locale, timezoneAbbr) : '—'}{o.holdCycle != null ? ` · ${t('admin.events.order.holdCycle')} ${o.holdCycle}` : ''}</dd>
+              <dt className="text-[var(--color-fg-quaternary)]">{t('organizer.orders.col.closed')}</dt><dd>{o.closedAt ? `${eventDateTime(o.closedAt, timezone, locale, timezoneAbbr)}${o.closeReason ? ` · ${t(closeReasonKey(o.closeReason))}` : ''}` : '—'}</dd>
+              <dt className="text-[var(--color-fg-quaternary)]">{t('admin.events.order.terms')}</dt><dd>{o.termsAcceptedAt ? `${eventDateTime(o.termsAcceptedAt, timezone, locale, timezoneAbbr)}${o.consentTextVersion ? ` · ${o.consentTextVersion}` : ''}` : '—'}</dd>
+              {(o.costCentre || o.purchaserReference) && <><dt className="text-[var(--color-fg-quaternary)]">{t('corp.events.costCentre')} / {t('corp.events.reference')}</dt><dd>{[o.costCentre, o.purchaserReference].filter(Boolean).join(' · ')}</dd></>}
             </dl>
             <table className="ui-table ui-table-dense w-full" data-testid="admin-order-lines">
               <thead><tr><th scope="col">{t('organizer.reg.col.ticket')}</th><th scope="col" className="text-right">{t('corp.events.col.places')}</th><th scope="col" className="text-right">{t('corp.events.col.total')}</th></tr></thead>
-              <tbody>{(doc.lines ?? []).map(l => <tr key={l.ticketTypeId}><td>{l.ticketTypeName} · {l.categoryName}</td><td className="text-right">{l.quantity}</td><td className="text-right">{money(l.lineTotalTzs, doc.currency)}</td></tr>)}</tbody>
+              <tbody>{(doc.lines ?? []).map(l => <tr key={l.ticketTypeId}><td>{l.ticketTypeName} · {l.categoryName}</td><td className="text-right">{l.quantity}</td><td className="text-right">{money(l.lineTotalTzs, o.currency)}</td></tr>)}</tbody>
             </table>
             <table className="ui-table ui-table-dense w-full" data-testid="admin-order-participants">
               <thead><tr><th scope="col">{t('corp.events.col.name')}</th>{hasContact && <th scope="col">{t('corp.events.col.phone')} / {t('corp.events.col.email')}</th>}<th scope="col">{t('corp.events.col.category')}</th><th scope="col">{t('corp.events.col.status')}</th><th scope="col">{t('organizer.reg.col.claimed')}</th></tr></thead>

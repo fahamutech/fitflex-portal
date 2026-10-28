@@ -5,6 +5,7 @@ import { Badge, Button, PageHeader, Segmented } from '@/components/shared';
 import { EventRegistrationsTable } from '@/components/event-registrations-table';
 import { EventOrdersTable } from '@/components/event-orders-table';
 import { useDocumentTitle } from '@/components/organizer/page-states';
+import { useEventsOptions } from '@/components/events-options';
 import { useApp } from '../../../app/providers';
 
 /** S3 §6.1 role gating of the two event tabs. */
@@ -18,9 +19,10 @@ export const hasRegistrationData = (doc: Pick<EventDocument, 'status' | 'publish
 /** The tab strip shared by the wizard header and the two views (§6.1 "next to changes"). */
 export function EventViewTabs({ view, role, onView }: { view: EventView | 'details'; role: OrganizerRole | null; onView: (v: EventView | null) => void }) {
   const { t } = useApp();
+  const registrationOn = !!useEventsOptions()?.registration;
   const options: Array<[string, string]> = [['details', t('events.wizard.step.review')]];
-  if (canSeeView('registrations', role)) options.push(['registrations', t('organizer.events.view.registrations')]);
-  if (canSeeView('orders', role)) options.push(['orders', t('organizer.events.view.orders')]);
+  if (registrationOn && canSeeView('registrations', role)) options.push(['registrations', t('organizer.events.view.registrations')]);
+  if (registrationOn && canSeeView('orders', role)) options.push(['orders', t('organizer.events.view.orders')]);
   if (options.length === 1) return null;
   return <div data-testid="event-view-tabs"><Segmented className="w-fit" value={view} options={options} onChange={v => onView(v === 'details' ? null : (v as EventView))} /></div>;
 }
