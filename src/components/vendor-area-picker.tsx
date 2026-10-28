@@ -3,7 +3,7 @@ import { useId, useMemo, useState } from 'react';
 import type { GeoArea } from '@/lib/api';
 import { useApp } from '../../app/providers';
 import { Button, Checkbox, Input, Radio } from './shared';
-import { ancestors, areaLabel, coveringArea, indexAreas, searchVisible } from '@/lib/vendor-areas';
+import { ancestors, areaLabel, coveringArea, indexAreas, nameSaysLevel, searchVisible } from '@/lib/vendor-areas';
 
 type Props = {
   areas: GeoArea[];
@@ -40,18 +40,23 @@ export function VendorAreaPicker(props: Props) {
 
   const row = (a: GeoArea, depth: number): React.ReactNode => {
     const parent = ancestors(a.id, byId).find(p => p.level !== 'country');
-    const description = parent ? `${levelName(a)} · ${parent.name}` : levelName(a);
+    // Skip the level word when the name already says it ("Zanzibar City" is not followed by "City").
+    const level = nameSaysLevel(a, levelName(a)) ? null : levelName(a);
+    // Second line: "City · Mwanza", or just the parent ("Zanzibar") when the name already says its level.
+    const description = parent ? (level ? `${level} · ${parent.name}` : parent.name) : level ?? undefined;
+    // Without a visible level word, a hidden comma keeps the screen-reader label "Zanzibar City, Zanzibar".
+    const withPause = (name: string) => (!level && parent ? <>{name}<span className="sr-only">,</span></> : name);
     const indent = { paddingLeft: Math.min(depth, 4) * 16 };
     let control: React.ReactNode;
     if (mode === 'single') {
       // Based in: only cities and districts can be picked; regions and the country are headings.
       control = a.level === 'city' || a.level === 'district'
-        ? <Radio name={groupName} label={a.name} description={description} checked={picked.includes(a.id)} onChange={() => toggle(a.id)} data-testid={`${testId}-${a.id}`} />
+        ? <Radio name={groupName} label={withPause(a.name)} description={description} checked={picked.includes(a.id)} onChange={() => toggle(a.id)} data-testid={`${testId}-${a.id}`} />
         : <p className="py-2.5 text-xs font-semibold uppercase tracking-wide text-[var(--color-fg-quaternary)]">{nameOf(a)}</p>;
     } else {
       const cover = coveringArea(a.id, picked, byId);
       control = <Checkbox
-        label={nameOf(a)}
+        label={withPause(nameOf(a))}
         description={cover ? t('vendors.areas.included').replace('{parent}', nameOf(cover)) : description}
         checked={picked.includes(a.id) || !!cover}
         disabled={!!cover}

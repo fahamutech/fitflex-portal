@@ -1,9 +1,9 @@
 // Marathon & Running Events, slice 2 (design spec docs/design/events-s2-organizer-and-discovery.md §2, §6, §7, §12,
 // §14, §15). Pure helpers for the organizer area and the admin queue: no strings here, only i18n keys.
 import {
-  ApiError, type Bilingual, type EventAllowedAction, type EventCategory, type EventCollectionPoint, type EventDocument,
-  type EventPatch, type EventStatus, type EventTicketType, type EventType, type OrganizerRole, type OrganizerStatus,
-  type RefundPolicyPreset,
+  ApiError, type Bilingual, type DuplicatePolicy, type EventAllowedAction, type EventCategory, type EventCollectionPoint, type EventDocument,
+  type EventOrderStatus, type EventPatch, type EventRegistrationStatus, type EventStatus, type EventTicketType, type EventType, type OrganizerRole,
+  type OrganizerStatus, type ParticipantFieldKey, type ParticipantFieldPolicy, type ParticipantFields, type RefundPolicyPreset,
 } from '@/lib/api';
 import type { BadgeTone } from '@/lib/admin-utils';
 import type { Locale, MessageKey } from '@/lib/i18n';
@@ -69,7 +69,7 @@ export const cancelReasonKey = (reason: string) => `events.cancel.reason.${(CANC
 /** Backend audit `action` names (rows carry `events.<name>`); approve writes `published`. Unknown codes show as given. */
 export const AUDIT_ACTIONS = [
   'organizer_created', 'organizer_status', 'event_created', 'event_updated', 'submitted', 'withdrawn', 'published', 'rejected', 'cancelled',
-  'completed', 'archived', 'started', 'registration_closed', 'deleted', 'staff_invited', 'staff_removed', 'staff_role_changed',
+  'completed', 'archived', 'started', 'registration_closed', 'deleted', 'staff_invited', 'staff_removed', 'staff_role_changed', 'order_cancelled',
 ] as const;
 export const AUDIT_ACTION_PREFIX = 'events.';
 export const auditActionName = (code: string) => code.replace(/^events\./, '');
@@ -91,6 +91,8 @@ export const LIFECYCLE_ACTIONS: EventAllowedAction[] = ['withdraw', 'cancel', 'c
 export const MATERIAL_FIELDS = [
   'startsAt', 'endsAt', 'timezone', 'venue.name', 'venue.address', 'venue.lat', 'venue.lng', 'routeUrl', 'routeImageUrl',
   'categories.distanceM', 'categories.startsAt', 'categories.ticketTypes.priceTzs', 'registrationClosesAt', 'refundPolicy',
+  // S3 §6.4: what members must enter changes with these (ORG-007).
+  'participantFields', 'duplicatePolicy',
 ] as const;
 
 // ── Error codes surfaced to people (§14.6) ──
@@ -119,6 +121,48 @@ export const EVENTS_ERRORS: Record<string, MessageKey> = {
   cannot_remove_self: 'events.error.cannot_remove_self',
   invalid_email: 'events.validation.email',
   invalid_timezone: 'events.error.invalid_timezone',
+  // S3 §3.17 (registration and orders).
+  idempotency_key_required: 'events.error.idempotency_key_required',
+  idempotency_key_reused: 'events.error.idempotency_key_reused',
+  participant_invalid: 'events.error.participant_invalid',
+  terms_not_accepted: 'events.error.terms_not_accepted',
+  consent_version_stale: 'events.error.consent_version_stale',
+  too_many_participants: 'events.error.too_many_participants',
+  price_changed: 'events.error.price_changed',
+  capacity_unavailable: 'events.error.capacity_unavailable',
+  quantity_out_of_range: 'events.error.quantity_out_of_range',
+  event_not_open: 'events.error.event_not_open',
+  registration_closed: 'events.error.registration_closed',
+  sale_not_open: 'events.error.sale_not_open',
+  sale_closed: 'events.error.sale_closed',
+  ticket_type_inactive: 'events.error.ticket_type_inactive',
+  category_inactive: 'events.error.category_inactive',
+  order_not_found: 'events.error.order_not_found',
+  registration_not_found: 'events.error.registration_not_found',
+  invalid_reason: 'events.error.invalid_reason',
+  remove_whole_line: 'events.error.remove_whole_line',
+  team_not_found: 'events.error.team_not_found',
+  team_full: 'events.error.team_full',
+  team_disbanded: 'events.error.team_disbanded',
+  team_name_taken: 'events.error.team_name_taken',
+  claim_token_invalid: 'events.error.claim_token_invalid',
+  claim_token_expired: 'events.error.claim_token_expired',
+  claim_not_verified: 'events.error.claim_not_verified',
+  already_claimed: 'events.error.already_claimed',
+  claim_own_contact: 'events.error.claim_own_contact',
+  registration_closed_state: 'events.error.registration_closed_state',
+  organization_not_active: 'events.error.organization_not_active',
+  organization_not_allowed: 'events.error.organization_not_allowed',
+  too_many_rows: 'events.error.too_many_rows',
+  invalid_lines: 'events.error.invalid_lines',
+  participants_mismatch: 'events.error.participant_invalid',
+  invalid_participant: 'events.error.participant_invalid',
+  already_closed: 'events.error.invalid_transition_order',
+  raw_text_too_long: 'events.error.raw_text_too_long',
+  field_too_long: 'events.error.field_too_long',
+  invalid_text: 'events.error.invalid_text',
+  expected_total_required: 'events.error.price_changed',
+  hold_limit_reached: 'events.error.capacity_unavailable',
 };
 export const errorCode = (err: unknown): string | null =>
   err instanceof ApiError ? ((err.body as { error?: string } | null)?.error ?? null) : null;
@@ -205,7 +249,9 @@ export function maskContact(value: string | null | undefined) {
   if (!value) return '—';
   if (value.includes('•')) return value;
   if (value.includes('@')) { const [u, d] = value.split('@'); return `${u.slice(0, 1)}•••@${d}`; }
-  const digits = value.replace(/\D/g, '');
+  let digits = value.replace(/\D/g, '');
+  // A local Tanzanian number ("0712 345 678") reads as +255 7•• ••• 678, like the server's own masking.
+  if (digits.length === 10 && digits.startsWith('0')) digits = `255${digits.slice(1)}`;
   if (digits.length >= 9) return `+${digits.slice(0, 3)} ${digits.slice(3, 4)}•• ••• ${digits.slice(-3)}`;
   return value;
 }
@@ -237,6 +283,29 @@ export type EventForm = {
   hasKit: boolean; collectionPoints: PointForm[]; inclusionsEn: string; inclusionsSw: string;
   termsEn: string; termsSw: string; policyPreset: RefundPolicyPreset | ''; policyEn: string; policySw: string;
   contactEmail: string; contactPhone: string; contactWhatsapp: string; sponsors: SponsorForm[]; schedule: ScheduleForm[];
+  /** S3 §6.4: the organizer's choices as typed; `effectiveParticipantFields` applies the locked rules. */
+  participantFields: Required<ParticipantFields>; duplicatePolicy: DuplicatePolicy;
+};
+
+// ── Participant details (S3 §3.3, §6.4) ──
+export const PARTICIPANT_FIELD_KEYS: ParticipantFieldKey[] = ['phone', 'email', 'dateOfBirth', 'gender', 'emergencyContact', 'kitSize'];
+export const FIELD_POLICIES: ParticipantFieldPolicy[] = ['required', 'optional', 'off'];
+export const DEFAULT_PARTICIPANT_FIELDS: Required<ParticipantFields> = { phone: 'required', email: 'optional', dateOfBirth: 'off', gender: 'off', emergencyContact: 'optional', kitSize: 'off' };
+export const DUPLICATE_POLICIES: DuplicatePolicy[] = ['one_per_category', 'allow'];
+export const hasMinAge = (form: Pick<EventForm, 'categories'>) => form.categories.some(c => c.minAge.trim() !== '' && Number(c.minAge) > 0);
+export const minAgeCategory = (form: Pick<EventForm, 'categories'>) => form.categories.find(c => c.minAge.trim() !== '' && Number(c.minAge) > 0)?.name.trim() ?? '';
+/** §3.3 rules on top of the typed choices: DOB is required when any category has a minimum age; kit size is off without a kit. */
+export function effectiveParticipantFields(form: Pick<EventForm, 'participantFields' | 'categories' | 'hasKit'>): Required<ParticipantFields> {
+  const f = { ...DEFAULT_PARTICIPANT_FIELDS, ...form.participantFields };
+  if (hasMinAge(form)) f.dateOfBirth = 'required';
+  if (!form.hasKit) f.kitSize = 'off';
+  return f;
+}
+const fieldsFromDoc = (doc: Pick<EventDocument, 'participantFields' | 'categories' | 'kitProvided'>): Required<ParticipantFields> => {
+  const typed = { ...DEFAULT_PARTICIPANT_FIELDS, ...(doc.participantFields ?? {}) };
+  // The §3.3 defaults for a document that never saved these: kit size is optional once a kit exists.
+  if (!doc.participantFields?.kitSize && doc.kitProvided) typed.kitSize = 'optional';
+  return typed;
 };
 
 export const newTicket = (): TicketForm => ({ uid: uid(), name: '', priceText: '', capacity: '', noLimit: true, saleOpensAt: '', saleClosesAt: '', minPerOrder: '1', maxPerOrder: '10' });
@@ -251,7 +320,7 @@ export function emptyForm(timezone = 'Africa/Dar_es_Salaam'): EventForm {
     heroImageUrl: '', heroThumbUrl: '', coverAlt: '', venueName: '', venueAddress: '', venueCity: '', venueRegion: '', lat: null, lng: null, outsideTz: false,
     routeUrl: '', routeImageUrl: '', routeImageAlt: '', accessEn: '', accessSw: '', categories: [], hasKit: false, collectionPoints: [],
     inclusionsEn: '', inclusionsSw: '', termsEn: '', termsSw: '', policyPreset: '', policyEn: '', policySw: '', contactEmail: '', contactPhone: '',
-    contactWhatsapp: '', sponsors: [], schedule: [],
+    contactWhatsapp: '', sponsors: [], schedule: [], participantFields: { ...DEFAULT_PARTICIPANT_FIELDS }, duplicatePolicy: 'one_per_category',
   };
 }
 
@@ -285,6 +354,7 @@ export function formFromDoc(doc: EventDocument): EventForm {
     contactEmail: s(doc.contact?.email), contactPhone: s(doc.contact?.phone), contactWhatsapp: s(doc.contact?.whatsapp),
     sponsors: (doc.sponsors ?? []).map(sp => ({ id: sp.id, uid: sp.id ?? uid(), name: s(sp.name), logoUrl: s(sp.logoUrl), url: s(sp.url) })),
     schedule: (doc.schedule ?? []).map(it => ({ id: it.id, uid: it.id ?? uid(), at: s(it.at), labelEn: s(it.label?.en), labelSw: s(it.label?.sw) })),
+    participantFields: fieldsFromDoc(doc), duplicatePolicy: doc.duplicatePolicy ?? 'one_per_category',
   };
 }
 
@@ -326,6 +396,8 @@ export function stepPayload(form: EventForm, step: WizardStep): Omit<EventPatch,
         contact: { email: nul(form.contactEmail), phone: nul(form.contactPhone), whatsapp: nul(form.contactWhatsapp) },
         sponsors: form.sponsors.map(sp => ({ id: sp.id, name: sp.name.trim(), logoUrl: nul(sp.logoUrl), url: nul(sp.url) })),
         schedule: form.schedule.map(it => ({ id: it.id, at: it.at, label: { en: it.labelEn.trim(), sw: it.labelSw.trim() } })),
+        // S3 §6.4: the effective policy (locked rules applied) and the duplicate rule travel with the Terms step.
+        participantFields: effectiveParticipantFields(form), duplicatePolicy: form.duplicatePolicy,
       };
     default:
       return {};
@@ -360,6 +432,7 @@ export function docFromForm(form: EventForm, base: Partial<EventDocument> = {}):
     collectionPoints: p.collectionPoints ?? [], schedule: p.schedule ?? [], sponsors: p.sponsors ?? [], contact: p.contact!, terms: p.terms!,
     refundPolicy: p.refundPolicy!, cancellation: base.cancellation ?? null, shareUrl: base.shareUrl ?? null, publishedAt: base.publishedAt ?? null,
     version: base.version ?? 0, allowedActions: base.allowedActions ?? [], submittedAt: base.submittedAt ?? null, rejection: base.rejection ?? null, changeLogCount: base.changeLogCount ?? 0,
+    participantFields: p.participantFields ?? null, duplicatePolicy: p.duplicatePolicy ?? null,
   };
 }
 export function minPrice(form: EventForm): number | null {
@@ -376,7 +449,7 @@ const STEP_OF_PATH: Array<[RegExp, WizardStep]> = [
   [/^categories(\.\d+\.(?!ticketTypes).*)?$/, 'categories'],
   [/^categories\.\d+\.ticketTypes/, 'tickets'],
   [/^(collectionPoints|inclusions|hasKit)/, 'kit'],
-  [/^(termsEn|termsSw|terms|policyPreset|policyEn|policySw|refundPolicy|contactEmail|contactPhone|contactWhatsapp|contact|sponsors|schedule)/, 'terms'],
+  [/^(termsEn|termsSw|terms|policyPreset|policyEn|policySw|refundPolicy|contactEmail|contactPhone|contactWhatsapp|contact|sponsors|schedule|participantFields|duplicatePolicy)/, 'terms'],
 ];
 export const stepOfPath = (path: string): WizardStep => STEP_OF_PATH.find(([re]) => re.test(path))?.[1] ?? 'basics';
 const ms = (iso: string) => Date.parse(iso);
@@ -512,6 +585,8 @@ export function validateEvent(form: EventForm, opts: { forSubmit?: boolean; now?
     length(`${p}.labelEn`, it.labelEn, 1, 80, true);
     length(`${p}.labelSw`, it.labelSw, 1, 80, true);
   });
+  // S3 §6.4: one way to reach every participant must stay on.
+  if (form.participantFields.phone === 'off' && form.participantFields.email === 'off') e['participantFields.contact'] = { key: 'events.validation.contact_policy' };
   return e;
 }
 /** Errors per step, for the stepper badge and `maxReached`. */
@@ -567,6 +642,9 @@ export function materialDiff(doc: EventDocument, payload: Omit<EventPatch, 'vers
   const before: Record<string, unknown> = {}; const after: Record<string, unknown> = {};
   const scope: Record<string, unknown> = {};
   for (const k of Object.keys(payload)) scope[k] = (doc as unknown as Record<string, unknown>)[k];
+  // S3: a document that never saved these carries the §3.3 defaults; only a real change is material.
+  if ('participantFields' in payload) scope.participantFields = effectiveParticipantFields({ participantFields: fieldsFromDoc(doc), categories: formFromDoc(doc).categories, hasKit: !!doc.kitProvided });
+  if ('duplicatePolicy' in payload) scope.duplicatePolicy = doc.duplicatePolicy ?? 'one_per_category';
   flat(scope, '', before); flat(payload, '', after);
   const generic = (p: string) => p.replace(/\.\d+\./g, '.').replace(/\.\d+$/, '');
   const out: Diff[] = [];
@@ -585,5 +663,129 @@ export function materialDiff(doc: EventDocument, payload: Omit<EventPatch, 'vers
 // ── Analytics (§15): no client pipeline exists in the portal; named no-ops so S7 can connect them. ──
 export type EventsAnalyticsName = 'organizer_event_submitted';
 export function trackEventsAnalytics(_name: EventsAnalyticsName, _payload: Record<string, string | number | boolean>) {
+  // Intentionally empty (reuse map: no portal analytics hook). No personal data may ever be put in `_payload`.
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════════
+// Events S3: registration modes and checkout orders (design spec docs/design/events-s3-registration-and-orders.md
+// §3, §5.10, §6; decisions D15–D22). Pure helpers for the corporate wizard, the organizer roster and the admin tabs.
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+/** Order status vocabulary (§5.10): text-first badges. Keys are kept apart from the event's own `events.status.*` (li- class). */
+export const ORDER_STATUS: Record<EventOrderStatus, { key: MessageKey; tone: Tone }> = {
+  awaiting_payment: { key: 'events.orderStatus.awaiting_payment', tone: 'warning' },
+  confirmed: { key: 'events.orderStatus.confirmed', tone: 'success' },
+  cancelled: { key: 'events.orderStatus.cancelled', tone: 'gray' },
+  expired: { key: 'events.orderStatus.expired', tone: 'gray' },
+};
+export const ORDER_STATUSES: EventOrderStatus[] = ['awaiting_payment', 'confirmed', 'cancelled', 'expired'];
+export const orderStatusOf = (status: string | null | undefined) => ORDER_STATUS[(status ?? 'awaiting_payment') as EventOrderStatus] ?? ORDER_STATUS.awaiting_payment;
+/** Registration status (§5.10): `reserved` reads "Awaiting payment" (the order is unpaid). */
+export const REGISTRATION_STATUS: Record<EventRegistrationStatus, { key: MessageKey; tone: Tone }> = {
+  reserved: { key: 'events.regStatus.reserved', tone: 'warning' },
+  confirmed: { key: 'events.regStatus.confirmed', tone: 'success' },
+  cancelled: { key: 'events.regStatus.cancelled', tone: 'gray' },
+};
+export const REGISTRATION_STATUSES: EventRegistrationStatus[] = ['reserved', 'confirmed', 'cancelled'];
+export const registrationStatusOf = (status: string | null | undefined) => REGISTRATION_STATUS[(status ?? 'reserved') as EventRegistrationStatus] ?? REGISTRATION_STATUS.reserved;
+
+/** §3.8 closed set a purchaser (member or organisation) may give. */
+export const MEMBER_CANCEL_REASONS = ['changed_mind', 'wrong_details', 'duplicate', 'other'] as const;
+export const memberCancelReasonKey = (reason: string) => `events.cancelReason.${(MEMBER_CANCEL_REASONS as readonly string[]).includes(reason) ? reason : 'other'}` as MessageKey;
+/** `closeReason` of an order (store RELEASE_REASONS, §3.8) → label key; unknown values fall back to the generic "Other". */
+export const closeReasonKey = (reason: string) => `events.cancelReason.${['admin', 'expired', 'cancelled', 'payment_failed', ...MEMBER_CANCEL_REASONS].includes(reason) ? reason : 'other'}` as MessageKey;
+export const KIT_SIZES = ['xs', 's', 'm', 'l', 'xl', 'xxl', 'xxxl'] as const;
+export const GENDERS = ['male', 'female', 'other'] as const;
+
+/** D18: validating a roster needs the roster permission; placing the order needs a billing role (same set as `Shell.tsx` ORG_BILLING). */
+export const ROSTER_PERMISSION = 'beneficiaries.manage';
+export const ORG_BILLING_ROLES = new Set(['owner', 'admin', 'finance']);
+export const canValidateRoster = (permissions: string[]) => permissions.includes(ROSTER_PERMISSION);
+/** The backend allows owner | admin | finance only (functions events-roster-service `ORG_BILLING_ROLES`). */
+export const canPlaceCorporateOrder = (role: string | null | undefined) => ORG_BILLING_ROLES.has(role ?? '');
+
+/** Per-participant validation codes (§3.11 + roster codes of §3.10) → `events.validation.<code>`. Unknown codes fall back to a generic text. */
+export const PARTICIPANT_CODES = [
+  'required', 'not_collected', 'name_invalid', 'phone_invalid', 'email_invalid', 'contact_required', 'dob_invalid', 'dob_required', 'age_not_eligible',
+  'gender_invalid', 'kit_size_invalid', 'emergency_contact_invalid', 'duplicate_participant', 'listed_twice', 'self_contact_mismatch', 'consent_basis_invalid',
+  'category_unknown', 'category_closed', 'ticket_type_unknown', 'name_incomplete', 'group_ignored', 'invalid_participant', 'invalid_text',
+] as const;
+export const participantCodeKey = (code: string) => ((PARTICIPANT_CODES as readonly string[]).includes(code) ? `events.validation.${code}` : 'events.validation.invalid_participant') as MessageKey;
+/** The wire field names a roster problem may name (§3.3, §3.10) → the column label key. */
+export const ROSTER_FIELD_KEYS: Record<string, MessageKey> = {
+  firstName: 'corp.events.col.firstName', lastName: 'corp.events.col.lastName', name: 'corp.events.col.name', phone: 'corp.events.col.phone',
+  email: 'corp.events.col.email', category: 'corp.events.col.category', ticketType: 'organizer.reg.col.ticket', ticketTypeId: 'organizer.reg.col.ticket',
+  dateOfBirth: 'corp.events.col.dob', gender: 'events.terms.fields.gender', kitSize: 'corp.events.col.kit', group: 'corp.events.col.group',
+  groupLabel: 'corp.events.col.group', emergencyContact: 'events.terms.fields.emergency', consentBasis: 'corp.events.col.status',
+};
+export const rosterFieldKey = (field: string | null | undefined): MessageKey | null => (field && ROSTER_FIELD_KEYS[field]) || null;
+/** Codes that are warnings (`ok: true` rows keep them, §3.11 `not_collected`, §3.10 `group_ignored`). */
+export const isRosterWarning = (code: string) => code === 'not_collected' || code === 'group_ignored';
+
+/** `cor_` + UUID: within the server's 8–100 `[A-Za-z0-9._:-]` rule (§3.5); one per wizard run, reused on retry (§6.2). */
+export const newCorporateIdempotencyKey = () => `cor_${typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 12)}`}`;
+
+/** Whole minutes left until `iso` (never negative); null without a time. */
+export function holdMinutesLeft(iso: string | null | undefined, now = Date.now()): number | null {
+  const ms = Date.parse(iso ?? '');
+  if (!Number.isFinite(ms)) return null;
+  return Math.max(0, Math.ceil((ms - now) / 60_000));
+}
+/** "Asha Mollel" → "A*** M*****" (friend-invitation `maskName`), for rows the server did not mask already. */
+export function maskName(name: string | null | undefined) {
+  if (!name) return '—';
+  if (name.includes('*')) return name;
+  return name.trim().split(/\s+/).map(w => `${w.slice(0, 1)}${'*'.repeat(Math.max(1, w.length - 1))}`).join(' ');
+}
+/** "••• 678": the last three digits only (§6.2 order detail). */
+export function maskPhoneLast3(phone: string | null | undefined) {
+  if (!phone) return '—';
+  if (phone.includes('•')) return phone;
+  const digits = phone.replace(/\D/g, '');
+  return digits.length >= 3 ? `••• ${digits.slice(-3)}` : '•••';
+}
+export const maskEmail = (email: string | null | undefined) => (email ? maskContact(email) : '—');
+
+// ── Roster CSV (§3.10 columns; D19 `group`) ──
+export const ROSTER_COLUMNS = ['first name', 'last name', 'phone', 'email', 'category', 'date of birth', 'gender', 'kit size', 'group'] as const;
+export const ROSTER_HEADER = ROSTER_COLUMNS.join(',');
+export const ROSTER_EXAMPLE_CSV = `${ROSTER_HEADER}\nAsha,Mollel,0712 345 678,asha@example.co.tz,10K,1994-05-12,female,m,Finance\nJuma,Omari,0755 000 111,,21K Half Marathon,1988-11-02,male,l,Operations`;
+/** Free text the server rejects (`invalid_text`): a leading = + - @ would be read as a spreadsheet formula. */
+export const startsWithFormulaChar = (v: string) => /^\s*[=+\-@]/.test(v);
+export const ROSTER_MAX_ROWS = 500;
+/** Under the backend's 1,000,000-character `rawText` cap (413 `raw_text_too_long`). */
+export const ROSTER_MAX_BYTES = 900_000;
+const csvCell = (v: string) => (/[",\n\r]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v);
+/** One CSV line in `ROSTER_COLUMNS` order. */
+export const rosterCsvLine = (values: Record<(typeof ROSTER_COLUMNS)[number], string>) => ROSTER_COLUMNS.map(c => csvCell((values[c] ?? '').trim())).join(',');
+/** Data lines in a pasted list (blank lines and the header do not count). */
+export function rosterRowCount(text: string) {
+  const lines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+  if (!lines.length) return 0;
+  const first = lines[0].toLowerCase();
+  const hasHeader = /\b(first ?name|last ?name|surname|phone|mobile|email|category|distance|race|name)\b/.test(first) && !/\d{6,}/.test(first);
+  return hasHeader ? lines.length - 1 : lines.length;
+}
+/** Appends a row as CSV, writing the header first when the list is empty (one source of truth, §6.2 step 2). */
+export function appendRosterRow(text: string, values: Record<(typeof ROSTER_COLUMNS)[number], string>) {
+  const line = rosterCsvLine(values);
+  const trimmed = text.replace(/\s+$/, '');
+  return trimmed ? `${trimmed}\n${line}` : `${ROSTER_HEADER}\n${line}`;
+}
+
+/** The smallest `remaining` across the ticket types a roster asks for (null = unlimited for all). */
+export function placesLeft(lines: Array<{ ticketTypeId: string }>, availability: Record<string, { remaining: number | null }> | null | undefined): number | null {
+  let min: number | null = null;
+  for (const l of lines) {
+    const r = availability?.[l.ticketTypeId]?.remaining;
+    if (r == null) continue;
+    min = min == null ? r : Math.min(min, r);
+  }
+  return min;
+}
+
+// ── Analytics names reserved for S3 (§7.2); same no-op as S2. ──
+export type EventsS3AnalyticsName = 'registration_started' | 'registration_roster_validated' | 'checkout_quote_created' | 'order_created' | 'order_cancelled';
+export function trackEventsS3Analytics(_name: EventsS3AnalyticsName, _payload: Record<string, string | number | boolean>) {
   // Intentionally empty (reuse map: no portal analytics hook). No personal data may ever be put in `_payload`.
 }
