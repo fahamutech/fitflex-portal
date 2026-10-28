@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 import { ChevronDown, ChevronRight, RefreshCw } from 'lucide-react';
 import { useApp } from '../../app/providers';
 import {
-  api, ApiError, userContact, B2BBeneficiary, B2BProgramLifecycle, B2BBenefit, B2BOrganization, B2BProgram, CorporateEmployee,
+  api, ApiError, userContact, isPendingMemberAcceptance, B2BBeneficiary, B2BMemberRequest, B2BProgramLifecycle, B2BBenefit, B2BOrganization, B2BProgram, CorporateEmployee,
 } from '@/lib/api';
 import { Alert, Badge, Button, Card, CardContent, Field, Input, PageHeader, Select, Spinner, Table, TBody, Td, Th, THead, Tr } from '@/components/shared';
 import { money } from '@/lib/admin-utils';
@@ -11,7 +11,8 @@ import { ChallengeManager } from '@/components/challenge-manager';
 import { PeopleImport } from '@/components/b2b-people-import';
 import { RewardQueue } from '@/components/reward-queue';
 import { GroupManager } from '@/components/group-manager';
-import type { MessageKey } from '@/lib/i18n';
+import type { Locale, MessageKey } from '@/lib/i18n';
+import { PendingMemberStatus, WithdrawRequestButton, fill, memberRequestError, requestLabel, requestSentNotice, shownRequests } from '@/components/b2b-member-requests';
 
 /**
  * The organisation's own screens for the people it covers and its
@@ -41,7 +42,9 @@ const ERRORS: Record<string, string> = {
 const I18N_ERRORS: Partial<Record<string, MessageKey>> = {
   user_not_found: 'b2b.errors.userNotFound',
 };
-const said = (e: unknown, fallback: string, t: (k: MessageKey) => string) => {
+const said = (e: unknown, fallback: string, t: (k: MessageKey) => string, locale: Locale = 'en') => {
+  const request = memberRequestError(e, t, locale);
+  if (request) return request;
   const code = e instanceof ApiError ? (e.body as { error?: string } | null)?.error : undefined;
   const i18nKey = code ? I18N_ERRORS[code] : undefined;
   if (i18nKey) return t(i18nKey);
@@ -126,10 +129,12 @@ export function OrgPeoplePage() {
 }
 
 function Beneficiaries({ token, mine, readOnlyNote }: { token: string; mine: Mine; readOnlyNote?: string }) {
-  const { t } = useApp();
+  const { t, locale } = useApp();
   const orgId = mine.organization.id;
   const canManage = mine.permissions.includes('beneficiaries.manage') && !readOnlyNote;
   const [people, setPeople] = useState<B2BBeneficiary[] | null>(null);
+  // Adds by user ID the member has not accepted yet (absent on an older backend).
+  const [pending, setPending] = useState<B2BMemberRequest[]>([]);
   const [total, setTotal] = useState(0);
   const [search, setSearch] = useState('');
   const [types, setTypes] = useState<Record<string, string>>({});
@@ -140,7 +145,7 @@ function Beneficiaries({ token, mine, readOnlyNote }: { token: string; mine: Min
 
   const load = async () => {
     const r = await api.b2bBeneficiaries(token, orgId, { search: search.trim() || undefined, limit: 100 });
-    setPeople(r.items); setTotal(r.total);
+    setPeople(r.items); setTotal(r.total); setPending(shownRequests(r.pendingMemberAcceptance));
   };
   useEffect(() => {
     load().catch(() => { setError('Could not load the list.'); setPeople([]); });
@@ -155,7 +160,7 @@ function Beneficiaries({ token, mine, readOnlyNote }: { token: string; mine: Min
       if (told) setNotice(told);
       await load();
     } catch (e) {
-      setError(said(e, fallback, t));
+      setError(said(e, fallback, t, locale));
     } finally {
       setBusy(false);
     }
@@ -163,14 +168,22 @@ function Beneficiaries({ token, mine, readOnlyNote }: { token: string; mine: Min
   const add = (e: React.FormEvent) => {
     e.preventDefault();
     run(async () => {
-      const { beneficiary } = await api.enrollB2BBeneficiary(token, orgId, {
+      const out = await api.enrollB2BBeneficiary(token, orgId, {
         ...userContact(form.contact), beneficiaryType: form.beneficiaryType, status: 'active',
         groupName: form.groupName.trim() || undefined, externalReference: form.externalReference.trim() || undefined,
       });
       setForm({ ...form, contact: '', externalReference: '' });
-      return `${beneficiary.displayName ?? 'They'} can now use your programmes.`;
+      // Named by user ID: nobody is added until the member accepts in the app. Same text whether or not
+      // anything was stored (memberRequest.id null), so the screen can't reveal whether the id exists.
+      if (isPendingMemberAcceptance(out)) return requestSentNotice(t);
+      return `${out.beneficiary.displayName ?? 'They'} can now use your programmes.`;
     }, 'Could not add them.');
   };
+
+  const withdraw = (r: B2BMemberRequest) => r.id && run(async () => {
+    await api.cancelB2BMemberRequest(token, orgId, r.id as string);
+    return t('b2b.memberRequest.withdrawn');
+  }, t('b2b.memberRequest.withdrawFailed'));
 
   return (
     <div className="space-y-4" data-testid="org-people">
@@ -208,7 +221,7 @@ function Beneficiaries({ token, mine, readOnlyNote }: { token: string; mine: Min
               <Button type="submit" size="sm" variant="secondary" disabled={busy}><RefreshCw className="h-4 w-4" />Search</Button>
             </form>
           </div>
-          {!people ? <Spinner className="h-5 w-5" /> : people.length === 0 ? <p className="text-sm text-[var(--color-fg-quaternary)]">Nobody yet.</p> : (
+          {!people ? <Spinner className="h-5 w-5" /> : people.length === 0 && pending.length === 0 ? <p className="text-sm text-[var(--color-fg-quaternary)]">Nobody yet.</p> : (
             <Table aria-label={`${total} ${total === 1 ? 'person' : 'people'}`} data-testid="org-people-list">
               <THead>
                 <Tr>
@@ -216,6 +229,18 @@ function Beneficiaries({ token, mine, readOnlyNote }: { token: string; mine: Min
                 </Tr>
               </THead>
               <TBody>
+                {pending.map(r => (
+                  <Tr key={`request-${r.id}`} data-testid={`org-people-request-${r.id}`}>
+                    <Td className="font-medium">{requestLabel(t, r)}</Td>
+                    <Td>{r.beneficiaryType ? (types[r.beneficiaryType] ?? r.beneficiaryType) : ''}</Td>
+                    <Td>{r.groupName ?? ''}</Td>
+                    <Td>{r.externalReference ?? ''}</Td>
+                    <Td><PendingMemberStatus request={r} /></Td>
+                    <Td className="text-right">
+                      {canManage && <span className="flex justify-end"><WithdrawRequestButton request={r} disabled={busy} onWithdraw={() => withdraw(r)} /></span>}
+                    </Td>
+                  </Tr>
+                ))}
                 {people.map(p => (
                   <Tr key={p.id}>
                     <Td className="font-medium">{p.displayName ?? '—'}{!p.userId && <span className="ml-2 text-xs font-normal text-[var(--color-fg-quaternary)]">no FitFlex account linked</span>}</Td>
@@ -246,7 +271,7 @@ function Beneficiaries({ token, mine, readOnlyNote }: { token: string; mine: Min
 
 /** A company's staff list (the Companies side): add an employee, link them to their FitFlex account, change their status. */
 function CompanyStaff({ token }: { token: string }) {
-  const { t } = useApp();
+  const { t, locale } = useApp();
   const [staff, setStaff] = useState<CorporateEmployee[] | null>(null);
   const [form, setForm] = useState({ displayName: '', contact: '', department: '' });
   const [link, setLink] = useState<Record<string, string>>({});
@@ -266,7 +291,7 @@ function CompanyStaff({ token }: { token: string }) {
       if (told) setNotice(told);
       await load();
     } catch (e) {
-      setError(said(e, fallback, t));
+      setError(said(e, fallback, t, locale));
     } finally {
       setBusy(false);
     }
@@ -284,10 +309,14 @@ function CompanyStaff({ token }: { token: string }) {
       // Benefits only work once the employee is linked to the account they use in the app.
       if (!contact) return `${employee.displayName} added. Link their FitFlex account so they can use the benefits.`;
       try {
-        await api.linkCorporateStaff(token, employee.id, contact);
+        const linked = await api.linkCorporateStaff(token, employee.id, contact);
+        // Named by user ID: the member must accept in the app before the record is linked.
+        if (isPendingMemberAcceptance(linked)) {
+          return fill(t('b2b.memberRequest.employeeAddedSent'), { employee: employee.displayName });
+        }
         return `${employee.displayName} added and linked to their FitFlex account.`;
       } catch (err) {
-        return `${employee.displayName} added, but not linked yet: ${said(err, 'their FitFlex account wasn’t found.', t)}`;
+        return `${employee.displayName} added, but not linked yet: ${said(err, 'their FitFlex account wasn’t found.', t, locale)}`;
       }
     }, 'Could not add the employee.');
   };
@@ -330,11 +359,24 @@ function CompanyStaff({ token }: { token: string }) {
                         <span className="flex items-center gap-2"><Badge tone="success">Linked</Badge>
                           <Button variant="link" className="h-auto px-0 text-xs font-normal text-[var(--color-fg-quaternary)] underline" disabled={busy} onClick={() => run(async () => { await api.linkCorporateStaff(token, s.id, null); }, 'Could not unlink.')}>Unlink</Button>
                         </span>
+                      ) : s.pendingLink?.id ? (
+                        <span className="flex flex-wrap items-center gap-2" data-testid={`company-staff-request-${s.id}`}>
+                          <span className="text-sm">{requestLabel(t, s.pendingLink)}</span>
+                          <PendingMemberStatus request={s.pendingLink} />
+                          {/* HR withdraws a link request by unlinking the record (the backend closes the request). */}
+                          <WithdrawRequestButton request={s.pendingLink} disabled={busy}
+                            onWithdraw={() => run(async () => { await api.linkCorporateStaff(token, s.id, null); return t('b2b.memberRequest.withdrawn'); }, t('b2b.memberRequest.withdrawFailed'))} />
+                        </span>
                       ) : (
                         <span className="flex flex-wrap items-center gap-2">
                           <Input className="!w-52" value={link[s.id] ?? ''} onChange={e => setLink({ ...link, [s.id]: e.target.value })} placeholder="Their email or number" data-testid={`company-staff-link-${s.id}`} />
                           <Button size="sm" variant="secondary" disabled={busy || !(link[s.id] ?? '').trim()}
-                            onClick={() => run(async () => { await api.linkCorporateStaff(token, s.id, userContact(link[s.id])); setLink({ ...link, [s.id]: '' }); return `${s.displayName} is linked to their FitFlex account.`; }, 'Could not link them.')}>Link</Button>
+                            onClick={() => run(async () => {
+                              const linked = await api.linkCorporateStaff(token, s.id, userContact(link[s.id]));
+                              setLink({ ...link, [s.id]: '' });
+                              if (isPendingMemberAcceptance(linked)) return requestSentNotice(t);
+                              return `${s.displayName} is linked to their FitFlex account.`;
+                            }, 'Could not link them.')}>Link</Button>
                         </span>
                       )}
                     </Td>
