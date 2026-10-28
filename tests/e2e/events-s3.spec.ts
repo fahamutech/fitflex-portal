@@ -334,7 +334,7 @@ test.describe('organizer roster and orders (§6.3)', () => {
     await expect(table).toContainText('B***** M****');
     await expect(table).toContainText('TSh 50,000');
     await expect(table).toContainText('Paid');
-    await expect(page.getByTestId('orders-footer')).toContainText('your payout statement comes with payments (next release)');
+    await expect(page.getByTestId('orders-footer')).toContainText('Your payout statement comes in a later release.');
   });
 
   test('role gating: finance sees orders only (P-O-2)', async ({ page }) => {
