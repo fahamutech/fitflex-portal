@@ -13,6 +13,7 @@ import { useOrganizer } from '@/components/organizer-context';
 import { EventsUnavailable, OrganizerForbidden, PageError, PageLoading, useDocumentTitle } from '@/components/organizer/page-states';
 import { LifecycleButtons, LifecycleDialogs, lifecycleActions, type LifecycleAction } from '@/components/event-lifecycle';
 import { EventChangeLog } from '@/components/event-change-log';
+import { EventViewTabs, OrganizerEventView, canSeeView, type EventView } from '@/components/organizer/event-views';
 import { BasicsStep } from '@/components/event-wizard-steps/basics';
 import { VenueStep } from '@/components/event-wizard-steps/venue';
 import { CategoriesStep } from '@/components/event-wizard-steps/categories';
@@ -31,7 +32,7 @@ type SaveState = 'idle' | 'saving' | 'saved' | 'error' | 'conflict';
  * (1.5 s debounce, PATCH with `version`), published events save explicitly with the material-change dialog (§7.4).
  */
 export function EventWizard({ eventId, initialStep, view, onBack, onView }: {
-  eventId: string; initialStep?: string | null; view?: string | null; onBack: () => void; onView: (id: string, view: 'changes' | null) => void;
+  eventId: string; initialStep?: string | null; view?: string | null; onBack: () => void; onView: (id: string, view: 'changes' | EventView | null) => void;
 }) {
   const { t, token, locale } = useApp();
   const org = useOrganizer();
@@ -278,6 +279,11 @@ export function EventWizard({ eventId, initialStep, view, onBack, onView }: {
   if (loadState === 'error') return <PageError onRetry={() => idRef.current && void load(idRef.current)} />;
   if (loadState === 'loading') return <PageLoading />;
   if (view === 'changes' && doc) return <EventChangeLog doc={doc} onBack={() => onView(doc.id, null)} />;
+  // S3 §6.3: the roster and orders of this event, role-gated (§6.1); an unknown role falls back to the details.
+  if ((view === 'registrations' || view === 'orders') && doc) {
+    if (!canSeeView(view, org.role)) return <OrganizerForbidden backHref="/organizer/events" />;
+    return <OrganizerEventView doc={doc} view={view} role={org.role} onView={v => onView(doc.id, v)} onBack={onBack} />;
+  }
 
   const st = eventStatusOf(status);
   const current = WIZARD_STEPS[step];
@@ -321,6 +327,7 @@ export function EventWizard({ eventId, initialStep, view, onBack, onView }: {
       {doc?.rejection && status === 'draft' && (
         <div data-testid="rejected-banner"><Alert tone="warning">{fmt(t('events.rejected.banner'), { reason: t(rejectReasonKey(doc.rejection.reason)), note: doc.rejection.note ?? '' })}</Alert></div>
       )}
+      {doc && <EventViewTabs view="details" role={org.role} onView={v => onView(doc.id, v)} />}
       {status === 'submitted' && <div data-testid="submitted-card"><Alert tone="info">{t('events.submitted.card')}</Alert></div>}
       {doc && !isEditableStatus(status) && status !== 'submitted' && <Alert tone="info">{fmt(t('events.wizard.readOnly'), { status: t(st.key) })}</Alert>}
       {doc && status === 'published' && doc.registrationClosesAt && <Alert tone="info">{fmt(t('events.autoHint.regCloses'), { when: eventDateTime(doc.registrationClosesAt, doc.timezone, locale, doc.timezoneAbbr) })}</Alert>}

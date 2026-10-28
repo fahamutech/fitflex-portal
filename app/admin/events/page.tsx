@@ -2,13 +2,18 @@
 import Link from 'next/link';
 import { Suspense, useCallback, useEffect, useState } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
-import { api, type AdminEventDetail, type AdminEventRow, type Bilingual, type EventAuditRow } from '@/lib/api';
+import { api, type AdminEventDetail, type AdminEventOrderDetail, type AdminEventRow, type Bilingual, type EventAuditRow, type EventOrderRow } from '@/lib/api';
+import { money } from '@/lib/admin-utils';
 import { EVENTS_MODULE } from '@/lib/flags';
-import { AUDIT_ACTIONS, AUDIT_ACTION_PREFIX, ORGANIZER_STATUS, REJECT_REASONS, auditActionLabel, distanceLabel, errorCode, errorKey, eventDateTime, eventStatusOf, isFeatureOff, rejectReasonKey, relativeTime, typeKey } from '@/lib/events';
+import { AUDIT_ACTIONS, AUDIT_ACTION_PREFIX, ORGANIZER_STATUS, REJECT_REASONS, auditActionLabel, distanceLabel, errorCode, errorKey, eventDateTime, eventStatusOf, closeReasonKey, isFeatureOff, maskContact, orderStatusOf, registrationStatusOf, rejectReasonKey, relativeTime, typeKey } from '@/lib/events';
 import { Alert, Badge, Button, Card, CardContent, CardHeader, Checkbox, Field, PageHeader, Segmented, Select, SkeletonTable, Textarea, useToast } from '@/components/shared';
 import { DataTable, type ColumnDef } from '@/components/data-table';
 import { Dialog, DialogFooter } from '@/components/dialog';
 import { EventReviewSummary } from '@/components/event-review-summary';
+import { EventRegistrationsTable } from '@/components/event-registrations-table';
+import { EventOrdersTable } from '@/components/event-orders-table';
+import { hasRegistrationData } from '@/components/organizer/event-views';
+import { useEventsOptions } from '@/components/events-options';
 import { LifecycleButtons, LifecycleDialogs, type LifecycleAction } from '@/components/event-lifecycle';
 import { EventsUnavailable, PageError, PageLoading, useDocumentTitle } from '@/components/organizer/page-states';
 import { useApp } from '../../providers';
@@ -109,7 +114,10 @@ function AuditTable({ eventId }: { eventId?: string }) {
 }
 
 /** One event (spec §8.1): read-only review, decision card, organizer card, audit card. */
-function Detail({ id, onBack }: { id: string; onBack: () => void }) {
+const DETAIL_VIEWS = ['review', 'orders', 'registrations'] as const;
+type DetailView = (typeof DETAIL_VIEWS)[number];
+
+function Detail({ id, view, onView, onBack }: { id: string; view: DetailView; onView: (v: DetailView) => void; onBack: () => void }) {
   const { t, token, locale, hasPermission } = useApp();
   const toast = useToast();
   const [doc, setDoc] = useState<AdminEventDetail | null>(null);
@@ -121,6 +129,10 @@ function Detail({ id, onBack }: { id: string; onBack: () => void }) {
   const [busy, setBusy] = useState(false);
   const [lifecycle, setLifecycle] = useState<LifecycleAction | null>(null);
   const [auditKey, setAuditKey] = useState(0);
+  const [order, setOrder] = useState<EventOrderRow | null>(null);
+  const [ordersKey, setOrdersKey] = useState(0);
+  // S3 §6.5: the orders and registrations tabs exist only while the server says registration is on.
+  const registrationOn = !!useEventsOptions()?.registration;
   useDocumentTitle(doc?.title ? `${doc.title} · ${t('admin.events.title')}` : t('admin.events.title'));
   const load = useCallback(async () => {
     if (!token) return;
@@ -160,7 +172,18 @@ function Detail({ id, onBack }: { id: string; onBack: () => void }) {
       <PageHeader title={doc.title} description={<span className="inline-flex items-center gap-2"><Badge tone={st.tone}>{t(st.key)}</Badge><span>{doc.organizer?.name}</span></span>}
         actions={<Button variant="ghost" onClick={onBack}>{t('admin.events.backToQueue')}</Button>} />
       {!doc.permitOnFile && <div data-testid="admin-permit-missing"><Alert tone="warning">{t('events.review.permitMissing')}</Alert></div>}
-      <div className="grid gap-6 lg:grid-cols-3">
+      {/* S3 §6.5: orders and registrations of the event, full names (scope events). */}
+      {registrationOn && <Segmented className="w-fit" value={view} onChange={v => onView(v as DetailView)} options={DETAIL_VIEWS.map(v => [v, t(v === 'review' ? 'admin.events.view.review' : v === 'orders' ? 'admin.events.view.orders' : 'admin.events.view.registrations')] as [string, string])} />}
+      {view === 'orders' && !registrationOn && <EventsUnavailable />}
+      {view === 'registrations' && !registrationOn && <EventsUnavailable />}
+      {view === 'orders' && registrationOn && (
+        <>
+          <EventOrdersTable eventId={id} timezone={doc.timezone} timezoneAbbr={doc.timezoneAbbr} fieldPolicy="admin" published={hasRegistrationData(doc)} onOpen={setOrder} reloadKey={ordersKey} />
+          <AdminOrderDialog eventId={id} row={order} timezone={doc.timezone} timezoneAbbr={doc.timezoneAbbr} onClose={() => setOrder(null)} onChanged={() => { setOrdersKey(k => k + 1); setAuditKey(k => k + 1); }} />
+        </>
+      )}
+      {view === 'registrations' && registrationOn && <EventRegistrationsTable eventId={id} timezone={doc.timezone} timezoneAbbr={doc.timezoneAbbr} fieldPolicy="admin" published={hasRegistrationData(doc)} />}
+      {view === 'review' && <div className="grid gap-6 lg:grid-cols-3">
         <div className="space-y-4 lg:col-span-2">
           <Checkbox label={t('admin.events.previewAsMember')} checked={preview} onChange={e => setPreview(e.target.checked)} data-testid="admin-preview-member" />
           <EventReviewSummary doc={doc} lang={preview ? locale : 'en'} />
@@ -197,7 +220,7 @@ function Detail({ id, onBack }: { id: string; onBack: () => void }) {
             <CardContent><AuditTable key={auditKey} eventId={id} /></CardContent>
           </Card>
         </div>
-      </div>
+      </div>}
 
       <Dialog open={dialog === 'approve'} onClose={() => setDialog(null)} title={t('admin.events.approveTitle')} description={t('admin.events.approveBody')} size="md">
         <Field label={t('admin.events.approveNote')}><Textarea rows={3} value={note} onChange={e => setNote(e.target.value)} maxLength={500} data-testid="admin-approve-note" /></Field>
@@ -226,6 +249,87 @@ function Detail({ id, onBack }: { id: string; onBack: () => void }) {
   );
 }
 
+/** §6.5: one order with lines, participants (name, masked contact), consent timestamps, hold info, and admin cancel with a note (≥ 5 chars). */
+function AdminOrderDialog({ eventId, row, timezone, timezoneAbbr, onClose, onChanged }: { eventId: string; row: EventOrderRow | null; timezone: string; timezoneAbbr?: string | null; onClose: () => void; onChanged: () => void }) {
+  const { t, token, locale } = useApp();
+  const toast = useToast();
+  const [doc, setDoc] = useState<AdminEventOrderDetail | null>(null);
+  const [error, setError] = useState(false);
+  const [note, setNote] = useState('');
+  const [busy, setBusy] = useState(false);
+  const orderId = row?.id ?? null;
+  const load = useCallback(async () => {
+    if (!token || !orderId) { setDoc(null); return; }
+    setError(false);
+    try { setDoc(await api.adminEventOrder(token, eventId, orderId)); } catch { setError(true); }
+  }, [token, eventId, orderId]);
+  useEffect(() => { setNote(''); void load(); }, [load]);
+  async function cancel() {
+    if (!token || !orderId || note.trim().length < 5) return;
+    setBusy(true);
+    try {
+      await api.adminCancelEventOrder(token, eventId, orderId, note.trim());
+      toast.success(t('admin.events.audit.order_cancelled'));
+      onChanged(); onClose();
+    } catch (err) {
+      if (errorCode(err) === 'invalid_transition' || errorCode(err) === 'already_closed') { toast.error(t('events.error.invalid_transition_order')); onChanged(); }
+      else toast.error(t(errorKey(err)));
+    } finally { setBusy(false); }
+  }
+  const o = doc?.order;
+  const status = o?.status ?? row?.status;
+  const st = orderStatusOf(status);
+  const unpaid = status === 'awaiting_payment';
+  const purchaser = doc?.purchaser ?? row?.purchaser;
+  const createdBy = doc?.createdBy?.name ?? o?.createdBy?.name ?? null;
+  // The admin order detail returns no contact fields (#265): the column only shows when some row has one.
+  const hasContact = (doc?.registrations ?? []).some(r => !!r.phone || !!r.email);
+  return (
+    <Dialog open={!!row} onClose={onClose} title={row ? `${row.reference} · ${row.purchaser?.label ?? ''}` : ''} size="lg">
+      <div className="space-y-4 text-sm" data-testid="admin-order-dialog">
+        {error ? <PageError onRetry={() => void load()} /> : !doc || !o ? <div aria-busy="true"><SkeletonTable rows={3} /></div> : (
+          <>
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge tone={st.tone}>{t(st.key)}</Badge>
+              {purchaser?.type === 'organization' && <Badge tone="brand">{t('organizer.orders.organisation')}</Badge>}
+              <span>{money(o.totalTzs, o.currency)}</span>
+              {o.feesTzs > 0 && <span className="text-[var(--color-fg-quaternary)]">{t('organizer.orders.col.fees')}: {money(o.feesTzs, o.currency)}</span>}
+            </div>
+            <dl className="grid gap-x-6 gap-y-1 sm:grid-cols-2" data-testid="admin-order-meta">
+              <dt className="text-[var(--color-fg-quaternary)]">{t('corp.events.col.created')}</dt><dd>{eventDateTime(o.createdAt, timezone, locale, timezoneAbbr)}{createdBy ? ` · ${createdBy}` : ''}</dd>
+              <dt className="text-[var(--color-fg-quaternary)]">{t('corp.events.col.heldUntil')}</dt><dd>{unpaid ? eventDateTime(o.holdExpiresAt, timezone, locale, timezoneAbbr) : '—'}{o.holdCycle != null ? ` · ${t('admin.events.order.holdCycle')} ${o.holdCycle}` : ''}</dd>
+              <dt className="text-[var(--color-fg-quaternary)]">{t('organizer.orders.col.closed')}</dt><dd>{o.closedAt ? `${eventDateTime(o.closedAt, timezone, locale, timezoneAbbr)}${o.closeReason ? ` · ${t(closeReasonKey(o.closeReason))}` : ''}` : '—'}</dd>
+              <dt className="text-[var(--color-fg-quaternary)]">{t('admin.events.order.terms')}</dt><dd>{o.termsAcceptedAt ? `${eventDateTime(o.termsAcceptedAt, timezone, locale, timezoneAbbr)}${o.consentTextVersion ? ` · ${o.consentTextVersion}` : ''}` : '—'}</dd>
+              {(o.costCentre || o.purchaserReference) && <><dt className="text-[var(--color-fg-quaternary)]">{t('corp.events.costCentre')} / {t('corp.events.reference')}</dt><dd>{[o.costCentre, o.purchaserReference].filter(Boolean).join(' · ')}</dd></>}
+            </dl>
+            <table className="ui-table ui-table-dense w-full" data-testid="admin-order-lines">
+              <thead><tr><th scope="col">{t('organizer.reg.col.ticket')}</th><th scope="col" className="text-right">{t('corp.events.col.places')}</th><th scope="col" className="text-right">{t('corp.events.col.total')}</th></tr></thead>
+              <tbody>{(doc.lines ?? []).map(l => <tr key={l.ticketTypeId}><td>{l.ticketTypeName} · {l.categoryName}</td><td className="text-right">{l.quantity}</td><td className="text-right">{money(l.lineTotalTzs, o.currency)}</td></tr>)}</tbody>
+            </table>
+            <table className="ui-table ui-table-dense w-full" data-testid="admin-order-participants">
+              <thead><tr><th scope="col">{t('corp.events.col.name')}</th>{hasContact && <th scope="col">{t('corp.events.col.phone')} / {t('corp.events.col.email')}</th>}<th scope="col">{t('corp.events.col.category')}</th><th scope="col">{t('corp.events.col.status')}</th><th scope="col">{t('organizer.reg.col.claimed')}</th></tr></thead>
+              <tbody>
+                {(doc.registrations ?? []).map(r => { const rs = registrationStatusOf(r.status); return (
+                  <tr key={r.id}><td>{r.firstName} {r.lastName}</td>{hasContact && <td>{[r.phone ? maskContact(r.phone) : null, r.email ? maskContact(r.email) : null].filter(Boolean).join(' · ') || '—'}</td>}<td>{r.categoryName ?? doc.lines?.find(l => l.ticketTypeId === r.ticketTypeId)?.categoryName ?? '—'}</td><td><Badge tone={rs.tone}>{t(rs.key)}</Badge></td><td>{t(r.claimState === 'claimed' || r.claimState === 'self' ? 'common.yes' : 'common.no')}</td></tr>
+                ); })}
+              </tbody>
+            </table>
+            {unpaid && (
+              <Field label={t('admin.events.order.cancel.note')} required>
+                <Textarea rows={2} value={note} onChange={e => setNote(e.target.value)} maxLength={500} data-testid="admin-order-cancel-note" />
+              </Field>
+            )}
+          </>
+        )}
+      </div>
+      <DialogFooter>
+        <Button variant="secondary" onClick={onClose} disabled={busy}>{t('events.common.close')}</Button>
+        {unpaid && doc && <Button variant="destructive" loading={busy} disabled={note.trim().length < 5} onClick={() => void cancel()} data-testid="admin-order-cancel">{t('admin.events.order.cancel')}</Button>}
+      </DialogFooter>
+    </Dialog>
+  );
+}
+
 function AdminEventsInner() {
   const { t } = useApp();
   const router = useRouter();
@@ -233,6 +337,8 @@ function AdminEventsInner() {
   const params = useSearchParams();
   useDocumentTitle(t('admin.events.title'));
   const event = params.get('event');
+  const viewParam = params.get('view');
+  const view: DetailView = (DETAIL_VIEWS as readonly string[]).includes(viewParam ?? '') ? (viewParam as DetailView) : 'review';
   const tabParam = params.get('tab');
   const tab: Tab = (TABS as readonly string[]).includes(tabParam ?? '') ? (tabParam as Tab) : 'submitted';
   const go = (patch: Record<string, string | null>) => {
@@ -242,7 +348,7 @@ function AdminEventsInner() {
     router.push(s ? `${pathname}?${s}` : pathname, { scroll: false });
   };
   if (!EVENTS_MODULE) return <EventsUnavailable />;
-  if (event) return <Detail id={event} onBack={() => go({ event: null })} />;
+  if (event) return <Detail id={event} view={view} onView={v => go({ view: v === 'review' ? null : v })} onBack={() => go({ event: null, view: null })} />;
   return <Queue tab={tab} onTab={v => go({ tab: v === 'submitted' ? null : v })} onOpen={id => go({ event: id })} />;
 }
 
