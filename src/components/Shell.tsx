@@ -54,15 +54,15 @@ import { eventsAreaOpen, staffAreaOpen } from '@/lib/events';
 import { useAdminEventsSummary, useOrganizer } from './organizer-context';
 import { useCorporateEventsAvailable, useEventsOptions } from './events-options';
 import { opsOf } from '@/lib/events-ops';
-import { useShopBannersAvailable } from './shop-banners-gate';
+import { useShopBannersAvailable, useShopFlashSalesAvailable } from './shop-banners-gate';
 import { useTaxRatesAvailable } from './tax-rates-gate';
 import { useHrToOrgRefresh } from './hr-to-org-refresh';
 import { isHrInOrg, orgHome, orgPathForHr } from '@/lib/hr-to-org';
 
-/** SHOP_BANNERS as /vendor/me reports it (tools.merch.banners); undefined when the server doesn't say. */
-const vendorBannersTool = (tools: VendorTools | null | undefined) => {
-  const merch = tools?.merch as { banners?: unknown } | undefined;
-  return typeof merch?.banners === 'boolean' ? merch.banners : undefined;
+/** SHOP_BANNERS / SHOP_FLASH_SALES as /vendor/me reports them (tools.merch.banners / flashSales); undefined when the server doesn't say. */
+const vendorMerchTool = (tools: VendorTools | null | undefined, kind: 'banners' | 'flashSales') => {
+  const merch = tools?.merch as Record<string, unknown> | undefined;
+  return typeof merch?.[kind] === 'boolean' ? (merch[kind] as boolean) : undefined;
 };
 
 /* ── Nav definitions ─────────────────────────────────────── */
@@ -492,11 +492,11 @@ export function Shell({ children }: { children: ReactNode }) {
   const organizerOptions = useEventsOptions(isOrganizer && EVENTS_MODULE);
   const integrationsOn = opsOf(organizerOptions).api || opsOf(organizerOptions).webhooks;
   const corporateEvents = useCorporateEventsAvailable(!!token && (!!isOrgUser || !!isHr));
-  const bannersOn = useShopBannersAvailable(
-    isVendor ? 'vendor' : 'admin', token,
-    isVendor ? vendor.status === 'ready' && !!vendor.me?.permissions?.includes('products') : !!isAdminUser && (hasPermission('promotions') || hasPermission('promotions_approve')),
-    isVendor ? vendorBannersTool(vendor.me?.tools) : undefined,
-  );
+  const merchAllowed = isVendor ? vendor.status === 'ready' && !!vendor.me?.permissions?.includes('products') : !!isAdminUser && (hasPermission('promotions') || hasPermission('promotions_approve'));
+  const bannersOnly = useShopBannersAvailable(isVendor ? 'vendor' : 'admin', token, merchAllowed, isVendor ? vendorMerchTool(vendor.me?.tools, 'banners') : undefined);
+  const salesOn = useShopFlashSalesAvailable(isVendor ? 'vendor' : 'admin', token, merchAllowed, isVendor ? vendorMerchTool(vendor.me?.tools, 'flashSales') : undefined);
+  // The merch page (banners and flash sales) shows while either is switched on.
+  const bannersOn = bannersOnly || salesOn;
 
   const taxRatesOn = useTaxRatesAvailable(token, !!isAdminUser && hasPermission('payments'));
   // B5b: an HR session stored before ORG_ONLY_SPONSORS went on picks up the organisation marks.
