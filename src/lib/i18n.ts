@@ -1648,7 +1648,7 @@ export const messages = {
     'comms.skip.vendor_unavailable': 'Vendor suspended, closed or rejected',
     'comms.skip.not_vendor_admin': 'No longer one of the vendor\'s admin staff',
     'comms.vendor.marketingUnavailable': 'Promotions to vendors aren\'t available yet — vendors can\'t opt out in the app yet. Choose a renewal reminder, payment or announcement.',
-    'comms.vendor.changePurpose': 'Change the purpose'
+    'comms.vendor.promotionsOptOut': 'Promotions reach only vendors who haven\'t switched them off in their message settings.'
 ,
     'admin.nav.accountRecovery': 'Account recovery',
     'rec.title': 'Account recovery',
@@ -6226,7 +6226,7 @@ export const messages = {
     'comms.skip.vendor_unavailable': 'Muuzaji amesimamishwa, amefungwa au amekataliwa',
     'comms.skip.not_vendor_admin': 'Si mfanyakazi wa admin wa muuzaji tena',
     'comms.vendor.marketingUnavailable': 'Promosheni kwa wauzaji bado hazipatikani — wauzaji bado hawawezi kujiondoa kwenye app. Chagua kikumbusho cha kulipia tena, malipo au tangazo.',
-    'comms.vendor.changePurpose': 'Badilisha lengo la ujumbe',
+    'comms.vendor.promotionsOptOut': 'Promosheni huwafikia wauzaji tu ambao hawajazizima kwenye mipangilio yao ya ujumbe.',
     'admin.nav.accountRecovery': 'Kurejesha akaunti',
     'rec.title': 'Kurejesha akaunti',
     'rec.description': 'Watu waliopoteza namba na barua pepe zote zilizothibitishwa na kusahau PIN huomba hapa akaunti yao ihamishiwe kwenye namba au barua pepe mpya. Linganisha majibu yao na akaunti, kisha idhinisha au kataa.',
