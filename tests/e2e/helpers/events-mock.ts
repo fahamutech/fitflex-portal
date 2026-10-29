@@ -2,11 +2,12 @@
 // organizer area and the admin queue call is answered from fixtures shaped like §14, nothing reaches a real backend, and
 // every call is recorded so a spec can assert the exact request a form sends. Same style as b2b-mock.ts.
 import { expect, Page } from '@playwright/test';
+import { makeS5, type S5Opts, type S5State } from './events-s5-mock';
 
 export const API = process.env.FITFLEX_API_URL || 'http://localhost:3000';
 export type Json = Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
 export type Call = { method: string; path: string; query: Record<string, string>; body: Json | null; headers?: Record<string, string> };
-type Reply = Json | { status: number; json: Json } | { status: 204 };
+type Reply = Json | { status: number; json: Json } | { status: 204 } | { status: 200 | 201; body: string; headers?: Record<string, string> };
 type Handler = (c: Call, m: RegExpMatchArray) => Reply | undefined;
 
 // ── Sessions ──
@@ -612,6 +613,7 @@ function makeS4(user: Json, me: Json | null, orgRole: string, o: S4Opts, setup: 
 
 export type EventsMock = {
   /** S4 state for assertions (statuses move as the strict routes accept writes). */ s4: S4State | null;
+  /** S5 state for assertions (kit, bibs, clients, endpoints, payout schedule). */ s5: S5State | null;
   calls: Call[]; unmatched: Call[];
   writes: (path?: RegExp) => Call[];
   reads: (path: RegExp) => Call[];
@@ -625,7 +627,8 @@ export type EventsMock = {
  */
 export async function setupEvents(page_: Page, user: Json = OWNER, opts: { me?: Json | null; locale?: 'en' | 'sw'; kyc?: Json; extra?: Array<[string, RegExp, Handler]>;
   /** S3: the options probe says registration + corporate are on, and the S3 routes answer. */ s3?: boolean; orgPermissions?: string[]; orgStatus?: string; orders?: Record<string, Json>;
-  /** S4 (spec events-s4-payments-and-tickets): payments, refunds, finance and the corporate payment routes, strict about the spec's shapes. Implies s3. */ s4?: S4Opts } = {}): Promise<EventsMock> {
+  /** S4 (spec events-s4-payments-and-tickets): payments, refunds, finance and the corporate payment routes, strict about the spec's shapes. Implies s3. */ s4?: S4Opts;
+  /** S5 (spec events-s5-venue-api-and-webhooks): kit desk, bibs, export, integrations and the payout schedule, strict about the spec's shapes. Implies s3. */ s5?: S5Opts } = {}): Promise<EventsMock> {
   const calls: Call[] = [];
   const unmatched: Call[] = [];
   const routes: Array<[string, RegExp, Handler]> = [...(opts.extra ?? [])];
@@ -642,17 +645,20 @@ export async function setupEvents(page_: Page, user: Json = OWNER, opts: { me?: 
   const orgRole = (user.organizationRoles ?? [])[0] ?? (user.userType === 'corporate_hr' ? 'hr' : 'member');
   const s4 = opts.s4 ? makeS4(user, me, orgRole, opts.s4, opts) : null;
   if (s4) opts = { ...opts, s3: true };
+  const s5 = opts.s5 ? makeS5(user, me, opts.s5) : null;
+  if (s5) { opts = { ...opts, s3: true }; docs.evt_pub = { ...docs.evt_pub, ...s5.doc('evt_pub'), allowedActions: ['edit', 'cancel'] }; docs.evt_1 = { ...docs.evt_1, payoutSchedule: null }; }
   const orders: Record<string, Json> = opts.orders ?? { ord_1: ORDER_DETAIL() };
   const adminCancelled = new Set<string>();
   let version = 3;
 
   const defaults: Array<[string, RegExp, Handler]> = [
+    ...(s5 ? s5.routes : []),
     ...(s4 ? s4.routes : []),
     ['GET', /^\/me\/personas$/, () => ({ status: 404, json: { error: 'not_found' } })],
     ['GET', /^\/me\/invitations$/, () => ({ status: 404, json: { error: 'not_found' } })],
     ['GET', /^\/admin\/shop-merch$/, () => ({ status: 404, json: { error: 'feature_disabled' } })],
     ['GET', /^\/admin\/tax-rates$/, () => ({ status: 404, json: { error: 'feature_disabled' } })],
-    ['GET', /^\/events\/options$/, () => (s4 ? s4.options : opts.s3 ? OPTIONS_S3 : OPTIONS)],
+    ['GET', /^\/events\/options$/, () => (s5 ? s5.options : s4 ? s4.options : opts.s3 ? OPTIONS_S3 : OPTIONS)],
     // ── S3: B2B organisation frame, public discovery, corporate orders, organizer/admin reads ──
     ['GET', /^\/b2b\/me\/organizations$/, () => ({ organizations: [{ id: ORG.id, legalName: ORG.legalName, tradingName: ORG.tradingName, role: orgRole, status: ORG.status }] })],
     ['GET', /^\/b2b\/organizations\/org-1$/, () => ({ organization: { ...ORG, status: opts.orgStatus ?? 'active' }, access: { role: orgRole, permissions: opts.orgPermissions ?? PERMS_BILLING } })],
@@ -716,11 +722,17 @@ export async function setupEvents(page_: Page, user: Json = OWNER, opts: { me?: 
     ['GET', /^\/organizer\/events$/, () => pageOf(ROWS)],
     ['POST', /^\/organizer\/events$/, c => { docs.evt_new = DOC({ id: 'evt_new', slug: 'new-event', title: c.body?.title, categories: [], terms: { en: '', sw: '' }, refundPolicy: { preset: null, text: null }, contact: { email: null, phone: null, whatsapp: null }, description: { en: '', sw: '' }, version: 1 }); return { status: 201, json: { id: 'evt_new', version: 1 } }; }],
     ['GET', /^\/organizer\/events\/([^/]+)\/changes$/, () => pageOf(CHANGES)],
-    ['GET', /^\/organizer\/events\/([^/]+)$/, (_c, m) => (m[1] === 'evt_other' ? { status: 403, json: { error: 'not_your_organizer' } } : docs[m[1]] ? docs[m[1]] : { status: 404, json: { error: 'event_not_found' } })],
+    ['GET', /^\/organizer\/events\/([^/]+)$/, (_c, m) => (m[1] === 'evt_other' ? { status: 403, json: { error: 'not_your_organizer' } } : docs[m[1]] ? (s5 && m[1] === 'evt_pub' ? { ...docs[m[1]], payoutSchedule: s5.state.payout.evt_pub } : docs[m[1]]) : { status: 404, json: { error: 'event_not_found' } })],
     ['PATCH', /^\/organizer\/events\/([^/]+)$/, (c, m) => {
+      if (s5 && c.body && 'payoutSchedule' in c.body) {
+        // S5 §3.1: only a draft takes the schedule; published and later answer 409; the value is one of the two choices.
+        if (!['biweekly', 'monthly'].includes(c.body.payoutSchedule)) return { status: 422, json: { error: 'event_invalid', fields: [{ path: 'payoutSchedule', code: 'invalid' }] } };
+        if (docs[m[1]]?.status !== 'draft') return { status: 409, json: { error: 'payout_schedule_locked' } };
+        docs[m[1]] = { ...docs[m[1]], payoutSchedule: c.body.payoutSchedule }; s5.state.payout[m[1]] = c.body.payoutSchedule;
+      }
       if (c.body?.refundPolicy && docs[m[1]]) docs[m[1]] = { ...docs[m[1]], refundPolicy: { ...c.body.refundPolicy, generated: serverPolicyLine(c.body.refundPolicy) } };
       if ('collectionPoints' in (c.body ?? {}) && typeof c.body?.kitProvided !== 'boolean') return { status: 400, json: { error: 'kit_provided_required' } }; version = Number(c.body?.version ?? version) + 1; return { version, updatedAt: '2026-10-22T10:00:00.000Z', material: !!c.body?.changeNote }; }],
-    ['POST', /^\/organizer\/events\/([^/]+)\/(submit|withdraw|cancel|complete|archive)$/, (_c, m) => { const next = { submit: 'submitted', withdraw: 'draft', cancel: 'cancelled', complete: 'completed', archive: 'archived' }[m[2]]!; if (docs[m[1]]) docs[m[1]] = { ...docs[m[1]], status: next, allowedActions: next === 'submitted' ? ['withdraw'] : [] }; return { status: next }; }],
+    ['POST', /^\/organizer\/events\/([^/]+)\/(submit|withdraw|cancel|complete|archive)$/, (_c, m) => { if (s5 && m[2] === 'submit' && !docs[m[1]]?.payoutSchedule) return { status: 422, json: { error: 'event_invalid', fields: [{ path: 'payoutSchedule', code: 'required' }] } }; const next = { submit: 'submitted', withdraw: 'draft', cancel: 'cancelled', complete: 'completed', archive: 'archived' }[m[2]]!; if (docs[m[1]]) docs[m[1]] = { ...docs[m[1]], status: next, allowedActions: next === 'submitted' ? ['withdraw'] : [] }; return { status: next }; }],
     ['DELETE', /^\/organizer\/events\/([^/]+)$/, () => ({ status: 204 })],
     ['GET', /^\/organizer\/staff$/, () => ({ items: staff })],
     ['POST', /^\/organizer\/staff$/, c => { if (c.body?.userId || (!c.body?.email && !c.body?.phone)) return { status: 400, json: { error: 'invalid_contact' } }; const row = { id: `st_${staff.length}`, userId: null, displayName: null, maskedContact: c.body?.email ? 'n•••@example.com' : '+255 7•• ••• 999', role: c.body?.role, status: 'invited', addedAt: '2026-10-22T08:00:00.000Z' }; staff = [...staff, row]; return { status: 201, json: { invitation: row } }; }],
@@ -738,7 +750,7 @@ export async function setupEvents(page_: Page, user: Json = OWNER, opts: { me?: 
     ['GET', /^\/admin\/events\/summary$/, () => ({ submitted: ADMIN_ROWS.filter(r => r.status === 'submitted').length })],
     ['GET', /^\/admin\/events\/audit$/, () => pageOf(AUDIT)],
     ['GET', /^\/admin\/events\/([^/]+)\/audit$/, () => pageOf(AUDIT)],
-    ['GET', /^\/admin\/events\/([^/]+)$/, (_c, m) => ADMIN_DOC(m[1] === 'evt_pub' ? PUBLISHED : m[1] === 'evt_1' ? DOC() : SUBMITTED, m[1] === 'evt_pub' ? { permitOnFile: true } : {})],
+    ['GET', /^\/admin\/events\/([^/]+)$/, (_c, m) => (s5 && m[1] === 'evt_pub' ? ADMIN_DOC({ ...docs.evt_pub, payoutSchedule: s5.state.payout.evt_pub }, { permitOnFile: true }) : ADMIN_DOC(m[1] === 'evt_pub' ? PUBLISHED : m[1] === 'evt_1' ? DOC() : SUBMITTED, m[1] === 'evt_pub' ? { permitOnFile: true } : {}))],
     ['GET', /^\/admin\/events$/, c => pageOf(c.query.status ? ADMIN_ROWS.filter(r => r.status === c.query.status) : ADMIN_ROWS)],
     ['POST', /^\/admin\/events\/([^/]+)\/decision$/, c => {
       if (c.body?.decision === 'reject' && !c.body?.reason) return { status: 400, json: { error: 'reason_code_required' } };
@@ -771,6 +783,7 @@ export async function setupEvents(page_: Page, user: Json = OWNER, opts: { me?: 
       const out = h(call, match);
       if (out === undefined) continue;
       if ('status' in out && out.status === 204 && !('json' in out)) return route.fulfill({ status: 204 });
+      if ('body' in out && typeof out.body === 'string') return route.fulfill({ status: out.status, body: out.body, headers: out.headers });
       if ('status' in out && 'json' in out) return route.fulfill({ status: out.status as number, json: out.json });
       return route.fulfill({ status: method === 'POST' ? 201 : 200, json: out });
     }
@@ -780,6 +793,7 @@ export async function setupEvents(page_: Page, user: Json = OWNER, opts: { me?: 
 
   return {
     s4: s4 ? s4.state : null,
+    s5: s5 ? s5.state : null,
     calls, unmatched,
     writes: path => calls.filter(c => c.method !== 'GET' && (!path || path.test(c.path))),
     reads: path => calls.filter(c => c.method === 'GET' && path.test(c.path)),

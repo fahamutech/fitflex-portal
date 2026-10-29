@@ -2,7 +2,9 @@
 import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
 import { Flag } from 'lucide-react';
-import { api, type OrganizerSummary } from '@/lib/api';
+import { api, type IntegrationsHealth, type OrganizerSummary } from '@/lib/api';
+import { opsOf } from '@/lib/events-ops';
+import { useEventsOptions } from '@/components/events-options';
 import { canManageEvents, errorKey, eventDateTime, eventStatusOf, fmt } from '@/lib/events';
 import { Alert, Badge, Button, Card, CardContent, CardHeader, EmptyState, MetricCard, PageHeader } from '@/components/shared';
 import { useOrganizer } from '@/components/organizer-context';
@@ -15,6 +17,8 @@ function OverviewInner() {
   const org = useOrganizer();
   const [summary, setSummary] = useState<OrganizerSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [health, setHealth] = useState<IntegrationsHealth | null>(null);
+  const eventsOptions = useEventsOptions();
   useDocumentTitle(t('organizer.overview.title'));
 
   const load = useCallback(async () => {
@@ -23,6 +27,12 @@ function OverviewInner() {
     try { setSummary(await api.organizerSummary(token)); } catch (err) { setError(t(errorKey(err))); }
   }, [token, t]);
   useEffect(() => { void load(); }, [load]);
+  // Events S5 §8.7 (ORG-010): the integration health card, for owner/admin while the API or webhooks are on. A failed fetch just hides it.
+  const integrationsOn = (opsOf(eventsOptions).api || opsOf(eventsOptions).webhooks) && (org.role === 'owner' || org.role === 'admin');
+  useEffect(() => {
+    if (!token || !integrationsOn) return;
+    api.integrationsHealth(token).then(setHealth).catch(() => setHealth(null));
+  }, [token, integrationsOn]);
 
   const organizer = org.organizer!;
   const canCreate = canManageEvents(organizer.status, org.role);
@@ -42,6 +52,12 @@ function OverviewInner() {
         <MetricCard wrapLabel label={t('organizer.overview.awaitingPayment')} value={summary.awaitingPaymentTotal ?? 0} sub={t('organizer.overview.comingSoon')} />
         <MetricCard wrapLabel label={t('organizer.overview.confirmed')} value={summary.confirmedTotal ?? 0} sub={t('organizer.overview.comingSoon')} />
       </div>
+
+      {integrationsOn && health && (
+        <Link href="/organizer/integrations" className="block" data-testid="overview-integrations">
+          <MetricCard wrapLabel label={t('integrations.health.card')} value={fmt(t('integrations.health.summary'), { healthy: health.healthy, failing: health.failing })} sub={health.deadLast24h > 0 ? t('integrations.health.failingBadge') : undefined} />
+        </Link>
+      )}
 
       <Card>
         <CardHeader><h2 className="text-base font-semibold text-[var(--color-fg-primary)]">{t('organizer.overview.nextUp')}</h2></CardHeader>

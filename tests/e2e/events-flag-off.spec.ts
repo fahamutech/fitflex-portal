@@ -28,6 +28,18 @@ test('an organizer session sees the not-available state on every organizer page 
   await expect(page.getByTestId('events-unavailable')).toBeVisible();
 });
 
+// Events S5 (spec §11.1): integrations and the venue tabs vanish with the build flag, and no S5 call is made.
+test('/organizer/integrations renders the not-available state and makes no integrations call', async ({ page }) => {
+  const mock = await setupEvents(page, OWNER);
+  await page.goto('/organizer/integrations/');
+  await expect(page.getByTestId('events-unavailable')).toBeVisible();
+  expect(mock.reads(/api-clients|webhook-endpoints|webhook-deliveries|integrations\/health/)).toHaveLength(0);
+  await expect(page.getByRole('navigation', { name: 'Main navigation' }).getByRole('link', { name: 'Integrations' })).toHaveCount(0);
+  await page.goto('/organizer/events/?event=evt_pub&view=kit');
+  await expect(page.getByTestId('events-unavailable')).toBeVisible();
+  expect(mock.reads(/tickets|kit-collections|kit\/summary|bib-assignments/)).toHaveLength(0);
+});
+
 test('/admin/events renders the not-available state and the admin nav has no Events item', async ({ page }) => {
   await setupEvents(page, SUPER_ADMIN);
   await page.goto('/admin/events/');

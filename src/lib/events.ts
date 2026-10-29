@@ -3,7 +3,7 @@
 import {
   ApiError, type Bilingual, type DuplicatePolicy, type EventAllowedAction, type EventCategory, type EventCollectionPoint, type EventDocument,
   type EventOrderStatus, type EventPatch, type EventRefundPolicy, type EventRejectCode, type EventRegistrationStatus, type EventStatus, type EventTicketType, type EventType, type OrganizerRole,
-  type OrganizerStatus, type ParticipantFieldKey, type ParticipantFieldPolicy, type ParticipantFields, type RefundPolicyPreset,
+  type OrganizerStatus, type ParticipantFieldKey, type ParticipantFieldPolicy, type ParticipantFields, type PayoutSchedule, type RefundPolicyPreset,
 } from '@/lib/api';
 import type { BadgeTone } from '@/lib/admin-utils';
 import { messages, type Locale, type MessageKey } from '@/lib/i18n';
@@ -125,6 +125,24 @@ export const EVENTS_ERRORS: Record<string, MessageKey> = {
   cannot_remove_self: 'events.error.cannot_remove_self',
   invalid_email: 'events.validation.email',
   invalid_timezone: 'events.error.invalid_timezone',
+  // S5 (spec events-s5-venue-api-and-webhooks §10.1 and the port list at its end).
+  not_event_ticket: 'errors.events.not_event_ticket',
+  already_collected: 'errors.events.already_collected',
+  payout_schedule_locked: 'errors.events.payout_schedule_locked',
+  preview_stale: 'errors.events.preview_stale',
+  cursor_expired: 'errors.events.cursor_expired',
+  bib_taken: 'errors.events.bib_taken',
+  bib_already_assigned: 'errors.events.bib_already_assigned',
+  bib_invalid: 'errors.events.bib_invalid',
+  ticket_revoked: 'errors.events.ticket_revoked',
+  registration_unpaid: 'errors.events.registration_unpaid',
+  collection_point_required: 'errors.events.collection_point_required',
+  manual_reason_required: 'errors.events.manual_reason_required',
+  request_in_progress: 'errors.events.request_in_progress',
+  invalid_scope: 'errors.events.invalid_scope',
+  scope_not_available: 'errors.events.scope_not_available',
+  invalid_url: 'errors.events.invalid_url',
+  already_corrected: 'errors.events.already_corrected',
   // S3 §3.17 (registration and orders).
   idempotency_key_required: 'events.error.idempotency_key_required',
   idempotency_key_reused: 'events.error.idempotency_key_reused',
@@ -345,6 +363,8 @@ export type EventForm = {
   contactEmail: string; contactPhone: string; contactWhatsapp: string; sponsors: SponsorForm[]; schedule: ScheduleForm[];
   /** S3 §6.4: the organizer's choices as typed; `effectiveParticipantFields` applies the locked rules. */
   participantFields: Required<ParticipantFields>; duplicatePolicy: DuplicatePolicy;
+  /** S5 §3: nothing pre-selected; required at submit, sent with step 4 while the event is a draft. */
+  payoutSchedule: PayoutSchedule | '';
 };
 
 // ── Participant details (S3 §3.3, §6.4) ──
@@ -381,7 +401,7 @@ export function emptyForm(timezone = 'Africa/Dar_es_Salaam'): EventForm {
     heroImageUrl: '', heroThumbUrl: '', coverAlt: '', venueName: '', venueAddress: '', venueCity: '', venueRegion: '', lat: null, lng: null, outsideTz: false,
     routeUrl: '', routeImageUrl: '', routeImageAlt: '', accessEn: '', accessSw: '', categories: [], hasKit: false, collectionPoints: [],
     inclusionsEn: '', inclusionsSw: '', termsEn: '', termsSw: '', policyPreset: '', policyEn: '', policySw: '', policyDays: '', policyTiers: [], contactEmail: '', contactPhone: '',
-    contactWhatsapp: '', sponsors: [], schedule: [], participantFields: { ...DEFAULT_PARTICIPANT_FIELDS }, duplicatePolicy: 'one_per_category',
+    contactWhatsapp: '', sponsors: [], schedule: [], participantFields: { ...DEFAULT_PARTICIPANT_FIELDS }, duplicatePolicy: 'one_per_category', payoutSchedule: '',
   };
 }
 
@@ -417,7 +437,7 @@ export function formFromDoc(doc: EventDocument): EventForm {
     contactEmail: s(doc.contact?.email), contactPhone: s(doc.contact?.phone), contactWhatsapp: s(doc.contact?.whatsapp),
     sponsors: (doc.sponsors ?? []).map(sp => ({ id: sp.id, uid: sp.id ?? uid(), name: s(sp.name), logoUrl: s(sp.logoUrl), url: s(sp.url) })),
     schedule: (doc.schedule ?? []).map(it => ({ id: it.id, uid: it.id ?? uid(), at: s(it.at), labelEn: s(it.label?.en), labelSw: s(it.label?.sw) })),
-    participantFields: fieldsFromDoc(doc), duplicatePolicy: doc.duplicatePolicy ?? 'one_per_category',
+    participantFields: fieldsFromDoc(doc), duplicatePolicy: doc.duplicatePolicy ?? 'one_per_category', payoutSchedule: doc.payoutSchedule ?? '',
   };
 }
 
@@ -450,8 +470,10 @@ export function stepPayload(form: EventForm, step: WizardStep): Omit<EventPatch,
         routeUrl: nul(form.routeUrl), routeImageUrl: nul(form.routeImageUrl), routeImageAlt: nul(form.routeImageAlt), accessibility: bi(form.accessEn, form.accessSw),
       };
     case 'categories':
-    case 'tickets':
       return { categories: form.categories.map(categoryPayload) };
+    case 'tickets':
+      // S5 §3.1: a draft may leave the schedule empty (it is simply not sent); published events never send it (409 payout_schedule_locked).
+      return { categories: form.categories.map(categoryPayload), ...(form.payoutSchedule ? { payoutSchedule: form.payoutSchedule } : {}) };
     case 'kit':
       return {
         kitProvided: form.hasKit,
@@ -504,7 +526,7 @@ export function docFromForm(form: EventForm, base: Partial<EventDocument> = {}):
     collectionPoints: p.collectionPoints ?? [], schedule: p.schedule ?? [], sponsors: p.sponsors ?? [], contact: p.contact!, terms: p.terms!,
     refundPolicy: { ...p.refundPolicy!, generated: base.refundPolicy?.generated ?? null }, cancellation: base.cancellation ?? null, shareUrl: base.shareUrl ?? null, publishedAt: base.publishedAt ?? null,
     version: base.version ?? 0, allowedActions: base.allowedActions ?? [], submittedAt: base.submittedAt ?? null, rejection: base.rejection ?? null, changeLogCount: base.changeLogCount ?? 0,
-    participantFields: p.participantFields ?? null, duplicatePolicy: p.duplicatePolicy ?? null,
+    participantFields: p.participantFields ?? null, duplicatePolicy: p.duplicatePolicy ?? null, payoutSchedule: form.payoutSchedule || null,
   };
 }
 export function minPrice(form: EventForm): number | null {
@@ -516,6 +538,7 @@ export function minPrice(form: EventForm): number | null {
 export type FieldError = { key: MessageKey; vars?: Record<string, string | number> };
 export type Errors = Record<string, FieldError>;
 const STEP_OF_PATH: Array<[RegExp, WizardStep]> = [
+  [/^payoutSchedule$/, 'tickets'],
   [/^(title|type|descriptionEn|descriptionSw|description|timezone|startsAt|endsAt|registrationOpensAt|registrationClosesAt|heroImageUrl|coverAlt)$/, 'basics'],
   [/^(venueName|venueAddress|venueCity|venueRegion|venue|pin|routeUrl|routeImageUrl|routeImageAlt|accessEn|accessSw|accessibility)/, 'venue'],
   [/^categories(\.\d+\.(?!ticketTypes).*)?$/, 'categories'],
@@ -658,6 +681,8 @@ export function validateEvent(form: EventForm, opts: { forSubmit?: boolean; now?
     length(`${p}.labelEn`, it.labelEn, 1, 80, true);
     length(`${p}.labelSw`, it.labelSw, 1, 80, true);
   });
+  // S5 §3.1: required at submit, not at create (a draft may leave it empty).
+  if (opts.forSubmit && !form.payoutSchedule) e.payoutSchedule = { key: 'events.validation.payoutRequired' };
   // S3 §6.4: one way to reach every participant must stay on.
   if (form.participantFields.phone === 'off' && form.participantFields.email === 'off') e['participantFields.contact'] = { key: 'events.validation.contact_policy' };
   return e;

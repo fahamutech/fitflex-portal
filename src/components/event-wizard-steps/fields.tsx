@@ -18,6 +18,8 @@ export type StepProps = {
   savedPolicy?: EventRefundPolicy | null;
   /** Explicit save hooks (the title creates the draft on blur, §6.2). */
   onTitleBlur?: () => void;
+  /** S5 §3.1: the payout schedule is editable only while the event is a draft the person may edit. */
+  payoutLocked?: boolean;
 };
 
 export function useErrorText() {

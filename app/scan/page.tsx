@@ -1,12 +1,13 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
 import { Camera, CameraOff, CheckCircle2, XCircle, Hash, User, Tag, Info } from 'lucide-react';
-import jsQR from 'jsqr';
 import { useApp } from '../providers';
 import { api, ApiError, CheckInResult, Gym } from '@/lib/api';
 import { Button, Card, CardHeader, CardContent, Badge, PageHeader, Alert, Input, Field, Select } from '@/components/shared';
 import { MessageKey } from '@/lib/i18n';
 import { sellableFrom } from '@/lib/pass-tiers';
+import { QrScanner, type QrScannerState } from '@/components/qr-scanner';
+import { isEventTicketPayload } from '@/lib/events-ops';
 
 const FAILURE_KEYS: Record<string, MessageKey> = {
   subscription_inactive: 'scan.fail.subscription_inactive',
@@ -29,6 +30,8 @@ const FAILURE_KEYS: Record<string, MessageKey> = {
 
 /** What went wrong with the last scan, apart from a backend refusal code. */
 type ScanProblem = 'network' | 'camera' | null;
+/** An event ticket scanned here (events S5 §4.7): shown locally, never sent to check-in. */
+type LocalNotice = 'event_ticket' | null;
 
 /** Per-browser memory of the gym a multi-gym operator scans for (per signed-in user). */
 const gymKey = (userId?: string) => `fitflex.scan.gymId.${userId ?? 'anon'}`;
@@ -51,9 +54,10 @@ function refusalCode(body: unknown): string | null {
 
 export default function ScanPage() {
   const { token, user, t } = useApp();
-  const videoRef  = useRef<HTMLVideoElement | null>(null);
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  // The camera itself lives in <QrScanner>; this page only says when it should run and what a decoded text means.
+  const [scanning, setScanning] = useState(false);
   const [streaming, setStreaming] = useState(false);
+  const [notice, setNotice] = useState<LocalNotice>(null);
   const [last, setLast]     = useState<CheckInResult | null>(null);
   const [problem, setProblem] = useState<ScanProblem>(null);
   // The operator's gyms (null while loading). With more than one, or if the
@@ -111,48 +115,35 @@ export default function ScanPage() {
   }, []);
   const tierLabel = (key: string) => tierLabels[key] ?? key.charAt(0).toLocaleUpperCase() + key.slice(1).replace(/_/g, ' ');
 
-  useEffect(() => () => stopCamera(), []); // eslint-disable-line react-hooks/exhaustive-deps
+  function startCamera() { setScanning(true); }
+  function stopCamera() { setScanning(false); setStreaming(false); }
 
-  async function startCamera() {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        await videoRef.current.play();
-        setStreaming(true);
-        tick();
-      }
-    } catch {
-      setLast(null);
-      setProblem('camera');
-      setResultSeq(n => n + 1);
-    }
-  }
-
-  function stopCamera() {
-    const video  = videoRef.current;
-    const stream = video?.srcObject as MediaStream | null;
-    stream?.getTracks().forEach(t => t.stop());
-    if (video) video.srcObject = null;
+  function onCameraState(state: QrScannerState) {
+    if (state === 'active') { setStreaming(true); return; }
     setStreaming(false);
+    if (state === 'idle') { setScanning(false); return; }
+    if (state === 'requesting') return;
+    // denied, unsupported, insecure, no camera or any other failure: the same camera message as before.
+    setScanning(false);
+    setLast(null);
+    setProblem('camera');
+    setResultSeq(n => n + 1);
   }
 
-  function tick() {
-    if (!videoRef.current || !canvasRef.current || videoRef.current.readyState < 2) {
-      requestAnimationFrame(tick); return;
-    }
-    const video = videoRef.current, canvas = canvasRef.current;
-    canvas.width = video.videoWidth; canvas.height = video.videoHeight;
-    const ctx = canvas.getContext('2d')!;
-    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-    const img  = ctx.getImageData(0, 0, canvas.width, canvas.height);
-    const code = jsQR(img.data, img.width, img.height);
-    if (code?.data && !inFlight.current) submit(code.data);
-    if (videoRef.current?.srcObject) requestAnimationFrame(tick);
+  function onDecode(text: string) {
+    if (inFlight.current) return;
+    submit(text);
   }
 
   async function submit(qrToken: string) {
     if (!token || !scanGym.current.canScan) return;
+    // §4.7: an event ticket belongs to the organizer kit desk. Say so here and send nothing to check-in.
+    if (isEventTicketPayload(qrToken)) {
+      setNotice('event_ticket'); setLast(null); setProblem(null); setResultSeq(n => n + 1);
+      stopCamera();
+      return;
+    }
+    setNotice(null);
     inFlight.current = true;
     try {
       const r = await api.checkIn(token, qrToken, scanGym.current.gymId || undefined);
@@ -275,6 +266,11 @@ export default function ScanPage() {
         </div>
       )}
 
+      {notice === 'event_ticket' && (
+        <div data-testid="scan-event-ticket" role="status">
+          <Alert tone="info"><p className="font-semibold">{t('scan.eventTicket.title')}</p><p className="mt-1 font-normal">{t('scan.eventTicket.body')}</p></Alert>
+        </div>
+      )}
       {/* Camera or network problem — distinct from a backend refusal */}
       {problem && (
         <div data-testid="scan-problem">
@@ -302,29 +298,7 @@ export default function ScanPage() {
         </CardHeader>
 
         {/* Viewfinder */}
-        <div className="relative mx-6 mb-6 aspect-video overflow-hidden rounded-[var(--radius-xl)] bg-[var(--color-gray-950)]">
-          <video
-            ref={videoRef}
-            className={streaming ? 'h-full w-full object-cover' : 'hidden'}
-            muted
-            playsInline
-          />
-          {!streaming && (
-            // gray-400 on gray-950 is about 7:1 (gray-600 was 2.45:1).
-            <div className="flex h-full flex-col items-center justify-center gap-3 text-[var(--color-gray-400)]">
-              <Camera aria-hidden="true" className="h-10 w-10" />
-              <p className="text-sm">{t('scan.cameraOff')}</p>
-            </div>
-          )}
-          {/* Scan overlay guide lines */}
-          {streaming && (
-            <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-              <div className="h-48 w-48 rounded-[var(--radius-xl)] border-2 border-white/40" />
-            </div>
-          )}
-        </div>
-
-        <canvas ref={canvasRef} className="hidden" />
+        <QrScanner className="mx-6 mb-6" active={scanning} onDecode={onDecode} onState={onCameraState} cooldownMs={0} previewLabel={t('events.kit.camera.preview')} offLabel={t('scan.cameraOff')} />
       </Card>
 
       {/* Manual token input */}
