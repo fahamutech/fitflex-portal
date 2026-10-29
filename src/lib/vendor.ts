@@ -260,6 +260,18 @@ export function receiptDateTime(iso: string | null | undefined, locale: Locale) 
   return `${d.getUTCDate()} ${RECEIPT_MONTHS[locale === 'sw' ? 'sw' : 'en'][d.getUTCMonth()]} ${d.getUTCFullYear()}, ${time}`;
 }
 /**
+ * "19 Oct, 14:05" / "19 Okt, 2:05 mchana" in EAT: eatDateTime with the Swahili time of day on a 12-hour clock
+ * and its part of the day (glossary, decided 2026-10-20; the app's formatTimeOfDay). Used on the flash sale screens.
+ */
+export function eatWhen(iso: string | null | undefined, locale: Locale) {
+  if (locale !== 'sw') return eatDateTime(iso, locale);
+  const ms = Date.parse(iso ?? '');
+  if (!Number.isFinite(ms)) return '—';
+  const d = new Date(ms + 3 * 3_600_000); // EAT has no DST: read the UTC fields of the shifted time.
+  const h = d.getUTCHours();
+  return `${d.getUTCDate()} ${RECEIPT_MONTHS.sw[d.getUTCMonth()]}, ${h % 12 === 0 ? 12 : h % 12}:${String(d.getUTCMinutes()).padStart(2, '0')} ${swDayPeriod(h)}`;
+}
+/**
  * The receipt as plain text (spec §4.2), in the language `t` speaks. Not a TRA fiscal receipt; no customer
  * details, no marketing line. `totalLabel` is the formatted total ("TSh 95,000").
  */

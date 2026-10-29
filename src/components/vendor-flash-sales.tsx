@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { ArrowLeft, Plus, Zap } from 'lucide-react';
 import { api, type VendorProduct } from '@/lib/api';
 import { money } from '@/lib/admin-utils';
-import { eatDateTime, eatDay, fmt } from '@/lib/vendor';
+import { eatWhen, eatDay, fmt } from '@/lib/vendor';
 import { PHASE_TONE, VENDOR_GROUPS, isNetworkError, phaseOf, vendorGroupOf } from '@/lib/shop-banners';
 import {
   SALE_GROUP_KEY, SALE_PHASE_KEY, discountPctOf, saleCan, saleErrorCode, saleMessageOf, saleReasonText, salesApi,
@@ -47,7 +47,7 @@ export function VendorFlashSales({ tabs }: { tabs: ReactNode }) {
   const [openProposals, setOpenProposals] = useState<{ open: number; max: number } | null>(null);
   const [rules, setRules] = useState<SaleRules | null>(null);
   const [busy, setBusy] = useState(false);
-  const deps = { money: (n: number) => money(n), when: (iso: string) => eatDateTime(iso, locale), day: (ymd: string) => eatDay(ymd, locale) };
+  const deps = { money: (n: number) => money(n), when: (iso: string) => eatWhen(iso, locale), day: (ymd: string) => eatDay(ymd, locale) };
 
   const me = vendor.me;
   const approved = standing ? standing.reason !== 'vendor_not_approved' : !me?.approvalStatus || me.approvalStatus === 'approved';
@@ -150,14 +150,14 @@ export function VendorFlashSales({ tabs }: { tabs: ReactNode }) {
 
   const extraLine = (s: FlashSale) => {
     const p = phaseOf(s);
-    if (p === 'pending') return fmt(t('merch.sale.line.expires'), { date: eatDateTime(s.expiresAt ?? s.startsAt, locale) });
-    if (p === 'scheduled') return fmt(t('merch.sale.line.starts'), { date: eatDateTime(s.startsAt, locale) });
-    if (p === 'live') return fmt(t('merch.sale.line.ends'), { date: eatDateTime(s.endsAt, locale) });
+    if (p === 'pending') return fmt(t('merch.sale.line.expires'), { date: eatWhen(s.expiresAt ?? s.startsAt, locale) });
+    if (p === 'scheduled') return fmt(t('merch.sale.line.starts'), { date: eatWhen(s.startsAt, locale) });
+    if (p === 'live') return fmt(t('merch.sale.line.ends'), { date: eatWhen(s.endsAt, locale) });
     if (p === 'rejected') return saleReasonText(s, t) ? fmt(t('merch.line.reason'), { reason: saleReasonText(s, t) }) : t('merch.status.rejected');
     if (p === 'expired') return t('merch.sale.line.notReviewed');
     if (p === 'withdrawn') return t('merch.sale.line.youWithdrew');
     if (p === 'ended') {
-      const on = fmt(t('merch.sale.line.endedOn'), { date: eatDateTime(s.endedAt ?? s.endsAt, locale) });
+      const on = fmt(t('merch.sale.line.endedOn'), { date: eatWhen(s.endedAt ?? s.endsAt, locale) });
       // Contract rev 2: FitFlex suspended the seller, so the sale ended.
       if (s.statusReason === 'vendor_suspended') return `${on} · ${t('merch.sale.endedSuspended')}`;
       const byFitflex = s.endedByFitflex ?? s.statusReason === 'ended_by_fitflex';
@@ -183,7 +183,7 @@ export function VendorFlashSales({ tabs }: { tabs: ReactNode }) {
               <Badge tone={PHASE_TONE[p]} dot><span data-testid={`sale-status-${s.id}`}>{t(SALE_PHASE_KEY[p])}</span></Badge>
             </div>
             <SalePriceBlock sale={s.salePriceTzs} was={was} pct={pct} size="sm" testId={`sale-price-${s.id}`} />
-            <p className="text-xs text-[var(--color-fg-tertiary)]">{eatDateTime(s.startsAt, locale)} → {eatDateTime(s.endsAt, locale)} ({t('merch.dates.tzNote')})</p>
+            <p className="text-xs text-[var(--color-fg-tertiary)]">{eatWhen(s.startsAt, locale)} → {eatWhen(s.endsAt, locale)} ({t('merch.dates.tzNote')})</p>
             <p className="text-sm text-[var(--color-fg-secondary)]" data-testid={`sale-line-${s.id}`}>{extraLine(s)}</p>
             {s.origin === 'staff' && <p className="text-xs text-[var(--color-fg-tertiary)]" data-testid={`sale-staff-${s.id}`}>{t('merch.sale.setByFitflex')}</p>}
             <div className="flex flex-wrap gap-1 pt-1">

@@ -6,7 +6,7 @@ import { ChevronDown, ChevronRight, History, PackageOpen, RefreshCw, SlidersHori
 import { api, type LowStockRow, type ProductStock, type VendorProduct } from '@/lib/api';
 import { money } from '@/lib/admin-utils';
 import type { MessageKey } from '@/lib/i18n';
-import { categoryLabel, eatDateTime, fmt, lowKey, PRODUCTS_QS_KEY, tracksVariantStock, variantsOf, type Category } from '@/lib/vendor';
+import { categoryLabel, eatWhen, fmt, lowKey, PRODUCTS_QS_KEY, tracksVariantStock, variantsOf, type Category } from '@/lib/vendor';
 import { useShopFlashSalesAvailable } from '@/components/shop-banners-gate';
 import { Badge, Button, Card, EmptyState, ErrorState, Input, PageHeader, Segmented, Select, SkeletonCard, SkeletonTable, Table, TBody, Td, Th, THead, Tr } from '@/components/shared';
 import { AdjustStockDialog } from '@/components/vendor/adjust-stock-dialog';
@@ -134,7 +134,7 @@ function ProductsInner() {
         {basePrice(p)}
         {lock
           ? <span className="max-w-[16rem] text-right text-xs text-[var(--color-fg-tertiary)]" data-testid={`price-lock-${p.id}`}>
-              {fmt(t('vendor.priceLocked'), { start: eatDateTime(lock.startsAt, locale), end: eatDateTime(lock.endsAt, locale) })}{' '}
+              {fmt(t('vendor.priceLocked'), { start: eatWhen(lock.startsAt, locale), end: eatWhen(lock.endsAt, locale) })}{' '}
               <Link href={`/vendor/promotions/?tab=sales&item=${encodeURIComponent(lock.saleId)}`} className={saleLink}>{t('vendor.viewSale')}</Link>
             </span>
           : p.status === 'active' && (p.approvalStatus ?? 'approved') === 'approved' && (
