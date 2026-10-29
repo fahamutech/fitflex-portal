@@ -1,9 +1,11 @@
 'use client';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { Globe, MapPin, ShieldCheck, Star } from 'lucide-react';
 import { useApp } from '../providers';
 import { Badge, Button, Card, CardContent, CardHeader } from '@/components/shared';
-import { WEB_GYM_PROFILE } from '@/lib/flags';
+import { WEB_GYM_PROFILE, WEB_QR_CHECKIN } from '@/lib/flags';
+import { CHECKIN_ROUTES, rememberQ } from '@/lib/web-checkin';
 import { fmt } from '@/lib/vendor';
 import { hoursView, mapUrl, resolveWebGym, safeImage, type WebGymProfile } from '@/lib/web-gym';
 import type { MessageKey } from '@/lib/i18n';
@@ -88,6 +90,15 @@ export default function PublicGymPage() {
     void load();
   }, [ready, load]);
 
+  // "Visit this gym" (flag WEB_QR_CHECKIN): keep the signed code for this tab only, then go to a fixed route.
+  const router = useRouter();
+  const startCheckin = useCallback(() => {
+    const q = qRef.current;
+    if (!q) return;
+    rememberQ(q);
+    router.push(CHECKIN_ROUTES.signin);
+  }, [router]);
+
   const toggle = (
     <button
       type="button"
@@ -131,12 +142,12 @@ export default function PublicGymPage() {
           <Button onClick={() => void load(true)}>{t('web.gym.retry')}</Button>
         </div>
       )}
-      {view.kind === 'ok' && <Profile profile={view.profile} />}
+      {view.kind === 'ok' && <Profile profile={view.profile} onVisit={WEB_QR_CHECKIN ? startCheckin : undefined} />}
     </div>
   );
 }
 
-function Profile({ profile }: { profile: WebGymProfile }) {
+function Profile({ profile, onVisit }: { profile: WebGymProfile; onVisit?: () => void }) {
   const { t, locale } = useApp();
   const g = profile.gym;
   const name = g.name ?? '';
@@ -204,11 +215,11 @@ function Profile({ profile }: { profile: WebGymProfile }) {
       </header>
 
       <div className="space-y-2">
-        <Button size="lg" className="w-full" disabled aria-describedby="web-gym-visit-hint" data-testid="web-gym-visit">
+        <Button size="lg" className="w-full" disabled={!onVisit} onClick={onVisit} aria-describedby="web-gym-visit-hint" data-testid="web-gym-visit">
           {t('web.gym.visit')}
         </Button>
         <p id="web-gym-visit-hint" className="text-center text-xs text-[var(--color-fg-tertiary)]" data-testid="web-gym-visit-hint">
-          {t('web.gym.signInToVisit')}
+          {onVisit ? t('web.checkin.visitHint') : t('web.gym.signInToVisit')}
         </p>
       </div>
 
