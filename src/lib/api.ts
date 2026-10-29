@@ -2345,8 +2345,9 @@ export interface VendorTools {
   stockLedger?: boolean;
   buyerContact?: boolean;
   canSeeCost?: boolean;
-  /** Shop banners (SHOP_BANNERS): merch.banners. When absent the portal asks GET /vendor/shop-banners once. */
-  merch?: { banners?: boolean };
+  /** Shop banners (SHOP_BANNERS): merch.banners; flash sales (SHOP_FLASH_SALES): merch.flashSales. When absent the
+   *  portal asks GET /vendor/shop-banners or GET /vendor/flash-sales once. */
+  merch?: { banners?: boolean; flashSales?: boolean };
   /** S5 (VENDOR_DOCUMENTS): share links, PDF, the document view and order invoices. Missing = off. */
   documents?: boolean;
   /** S5 (VENDOR_VAT): tax details, VAT codes and VAT on documents. Missing = off. */
@@ -2362,6 +2363,8 @@ export interface VendorTools {
 
 export interface VendorProduct extends ShopProduct {
   variants?: ProductVariant[];
+  /** SHOP_FLASH_SALES: present while an approved sale of this product is scheduled or live (price and discount locked). */
+  priceLock?: { saleId: string; startsAt: string; endsAt: string; effectiveStatus?: string } | null;
 }
 
 export interface LowStockRow { productId: string; name: string; variant: string | null; stock: number; reorderLevel: number }

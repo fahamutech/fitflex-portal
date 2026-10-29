@@ -117,7 +117,8 @@ function adminRoutes(items: Json[], extra: Array<[string, RegExp, Handler]> = []
   const find = (id: string) => items.find(b => b.id === id);
   return [
     ...extra,
-    ['GET', /^\/admin\/shop-merch$/, () => ({ json: { items, total: items.length, nextCursor: null, confirmation: CONFIRMATION } })],
+    // SHOP_FLASH_SALES off here (S4 contract: kind=flash_sale → 404 feature_disabled); banners only.
+    ['GET', /^\/admin\/shop-merch$/, (_r, c) => (c.search.get('kind') === 'flash_sale' ? { status: 404, json: { error: 'feature_disabled' } } : { json: { items, total: items.length, nextCursor: null, confirmation: CONFIRMATION } })],
     ['GET', /^\/admin\/shop-banners\/([^/]+)\/image$/, photo],
     ['GET', /^\/admin\/shop-banners\/([^/]+)$/, (_r, _c, m) => (find(m[1]) ? { json: { banner: find(m[1]), history: [{ id: 1, action: 'shop_banner.submitted', actor: 'usr_vendor', actorName: 'Rehema', at: at(-2) }, { id: 2, action: 'shop_banner.image_published', actor: 'admin-y', actorName: 'Yusuf', at: at(-1) }, { id: 3, action: 'shop_banner.public_files_orphaned', actor: 'admin-y', actorName: 'Yusuf', at: at(-1) }, { id: 4, action: 'shop_banner.something_new', actor: 'admin-y', actorName: 'Yusuf', at: at(-1) }] } } : { status: 404, json: { error: 'banner_not_found' } })],
     ['POST', /^\/admin\/shop-banners\/([^/]+)\/approve$/, (_r, c, m) => { Object.assign(find(m[1])!, { status: 'approved', effectiveStatus: 'approved', allowedActions: ['end', 'position'], approvedBy: 'admin-x' }); return { json: { banner: find(m[1]) } }; }],
