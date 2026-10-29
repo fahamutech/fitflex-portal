@@ -6,6 +6,7 @@ import { api, type AdminCancelRefundMode, type AdminEventDetail, type AdminEvent
 import { money } from '@/lib/admin-utils';
 import { EVENTS_MODULE } from '@/lib/flags';
 import { AUDIT_ACTIONS, AUDIT_ACTION_PREFIX, ORGANIZER_STATUS, REJECT_REASONS, auditActionLabel, distanceLabel, errorCode, errorKey, eventDateTime, eventStatusOf, closeReasonKey, isFeatureOff, maskContact, orderStatusOf, registrationStatusOf, rejectReasonKey, relativeTime, typeKey } from '@/lib/events';
+import { AdminPayoutCard } from '@/components/admin-payout-schedule';
 import { Alert, Badge, Button, Card, CardContent, CardHeader, Checkbox, Field, PageHeader, Radio, Segmented, Select, SkeletonTable, Textarea, useToast } from '@/components/shared';
 import { DataTable, type ColumnDef } from '@/components/data-table';
 import { Dialog, DialogFooter } from '@/components/dialog';
@@ -204,6 +205,7 @@ function Detail({ id, view, orderParam, onView, onBack }: { id: string; view: De
                 : <p className="text-sm text-[var(--color-fg-quaternary)]">{t('admin.events.noDecision')}</p>}
             </CardContent>
           </Card>
+          <AdminPayoutCard doc={doc} onChanged={() => void load()} />
           <Card data-testid="admin-organizer-card">
             <CardHeader><h2 className="text-base font-semibold text-[var(--color-fg-primary)]">{t('admin.events.organizerCard')}</h2></CardHeader>
             <CardContent className="space-y-3 text-sm">

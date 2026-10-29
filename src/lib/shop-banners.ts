@@ -332,7 +332,9 @@ export const MERCH_TAB_KEY: Record<MerchTab, MessageKey> = {
 export const MERCH_EMPTY_KEY: Record<MerchTab, MessageKey> = {
   requests: 'merchAdmin.empty.requests', scheduled: 'merchAdmin.empty.scheduled', live: 'merchAdmin.empty.live', closed: 'merchAdmin.empty.closed', drafts: 'merchAdmin.empty.drafts',
 };
-export function tabOfBanner(b: ShopBanner, now = Date.now()): MerchTab {
+/** Banners and flash sales share the lifecycle (spec §4.1), so any item with these fields works. */
+export type PhasedItem = Pick<ShopBanner, 'status' | 'startsAt' | 'endsAt' | 'effectiveStatus' | 'expiresAt'>;
+export function tabOfBanner(b: PhasedItem, now = Date.now()): MerchTab {
   const p = phaseOf(b, now);
   if (p === 'pending') return 'requests';
   if (p === 'draft') return 'drafts';
@@ -340,8 +342,9 @@ export function tabOfBanner(b: ShopBanner, now = Date.now()): MerchTab {
   if (p === 'live') return 'live';
   return 'closed';
 }
-/** Kinds in the merch queue. Flash sales join in slice 4 (the type filter appears once there is more than one). */
-export const MERCH_KINDS = ['banner'] as const;
+/** Kinds in the merch queue (the type filter shows when the server has more than one switched on). */
+export const MERCH_KINDS = ['banner', 'flash_sale'] as const;
+export type MerchKind = typeof MERCH_KINDS[number];
 
 /** Vendor list groups (spec §5.2.2), in display order. */
 export type VendorGroup = 'live' | 'scheduled' | 'waiting' | 'drafts' | 'past';
@@ -349,7 +352,7 @@ export const VENDOR_GROUPS: VendorGroup[] = ['live', 'scheduled', 'waiting', 'dr
 export const VENDOR_GROUP_KEY: Record<VendorGroup, MessageKey> = {
   live: 'merch.group.live', scheduled: 'merch.group.scheduled', waiting: 'merch.group.waiting', drafts: 'merch.group.drafts', past: 'merch.group.past',
 };
-export function vendorGroupOf(b: ShopBanner, now = Date.now()): VendorGroup {
+export function vendorGroupOf(b: PhasedItem, now = Date.now()): VendorGroup {
   const p = phaseOf(b, now);
   if (p === 'live') return 'live';
   if (p === 'scheduled') return 'scheduled';

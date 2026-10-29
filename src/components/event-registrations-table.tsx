@@ -17,8 +17,10 @@ const BANNER_KEY = 'events.reg.privacyBannerDismissed';
  * Registrations of one event (§6.3 / §6.5). Never shows phone, email, DOB, gender or an emergency contact: the rows
  * do not carry them (P-O-1). Filters go to the server; paging is client-side over the pages fetched (≤ 500 rows).
  */
-export function EventRegistrationsTable({ eventId, timezone, timezoneAbbr, fieldPolicy, published }: {
+export function EventRegistrationsTable({ eventId, timezone, timezoneAbbr, fieldPolicy, published, onOpen }: {
   eventId: string; timezone: string | null | undefined; timezoneAbbr?: string | null; fieldPolicy: RegistrationsFieldPolicy; published: boolean;
+  /** Events S5 §8.5: opens the registration drawer (offered only while the venue tools are on). */
+  onOpen?: (registrationId: string) => void;
 }) {
   const { t, token, locale } = useApp();
   const [rows, setRows] = useState<EventRegistrationRow[] | null>(null);
@@ -123,7 +125,8 @@ export function EventRegistrationsTable({ eventId, timezone, timezoneAbbr, field
       )}
       <Card><CardContent>
         <DataTable columns={columns} data={rows} keyFn={r => r.id} label={t('organizer.events.view.registrations')} dense pageSize={25} extraFilters={filters}
-          defaultSort={{ key: 'createdAt', dir: 'desc' }} emptyState={t('organizer.reg.empty')} />
+          defaultSort={{ key: 'createdAt', dir: 'desc' }} emptyState={t('organizer.reg.empty')}
+          actions={onOpen && options?.ops?.kit ? (r => (r.status === 'confirmed' ? <Button variant="ghost" size="sm" onClick={() => onOpen(r.id)} data-testid={`reg-open-${r.id}`}>{t('events.reg.open')}</Button> : null)) : undefined} />
       </CardContent></Card>
     </div>
   );

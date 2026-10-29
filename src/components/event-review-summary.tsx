@@ -2,6 +2,7 @@
 import { ReactNode } from 'react';
 import type { EventDocument } from '@/lib/api';
 import { money } from '@/lib/admin-utils';
+import type { MessageKey } from '@/lib/i18n';
 import { distanceLabel, eventDateTime, fmt, generatedPolicyLine, stepKey, typeKey, type WizardStep } from '@/lib/events';
 import { Button, Card, CardContent, CardHeader } from '@/components/shared';
 import { useApp } from '../../app/providers';
@@ -74,6 +75,7 @@ export function EventReviewSummary({ doc, lang, onEdit }: { doc: EventDocument; 
         )}
       </Section>
       <Section step="tickets">
+        <p data-testid="review-payout" className="mb-1 text-sm"><span className="font-medium text-[var(--color-fg-primary)]">{t('events.payout.title')}</span>: {doc.payoutSchedule ? t(`events.payout.${doc.payoutSchedule}` as MessageKey) : t('events.payout.notSet')}</p>
         {doc.categories.flatMap(c => c.ticketTypes.map(tt => ({ c, tt }))).length === 0 ? <p>{t('events.review.noValue')}</p> : (
           <ul className="space-y-1">
             {doc.categories.map((c, i) => (

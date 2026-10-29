@@ -5,7 +5,7 @@ import { useApp } from '../../providers';
 import { api, GymSettlement, GymSettlementStatus, SettlementClawbacks, SettlementMode, SettlementRun } from '@/lib/api';
 import { money } from '@/lib/admin-utils';
 import { STATEMENT_STATUS, STATEMENT_TABS, clawbackSkipReason, lastMonth, period, settlementError, shortDay, signed, skipReason } from '@/lib/settlements';
-import { Alert, Badge, Button, Card, CardContent, Field, PageHeader, Segmented, Spinner, Table, TBody, Td, Th, THead, Tr } from '@/components/shared';
+import { Alert, Badge, Button, Card, CardContent, ErrorState, Field, PageHeader, Segmented, Spinner, Table, TBody, Td, Th, THead, Tr } from '@/components/shared';
 import { Dialog, DialogFooter } from '@/components/dialog';
 import { SettlementStatementView } from '@/components/settlement-statement';
 
@@ -17,7 +17,7 @@ type View = 'statements' | 'runs';
  * Shadow runs are for checking the numbers and can never be paid.
  */
 export default function SettlementsPage() {
-  const { token, user, hasPermission } = useApp();
+  const { token, user, hasPermission, t } = useApp();
   const [view, setView] = useState<View>('statements');
   const [mode, setMode] = useState<SettlementMode>('live');
   const [rows, setRows] = useState<GymSettlement[] | null>(null);
@@ -29,6 +29,8 @@ export default function SettlementsPage() {
   const [notice, setNotice] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
   const [clawbacks, setClawbacks] = useState<SettlementClawbacks | null>(null);
+  // A failed clawbacks request is not "none pending": it gets its own error with a retry.
+  const [clawbacksFailed, setClawbacksFailed] = useState(false);
 
   // The open statement lives in the URL so it survives a refresh and can be shared.
   useEffect(() => {
@@ -51,7 +53,10 @@ export default function SettlementsPage() {
       setRows(statements);
       setRuns(runRows);
       // Differences from voided check-ins that no statement has taken yet.
-      setClawbacks(mode === 'live' ? await api.settlementClawbacks(token).catch(() => null) : null);
+      setClawbacksFailed(false);
+      if (mode === 'live') {
+        try { setClawbacks(await api.settlementClawbacks(token)); } catch { setClawbacks(null); setClawbacksFailed(true); }
+      } else setClawbacks(null);
     } catch (err) {
       setError(settlementError(err));
       setRows([]);
@@ -82,6 +87,11 @@ export default function SettlementsPage() {
       />
       {error && <Alert tone="error">{error}</Alert>}
       {notice && <Alert tone="success">{notice}</Alert>}
+      {clawbacksFailed && (
+        <div data-testid="settlement-clawbacks-error">
+          <ErrorState title={t('adminLoad.clawbacksTitle')} message={t('adminLoad.clawbacksBody')} onRetry={load} retryLabel={t('common.tryAgain')} />
+        </div>
+      )}
       {clawbacks && clawbacks.pending.length > 0 && (
         <Alert tone="warning">
           <span data-testid="settlement-clawbacks-pending">

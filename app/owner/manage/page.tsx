@@ -2,9 +2,12 @@
 
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { api, Gym, isPin, passwordForPin, TrainerProfile } from '@/lib/api';
+import { api, ApiError, Gym, isPin, passwordForPin, TrainerProfile } from '@/lib/api';
+import type { MessageKey } from '@/lib/i18n';
+import { fmt } from '@/lib/vendor';
 import { Alert, Badge, Button, Card, Field, Input, PageHeader, Select, Spinner, Textarea } from '@/components/shared';
 import { BulkInvite, InvitationsSent, InviteForm } from '@/components/GymInvitations';
+import { Dialog, DialogFooter } from '@/components/dialog';
 import { useApp } from '../../providers';
 
 type MemberDraft = { displayName: string; email: string; phone: string; pin: string; plan: 'D' | 'W' | 'M' };
@@ -16,8 +19,19 @@ const BASE_STAFF_SCOPES = ['members', 'checkins', 'trainers', 'gyms'];
 const EMPTY_MEMBER: MemberDraft = { displayName: '', email: '', phone: '', pin: '', plan: 'M' };
 const EMPTY_STAFF: StaffDraft = { displayName: '', email: '', pin: '', canMessage: false };
 
+// What each refusal of POST /owner/staff/:id/pin (B3a) means for the owner.
+const RESET_PIN_ERROR_KEYS: Record<string, MessageKey> = {
+  pin_must_be_4_digits: 'ownerStaff.err.format',
+  staff_identity_shared: 'ownerStaff.err.shared',
+  credentials_not_accepted: 'ownerStaff.err.credentialsNotAccepted',
+  feature_disabled: 'ownerStaff.err.unavailable',
+  staff_not_found: 'ownerStaff.err.notFound',
+  staff_not_at_your_gym: 'ownerStaff.err.otherGym',
+  firebase_update_failed: 'ownerStaff.err.saveFailed',
+};
+
 export default function OwnerManagePage() {
-  const { token, locale, user, invitesEnabled } = useApp();
+  const { token, locale, user, invitesEnabled, t } = useApp();
   const sw = locale === 'sw';
   const copy = sw ? {
     title: 'Usimamizi wa gym', subtitle: 'Wanachama, gym, wafanyakazi, wakufunzi na ufikiaji.', members: 'Wanachama', addMember: 'Ongeza mwanachama', bulk: 'Ongeza wengi', bulkHint: 'Mstari mmoja: jina,email,simu,PIN,mpango (D/W/M)', save: 'Hifadhi', gym: 'Maelezo ya gym', staff: 'Wafanyakazi', canMessage: 'Anaweza kutuma ujumbe kwa wanachama', trainers: 'Wakufunzi', access: 'Ufikiaji na kuingia', review: 'Kagua walioingia', scan: 'Skani QR', pending: 'Maombi yanayosubiri', approve: 'Idhinisha', reject: 'Kataa', empty: 'Hakuna rekodi bado.', saved: 'Imehifadhiwa.', failed: 'Ombi halikukamilika.', name: 'Jina', email: 'Barua pepe', phone: 'Simu', pin: 'PIN ya tarakimu 4', plan: 'Mpango', location: 'Mahali', addStaff: 'Ongeza mfanyakazi', reload: 'Pakia upya', active: 'Wanachama hai', total: 'Jumla ya wanachama',
@@ -39,12 +53,23 @@ export default function OwnerManagePage() {
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState<string | null>(null);
   const [invitesSent, setInvitesSent] = useState(0);
+  // Owner "Reset PIN" for one staff member (B3a): who, the new start PIN, and what the server said.
+  const [resetFor, setResetFor] = useState<{ id: string; name: string } | null>(null);
+  const [resetPin, setResetPin] = useState('');
+  const [resetError, setResetError] = useState<string | null>(null);
+  const [resetBusy, setResetBusy] = useState(false);
+  const [resetNotice, setResetNotice] = useState<string | null>(null);
 
   const gymId = gyms[0]?.id;
   const activeGym = useMemo(() => gyms.find(g => g.id === gymId), [gyms, gymId]);
   // Identity V2: with invitations on, people join with their own account and no PIN is set here.
   const invites = invitesEnabled && token && gymId ? { token, gymId, sw, onSent: () => setInvitesSent(n => n + 1) } : null;
   const isOwner = user?.userType === 'gym_operator';
+  // Staff rows carry passwordChangeRequired only while STAFF_PIN_CHANGE_REQUIRED is on: the badge and the
+  // reset action stay hidden (dormant) until then. With invitations on, owners no longer set a PIN.
+  const staffPinOn = staff.some(s => typeof s?.passwordChangeRequired === 'boolean');
+  const canResetPin = isOwner && staffPinOn && !invitesEnabled;
+  const staffName = (s: any) => String(s?.displayName || s?.email || '');
 
   async function load() {
     if (!token) return;
@@ -102,6 +127,25 @@ export default function OwnerManagePage() {
     try { await api.ownerCreateStaff(token, { displayName: staffDraft.displayName, email: staffDraft.email, password: passwordForPin(staffDraft.pin), gymIds: [gymId], aclPermissions: [...BASE_STAFF_SCOPES, ...(staffDraft.canMessage ? ['communications'] : [])] }); setStaffDraft(EMPTY_STAFF); setMessage(copy.saved); await load(); } catch { setMessage(copy.failed); } finally { setBusy(false); }
   }
 
+  function openReset(s: any) { setResetNotice(null); setResetFor({ id: s.id, name: staffName(s) }); setResetPin(''); setResetError(null); }
+
+  async function submitResetPin(event: FormEvent) {
+    event.preventDefault(); if (!token || !resetFor) return;
+    setResetError(null);
+    if (!isPin(resetPin)) { setResetError(t('ownerStaff.err.format')); return; }
+    setResetBusy(true);
+    try {
+      const row = await api.ownerResetStaffPin(token, resetFor.id, resetPin);
+      setStaff(list => list.map(s => (s.id === resetFor.id ? { ...s, ...row, passwordChangeRequired: true } : s)));
+      setResetNotice(fmt(t('ownerStaff.resetDone'), { name: resetFor.name }));
+      setResetFor(null); setResetPin('');
+    } catch (err) {
+      const code = err instanceof ApiError ? (err.body as { error?: string } | null)?.error : undefined;
+      const key = code ? RESET_PIN_ERROR_KEYS[code] : undefined;
+      setResetError(fmt(t(key ?? 'ownerStaff.err.generic'), { name: resetFor.name }));
+    } finally { setResetBusy(false); }
+  }
+
   async function decideTrainer(trainerId: string, decision: 'approve' | 'reject') {
     if (!token || !gymId) return; setBusy(true);
     try { await api.ownerDecideTrainer(token, trainerId, gymId, decision); setMessage(copy.saved); await load(); } catch { setMessage(copy.failed); } finally { setBusy(false); }
@@ -112,13 +156,24 @@ export default function OwnerManagePage() {
   return <div className="space-y-6">
     <PageHeader title={copy.title} description={copy.subtitle} actions={<Button variant="secondary" onClick={load}>{copy.reload}</Button>} />
     {message && <Alert tone={message === copy.saved ? 'success' : 'error'}>{message}</Alert>}
+    {resetNotice && <Alert tone="success">{resetNotice}</Alert>}
     <div className="grid gap-3 sm:grid-cols-2"><Card><p className="text-sm text-[var(--color-fg-quaternary)]">{copy.total}</p><p className="text-2xl font-semibold text-[var(--color-fg-primary)]">{stats.totalMembers ?? members.length}</p></Card><Card><p className="text-sm text-[var(--color-fg-quaternary)]">{copy.active}</p><p className="text-2xl font-semibold text-[var(--color-fg-primary)]">{stats.activeMembers ?? stats.activeToday ?? 0}</p></Card></div>
 
     <Card><h2 className="mb-4 text-lg font-semibold text-[var(--color-fg-primary)]">{copy.members}</h2>{invites ? <div className="grid gap-6 lg:grid-cols-2"><div className="space-y-3"><h3 className="font-medium text-[var(--color-fg-primary)]">{copy.addMember}</h3><InviteForm role="member" {...invites} /></div><div className="space-y-3"><h3 className="font-medium text-[var(--color-fg-primary)]">{copy.bulk}</h3><BulkInvite {...invites} /></div></div> : <div className="grid gap-6 lg:grid-cols-2"><form onSubmit={submitMember} className="space-y-3"><h3 className="font-medium text-[var(--color-fg-primary)]">{copy.addMember}</h3><Field label={copy.name}><Input aria-label="Owner member name" required value={member.displayName} onChange={e => setMember({...member, displayName:e.target.value})}/></Field><Field label={copy.email}><Input aria-label="Owner member email" type="email" value={member.email} onChange={e => setMember({...member, email:e.target.value})}/></Field><div className="grid grid-cols-2 gap-3"><Field label={copy.phone}><Input value={member.phone} onChange={e => setMember({...member, phone:e.target.value})}/></Field><Field label={copy.pin}><Input aria-label="Owner member PIN" inputMode="numeric" pattern="[0-9]{4}" maxLength={4} value={member.pin} onChange={e => setMember({...member, pin:e.target.value})}/></Field></div><Field label={copy.plan}><Select value={member.plan} onChange={e => setMember({...member, plan:e.target.value as 'D'|'W'|'M'})}><option value="D">Daily</option><option value="W">Weekly</option><option value="M">Monthly</option></Select></Field><Button type="submit" disabled={busy}>{copy.save}</Button></form><div className="space-y-3"><h3 className="font-medium text-[var(--color-fg-primary)]">{copy.bulk}</h3><Textarea aria-label="Bulk members CSV" className="!min-h-36" placeholder={copy.bulkHint} value={bulkText} onChange={e => setBulkText(e.target.value)}/><Button onClick={submitBulk} disabled={busy || !bulkText.trim()}>{copy.bulk}</Button></div></div>}{invites && <div className="mt-5"><InvitationsSent token={invites.token} gymId={invites.gymId} sw={sw} refreshKey={invitesSent} /></div>}<div className="mt-5 divide-y divide-[var(--color-border-secondary)]">{members.length === 0 ? <p className="py-3 text-sm text-[var(--color-fg-quaternary)]">{copy.empty}</p> : members.slice(0,10).map(m => <div key={m.id} className="flex items-center justify-between py-3"><div><p className="text-sm font-medium text-[var(--color-fg-primary)]">{m.displayName || m.email}{m.username && <span className="ml-1 font-normal text-[var(--color-fg-tertiary)]">@{m.username}</span>}</p><p className="text-xs text-[var(--color-fg-quaternary)]">{m.email || m.phone}</p></div><Badge tone={m.status === 'active' ? 'success' : 'gray'}>{m.status || 'active'}</Badge></div>)}</div></Card>
 
     <Card><h2 className="mb-4 text-lg font-semibold text-[var(--color-fg-primary)]">{copy.gym}</h2>{activeGym ? <div className="grid gap-3 sm:grid-cols-2"><Field label={copy.name}><Input aria-label="Owner gym name" value={gymDraft.name || ''} onChange={e => setGymDraft({...gymDraft,name:e.target.value})}/></Field><Field label={copy.location}><Input aria-label="Owner gym location" value={gymDraft.location || ''} onChange={e => setGymDraft({...gymDraft,location:e.target.value})}/></Field><div className="sm:col-span-2"><Button onClick={saveGym} disabled={busy}>{copy.save}</Button></div></div> : <p>{copy.empty}</p>}</Card>
 
-    <Card><h2 className="mb-4 text-lg font-semibold text-[var(--color-fg-primary)]">{copy.staff}</h2>{invites ? (isOwner && <div className="max-w-xl"><InviteForm role="staff" {...invites} /></div>) : <form onSubmit={addStaff} className="grid gap-3 sm:grid-cols-4"><Field label={copy.name}><Input required value={staffDraft.displayName} onChange={e => setStaffDraft({...staffDraft,displayName:e.target.value})}/></Field><Field label={copy.email}><Input required type="email" value={staffDraft.email} onChange={e => setStaffDraft({...staffDraft,email:e.target.value})}/></Field><Field label={copy.pin}><Input aria-label="Staff PIN" required pattern="[0-9]{4}" maxLength={4} value={staffDraft.pin} onChange={e => setStaffDraft({...staffDraft,pin:e.target.value})}/></Field><div className="self-end"><Button type="submit" disabled={busy}>{copy.addStaff}</Button></div><label className="flex items-center gap-2 text-sm sm:col-span-4"><input type="checkbox" data-testid="staff-can-message" checked={staffDraft.canMessage} onChange={e => setStaffDraft({...staffDraft,canMessage:e.target.checked})}/>{copy.canMessage}</label></form>}<div className="mt-4 flex flex-wrap gap-2">{staff.map(s => <Badge key={s.id} tone="brand">{s.displayName || s.email}</Badge>)}</div></Card>
+    <Card><h2 className="mb-4 text-lg font-semibold text-[var(--color-fg-primary)]">{copy.staff}</h2>{invites ? (isOwner && <div className="max-w-xl"><InviteForm role="staff" {...invites} /></div>) : <form onSubmit={addStaff} className="grid gap-3 sm:grid-cols-4"><Field label={copy.name}><Input required value={staffDraft.displayName} onChange={e => setStaffDraft({...staffDraft,displayName:e.target.value})}/></Field><Field label={copy.email}><Input required type="email" value={staffDraft.email} onChange={e => setStaffDraft({...staffDraft,email:e.target.value})}/></Field><Field label={copy.pin}><Input aria-label="Staff PIN" required pattern="[0-9]{4}" maxLength={4} value={staffDraft.pin} onChange={e => setStaffDraft({...staffDraft,pin:e.target.value})}/></Field><div className="self-end"><Button type="submit" disabled={busy}>{copy.addStaff}</Button></div><label className="flex items-center gap-2 text-sm sm:col-span-4"><input type="checkbox" data-testid="staff-can-message" checked={staffDraft.canMessage} onChange={e => setStaffDraft({...staffDraft,canMessage:e.target.checked})}/>{copy.canMessage}</label></form>}{staffPinOn ? <ul className="mt-4 divide-y divide-[var(--color-border-secondary)]" data-testid="owner-staff-list">{staff.map(s => <li key={s.id} className="flex flex-wrap items-center justify-between gap-2 py-2" data-testid={`owner-staff-${s.id}`}><div className="flex flex-wrap items-center gap-2"><span className="text-sm font-medium text-[var(--color-fg-primary)]">{staffName(s)}</span>{s.passwordChangeRequired === true && <Badge tone="warning">{t('ownerStaff.mustChangePin')}</Badge>}</div>{canResetPin && <Button type="button" variant="secondary" size="sm" onClick={() => openReset(s)} data-testid={`owner-staff-reset-${s.id}`}>{t('ownerStaff.resetPin')}</Button>}</li>)}</ul> : <div className="mt-4 flex flex-wrap gap-2">{staff.map(s => <Badge key={s.id} tone="brand">{s.displayName || s.email}</Badge>)}</div>}</Card>
+    <Dialog open={!!resetFor} onClose={() => { if (!resetBusy) setResetFor(null); }} title={fmt(t('ownerStaff.resetTitle'), { name: resetFor?.name ?? '' })} description={fmt(t('ownerStaff.resetBody'), { name: resetFor?.name ?? '' })} size="sm">
+      <form id="owner-reset-pin-form" onSubmit={submitResetPin} noValidate className="space-y-3">
+        {resetError && <Alert tone="error">{resetError}</Alert>}
+        <Field label={t('ownerStaff.resetPinLabel')} required><Input type="password" inputMode="numeric" pattern="[0-9]{4}" autoComplete="off" value={resetPin} onChange={e => { setResetPin(e.target.value.replace(/\D/g, '').slice(0, 4)); setResetError(null); }} data-testid="owner-staff-reset-pin" /></Field>
+      </form>
+      <DialogFooter>
+        <Button type="button" variant="secondary" onClick={() => setResetFor(null)} disabled={resetBusy}>{t('common.cancel')}</Button>
+        <Button type="submit" form="owner-reset-pin-form" loading={resetBusy} data-testid="owner-staff-reset-submit">{t('ownerStaff.resetPin')}</Button>
+      </DialogFooter>
+    </Dialog>
 
     <Card><h2 className="mb-4 text-lg font-semibold text-[var(--color-fg-primary)]">{copy.trainers}</h2>{invites && isOwner && <div className="mb-4 max-w-xl"><InviteForm role="trainer" {...invites} /></div>}<div className="flex flex-wrap gap-2">{trainers.map(t => <Badge key={t.id} tone={t.verified ? 'success':'gray'}>{t.displayName}</Badge>)}</div>{pending.length > 0 && <div className="mt-5 space-y-2"><h3 className="text-sm font-medium text-[var(--color-fg-primary)]">{copy.pending}</h3>{pending.map(t => <div key={t.id} className="flex items-center justify-between rounded-[var(--radius-lg)] border border-[var(--color-border-secondary)] p-3"><span>{t.displayName}</span><div className="flex gap-2"><Button size="sm" onClick={() => decideTrainer(t.id,'approve')}>{copy.approve}</Button><Button size="sm" variant="secondary" onClick={() => decideTrainer(t.id,'reject')}>{copy.reject}</Button></div></div>)}</div>}</Card>
 

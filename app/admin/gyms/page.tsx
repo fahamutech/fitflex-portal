@@ -1,8 +1,8 @@
 'use client';
-import { useEffect, useState, useMemo } from 'react';
-import { Plus, Pencil, Trash2, RefreshCw, ChevronLeft, ChevronRight as ChevronRightIcon, Eye } from 'lucide-react';
+import { useEffect, useRef, useState, useMemo } from 'react';
+import { Plus, Pencil, Trash2, RefreshCw, ChevronLeft, ChevronRight as ChevronRightIcon, Eye, X } from 'lucide-react';
 import { useApp } from '../../providers';
-import { api, Gym, GymOwnerRef, TrainerRef } from '@/lib/api';
+import { api, Gym, GymOwnerRef, GymPayoutOwnerView, TrainerRef } from '@/lib/api';
 import { Badge, Button, PageHeader, Alert, Spinner, Card, Field, Input, Select } from '@/components/shared';
 import { DataTable, ColumnDef } from '@/components/data-table';
 import { Dialog, DialogFooter } from '@/components/dialog';
@@ -16,6 +16,9 @@ import { statusTone, statusLabel, money, trainerNames } from '@/lib/admin-utils'
 import { OwnerInlineForm, OwnerFormDraft, BLANK_OWNER_DRAFT, validateOwnerDraft } from '@/components/owner-inline-form';
 import { TrainerInlineForm, TrainerFormDraft, BLANK_TRAINER_DRAFT, validateTrainerDraft } from '@/components/trainer-inline-form';
 import { TrainerPassFields, trainerPassError, trainerPassOptions } from '@/components/trainer-pass-fields';
+import { PartnerMediaDetailSection, PartnerMediaRowAction, PartnerMediaSetDialog } from '@/components/partner-media-set-dialog';
+import type { PartnerSubject } from '@/lib/partner-media';
+import { GymPayoutOwnerDialog, PayoutOwnerCell, PayoutOwnerRequiredAlert, PayoutOwnerSummary, fill, needsPayoutOwner, ownerName } from '@/components/gym-payout-owner';
 
 const TIERS = ['standard', 'midtier', 'premium', 'luxury_executive'];
 const STATUS_OPTIONS: { value: string; label: string; tone: 'success' | 'danger' | 'gray' }[] = [
@@ -33,6 +36,12 @@ const BLANK_GYM: Partial<Gym> = {
   homepageVisible: true, homepagePriority: 0,
 };
 
+/** Admin list rows carry payout-owner fields that are read-only here (set via /admin/gyms/:id/payout-owner): never send them back. */
+function gymPayload<T extends Partial<Gym>>(gym: T): T {
+  const { payoutOwnerId: _named, owners: _owners, payoutOwner: _state, ...rest } = gym;
+  return rest as T;
+}
+
 export default function GymsPage() {
   const { token, user, t } = useApp();
   const [gyms, setGyms]         = useState<Gym[]>([]);
@@ -48,6 +57,7 @@ export default function GymsPage() {
   const [deleteTarget, setDeleteTarget] = useState<Gym | null>(null);
   const [detailGym, setDetailGym] = useState<Gym | null>(null);
   const [detailImagesLoading, setDetailImagesLoading] = useState(false);
+  const [mediaSubject, setMediaSubject] = useState<PartnerSubject | null>(null);
   const [editLoading, setEditLoading] = useState(false);
   const [slideIndex, setSlideIndex] = useState(0);
   const [ownerDialogOpen, setOwnerDialogOpen] = useState(false);
@@ -62,6 +72,12 @@ export default function GymsPage() {
   const [rubricData, setRubricData] = useState<RubricData>(EMPTY_RUBRIC);
   const [rubricResult, setRubricResult] = useState<RubricResult | null>(null);
   const [verificationBusyId, setVerificationBusyId] = useState<string | null>(null);
+  // Payout owner: the gym whose picker is open, the "needs payout owner" filter,
+  // and gyms an owner change just left without a payout owner.
+  const [payoutGym, setPayoutGym] = useState<Gym | null>(null);
+  const [needsPayoutOnly, setNeedsPayoutOnly] = useState(false);
+  const [payoutRequiredIds, setPayoutRequiredIds] = useState<string[]>([]);
+  const linkedPayoutGymHandled = useRef(false);
 
   const load = async () => {
     if (!token) return;
@@ -81,6 +97,29 @@ export default function GymsPage() {
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { load(); }, [token]);
+
+  // /admin/gyms?payoutOwner=<gymId> (linked from the owners page) opens that gym's payout-owner picker once.
+  useEffect(() => {
+    if (linkedPayoutGymHandled.current || !gyms.length) return;
+    const id = new URLSearchParams(window.location.search).get('payoutOwner');
+    if (!id) return;
+    linkedPayoutGymHandled.current = true;
+    const gym = gyms.find(g => g.id === id);
+    if (gym) setPayoutGym(gym);
+    history.replaceState(null, '', window.location.pathname);
+  }, [gyms]);
+
+  /** A payout owner was named or cleared: show the new answer everywhere. */
+  function applyPayoutOwner(view: GymPayoutOwnerView) {
+    const patch = { payoutOwnerId: view.payoutOwnerId, owners: view.owners, payoutOwner: view.payoutOwner };
+    setGyms(current => current.map(g => (g.id === view.gymId ? { ...g, ...patch } : g)));
+    setPayoutGym(current => (current && current.id === view.gymId ? { ...current, ...patch } : current));
+    if (view.payoutOwner.reason !== 'payout_owner_required') setPayoutRequiredIds(ids => ids.filter(id => id !== view.gymId));
+  }
+
+  const needsPayoutCount = useMemo(() => gyms.filter(needsPayoutOwner).length, [gyms]);
+  const shownGyms = needsPayoutOnly ? gyms.filter(needsPayoutOwner) : gyms;
+  const gymNameOf = (id: string) => gyms.find(g => g.id === id)?.name || id;
 
   function openDetail(gym: Gym) {
     // The list row only carries a single `thumbnail` — show everything else
@@ -237,12 +276,14 @@ export default function GymsPage() {
     try {
       let savedGym: Gym;
       if (editing) {
-        savedGym = await api.saveGym(token, { ...draft, id: editing.id });
+        savedGym = await api.saveGym(token, gymPayload({ ...draft, id: editing.id }));
       } else {
-        savedGym = await api.saveGym(token, draft);
+        savedGym = await api.saveGym(token, gymPayload(draft));
       }
+      let payoutRequired: string[] = [];
       if (draftOwnerId) {
-        await api.saveGymOwner(token, { id: draftOwnerId, gymId: savedGym.id });
+        const savedOwner = await api.saveGymOwner(token, { id: draftOwnerId, gymId: savedGym.id });
+        payoutRequired = savedOwner?.payoutOwnerRequiredGymIds ?? [];
       }
       // Assign selected trainers to this gym
       for (const tId of draftTrainerIds) {
@@ -262,6 +303,7 @@ export default function GymsPage() {
         }
       }
       setDialogOpen(false);
+      setPayoutRequiredIds(payoutRequired);
       await load();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Save failed');
@@ -297,7 +339,7 @@ export default function GymsPage() {
   async function handleStatusChange(gym: Gym, newStatus: string) {
     if (!token) return;
     try {
-      await api.saveGym(token, { ...gym, status: newStatus });
+      await api.saveGym(token, gymPayload({ ...gym, status: newStatus }));
       await load();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Status update failed');
@@ -364,6 +406,9 @@ export default function GymsPage() {
     {
       key: 'owner', header: 'Owner', sortable: false,
       cell: (gym) => {
+        if (gym.owners?.length) {
+          return <span className="text-sm text-[var(--color-fg-secondary)]">{gym.owners.map(ownerName).join(', ')}</span>;
+        }
         const owner = gymOwnerMap[gym.id];
         return owner ? (
           <span className="text-sm text-[var(--color-fg-secondary)]">
@@ -371,6 +416,10 @@ export default function GymsPage() {
           </span>
         ) : <span className="text-xs text-[var(--color-fg-quaternary)]">—</span>;
       },
+    },
+    {
+      key: 'payoutOwner', header: t('admin.gym.payout.title'), sortable: false,
+      cell: (gym) => <PayoutOwnerCell gym={gym} onOpen={() => setPayoutGym(gym)} />,
     },
     { key: 'ratePerDay', header: 'Day rate', sortable: true, align: 'right', cell: (gym) => <span className="tabular-nums text-sm">{money(gym.ratePerDay ?? gym.perVisitRate)}</span> },
     { key: 'ratePerWeek', header: 'Week rate', sortable: true, align: 'right', cell: (gym) => <span className="tabular-nums text-sm">{money(gym.ratePerWeek ?? 0)}</span> },
@@ -434,6 +483,11 @@ export default function GymsPage() {
       />
 
       {error && <Alert tone="error">{error}</Alert>}
+      <PayoutOwnerRequiredAlert
+        gymIds={payoutRequiredIds}
+        gymName={gymNameOf}
+        onOpen={(id) => { const gym = gyms.find(g => g.id === id); if (gym) setPayoutGym(gym); }}
+      />
 
       {loading && !gyms.length ? (
         <div className="flex h-64 items-center justify-center"><Spinner className="h-8 w-8" /></div>
@@ -442,16 +496,29 @@ export default function GymsPage() {
           <div className="p-5">
             <DataTable
               columns={columns}
-              data={gyms}
+              data={shownGyms}
               keyFn={(g) => g.id}
               filterPlaceholder="Search gyms..."
               emptyState="No gyms found."
+              extraFilters={needsPayoutCount > 0 || needsPayoutOnly ? (
+                <button
+                  type="button"
+                  aria-pressed={needsPayoutOnly}
+                  data-testid="filter-needs-payout-owner"
+                  onClick={() => setNeedsPayoutOnly(v => !v)}
+                  className={`inline-flex items-center gap-1 px-2.5 py-1 text-xs rounded-[var(--radius-full)] font-medium border ${needsPayoutOnly ? 'bg-[var(--color-warning-50)] text-[var(--color-warning-700)] border-[var(--color-warning-200)]' : 'bg-[var(--color-bg-primary)] text-[var(--color-fg-secondary)] border-[var(--color-border-secondary)]'}`}
+                >
+                  {fill(t('admin.gym.payout.filterNeeds'), { count: needsPayoutCount })}
+                  {needsPayoutOnly && <X className="h-3 w-3" />}
+                </button>
+              ) : undefined}
               onRowClick={(gym) => openDetail(gym)}
               actions={(gym) => (
                 <>
                   <Button variant="ghost" size="sm" onClick={(e) => { e.stopPropagation(); openDetail(gym); }} title="View details">
                     <Eye className="h-3.5 w-3.5" />
                   </Button>
+                  <PartnerMediaRowAction subject={{ type: 'gym', id: gym.id, name: gym.name }} onOpen={setMediaSubject} />
                   <Button variant="ghost" size="sm" disabled={editLoading} onClick={(e) => { e.stopPropagation(); openEdit(gym); }} title="Edit gym">
                     <Pencil className="h-3.5 w-3.5" />
                   </Button>
@@ -738,6 +805,13 @@ export default function GymsPage() {
         busy={busy}
       />
 
+      <GymPayoutOwnerDialog
+        gym={payoutGym}
+        open={!!payoutGym}
+        onClose={() => setPayoutGym(null)}
+        onSaved={applyPayoutOwner}
+      />
+
       {/* Gym Detail Dialog */}
       <Dialog
         open={!!detailGym}
@@ -818,6 +892,8 @@ export default function GymsPage() {
               </div>
             </div>
 
+            <PayoutOwnerSummary gym={detailGym} onChange={() => { const gym = detailGym; setDetailGym(null); setPayoutGym(gym); }} />
+
             {/* Pricing */}
             <div className="grid grid-cols-3 gap-4">
               <div className="rounded-[var(--radius-lg)] border border-[var(--color-border-secondary)] p-3 text-center">
@@ -872,6 +948,11 @@ export default function GymsPage() {
               </div>
             )}
 
+            <PartnerMediaDetailSection
+              subject={{ type: 'gym', id: detailGym.id, name: detailGym.name }}
+              onManage={(s) => { setDetailGym(null); setMediaSubject(s); }}
+            />
+
             {/* Coordinates */}
             {detailGym.coordinates?.lat && (
               <div>
@@ -891,6 +972,8 @@ export default function GymsPage() {
           </Button>
         </DialogFooter>
       </Dialog>
+
+      <PartnerMediaSetDialog subject={mediaSubject} onClose={() => setMediaSubject(null)} />
     </div>
   );
 }

@@ -8,7 +8,7 @@ import {
 } from '@/lib/api';
 import { BadgeTone, money } from '@/lib/admin-utils';
 import { PASS_TIER_KEYS, SETTLED_GYM_TIERS, configError, percent, shortDay, tierLabel, todayEAT, wholesale } from '@/lib/settlements';
-import { Alert, Badge, Button, Card, CardContent, Field, Input, PageHeader, Segmented, Spinner, Table, TBody, Td, Th, THead, Tr } from '@/components/shared';
+import { Alert, Badge, Button, Card, CardContent, ErrorState, Field, Input, PageHeader, Segmented, Spinner, Table, TBody, Td, Th, THead, Tr } from '@/components/shared';
 import { Dialog, DialogFooter } from '@/components/dialog';
 
 type Tab = 'rate-cards' | 'rules' | 'pass-tiers';
@@ -34,9 +34,11 @@ function standing(row: Row, today: string): { label: string; tone: BadgeTone; wh
  * from a date.
  */
 export default function SettlementConfigPage() {
-  const { token, user } = useApp();
+  const { token, user, t } = useApp();
   const [config, setConfig] = useState<SettlementConfig | null>(null);
   const [gyms, setGyms] = useState<Gym[]>([]);
+  // An empty list because the request failed must not read as "no gyms".
+  const [gymsFailed, setGymsFailed] = useState(false);
   const [tab, setTab] = useState<Tab>('rate-cards');
   const [history, setHistory] = useState(false);
   const [ask, setAsk] = useState<Ask | null>(null);
@@ -49,9 +51,11 @@ export default function SettlementConfigPage() {
   const load = useCallback(async () => {
     if (!token) return;
     try {
-      const [c, g] = await Promise.all([api.settlementConfig(token), api.adminGyms(token).catch(() => [] as Gym[])]);
+      let gymsDown = false;
+      const [c, g] = await Promise.all([api.settlementConfig(token), api.adminGyms(token).catch(() => { gymsDown = true; return [] as Gym[]; })]);
       setConfig(c);
       setGyms(g);
+      setGymsFailed(gymsDown);
     } catch (err) {
       setError(configError(err));
       setConfig({ passTierVersions: [], rules: [], rateCards: [] });
@@ -127,6 +131,11 @@ export default function SettlementConfigPage() {
         </>}
       />
       {error && !ask && <Alert tone="error">{error}</Alert>}
+      {gymsFailed && (
+        <div data-testid="settlement-config-gyms-error">
+          <ErrorState title={t('adminLoad.gymsTitle')} message={t('adminLoad.gymsBody')} onRetry={load} retryLabel={t('common.tryAgain')} />
+        </div>
+      )}
       {notice && <Alert tone="success">{notice}</Alert>}
       {drafts > 0 && <Alert tone="info">{drafts} {drafts === 1 ? 'draft is' : 'drafts are'} waiting to be activated or rejected.</Alert>}
 

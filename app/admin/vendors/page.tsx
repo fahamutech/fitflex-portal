@@ -10,6 +10,8 @@ import { Alert, Badge, Button, Card, Field, PageHeader, Segmented, Spinner } fro
 import { Dialog, DialogFooter } from '@/components/dialog';
 import { ColumnDef, DataTable } from '@/components/data-table';
 import { VendorAreaPicker } from '@/components/vendor-area-picker';
+import { PartnerMediaRowAction, PartnerMediaSetDialog } from '@/components/partner-media-set-dialog';
+import type { PartnerSubject } from '@/lib/partner-media';
 import { areaLabel, deliveryIds, freeTextRegions, hasNoArea, indexAreas, localiseAreas, regionOf, suggestAreas, usableAreas } from '@/lib/vendor-areas';
 
 type T = ReturnType<typeof useApp>['t'];
@@ -84,6 +86,7 @@ function approvalTone(status: VendorSummary['approvalStatus']) {
 export default function VendorsPage() {
   const { token, user, t, locale } = useApp();
   const [vendors, setVendors] = useState<VendorSummary[]>([]);
+  const [mediaSubject, setMediaSubject] = useState<PartnerSubject | null>(null);
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -282,6 +285,7 @@ export default function VendorsPage() {
           ['backfill', `${t('vendors.areas.guessed')} (${guessedCount})`],
         ]} /> : undefined}
         actions={(vendor) => <div className="flex flex-wrap justify-end gap-1">
+          <PartnerMediaRowAction subject={{ type: 'vendor', id: vendor.id, name: vendor.vendorProfile?.businessName || vendor.displayName || null }} onOpen={setMediaSubject} />
           {/* New vendors are approved through their KYC case. */}
           {!vendor.kycExempt && <Link href="/admin/kyc" title={t('vendors.kycReview')} className="inline-flex items-center rounded-md px-2 py-1 text-[var(--color-brand-700)] hover:bg-[var(--color-bg-secondary)]"><BadgeCheck className="h-4 w-4" /></Link>}
           {vendor.kycExempt && vendor.approvalStatus !== 'approved' && <Button variant="ghost" size="sm" title={t('vendors.approve')} disabled={busyId === vendor.id} onClick={() => update(vendor, { approvalStatus: 'approved' })}><CheckCircle2 className="h-4 w-4 text-[var(--color-success-600)]" /></Button>}
@@ -339,5 +343,7 @@ export default function VendorsPage() {
         <Button variant="primary" size="md" onClick={saveRate} disabled={busyId === rateTarget?.id} data-testid="vendor-commission-save">{t('vendors.save')}</Button>
       </DialogFooter>
     </Dialog>
+
+    <PartnerMediaSetDialog subject={mediaSubject} onClose={() => setMediaSubject(null)} />
   </div>;
 }

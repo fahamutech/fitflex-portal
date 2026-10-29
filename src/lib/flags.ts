@@ -20,3 +20,26 @@ export const HERO_IMAGES_REMOTE = process.env.NEXT_PUBLIC_HERO_IMAGES_REMOTE ===
  * Off, those pages render the "not available yet" state. The server has its own EVENTS_MODULE flag. Default off.
  */
 export const EVENTS_MODULE = process.env.NEXT_PUBLIC_EVENTS_MODULE === 'true';
+
+/**
+ * Partner photos (design spec photo-hero-screens §43, §44.5; backend functions#277): the admin "Partner photos"
+ * queue (/admin/partner-media) and its nav item, and the "Home photo and logo" row action and dialog on the gyms,
+ * trainers and vendors pages. Off, the nav item and row actions are absent and the page is the not-found page.
+ * The server has its own PARTNER_MEDIA flag. Default off.
+ */
+export const PARTNER_MEDIA_ADMIN = process.env.NEXT_PUBLIC_PARTNER_MEDIA_ADMIN === 'true';
+
+/**
+ * Public gym page opened from a gym's QR code (/g/?q=...; backend POST /public/gyms/resolve, functions#281):
+ * read-only profile, no sign-in. Off, the page shows the not-found state and makes no request. The server has its
+ * own WEB_GYM_PROFILE flag. Default off.
+ */
+export const WEB_GYM_PROFILE = process.env.NEXT_PUBLIC_WEB_GYM_PROFILE === 'true';
+
+/**
+ * Browser gym check-in from the gym's QR code (/g/signin, /g/confirm, /g/done; backend functions#284): the "Visit this
+ * gym" button on the public gym page starts PIN sign-in, a preview and an explicit confirmation. Off, the button stays
+ * disabled, the three routes show the not-available state and no request is made. The server has its own
+ * WEB_QR_CHECKIN flag. Default off.
+ */
+export const WEB_QR_CHECKIN = process.env.NEXT_PUBLIC_WEB_QR_CHECKIN === 'true';

@@ -36,7 +36,7 @@ import {
   Star,
   HandCoins,
   SlidersHorizontal,
-  Undo2, Receipt, KeyRound, ShieldAlert, Images, Landmark, Percent, CalendarCheck
+  Undo2, Receipt, KeyRound, ShieldAlert, Images, Landmark, Percent, CalendarCheck, ImageUp, Plug
 } from 'lucide-react';
 import { useApp } from '../../app/providers';
 import { ChangePasswordGate } from './change-password-gate';
@@ -49,17 +49,20 @@ import { useVendor } from './vendor-context';
 import { BrandLogo } from './brand-logo';
 import { LanguageToggle } from './language-toggle';
 import { PhotoPanel } from './photo-panel';
-import { EVENTS_MODULE, HERO_IMAGES_ADMIN, PHOTO_HERO_UI } from '@/lib/flags';
+import { EVENTS_MODULE, HERO_IMAGES_ADMIN, PARTNER_MEDIA_ADMIN, PHOTO_HERO_UI } from '@/lib/flags';
 import { eventsAreaOpen, staffAreaOpen } from '@/lib/events';
 import { useAdminEventsSummary, useOrganizer } from './organizer-context';
-import { useCorporateEventsAvailable } from './events-options';
-import { useShopBannersAvailable } from './shop-banners-gate';
+import { useCorporateEventsAvailable, useEventsOptions } from './events-options';
+import { opsOf } from '@/lib/events-ops';
+import { useShopBannersAvailable, useShopFlashSalesAvailable } from './shop-banners-gate';
 import { useTaxRatesAvailable } from './tax-rates-gate';
+import { useHrToOrgRefresh } from './hr-to-org-refresh';
+import { isHrInOrg, orgHome, orgPathForHr } from '@/lib/hr-to-org';
 
-/** SHOP_BANNERS as /vendor/me reports it (tools.merch.banners); undefined when the server doesn't say. */
-const vendorBannersTool = (tools: VendorTools | null | undefined) => {
-  const merch = tools?.merch as { banners?: unknown } | undefined;
-  return typeof merch?.banners === 'boolean' ? merch.banners : undefined;
+/** SHOP_BANNERS / SHOP_FLASH_SALES as /vendor/me reports them (tools.merch.banners / flashSales); undefined when the server doesn't say. */
+const vendorMerchTool = (tools: VendorTools | null | undefined, kind: 'banners' | 'flashSales') => {
+  const merch = tools?.merch as Record<string, unknown> | undefined;
+  return typeof merch?.[kind] === 'boolean' ? (merch[kind] as boolean) : undefined;
 };
 
 /* ── Nav definitions ─────────────────────────────────────── */
@@ -74,6 +77,19 @@ type NavItem = {
   count?: { n: number; labelKey: MessageKey; tone: 'warning' | 'fuel' };
 };
 const scopesOf = (item: NavItem) => [item.aclScope, ...(item.aclAny ?? [])].filter(Boolean) as string[];
+
+/**
+ * The admin nav item that owns a path: the longest matching href, on a path boundary. A plain prefix match let
+ * /admin/b2b-billing resolve to the /admin/b2b item and redirect staff who only hold b2b_billing. Roots match exactly.
+ */
+function matchAdminNav(path: string): NavItem | undefined {
+  let best: NavItem | undefined;
+  for (const item of ADMIN_NAV) {
+    const hit = ROOTS.has(item.href) ? path === item.href : path === item.href || path.startsWith(`${item.href}/`);
+    if (hit && (!best || item.href.length > best.href.length)) best = item;
+  }
+  return best;
+}
 
 // Section roots highlight only on themselves, not on their sub-pages.
 const ROOTS = new Set(['/admin', '/hr', '/org', '/vendor', '/organizer']);
@@ -125,8 +141,8 @@ const OPERATOR_NAV: NavItem[] = [
 
 // A business that sells on FitFlex (vendor portal, S2): each item needs its permission.
 function vendorNav(permissions: string[], tools: VendorTools | null | undefined, lowCount: number | null, waitingCount: number | null, bannersOn = false): NavItem[] {
-  const icons: Record<string, React.ElementType> = { '/vendor': LayoutDashboard, '/vendor/products': ShoppingBag, '/vendor/promotions': Megaphone, '/vendor/orders': ClipboardList, '/vendor/sales': Receipt, '/vendor/customers': Users, '/vendor/payouts': HandCoins, '/vendor/settings/tax': Landmark };
-  const labels: Record<string, string> = { '/vendor': 'vendor.nav.dashboard', '/vendor/products': 'vendor.nav.products', '/vendor/promotions': 'merch.nav', '/vendor/orders': 'vendor.nav.orders', '/vendor/sales': 'vendor.nav.sales', '/vendor/customers': 'vendor.nav.customers', '/vendor/payouts': 'vendor.nav.payouts', '/vendor/settings/tax': 'vendor.tax.title' };
+  const icons: Record<string, React.ElementType> = { '/vendor': LayoutDashboard, '/vendor/products': ShoppingBag, '/vendor/promotions': Megaphone, '/vendor/orders': ClipboardList, '/vendor/sales': Receipt, '/vendor/customers': Users, '/vendor/reports': BarChart3, '/vendor/payouts': HandCoins, '/vendor/settings/tax': Landmark };
+  const labels: Record<string, string> = { '/vendor': 'vendor.nav.dashboard', '/vendor/products': 'vendor.nav.products', '/vendor/promotions': 'merch.nav', '/vendor/orders': 'vendor.nav.orders', '/vendor/sales': 'vendor.nav.sales', '/vendor/customers': 'vendor.nav.customers', '/vendor/reports': 'vendor.nav.reports', '/vendor/payouts': 'vendor.nav.payouts', '/vendor/settings/tax': 'vendor.tax.title' };
   // S5: Settings → Tax details (VAT on; owner or staff with `payments`).
   const groups: Record<string, string> = { '/vendor/settings/tax': 'vendor.nav.group.settings' };
   return VENDOR_AREAS.filter(a => a.nav !== false && vendorAreaOpen(a, permissions, tools) && (a.href !== '/vendor/promotions' || bannersOn)).map(a => ({
@@ -137,21 +153,25 @@ function vendorNav(permissions: string[], tools: VendorTools | null | undefined,
 }
 
 // Events S2 (spec §3): a running-event organizer and their staff. Items open by organizer status and role.
-function organizerNav(status: OrganizerStatus | null, role: OrganizerRole | null): NavItem[] {
+function organizerNav(status: OrganizerStatus | null, role: OrganizerRole | null, integrations = false): NavItem[] {
   return [
     { href: '/organizer', labelKey: 'nav.organizer.overview', icon: LayoutDashboard },
     { href: '/organizer/onboarding', labelKey: 'nav.organizer.onboarding', icon: ShieldCheck },
     ...(eventsAreaOpen(status) ? [{ href: '/organizer/events', labelKey: 'nav.organizer.events', icon: Flag }] : []),
     ...(staffAreaOpen(status, role) ? [{ href: '/organizer/staff', labelKey: 'nav.organizer.staff', icon: Users }] : []),
+    // Events S5 §8.1: owner/admin of an active organizer, and only while the server says the API or webhooks are on.
+    ...(integrations && staffAreaOpen(status, role) ? [{ href: '/organizer/integrations', labelKey: 'organizer.nav.integrations', icon: Plug }] : []),
   ];
 }
 
 /** Where each kind of session lives. */
-export function homeFor(user: { userType?: string } | null | undefined) {
+export function homeFor(user: { userType?: string; organizationUser?: boolean; organizationRoles?: string[] } | null | undefined) {
   if (!user) return '/login';
   if (VENDOR_USER_TYPES.has(user.userType ?? '')) return '/vendor';
   if (ORGANIZER_USER_TYPES.has(user.userType ?? '')) return '/organizer';
   if (user.userType === 'admin') return '/admin';
+  // B5b: a company HR login the server marked for the organisation area (ORG_ONLY_SPONSORS) opens /org.
+  if (isHrInOrg(user)) return orgHome(user.organizationRoles);
   if (user.userType === 'corporate_hr') return '/hr';
   return '/dashboard';
 }
@@ -199,6 +219,9 @@ const ADMIN_NAV: NavItem[] = [
   { href: '/admin/vendors',       labelKey: 'admin.nav.vendors',        icon: Store,           groupKey: 'nav.group.platform', aclScope: 'shop' },
   { href: '/admin/promotion-overview', labelKey: 'admin.nav.promotionOverview', icon: LineChart, groupKey: 'nav.group.promotion', aclScope: 'promotions', aclAny: ['promotions_approve', 'campaigns'] },
   { href: '/admin/moderation',    labelKey: 'admin.nav.moderation',     icon: ShieldAlert,     groupKey: 'nav.group.promotion', aclScope: 'moderation', aclAny: ['moderation_decide'] },
+  // Partner photos (spec photo-hero-screens §43.1): only in builds with NEXT_PUBLIC_PARTNER_MEDIA_ADMIN=true. The queue needs
+  // moderation or moderation_decide; brand_media alone opens the page with only "Set photo for a partner" (no queue).
+  ...(PARTNER_MEDIA_ADMIN ? [{ href: '/admin/partner-media', labelKey: 'admin.nav.partnerMedia', icon: ImageUp, groupKey: 'nav.group.promotion', aclScope: 'moderation', aclAny: ['moderation_decide', 'brand_media'] }] : []),
   { href: '/admin/promotions',    labelKey: 'admin.nav.promotions',     icon: Megaphone,       groupKey: 'nav.group.promotion', aclScope: 'promotions', aclAny: ['promotions_approve', 'campaigns'] },
   // Shop banners (Phase 2 S1): shown only while the server has SHOP_BANNERS on (see visibleNav).
   { href: '/admin/shop-merch',    labelKey: 'admin.nav.shopMerch',      icon: Images,          groupKey: 'nav.group.promotion', aclScope: 'promotions', aclAny: ['promotions_approve'] },
@@ -206,9 +229,9 @@ const ADMIN_NAV: NavItem[] = [
   { href: '/admin/promotion-analytics', labelKey: 'admin.nav.promotionAnalytics', icon: BarChart3, groupKey: 'nav.group.promotion', aclScope: 'promotion_analytics' },
   { href: '/admin/promotion-limits', labelKey: 'admin.nav.promotionLimits', icon: SlidersHorizontal, groupKey: 'nav.group.promotion', aclScope: 'campaigns', aclAny: ['promotions', 'promotions_approve'] },
   { href: '/admin/distributions', labelKey: 'admin.nav.distributions',  icon: BarChart3,       groupKey: 'nav.group.finance',  aclScope: 'payments' },
-  { href: '/admin/settlements',   labelKey: 'admin.nav.settlements',    icon: HandCoins,       groupKey: 'nav.group.finance',  aclScope: 'payments' },
-  { href: '/admin/trainer-settlements', labelKey: 'admin.nav.trainerSettlements', icon: Dumbbell, groupKey: 'nav.group.finance', aclScope: 'payments' },
-  { href: '/admin/vendor-settlements', labelKey: 'admin.nav.vendorSettlements', icon: Store, groupKey: 'nav.group.finance', aclScope: 'payments' },
+  { href: '/admin/settlements',   labelKey: 'admin.nav.settlements',    icon: HandCoins,       groupKey: 'nav.group.finance',  aclScope: 'payments', aclAny: ['settlements_prepare', 'settlements_approve', 'settlements_pay'] },
+  { href: '/admin/trainer-settlements', labelKey: 'admin.nav.trainerSettlements', icon: Dumbbell, groupKey: 'nav.group.finance', aclScope: 'payments', aclAny: ['settlements_prepare', 'settlements_approve', 'settlements_pay'] },
+  { href: '/admin/vendor-settlements', labelKey: 'admin.nav.vendorSettlements', icon: Store, groupKey: 'nav.group.finance', aclScope: 'payments', aclAny: ['settlements_prepare', 'settlements_approve', 'settlements_pay'] },
   { href: '/admin/settlement-config', labelKey: 'admin.nav.settlementConfig', icon: SlidersHorizontal, groupKey: 'nav.group.finance', aclScope: 'payments' },
   { href: '/admin/b2b-billing',   labelKey: 'admin.nav.b2bBilling',     icon: Receipt,         groupKey: 'nav.group.finance',  aclScope: 'b2b_billing', aclAny: ['b2b', 'b2b_billing_approve', 'b2b_payments'] },
   // S5: VAT rates with maker ≠ checker; shown only while the server has VAT on (useTaxRatesAvailable).
@@ -466,21 +489,25 @@ export function Shell({ children }: { children: ReactNode }) {
   const isVendor      = !!token && VENDOR_USER_TYPES.has(user?.userType ?? '');
   const isOrganizer   = !!token && ORGANIZER_USER_TYPES.has(user?.userType ?? '');
   const adminEvents = useAdminEventsSummary(token, !!isAdminUser && hasPermission('events'));
+  const organizerOptions = useEventsOptions(isOrganizer && EVENTS_MODULE);
+  const integrationsOn = opsOf(organizerOptions).api || opsOf(organizerOptions).webhooks;
   const corporateEvents = useCorporateEventsAvailable(!!token && (!!isOrgUser || !!isHr));
-  const bannersOn = useShopBannersAvailable(
-    isVendor ? 'vendor' : 'admin', token,
-    isVendor ? vendor.status === 'ready' && !!vendor.me?.permissions?.includes('products') : !!isAdminUser && (hasPermission('promotions') || hasPermission('promotions_approve')),
-    isVendor ? vendorBannersTool(vendor.me?.tools) : undefined,
-  );
+  const merchAllowed = isVendor ? vendor.status === 'ready' && !!vendor.me?.permissions?.includes('products') : !!isAdminUser && (hasPermission('promotions') || hasPermission('promotions_approve'));
+  const bannersOnly = useShopBannersAvailable(isVendor ? 'vendor' : 'admin', token, merchAllowed, isVendor ? vendorMerchTool(vendor.me?.tools, 'banners') : undefined);
+  const salesOn = useShopFlashSalesAvailable(isVendor ? 'vendor' : 'admin', token, merchAllowed, isVendor ? vendorMerchTool(vendor.me?.tools, 'flashSales') : undefined);
+  // The merch page (banners and flash sales) shows while either is switched on.
+  const bannersOn = bannersOnly || salesOn;
 
   const taxRatesOn = useTaxRatesAvailable(token, !!isAdminUser && hasPermission('payments'));
+  // B5b: an HR session stored before ORG_ONLY_SPONSORS went on picks up the organisation marks.
+  useHrToOrgRefresh();
 
   // Build the visible nav — portal staff only see items their ACL permits.
   // Overview (/admin) is always visible to all admin users.
   const visibleNav = isVendor
     ? (vendor.status === 'ready' ? vendorNav(vendor.me?.permissions ?? [], vendor.me?.tools, vendor.lowCount, vendor.waitingCount, bannersOn) : [])
     : isOrganizer
-    ? (!EVENTS_MODULE ? [] : organizer.status === 'ready' ? organizerNav(organizer.organizer?.status ?? null, organizer.role) : organizerNav(null, null))
+    ? (!EVENTS_MODULE ? [] : organizer.status === 'ready' ? organizerNav(organizer.organizer?.status ?? null, organizer.role, integrationsOn) : organizerNav(null, null))
     : isAdminUser
     ? ADMIN_NAV.filter(item => {
         if (item.href === '/admin/shop-merch' && !bannersOn) return false;
@@ -499,14 +526,18 @@ export function Shell({ children }: { children: ReactNode }) {
   // Where this person must go instead of the current page, or null when they may see it. One decision
   // drives both the redirect and the render: a page's content (and its requests) waits until it passes.
   const path = pathname.replace(/\/$/, '') || '/';
-  const vendorPermissionMissing = (() => {
-    if (!isVendor || vendor.status !== 'ready') return false;
-    const area = [...VENDOR_AREAS].reverse().find(a => path === a.href || path.startsWith(`${a.href}/`));
-    // Its permission and, where it has one, its tool (S3 sales: walkInSales) — both fail closed.
-    return !!area && !vendorAreaOpen(area, vendor.me?.permissions ?? [], vendor.me?.tools);
-  })();
+  const vendorArea = isVendor && vendor.status === 'ready'
+    ? [...VENDOR_AREAS].reverse().find(a => path === a.href || path.startsWith(`${a.href}/`)) ?? null
+    : null;
+  // Its permission and, where it has one, its tool (S3 sales: walkInSales) — both fail closed.
+  const vendorPermissionMissing = !!vendorArea && !vendorAreaOpen(vendorArea, vendor.me?.permissions ?? [], vendor.me?.tools);
+  // S6 reports (spec §0.1): with the tool switched off, back home with no message (never "feature off").
+  const vendorBounceQuiet = !!vendorArea?.quietWhenOff && !!vendorArea.tool && vendor.me?.tools?.[vendorArea.tool] !== true;
+  // The public gym page (/g, opened from a gym's QR code) is for everyone, signed in or not: no redirect, no sidebar.
+  const isPublicGymPage = path === '/g' || path.startsWith('/g/');
   const redirectTo = ((): string | null => {
     if (!ready) return null;
+    if (isPublicGymPage) return null;
     if (!token) return path !== '/login' && path !== '/' ? '/login' : null;
 
     // A business (vendor or vendor staff) only ever sees /vendor; nobody else does.
@@ -520,6 +551,14 @@ export function Shell({ children }: { children: ReactNode }) {
     if (isOrganizer) return inOrganizerArea ? null : '/organizer/';
     if (inOrganizerArea && path !== '/organizer/onboarding') return homeFor(user);
 
+    // B5b: company HR in the organisation area: an old /hr page opens the /org page of the same name.
+    if (isOrgUser && isHrInOrg(user)) {
+      const to = orgPathForHr(path);
+      if (to) return to;
+      // Anywhere else outside /org (e.g. /login right after sign-in): the same page the login page opens, so the
+      // two redirects agree instead of racing.
+      if (path !== '/org' && !path.startsWith('/org/')) return orgHome(user?.organizationRoles);
+    }
     // Someone signed in for an organisation's billing only ever sees /org; nobody else does.
     // Exact area match: /organizer (events S2) is not the /org area.
     const inOrgArea = path === '/org' || path.startsWith('/org/');
@@ -527,7 +566,7 @@ export function Shell({ children }: { children: ReactNode }) {
     if (!isOrgUser && inOrgArea) return user?.userType === 'admin' ? '/admin' : user?.userType === 'corporate_hr' ? '/hr' : '/dashboard';
 
     // Company HR only ever sees /hr; nobody else does.
-    if (user?.userType === 'corporate_hr' && !path.startsWith('/hr')) return '/hr';
+    if (user?.userType === 'corporate_hr' && !isOrgUser && !path.startsWith('/hr')) return '/hr';
     if (user?.userType !== 'corporate_hr' && path.startsWith('/hr')) return user?.userType === 'admin' ? '/admin' : '/dashboard';
 
     // Block non-admin users from admin routes
@@ -538,7 +577,7 @@ export function Shell({ children }: { children: ReactNode }) {
 
     // Portal staff: away from pages outside their ACL, to the first permitted page (or the overview)
     if (isPortalStaff && path.startsWith('/admin')) {
-      const matchedItem = ADMIN_NAV.find(item => (ROOTS.has(item.href) ? path === item.href : path.startsWith(item.href)));
+      const matchedItem = matchAdminNav(path);
       if (matchedItem?.aclScope && !scopesOf(matchedItem).some(hasPermission)) {
         const firstAllowed = ADMIN_NAV.find(i => !i.aclScope || scopesOf(i).some(hasPermission));
         const to = firstAllowed?.href ?? '/admin';
@@ -553,11 +592,11 @@ export function Shell({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!redirectTo) { if (!vendorPermissionMissing) bouncedFrom.current = null; return; }
     if (vendorPermissionMissing && bouncedFrom.current !== path) {
-      toast.error(t('vendor.noAccess'));
+      if (!vendorBounceQuiet) toast.error(t('vendor.noAccess'));
       bouncedFrom.current = path;
     }
     router.replace(redirectTo);
-  }, [redirectTo, vendorPermissionMissing, path, router, toast, t]);
+  }, [redirectTo, vendorPermissionMissing, vendorBounceQuiet, path, router, toast, t]);
 
   /* Close mobile drawer on route change */
   useEffect(() => { setMobileOpen(false); }, [pathname]);
@@ -620,7 +659,7 @@ export function Shell({ children }: { children: ReactNode }) {
     );
   }
 
-  const isLoginPage = path === '/login' || !token;
+  const isLoginPage = path === '/login' || !token || isPublicGymPage;
 
   /* Public / login layout — no sidebar */
   if (isLoginPage) {
@@ -633,7 +672,7 @@ export function Shell({ children }: { children: ReactNode }) {
             <BrandLogo className="h-7 w-7 rounded-[var(--radius-md)]" />
             <span className="text-sm font-semibold text-[var(--color-fg-primary)]">FitFlex Af</span>
           </div>
-          <LanguageToggle className="justify-self-end" />
+          {isPublicGymPage ? <div className="w-24" /> : <LanguageToggle className="justify-self-end" />}
         </header>
         <main className="flex-1">{redirectTo ? <div aria-busy="true" data-testid="shell-redirecting" /> : children}</main>
       </div>

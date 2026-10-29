@@ -75,14 +75,15 @@ test.describe('tax rates', () => {
     expect(calls.outside).toEqual([]);
   });
 
-  test('an older backend without the route (plain 404) counts as off too', async ({ page }) => {
+  test('an older backend without the route (plain 404): nav stays hidden, the page is a load error, not "VAT off"', async ({ page }) => {
     await signIn(page);
     const calls = await mockApi(page, {});
     await page.goto('/admin/payments/');
     await expect(page.getByRole('link', { name: 'Payments', exact: true }).first()).toBeVisible();
     await expect(page.getByRole('link', { name: 'Tax rates' })).toHaveCount(0);
     await page.goto('/admin/tax-rates/');
-    await expect(page.getByTestId('tax-rates-off')).toBeVisible();
+    await expect(page.getByText("Couldn't load the tax rates.")).toBeVisible();
+    await expect(page.getByTestId('tax-rates-off')).toHaveCount(0);
     expect(calls.outside).toEqual([]);
   });
 

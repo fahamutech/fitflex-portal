@@ -66,7 +66,7 @@ export function tokenRequiresPasswordChange(token: string | null | undefined): b
 // The backend ignores the header unless its V2 flags are on.
 export const IDENTITY_V2_CLIENT = 'identity-v2';
 
-type SessionResult = { token: string; user: { id: string; userType: string; gymId?: string; email?: string; portalUser?: boolean; aclPermissions?: string[]; organizationUser?: boolean; organizationRoles?: string[] } };
+type SessionResult = { token: string; user: { id: string; userType: string; gymId?: string; email?: string; portalUser?: boolean; aclPermissions?: string[]; organizationUser?: boolean; organizationRoles?: string[]; organizationIds?: string[]; passwordChangeRequired?: boolean } };
 
 // The portal never registers anyone. It asks for an admin profile first (as it
 // always has), then for an existing gym owner profile, then an existing gym
@@ -423,6 +423,14 @@ export const api = {
   /** Replace the start password an admin set (sessions with `pwc: true`). Ends every earlier session on success. */
   changePortalPassword: (token: string, newPassword: string) =>
     request<SessionResult>('/auth/portal/password', { method: 'POST', body: JSON.stringify({ newPassword }) }, token),
+  /**
+   * Gym staff replace the start PIN their owner chose (sessions with `pwc: true`; B3a, STAFF_PIN_CHANGE_REQUIRED).
+   * Exactly 4 digits. Ends every earlier session of the person on success; store the returned token.
+   */
+  changeStaffPin: (token: string, newPin: string) =>
+    request<SessionResult & { pendingApproval?: boolean; partnerVerified?: boolean }>(
+      '/auth/pin/change', { method: 'POST', body: JSON.stringify({ newPin }) }, token
+    ),
   // ─── Portal user management (admin only) ───
   listPortalUsers: (token: string) => request<PortalUser[]>('/admin/portal-users', {}, token),
   createPortalUser: (token: string, data: { email: string; password: string; displayName?: string; aclPermissions: string[] }) =>
@@ -778,7 +786,8 @@ export const api = {
     request<{ employee: CorporateEmployee; unchanged?: boolean } | PendingMemberAcceptance>(`/corporate/staff/${encodeURIComponent(employeeId)}/link`, { method: 'POST', body: JSON.stringify(contact ?? { userId: null }) }, token),
   /** HR sign-in: email + password (not Firebase). */
   hrLogin: (email: string, password: string) =>
-    request<{ token: string; user: { id: string; userType: string; email?: string; displayName?: string; corporateId?: string } }>(
+    // B5a (ORG_ONLY_SPONSORS on): a company HR login that reaches its organisation also gets the organisation marks.
+    request<{ token: string; user: { id: string; userType: string; email?: string; displayName?: string; corporateId?: string; organizationUser?: boolean; organizationRoles?: string[]; organizationIds?: string[] } }>(
       '/auth/login', { method: 'POST', body: JSON.stringify({ email, password, requestedRole: 'corporate_hr' }) }
     ),
   // ── Companies and their HR logins (admin) ──
@@ -797,7 +806,8 @@ export const api = {
   createB2BOrganization: (token: string, body: Partial<B2BOrganization>) =>
     request<{ organization: B2BOrganization }>('/admin/b2b/organizations', { method: 'POST', body: JSON.stringify(body) }, token),
   b2bOrganization: (token: string, id: string) =>
-    request<{ organization: B2BOrganization; access: { role: string; permissions: string[] } }>(`/b2b/organizations/${encodeURIComponent(id)}`, {}, token),
+    // companyStaffManage (B5a): may add, change, link and import a company's staff here (org roles hr/admin, ORG_ONLY_SPONSORS on).
+    request<{ organization: B2BOrganization; access: { role: string; permissions: string[]; companyStaffManage?: boolean } }>(`/b2b/organizations/${encodeURIComponent(id)}`, {}, token),
   updateB2BOrganization: (token: string, id: string, body: Partial<B2BOrganization>) =>
     request<{ organization: B2BOrganization }>(`/b2b/organizations/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify(body) }, token),
   setB2BOrganizationStatus: (token: string, id: string, status: string, reason?: string) =>
@@ -831,8 +841,26 @@ export const api = {
     request<{ invite: B2BBeneficiaryInvite }>(`/b2b/organizations/${encodeURIComponent(id)}/beneficiary-invites/${encodeURIComponent(inviteId)}/cancel`, { method: 'POST', body: '{}' }, token),
   resendB2BBeneficiaryInvite: (token: string, id: string, inviteId: string) =>
     request<{ invite: B2BBeneficiaryInvite; sent: { email: boolean; sms: boolean }; emailConfigured: boolean; smsConfigured: boolean }>(`/b2b/organizations/${encodeURIComponent(id)}/beneficiary-invites/${encodeURIComponent(inviteId)}/resend`, { method: 'POST', body: '{}' }, token),
-  enrollB2BBeneficiary: (token: string, id: string, body: UserContact & { beneficiaryType?: string; externalReference?: string; groupName?: string; status?: string }) =>
-    request<{ beneficiary: B2BBeneficiary } | PendingMemberAcceptance>(`/b2b/organizations/${encodeURIComponent(id)}/beneficiaries`, { method: 'POST', body: JSON.stringify(body) }, token),
+  // Organisations: by userId (org users) the member is asked first: 202 pending_member_acceptance (fitflex-functions#241).
+  // A company's organisation with ORG_ONLY_SPONSORS on (B5a, functions#252): org roles hr/admin; displayName required;
+  // written through to its staff list with an activation PIN (shown once). Name only → 201 { beneficiary, pin };
+  // also named by userId/email/phone → 202 pending_member_acceptance with the unlinked beneficiary and the PIN.
+  enrollB2BBeneficiary: (token: string, id: string, body: UserContact & { displayName?: string; beneficiaryType?: string; externalReference?: string; groupName?: string; status?: string }) =>
+    request<({ beneficiary: B2BBeneficiary } | (PendingMemberAcceptance & { beneficiary?: B2BBeneficiary })) & CompanyStaffWrite>(`/b2b/organizations/${encodeURIComponent(id)}/beneficiaries`, { method: 'POST', body: JSON.stringify(body) }, token),
+  /**
+   * B5a: link a company employee to their FitFlex member account; `{}` unlinks (and withdraws an open request).
+   * An org user only asks the member (202 pending_member_acceptance); a FitFlex platform admin links directly.
+   * 404 not_found while ORG_ONLY_SPONSORS is off.
+   */
+  linkB2BBeneficiary: (token: string, id: string, beneficiaryId: string, contact: UserContact | Record<string, never>) =>
+    request<({ beneficiary: B2BBeneficiary } | (PendingMemberAcceptance & { beneficiary?: B2BBeneficiary })) & CompanyStaffWrite>(`/b2b/organizations/${encodeURIComponent(id)}/beneficiaries/${encodeURIComponent(beneficiaryId)}/link`, { method: 'POST', body: JSON.stringify(contact) }, token),
+  /**
+   * B5a: what a sign-in would say about this session right now (functions#252): always { orgOnlySponsors };
+   * for a company HR login that reaches its organisation while the flag is on, also the organisation fields.
+   * 404 on an older server.
+   */
+  organizationSession: (token: string) =>
+    request<{ orgOnlySponsors: boolean; organizationUser?: boolean; organizationRoles?: string[]; organizationIds?: string[] }>('/b2b/me/organization-session', {}, token),
   setB2BBeneficiaryStatus: (token: string, id: string, beneficiaryId: string, status: string) =>
     request<{ beneficiary: B2BBeneficiary }>(`/b2b/organizations/${encodeURIComponent(id)}/beneficiaries/${encodeURIComponent(beneficiaryId)}/status`, { method: 'POST', body: JSON.stringify({ status }) }, token),
   // ── B2B wellness programmes and benefits ──
@@ -1008,6 +1036,12 @@ export const api = {
   deleteGym: (token: string, id: string) =>
     request<{ ok: boolean; gym: Gym }>(`/admin/gyms/${id}`, { method: 'DELETE' }, token),
   gymOwners: (token: string) => request<GymOwner[]>('/admin/gym-owners', {}, token),
+  /** Who a gym's payouts go to, and its owners (ACL gyms or owners). */
+  gymPayoutOwner: (token: string, gymId: string) =>
+    request<GymPayoutOwnerView>(`/admin/gyms/${encodeURIComponent(gymId)}/payout-owner`, {}, token),
+  /** Name one of the gym's owners as its payout owner, or clear it with null. Audited; stored even while GYM_PAYOUT_OWNER is off. */
+  setGymPayoutOwner: (token: string, gymId: string, ownerId: string | null) =>
+    request<GymPayoutOwnerView>(`/admin/gyms/${encodeURIComponent(gymId)}/payout-owner`, { method: 'PUT', body: JSON.stringify({ ownerId }) }, token),
   /** View only, audited server-side: call only when an admin opens this owner's personal details. `id` is the owner user id. */
   adminGymOwnerPersonalDetails: (token: string, id: string) =>
     request<{ ownerId: string; personalDetails: PartnerPersonalDetails }>(`/admin/gym-owners/${encodeURIComponent(id)}/personal-details`, {}, token),
@@ -1155,6 +1189,12 @@ export const api = {
   ownerStaff: (token: string) => request<any[]>('/owner/staff', {}, token),
   ownerCreateStaff: (token: string, data: { displayName: string; email: string; password: string; gymIds: string[]; aclPermissions: string[] }) =>
     request<any>('/owner/staff', { method: 'POST', body: JSON.stringify(data) }, token),
+  /**
+   * Owner gives a staff member a new start PIN (B3a). The staff member is signed out everywhere and must choose
+   * their own PIN at the next sign-in; returns the staff row with passwordChangeRequired: true.
+   */
+  ownerResetStaffPin: (token: string, staffId: string, pin: string) =>
+    request<any>(`/owner/staff/${encodeURIComponent(staffId)}/pin`, { method: 'POST', body: JSON.stringify({ pin }) }, token),
   ownerTrainers: (token: string, gymId?: string) =>
     request<TrainerProfile[]>(`/owner/trainers${gymId ? `?gymId=${encodeURIComponent(gymId)}` : ''}`, {}, token),
   ownerPendingTrainers: (token: string) => request<TrainerProfile[]>('/owner/trainers/pending', {}, token),
@@ -1427,6 +1467,81 @@ export const api = {
     request<Record<string, unknown>>('/admin/refunds/batch-paid', { method: 'POST', body: JSON.stringify(body) }, token),
   /** §3.14, roles finance | owner | admin. */
   organizerEventFinance: (token: string, id: string) => request<EventFinance>(`/organizer/events/${encodeURIComponent(id)}/finance`, {}, token),
+
+  // ─── Events S5 (spec events-s5-venue-api-and-webhooks §4, §5, §7) ───
+  /** §4.1: read-only. A scan outcome is a 200; 400 `not_event_ticket` / `invalid_payload`. */
+  verifyEventTicket: (token: string, eventId: string, body: { payload: string; collectionPointId?: string }) =>
+    request<KitVerifyResult>(`/organizer/events/${encodeURIComponent(eventId)}/tickets/verify`, { method: 'POST', body: JSON.stringify(body), cache: 'no-store' }, token),
+  /** §4.2: `Idempotency-Key` required (8 to 100 chars). */
+  collectEventKit: (token: string, eventId: string, body: KitCollectBody, idempotencyKey: string) =>
+    request<{ collection: { id: string; status: string; collectedAt: string; collectionPointId: string | null }; card: KitCard }>(
+      `/organizer/events/${encodeURIComponent(eventId)}/kit-collections`, { method: 'POST', body: JSON.stringify(body), headers: { 'Idempotency-Key': idempotencyKey } }, token),
+  correctEventKit: (token: string, eventId: string, collectionId: string, body: { action: 'void' | 'recollect'; reason: string }, idempotencyKey: string) =>
+    request<Record<string, unknown>>(`/organizer/events/${encodeURIComponent(eventId)}/kit-collections/${encodeURIComponent(collectionId)}/corrections`, { method: 'POST', body: JSON.stringify(body), headers: { 'Idempotency-Key': idempotencyKey } }, token),
+  eventKitCollections: (token: string, eventId: string, query: { cursor?: string | null; limit?: number; status?: string; collectionPointId?: string } = {}) =>
+    request<{ items: KitCollectionRow[]; nextCursor: string | null }>(`/organizer/events/${encodeURIComponent(eventId)}/kit-collections${qs(query)}`, {}, token),
+  eventKitSummary: (token: string, eventId: string) => request<KitSummary>(`/organizer/events/${encodeURIComponent(eventId)}/kit/summary`, {}, token),
+  eventKitLookup: (token: string, eventId: string, q: string) =>
+    request<{ items: KitLookupItem[] }>(`/organizer/events/${encodeURIComponent(eventId)}/kit/lookup${qs({ q })}`, {}, token),
+  eventBibs: (token: string, eventId: string, query: { cursor?: string | null; limit?: number; categoryId?: string; filter?: string; q?: string } = {}) =>
+    request<BibList>(`/organizer/events/${encodeURIComponent(eventId)}/bib-assignments${qs(query)}`, {}, token),
+  assignEventBib: (token: string, eventId: string, body: { registrationId: string; bibNumber: string; reason?: string; replace?: boolean }, idempotencyKey: string) =>
+    request<Record<string, unknown>>(`/organizer/events/${encodeURIComponent(eventId)}/bib-assignments`, { method: 'POST', body: JSON.stringify(body), headers: { 'Idempotency-Key': idempotencyKey } }, token),
+  releaseEventBib: (token: string, eventId: string, assignmentId: string, reason: string, idempotencyKey: string) =>
+    request<Record<string, unknown>>(`/organizer/events/${encodeURIComponent(eventId)}/bib-assignments/${encodeURIComponent(assignmentId)}/release`, { method: 'POST', body: JSON.stringify({ reason }), headers: { 'Idempotency-Key': idempotencyKey } }, token),
+  previewEventBibsBulk: (token: string, eventId: string, body: BibBulkBody) =>
+    request<BibBulkPreview>(`/organizer/events/${encodeURIComponent(eventId)}/bib-assignments/bulk/preview`, { method: 'POST', body: JSON.stringify(body) }, token),
+  applyEventBibsBulk: (token: string, eventId: string, body: BibBulkBody & { previewHash: string }, idempotencyKey: string) =>
+    request<Record<string, unknown>>(`/organizer/events/${encodeURIComponent(eventId)}/bib-assignments/bulk`, { method: 'POST', body: JSON.stringify(body), headers: { 'Idempotency-Key': idempotencyKey } }, token),
+  previewEventBibsImport: (token: string, eventId: string, csv: string) =>
+    request<BibImportPreview>(`/organizer/events/${encodeURIComponent(eventId)}/bib-assignments/import/preview`, { method: 'POST', body: JSON.stringify({ csv }) }, token),
+  applyEventBibsImport: (token: string, eventId: string, body: { csv: string; previewHash: string }, idempotencyKey: string) =>
+    request<Record<string, unknown>>(`/organizer/events/${encodeURIComponent(eventId)}/bib-assignments/import`, { method: 'POST', body: JSON.stringify(body), headers: { 'Idempotency-Key': idempotencyKey } }, token),
+  /** §4.5: an authenticated fetch -> Blob (a plain link cannot carry the bearer). 429 `rate_limited { retryAfterSeconds }`. */
+  exportEventRegistrations: async (token: string, eventId: string): Promise<Blob> => {
+    const res = await fetch(`${BASE}/organizer/events/${encodeURIComponent(eventId)}/exports/registrations.csv`, { headers: { authorization: `Bearer ${token}`, 'x-fitflex-client': IDENTITY_V2_CLIENT }, cache: 'no-store' });
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      if (res.status === 401) notifyUnauthorized();
+      throw new ApiError(res.status, body);
+    }
+    return res.blob();
+  },
+  /** §3.1: a FitFlex admin with scope `events`, published events; `reason` is 10 to 300 chars. */
+  adminSetPayoutSchedule: (token: string, eventId: string, body: { payoutSchedule: PayoutSchedule; reason: string }) =>
+    request<unknown>(`/admin/events/${encodeURIComponent(eventId)}/payout-schedule`, { method: 'POST', body: JSON.stringify(body) }, token),
+
+  // §5.1 API clients (owner/admin). The list/detail envelopes are not spelled out in the spec; see the PR.
+  apiClients: (token: string) => request<{ items: ApiClientRow[]; max?: number; accessEnabled?: boolean }>('/organizer/api-clients', {}, token),
+  apiClient: (token: string, id: string) => request<ApiClientDetail>(`/organizer/api-clients/${encodeURIComponent(id)}`, {}, token),
+  createApiClient: (token: string, body: { name: string; environment: 'live' | 'sandbox'; scopes: string[]; eventIds?: string[]; expiresInDays?: number }) =>
+    request<{ client: ApiClientRow; clientSecret: string }>('/organizer/api-clients', { method: 'POST', body: JSON.stringify(body) }, token),
+  rotateApiClient: (token: string, id: string, graceHours: 0 | 24 | 72) =>
+    request<{ client: ApiClientRow; clientSecret: string }>(`/organizer/api-clients/${encodeURIComponent(id)}/rotate`, { method: 'POST', body: JSON.stringify({ graceHours }) }, token),
+  revokeApiClient: (token: string, id: string, reason?: string) =>
+    request<unknown>(`/organizer/api-clients/${encodeURIComponent(id)}/revoke`, { method: 'POST', body: JSON.stringify(reason ? { reason } : {}) }, token),
+
+  // §7.2 webhook endpoints (owner/admin) and §7.5 delivery log.
+  webhookEndpoints: (token: string) => request<{ items: WebhookEndpointRow[]; max?: number; types?: string[]; available?: boolean }>('/organizer/webhook-endpoints', {}, token),
+  /** `{ endpoint, attempts }`: the endpoint with its last 10 attempts (verification and test sends included). */
+  webhookEndpoint: (token: string, id: string) => request<{ endpoint: WebhookEndpointRow; attempts: WebhookAttempt[] }>(`/organizer/webhook-endpoints/${encodeURIComponent(id)}`, {}, token),
+  /** Runs the handshake now: `{ ok, host, reason? }`. */
+  verifyWebhookEndpoint: (token: string, id: string) => request<{ ok: boolean; host: string; reason?: string }>(`/organizer/webhook-endpoints/${encodeURIComponent(id)}/verify`, { method: 'POST', body: JSON.stringify({}) }, token),
+  createWebhookEndpoint: (token: string, body: { url: string; events: string[]; eventIds?: string[]; description?: string }) =>
+    request<{ endpoint: WebhookEndpointRow; signingSecret: string }>('/organizer/webhook-endpoints', { method: 'POST', body: JSON.stringify(body) }, token),
+  rotateWebhookSecret: (token: string, id: string, graceHours: 0 | 24 | 72) =>
+    request<{ endpoint?: WebhookEndpointRow; signingSecret: string }>(`/organizer/webhook-endpoints/${encodeURIComponent(id)}/rotate-secret`, { method: 'POST', body: JSON.stringify({ graceHours }) }, token),
+  testWebhookEndpoint: (token: string, id: string) =>
+    request<WebhookTestResult>(`/organizer/webhook-endpoints/${encodeURIComponent(id)}/test`, { method: 'POST', body: JSON.stringify({}) }, token),
+  setWebhookEndpointState: (token: string, id: string, action: 'disable' | 'enable') =>
+    request<unknown>(`/organizer/webhook-endpoints/${encodeURIComponent(id)}/${action}`, { method: 'POST', body: JSON.stringify({}) }, token),
+  webhookDeliveries: (token: string, query: { endpointId?: string; status?: string; eventId?: string; cursor?: string | null } = {}) =>
+    request<{ items: WebhookDeliveryRow[]; nextCursor: string | null }>(`/organizer/webhook-deliveries${qs(query)}`, {}, token),
+  /** `{ delivery, attempts, payload, manualRetriesLeft }`. */
+  webhookDelivery: (token: string, id: string) => request<WebhookDeliveryDetail>(`/organizer/webhook-deliveries/${encodeURIComponent(id)}`, {}, token),
+  retryWebhookDelivery: (token: string, id: string) =>
+    request<{ alreadyQueued?: boolean }>(`/organizer/webhook-deliveries/${encodeURIComponent(id)}/retry`, { method: 'POST', body: JSON.stringify({}) }, token),
+  integrationsHealth: (token: string) => request<IntegrationsHealth>('/organizer/integrations/health', {}, token),
   // Corporate payment (§3.4.3, §3.5): `Idempotency-Key` is required.
   submitCorporateEventPayment: (token: string, orgId: string, orderId: string, body: CorporateEventPaymentBody, idempotencyKey: string) =>
     request<{ payment: EventPaymentView; order: { id: string; status: EventOrderStatus; holdExpiresAt: string | null }; replayed?: boolean }>(
@@ -1694,6 +1809,41 @@ export interface Gym {
   homepagePriority?: number;
   /** Trainer passes the owner sells — only trainers (and admins) see them. */
   trainerPass?: TrainerPassConfig;
+  /** Admin gym rows only (GET /admin/gyms): the named payout owner (stored even while GYM_PAYOUT_OWNER is off). */
+  payoutOwnerId?: string | null;
+  /** Admin gym rows only: every owner account of this gym, by name. */
+  owners?: GymOwnerSummary[];
+  /** Admin gym rows only: who would be paid now, under the current switch. */
+  payoutOwner?: GymPayoutOwnerState;
+}
+
+/** One owner account of a gym, as the payout-owner endpoints list it. */
+export interface GymOwnerSummary {
+  id: string;
+  displayName: string | null;
+  email: string | null;
+}
+
+export type GymPayoutOwnerSource = 'named' | 'only_owner' | 'first_owner';
+export type GymPayoutOwnerReason = 'payout_owner_required' | 'no_owner_account';
+
+/**
+ * Who a gym's payouts go to now. mode 'first_owner': GYM_PAYOUT_OWNER is off and the
+ * first owner account found is paid (ownerId null). mode 'named': the switch is on.
+ */
+export interface GymPayoutOwnerState {
+  mode: 'named' | 'first_owner';
+  ownerId: string | null;
+  source: GymPayoutOwnerSource | null;
+  reason: GymPayoutOwnerReason | null;
+}
+
+/** GET / PUT /admin/gyms/:id/payout-owner. */
+export interface GymPayoutOwnerView {
+  gymId: string;
+  payoutOwnerId: string | null;
+  owners: GymOwnerSummary[];
+  payoutOwner: GymPayoutOwnerState;
 }
 
 export type TrainerPassPeriod = 'daily' | 'weekly' | 'monthly';
@@ -2095,6 +2245,8 @@ export interface GymOwner {
   gyms?: Gym[];
   accountStatus?: 'active' | 'suspended';
   approvalStatus?: 'pending_approval' | 'approved' | 'rejected';
+  /** POST /admin/gym-owners answer only (GYM_PAYOUT_OWNER on): gyms this change left with 2+ owners and no named payout owner. */
+  payoutOwnerRequiredGymIds?: string[];
 }
 
 export interface TrainerProfile {
@@ -2193,19 +2345,26 @@ export interface VendorTools {
   stockLedger?: boolean;
   buyerContact?: boolean;
   canSeeCost?: boolean;
-  /** Shop banners (SHOP_BANNERS): merch.banners. When absent the portal asks GET /vendor/shop-banners once. */
-  merch?: { banners?: boolean };
+  /** Shop banners (SHOP_BANNERS): merch.banners; flash sales (SHOP_FLASH_SALES): merch.flashSales. When absent the
+   *  portal asks GET /vendor/shop-banners or GET /vendor/flash-sales once. */
+  merch?: { banners?: boolean; flashSales?: boolean };
   /** S5 (VENDOR_DOCUMENTS): share links, PDF, the document view and order invoices. Missing = off. */
   documents?: boolean;
   /** S5 (VENDOR_VAT): tax details, VAT codes and VAT on documents. Missing = off. */
   vat?: boolean;
   /** S5: VAT applies to this vendor's new sales now (registered, verified, certificate standing). */
   vatInForce?: boolean;
+  /** S6 (VENDOR_REPORTS): the Reports area. Missing = off. */
+  reports?: boolean;
+  /** S6: this caller may see commission and payouts (the report App sales after commission). Missing = no. */
+  canSeeOrderMoney?: boolean;
   [tool: string]: unknown;
 }
 
 export interface VendorProduct extends ShopProduct {
   variants?: ProductVariant[];
+  /** SHOP_FLASH_SALES: present while an approved sale of this product is scheduled or live (price and discount locked). */
+  priceLock?: { saleId: string; startsAt: string; endsAt: string; effectiveStatus?: string } | null;
 }
 
 export interface LowStockRow { productId: string; name: string; variant: string | null; stock: number; reorderLevel: number }
@@ -2915,6 +3074,8 @@ export interface B2BMemberRequest {
   decidedAt: string | null;
   reason: string | null;
 }
+/** B5a: what a company staff write-through adds to a reply (functions#252): the activation PIN, shown once. */
+export type CompanyStaffWrite = { pin?: string | null; writtenThrough?: 'corporate_staff' };
 /** 202 answer to an add by user id: nobody is added until the member accepts. */
 export type PendingMemberAcceptance = { outcome: 'pending_member_acceptance'; memberRequest: B2BMemberRequest };
 /** True when an add answered "request sent" rather than "added" (older backends never do). */
@@ -2988,6 +3149,14 @@ export interface B2BBeneficiary {
   enrolledAt: string | null;
   source: 'b2b' | 'corporate_employee';
   readOnly: boolean;
+  // B5a, a company's employee with ORG_ONLY_SPONSORS on: the staff-list status, whether a FitFlex
+  // account is linked, and (only for beneficiaries.manage) the contact details.
+  employeeStatus?: 'pending' | 'active' | 'suspended' | 'exited';
+  linked?: boolean;
+  email?: string | null;
+  phone?: string | null;
+  /** B5a: a link the member has not accepted yet: when and until when, never who (hr/admin only). */
+  pendingLink?: { status: string; createdAt: string | null; expiresAt: string | null } | null;
 }
 export type B2BProgramStatus = 'draft' | 'pending' | 'active' | 'paused' | 'expired' | 'cancelled';
 export interface B2BProgramReference {
@@ -3609,8 +3778,18 @@ export interface SettlementAdjustment {
   rejectReason?: string | null;
 }
 
+/** Who a gym statement is paid to (admin statement detail, GYM_PAYOUT_OWNER on). */
+export interface SettlementPayee {
+  ownerId: string | null;
+  displayName: string | null;
+  source: 'destination_snapshot' | GymPayoutOwnerSource | null;
+  reason: GymPayoutOwnerReason | null;
+}
+
 export interface GymSettlementDetail {
   statement: GymSettlement;
+  /** Present only while GYM_PAYOUT_OWNER is on. */
+  payee?: SettlementPayee;
   lines: GymSettlementLine[];
   visits: SettlementVisit[];
   adjustments: SettlementAdjustment[];
@@ -3816,6 +3995,12 @@ export interface B2BImportResult {
   /** False when FitFlex can't send email codes, so email-only people can't confirm their email. Absent on older backends. */
   emailCodesAvailable?: boolean;
   problems: Array<{ line: number; name: string | null; contact: string | null; problem: string }>;
+  // B5a, a company's organisation with ORG_ONLY_SPONSORS on: added to its staff list, nobody invited.
+  companyStaff?: boolean;
+  /** Free seats before this list; null = no seat limit. */
+  seatsAvailable?: number | null;
+  /** Activation PINs, one for every person added (linked or not): shown once, never stored. */
+  credentials?: Array<{ line: number; employeeId: string; displayName: string | null; pin: string }>;
 }
 export interface B2BBeneficiaryInvite {
   id: string; organizationId: string; email: string | null; phone: string | null; displayName: string | null; externalReference: string | null; groupName: string | null;
@@ -4063,7 +4248,12 @@ export interface EventsOptions {
   manualConfirmHours?: number; refundDays?: number;
   hold?: { manualExtendHours: number; manualMaxHours: number; providerExtendMinutes: number; lateGraceHours: number };
   tickets?: { qr: boolean; scanning: boolean };
+  // Events S5 (spec events-s5-venue-api-and-webhooks §11.1): the server's flags, so the portal never infers availability from the build flag alone.
+  ops?: { kit: boolean; api: boolean; webhooks: boolean };
+  payoutSchedules?: PayoutSchedule[];
 }
+/** D33: the two payout schedules an event may choose (S5 §3). */
+export type PayoutSchedule = 'biweekly' | 'monthly';
 export interface OrganizerMe {
   organizer: { id: string; name: string; status: OrganizerStatus; timezone: string; kycCaseId: string | null; kycStatus: KycCaseStatus | null; statusReason: string | null };
   role: OrganizerRole;
@@ -4112,6 +4302,8 @@ export interface EventDocument extends EventSummary {
   submittedAt: string | null; rejection: { reason: string; note: string; at: string } | null; changeLogCount: number;
   /** Events S3 (spec §3.2, §3.3): which participant fields are collected and the duplicate rule. Absent on older documents. */
   participantFields?: ParticipantFields | null; duplicatePolicy?: DuplicatePolicy | null;
+  /** Events S5 §3.1: null until chosen (required at submit); never on public payloads. */
+  payoutSchedule?: PayoutSchedule | null;
 }
 /** PATCH /organizer/events/:id: the current version plus the fields that changed (nested lists carry ids for upsert). */
 export type EventPatch = { version: number; changeNote?: Bilingual } & Partial<Omit<EventDocument, 'id' | 'slug' | 'status' | 'version' | 'allowedActions' | 'organizer' | 'updatedAt'>>;
@@ -4227,6 +4419,8 @@ export interface CorporateEventOrderBody {
 export interface EventRegistrationRow {
   id: string; participant: { name: string }; categoryName: string; ticketTypeName: string; status: EventRegistrationStatus; orderReference: string;
   teamName: string | null; kitSize: string | null; createdAt: string; claimed: boolean; groupLabel?: string | null;
+  /** Events S5 §4.5. */
+  bibNumber?: string | null; kit?: { state: KitState; collectedAt?: string | null };
 }
 export interface EventRegistrationsSummary {
   byStatus: { reserved: number; confirmed: number; cancelled: number };
@@ -4295,6 +4489,8 @@ export interface EventFinance {
   orders: { paid: number; refunded: number; partlyRefunded: number };
   byTicketType: Array<{ ticketTypeId: string; name: string; sold: number; grossTzs: number }>;
   settlement: { state: string };
+  /** Events S5 §3.1. */
+  payoutSchedule?: PayoutSchedule | null;
 }
 /** GET /admin/events/:eventId/cancel-preview (§3.12.4). */
 export interface EventCancelImpact {
@@ -4326,3 +4522,89 @@ export interface AdminEventOrderPayment {
 
 /** GET /events/:id (S2 §14.2): the public detail a corporate coordinator reads before registering staff. */
 export type PublicEventDetail = Omit<EventDocument, 'allowedActions' | 'submittedAt' | 'rejection' | 'changeLogCount' | 'version'> & { version?: number };
+
+
+// ─── Events S5 types (spec events-s5-venue-api-and-webhooks §4, §5, §7) ───
+export type KitState = 'not_ready' | 'ready' | 'collected' | 'exception';
+export type KitResult = 'valid' | 'already_collected' | 'wrong_event' | 'revoked' | 'unpaid' | 'unknown';
+export type KitWarning = 'bib_missing' | 'kit_size_missing' | 'outside_collection_window' | 'bib_changed_after_collection' | 'claim_pending';
+/** The masked card: first name + last initial, never contact data. */
+export interface KitCard {
+  displayName: string; ticketCode: string; categoryName: string; distanceM: number; ticketTypeName: string; teamName: string | null;
+  bibNumber: string | null; kitSize: string | null;
+  kit: { state: KitState; collectedAt?: string | null; collectionPointName?: string | null };
+  payment: 'paid' | 'unpaid' | 'refunded';
+}
+export interface KitVerifyResult {
+  result: KitResult; registrationId?: string; card?: KitCard; warnings: KitWarning[];
+  revokedReason?: 'cancelled' | 'refunded' | 'event_cancelled' | 'admin' | 'replaced'; otherEvent?: { title: string };
+  canCollect: boolean; canOverride: boolean;
+  /** Backend is adding it on `already_collected` (verify and the 409): the handover an override corrects. */
+  collectionId?: string;
+  /** Present on `already_collected` (§4.1 step 6). */
+  collectedAt?: string; collectionPointName?: string | null; byFirstName?: string | null;
+}
+export interface KitCollectBody {
+  method: 'scan' | 'manual'; payload?: string; registrationId?: string;
+  manualReason?: 'phone_lost' | 'no_signal' | 'screen_damaged' | 'other'; collectionPointId?: string; kitSize?: string; bibNumber?: string;
+  status?: 'collected' | 'exception'; note?: string;
+}
+export interface KitCollectionRow {
+  id: string; registrationId: string; displayName: string; bibNumber: string | null; status: 'collected' | 'exception' | 'corrected'; collectedAt: string;
+  collectionPointName: string | null; byFirstName: string | null; method: 'scan' | 'manual' | 'api'; manualReason?: string | null; correctionReason?: string | null;
+}
+export interface KitSummary {
+  confirmed: number; collected: number; remaining: number; exceptions: number;
+  byCategory?: Array<{ categoryId?: string; name?: string; collected?: number; confirmed?: number }>; byCollectionPoint?: Array<{ collectionPointId?: string; name?: string; collected?: number }>;
+}
+/** A lookup hit is "the masked card of §4.1": the card fields may sit at the top level or under `card`. */
+export type KitLookupItem = Partial<KitCard> & { registrationId?: string; card?: KitCard; result?: KitResult; warnings?: KitWarning[]; canCollect?: boolean };
+export interface BibRow {
+  registrationId: string; displayName: string; categoryName: string; bibNumber: string | null; assignedAt: string | null; kit: { state: KitState };
+  /** Not in the spec's list item; the release route needs it (see the PR). */
+  assignmentId?: string | null; warnings?: KitWarning[];
+}
+export interface BibList { items: BibRow[]; nextCursor: string | null; counts: { assigned: number; unassigned: number } }
+export interface BibBulkBody { categoryId?: string; start: number; end?: number; prefix?: string; padTo?: number; order: 'registered_at' | 'last_name' }
+export interface BibBulkPreview { previewHash: string; count: number; first: string | null; last: string | null; conflicts: Array<Record<string, unknown>>; shortfall: number }
+export interface BibImportPreview {
+  previewHash?: string; total?: number; ok?: number; bad?: number;
+  rows: Array<{ line: number; status: 'ok' | 'error'; code?: string | null; bibNumber?: string }>;
+}
+
+export type ApiScope = 'registrations:read' | 'registrations:demographics' | 'kit:write' | 'bibs:write' | 'webhooks:manage' | 'results:write';
+export interface ApiClientRow {
+  id: string; clientId: string; name: string; environment: 'live' | 'sandbox'; scopes: ApiScope[]; eventIds: string[] | null;
+  status: 'active' | 'revoked' | 'expired'; expiresAt: string | null; lastUsedAt: string | null; createdAt: string; createdBy?: { name: string | null } | null;
+  rotation?: { inGrace: boolean; graceEndsAt: string | null } | null; rateLimitPerMinute?: number;
+}
+/** `GET /organizer/api-clients/:id`: "detail + usage" (the envelope is not spelled out; both `{client, usage}` and a flat row are read). */
+export type ApiClientDetail = { client: ApiClientRow; usage?: ApiClientUsage; history?: Array<{ at: string; action: string }> };
+export interface ApiClientUsage { days: Array<{ day: string; requests: number; errors: number; rateLimited: number }> }
+
+export type WebhookHealth = 'healthy' | 'degraded' | 'failing' | 'disabled' | 'unverified';
+export interface WebhookEndpointRow {
+  id: string; url: string; host?: string; events: string[]; eventIds?: string[] | null; description?: string | null;
+  status: 'active' | 'disabled'; verifiedAt: string | null; lastSuccessAt: string | null;
+  last24h: { delivered: number; failed: number; dead: number }; pending: number; oldestPendingAgeSeconds?: number | null; consecutiveFailures: number;
+  health: WebhookHealth; disabledReason?: string | null; disabledAt?: string | null; secretHint?: string | null;
+  rotation?: { inGrace: boolean; graceEndsAt: string | null }; createdAt?: string;
+}
+export type WebhookDeliveryStatus = 'pending' | 'delivered' | 'failed' | 'dead';
+export interface WebhookDeliveryRow {
+  /** `eventId` is the OUTBOX id (the backend renames it to `outboxEventId`; both are read). */
+  id: string; endpointId: string; eventType: string; eventId?: string; outboxEventId?: string; status: WebhookDeliveryStatus; attemptCount: number;
+  createdAt: string; lastAttemptAt: string | null; nextAttemptAt: string | null; responseCode: number | null; lastError: string | null;
+}
+export interface WebhookAttempt {
+  id?: string; attemptNo: number; trigger: 'auto' | 'manual' | 'test' | 'verify'; startedAt: string; durationMs: number | null;
+  outcome: 'success' | 'http_error' | 'timeout' | 'network_error' | 'tls_error' | 'blocked_address' | 'redirect_not_followed' | 'organizer_mismatch';
+  responseCode: number | null; responseSnippet: string | null; errorCode: string | null; nextAttemptAt: string | null;
+}
+export interface WebhookDeliveryDetail { delivery: WebhookDeliveryRow; attempts: WebhookAttempt[]; payload?: unknown; manualRetriesLeft?: number }
+/** The test-send answer is shown inline; the spec does not fix its shape (see the PR). */
+export interface WebhookTestResult { ok?: boolean; outcome?: WebhookAttempt['outcome']; responseCode?: number | null; durationMs?: number | null; errorCode?: string | null; snippet?: string | null }
+export interface IntegrationsHealth {
+  webhooks: { endpoints: number; healthy: number; degraded: number; failing: number; disabled: number; unverified?: number; deadLast24h: number } | null;
+  apiClients: { active: number; expiringSoon: number } | null;
+}
