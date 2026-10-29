@@ -2,7 +2,7 @@
 import { ReactNode } from 'react';
 import type { EventDocument } from '@/lib/api';
 import { money } from '@/lib/admin-utils';
-import { distanceLabel, eventDateTime, fmt, stepKey, typeKey, type WizardStep } from '@/lib/events';
+import { distanceLabel, eventDateTime, fmt, generatedPolicyLine, stepKey, typeKey, type WizardStep } from '@/lib/events';
 import { Button, Card, CardContent, CardHeader } from '@/components/shared';
 import { useApp } from '../../app/providers';
 
@@ -100,6 +100,10 @@ export function EventReviewSummary({ doc, lang, onEdit }: { doc: EventDocument; 
         <dl className="space-y-2">
           <Row label={t('events.terms.policy')} value={doc.refundPolicy?.preset ? t(`events.terms.policy.${doc.refundPolicy.preset}` as 'events.terms.policy.custom') : t('events.review.noValue')} />
           {doc.refundPolicy?.preset === 'custom' && <Row label={lang === 'sw' ? t('events.terms.policySw') : t('events.terms.policyEn')} value={text(doc.refundPolicy.text)} />}
+          {/* S4 §6.7: the sentence members read, generated from the structured fields (in the preview language). */}
+          {doc.refundPolicy?.preset && doc.refundPolicy.preset !== 'custom' && generatedPolicyLine(doc.refundPolicy.generated, lang) && (
+            <Row label={t('events.terms.policy.generated')} value={<span data-testid="review-policy-line">{generatedPolicyLine(doc.refundPolicy.generated, lang)}</span>} />
+          )}
           <Row label={t('events.terms.contactEmail')} value={doc.contact?.email || t('events.review.noValue')} />
           <Row label={t('events.terms.contactPhone')} value={doc.contact?.phone || '—'} />
           <Row label={t('events.terms.contactWhatsapp')} value={doc.contact?.whatsapp || '—'} />

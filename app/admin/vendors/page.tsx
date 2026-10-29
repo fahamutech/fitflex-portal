@@ -15,42 +15,49 @@ import { areaLabel, deliveryIds, freeTextRegions, hasNoArea, indexAreas, localis
 type T = ReturnType<typeof useApp>['t'];
 type AreaFilter = 'all' | 'none' | 'backfill';
 
-/** Area names for a list of ids; the country reads "Nationwide". */
-function areaNames(ids: string[], byId: Map<string, GeoArea>, t: T): string[] {
-  return ids.map(id => (byId.get(id)?.level === 'country' ? t('vendors.areas.nationwide') : areaLabel(id, byId)));
+/** Usable areas (what can be picked) and every row we know of, inactive included (for names only). */
+type AreaIndex = { byId: Map<string, GeoArea>; allById: Map<string, GeoArea> };
+
+/** A stored area's name. One that is no longer usable is marked; an id with no row at all is the last resort. */
+function areaDisplay(id: string, idx: AreaIndex, t: T, mark = true): string {
+  const usable = idx.byId.get(id);
+  if (usable) return usable.level === 'country' ? t('vendors.areas.nationwide') : areaLabel(id, idx.byId);
+  const known = idx.allById.get(id);
+  const name = known ? (known.level === 'country' ? t('vendors.areas.nationwide') : areaLabel(id, idx.allById)) : id;
+  return mark ? `${name} ${t('vendors.areas.unavailable')}` : name;
 }
 
 /** "Delivers to: A, B (+2)" */
-function deliversSummary(ids: string[], byId: Map<string, GeoArea>, t: T): string {
-  const names = areaNames(ids, byId, t);
+function deliversSummary(ids: string[], idx: AreaIndex, t: T): string {
+  const names = ids.map(id => areaDisplay(id, idx, t));
   const shown = names.slice(0, 2).join(', ');
   return t('vendors.areas.deliversRow').replace('{areas}', names.length > 2 ? `${shown} ${t('vendors.areas.deliversMore').replace('{n}', String(names.length - 2))}` : shown);
 }
 
-function basedInName(profile: VendorSummary['vendorProfile'], byId: Map<string, GeoArea>): string | null {
-  if (profile?.cityId) return areaLabel(profile.cityId, byId);
-  if (profile?.regionId) return areaLabel(profile.regionId, byId);
+function basedInName(profile: VendorSummary['vendorProfile'], idx: AreaIndex, t: T): string | null {
+  if (profile?.cityId) return areaDisplay(profile.cityId, idx, t);
+  if (profile?.regionId) return areaDisplay(profile.regionId, idx, t);
   return null;
 }
 
 /** "Based in" / "Delivers to" in the vendors table. */
-function VendorAreasCell({ vendor, byId, t }: { vendor: VendorSummary; byId: Map<string, GeoArea>; t: T }) {
+function VendorAreasCell({ vendor, idx, t }: { vendor: VendorSummary; idx: AreaIndex; t: T }) {
   const p = vendor.vendorProfile;
   if (hasNoArea(p)) return <Badge tone="warning">{t('vendors.areas.noArea')}</Badge>;
-  const based = basedInName(p, byId);
+  const based = basedInName(p, idx, t);
   const ids = deliveryIds(p);
   return <div className="space-y-0.5 text-xs" data-testid={`vendor-areas-${vendor.id}`}>
     <p className={based ? '' : 'text-[var(--color-fg-quaternary)]'}>{based ? t('vendors.areas.basedInRow').replace('{area}', based) : t('vendors.areas.basedInNotSet')}</p>
-    <p className={ids.length ? '' : 'text-[var(--color-fg-quaternary)]'}>{ids.length ? deliversSummary(ids, byId, t) : t('vendors.areas.deliversNone')}</p>
+    <p className={ids.length ? '' : 'text-[var(--color-fg-quaternary)]'}>{ids.length ? deliversSummary(ids, idx, t) : t('vendors.areas.deliversNone')}</p>
     {p?.areasSource === 'backfill' && <Badge tone="info">{t('vendors.areas.guessed')}</Badge>}
   </div>;
 }
 
 /** Message for a 400 invalid_area from PUT /admin/vendors/:id. */
-function invalidAreaMessage(err: unknown, byId: Map<string, GeoArea>, t: T): string {
+function invalidAreaMessage(err: unknown, idx: AreaIndex, t: T): string {
   const body = err instanceof ApiError ? err.body as { error?: string; reason?: string; ids?: string[] } | null : null;
   if (body?.error !== 'invalid_area') return t('vendors.areas.saveFailed');
-  const names = (body.ids ?? []).map(id => byId.get(id)?.name ?? id).join(', ');
+  const names = (body.ids ?? []).map(id => areaDisplay(id, idx, t, false)).join(', ');
   const key = body.reason === 'too_many' ? 'tooMany'
     : body.reason === 'wrong_level' ? 'wrongLevel'
     : body.reason === 'not_in_region' ? 'notInRegion'
@@ -94,9 +101,13 @@ export default function VendorsPage() {
   const [delivers, setDelivers] = useState<string[]>([]);
   const [areaError, setAreaError] = useState<string | null>(null);
   // Stored areas dropped on opening because they are no longer usable (deactivated or deleted).
-  const [droppedCount, setDroppedCount] = useState(0);
-  const areas = useMemo(() => localiseAreas(rawAreas, locale), [rawAreas, locale]);
+  const [dropped, setDropped] = useState<string[]>([]);
+  // rawAreas holds every row (inactive too, from /admin/geo-areas) so stored areas keep their names;
+  // only usable ones can be picked.
+  const allAreas = useMemo(() => localiseAreas(rawAreas, locale), [rawAreas, locale]);
+  const areas = useMemo(() => usableAreas(allAreas), [allAreas]);
   const byId = useMemo(() => indexAreas(areas), [areas]);
+  const idx = useMemo<AreaIndex>(() => ({ byId, allById: indexAreas(allAreas) }), [byId, allAreas]);
 
   async function load() {
     if (!token) return;
@@ -116,7 +127,7 @@ export default function VendorsPage() {
     if (!token) return;
     setAreasState('loading');
     try {
-      setAreas(usableAreas((await api.geoAreas(token)).areas ?? []));
+      setAreas((await api.geoAreas(token)).areas ?? []);
       setAreasState('ready');
     } catch {
       try {
@@ -139,7 +150,7 @@ export default function VendorsPage() {
     setAreaTarget(vendor);
     setBasedIn(cityOk ? storedCity : null);
     setDelivers(kept);
-    setDroppedCount(stored.length - kept.length + (cityOk ? 0 : 1));
+    setDropped([...(cityOk ? [] : [storedCity!]), ...stored.filter(id => !byId.has(id))]);
     setAreaError(null);
   }
 
@@ -163,7 +174,7 @@ export default function VendorsPage() {
       setAreaTarget(null);
       setSuccess(t('vendors.updated'));
     } catch (err) {
-      setAreaError(invalidAreaMessage(err, byId, t));
+      setAreaError(invalidAreaMessage(err, idx, t));
     } finally {
       setBusyId(null);
     }
@@ -234,7 +245,7 @@ export default function VendorsPage() {
     },
     ...(showAreas ? [{
       key: 'areas', header: t('vendors.areas.title'),
-      cell: (vendor: VendorSummary) => <VendorAreasCell vendor={vendor} byId={byId} t={t} />,
+      cell: (vendor: VendorSummary) => <VendorAreasCell vendor={vendor} idx={idx} t={t} />,
     }] : []),
     {
       key: 'commissionPct', header: t('vendors.commission'), sortable: true, align: 'right',
@@ -286,7 +297,8 @@ export default function VendorsPage() {
     <Dialog open={!!areaTarget} onClose={() => setAreaTarget(null)} title={t('vendors.areas.edit')} description={areaTarget?.vendorProfile?.businessName || areaTarget?.displayName || ''} size="lg">
       <div className="space-y-5">
         {areaError && <Alert tone="error">{areaError}</Alert>}
-        {droppedCount > 0 && <Alert tone="warning"><span data-testid="vendor-areas-dropped">{t('vendors.areas.dropped').replace('{n}', String(droppedCount))}</span></Alert>}
+        {dropped.length > 0 && <Alert tone="warning"><span data-testid="vendor-areas-dropped">{t(dropped.length === 1 ? 'vendors.areas.dropped.one' : 'vendors.areas.dropped.other')
+          .replace('{n}', String(dropped.length)).replace('{areas}', dropped.map(id => areaDisplay(id, idx, t, false)).join(', '))}</span></Alert>}
         {/* What the seller typed, so the admin can map it to areas. */}
         <section className="space-y-2 rounded-[var(--radius-md)] bg-[var(--color-bg-secondary)] p-3 text-sm" data-testid="vendor-areas-written">
           <p className="font-medium text-[var(--color-fg-primary)]">{t('vendors.areas.written')}</p>
@@ -303,7 +315,7 @@ export default function VendorsPage() {
           <VendorAreaPicker mode="single" areas={areas} value={basedIn} onChange={setBasedIn} label={t('vendors.areas.basedIn')} testId="vendor-based-in" />
         </Field>
         {!basedIn && areaTarget?.vendorProfile?.regionId && !areaTarget.vendorProfile.cityId && <p className="text-xs text-[var(--color-fg-tertiary)]">
-          {t('vendors.areas.regionOnly').replace('{area}', areaLabel(areaTarget.vendorProfile.regionId, byId))}
+          {t('vendors.areas.regionOnly').replace('{area}', areaDisplay(areaTarget.vendorProfile.regionId, idx, t))}
         </p>}
         <Field label={t('vendors.areas.deliversTo')} hint={t('vendors.areas.deliversHint')}>
           <VendorAreaPicker mode="multi" areas={areas} value={delivers} onChange={setDelivers} label={t('vendors.areas.deliversTo')} testId="vendor-delivers-to" />

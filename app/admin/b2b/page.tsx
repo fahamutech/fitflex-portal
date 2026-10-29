@@ -4,12 +4,13 @@ import Link from 'next/link';
 import { BarChart3, Building2, Plus, RefreshCw, UserPlus, Users } from 'lucide-react';
 import { useApp } from '../../providers';
 import {
-  api, ApiError, B2BBeneficiary, B2BOrganization, B2BOrganizationUser, B2BProgram, B2BReference, userContact,
+  api, ApiError, B2BBeneficiary, B2BMemberRequest, B2BOrganization, B2BOrganizationUser, B2BProgram, B2BReference, isPendingMemberAcceptance, userContact,
 } from '@/lib/api';
 import { Alert, Badge, Button, Card, CardContent, CardHeader, Field, Input, PageHeader, Select, Spinner } from '@/components/shared';
 import { B2BPrograms } from '@/components/b2b-programs';
 import { tierErrorKey } from '@/lib/pass-tiers';
-import type { MessageKey } from '@/lib/i18n';
+import type { Locale, MessageKey } from '@/lib/i18n';
+import { PendingMemberStatus, WithdrawRequestButton, fill, memberRequestError, requestLabel, requestSentNotice, shownRequests } from '@/components/b2b-member-requests';
 
 const ERRORS: Record<string, string> = {
   invalid_organization_type: 'Choose an organisation type.',
@@ -36,7 +37,9 @@ const I18N_ERRORS: Partial<Record<string, MessageKey>> = {
   hr_login_other_company: 'b2b.hrOrg.err.hr_login_other_company',
 };
 // byId: the request named the person by user ID, so user_not_found means the ID matched no account.
-const message = (err: unknown, fallback: string, t: (k: MessageKey) => string, byId = false) => {
+const message = (err: unknown, fallback: string, t: (k: MessageKey) => string, byId = false, locale: Locale = 'en') => {
+  const request = memberRequestError(err, t, locale);
+  if (request) return request;
   const code = err instanceof ApiError ? (err.body as { error?: string } | null)?.error : undefined;
   if (code === 'user_not_found' && byId) return t('b2b.errors.userIdNotFound');
   const i18nKey = code ? I18N_ERRORS[code] : undefined;
@@ -59,13 +62,16 @@ const EMPTY_ORG = { organizationType: 'insurer', legalName: '', tradingName: '',
  * staff, which show read-only.
  */
 export default function AdminB2BPage() {
-  const { token, t } = useApp();
+  const { token, t, locale } = useApp();
   const [ref, setRef] = useState<B2BReference | null>(null);
   const [filter, setFilter] = useState({ type: '', status: '' });
   const [orgs, setOrgs] = useState<B2BOrganization[] | null>(null);
   const [selected, setSelected] = useState<B2BOrganization | null>(null);
   const [orgUsers, setOrgUsers] = useState<B2BOrganizationUser[] | null>(null);
   const [beneficiaries, setBeneficiaries] = useState<B2BBeneficiary[] | null>(null);
+  // Adds by user ID (made by the organisation's own users) waiting for the member to accept; absent on an older backend.
+  const [pendingUsers, setPendingUsers] = useState<B2BMemberRequest[]>([]);
+  const [pendingBeneficiaries, setPendingBeneficiaries] = useState<B2BMemberRequest[]>([]);
   const [creating, setCreating] = useState(false);
   const [newOrg, setNewOrg] = useState(EMPTY_ORG);
   const [userForm, setUserForm] = useState({ userId: '', role: 'admin' });
@@ -100,12 +106,16 @@ export default function AdminB2BPage() {
     setNotice(null);
     setOrgUsers(null);
     setBeneficiaries(null);
+    setPendingUsers([]);
+    setPendingBeneficiaries([]);
     const [u, b] = await Promise.allSettled([
       api.b2bOrganizationUsers(token, o.id, { limit: 100 }),
       api.b2bBeneficiaries(token, o.id, { limit: 100 }),
     ]);
     setOrgUsers(u.status === 'fulfilled' ? u.value.items : []);
     setBeneficiaries(b.status === 'fulfilled' ? b.value.items : []);
+    setPendingUsers(u.status === 'fulfilled' ? shownRequests(u.value.pendingMemberAcceptance) : []);
+    setPendingBeneficiaries(b.status === 'fulfilled' ? shownRequests(b.value.pendingMemberAcceptance) : []);
   };
 
   const run = async (fn: () => Promise<void>, fallback: string, byId = false) => {
@@ -115,7 +125,7 @@ export default function AdminB2BPage() {
     try {
       await fn();
     } catch (err) {
-      setError(message(err, fallback, t, byId));
+      setError(message(err, fallback, t, byId, locale));
     } finally {
       setBusy(false);
     }
@@ -158,9 +168,16 @@ export default function AdminB2BPage() {
     if (!token || !selected) return;
     const contact = userContact(userForm.userId);
     return run(async () => {
-      const { organizationUser } = await api.addB2BOrganizationUser(token, selected.id, { ...contact, role: userForm.role });
-      setOrgUsers(list => [...(list ?? []), organizationUser]);
+      const out = await api.addB2BOrganizationUser(token, selected.id, { ...contact, role: userForm.role });
       setUserForm({ userId: '', role: userForm.role });
+      // Platform admins add directly today; should the backend ask the member first, show it as a request, not a user.
+      if (isPendingMemberAcceptance(out)) {
+        // id null: nothing was stored; same message, no row.
+        setPendingUsers(list => shownRequests([out.memberRequest, ...list.filter(r => r.id !== out.memberRequest.id)]));
+        setNotice(requestSentNotice(t));
+        return;
+      }
+      setOrgUsers(list => [...(list ?? []), out.organizationUser]);
     }, 'Could not add the user.', 'userId' in contact);
   };
 
@@ -178,11 +195,23 @@ export default function AdminB2BPage() {
     const contact = userContact(typed);
     const body = { ...contact, ...Object.fromEntries(Object.entries(rest).filter(([, v]) => v !== '')) };
     return run(async () => {
-      const { beneficiary } = await api.enrollB2BBeneficiary(token, selected.id, body);
-      setBeneficiaries(list => [...(list ?? []), beneficiary]);
+      const out = await api.enrollB2BBeneficiary(token, selected.id, body);
       setBenForm({ userId: '', beneficiaryType: benForm.beneficiaryType, externalReference: '', groupName: '' });
+      if (isPendingMemberAcceptance(out)) {
+        setPendingBeneficiaries(list => shownRequests([out.memberRequest, ...list.filter(r => r.id !== out.memberRequest.id)]));
+        setNotice(requestSentNotice(t));
+        return;
+      }
+      setBeneficiaries(list => [...(list ?? []), out.beneficiary]);
     }, 'Could not enrol the member.', 'userId' in contact);
   };
+
+  const withdrawRequest = (r: B2BMemberRequest) => token && selected && r.id && run(async () => {
+    await api.cancelB2BMemberRequest(token, selected.id, r.id as string);
+    if (r.kind === 'org_user') setPendingUsers(list => list.filter(x => x.id !== r.id));
+    else setPendingBeneficiaries(list => list.filter(x => x.id !== r.id));
+    setNotice(t('b2b.memberRequest.withdrawn'));
+  }, t('b2b.memberRequest.withdrawFailed'));
 
   const changeBeneficiary = (b: B2BBeneficiary, status: string) => token && selected && run(async () => {
     const { beneficiary } = await api.setB2BBeneficiaryStatus(token, selected.id, b.id, status);
@@ -345,10 +374,22 @@ export default function AdminB2BPage() {
               <Card>
                 <CardHeader><span className="flex items-center gap-2 text-sm font-semibold"><UserPlus className="h-4 w-4" />Organisation users</span></CardHeader>
                 <CardContent className="space-y-3">
-                  {orgUsers == null ? <Spinner className="h-6 w-6" /> : orgUsers.length === 0 ? (
+                  {orgUsers == null ? <Spinner className="h-6 w-6" /> : orgUsers.length === 0 && pendingUsers.length === 0 ? (
                     <p className="text-sm text-[var(--color-fg-quaternary)]">No users yet.</p>
                   ) : (
                     <ul className="divide-y divide-[var(--color-border-secondary)]" data-testid="b2b-users">
+                      {pendingUsers.map(r => (
+                        <li key={`request-${r.id}`} className="flex flex-wrap items-center justify-between gap-2 py-2 text-sm" data-testid={`b2b-user-request-${r.id}`}>
+                          <span>
+                            <span className="font-medium">{requestLabel(t, r)}</span>{' '}
+                            {r.role && <span className="text-[var(--color-fg-quaternary)]">{fill(t('b2b.memberRequest.role'), { role: r.role })}</span>}
+                          </span>
+                          <span className="flex items-center gap-2">
+                            <PendingMemberStatus request={r} />
+                            <WithdrawRequestButton request={r} disabled={busy} onWithdraw={() => withdrawRequest(r)} />
+                          </span>
+                        </li>
+                      ))}
                       {orgUsers.map(u => (
                         <li key={u.id} className="flex flex-wrap items-center justify-between gap-2 py-2 text-sm">
                           <span>
@@ -389,10 +430,24 @@ export default function AdminB2BPage() {
               <Card>
                 <CardHeader><span className="flex items-center gap-2 text-sm font-semibold"><Users className="h-4 w-4" />Beneficiaries</span></CardHeader>
                 <CardContent className="space-y-3">
-                  {beneficiaries == null ? <Spinner className="h-6 w-6" /> : beneficiaries.length === 0 ? (
+                  {beneficiaries == null ? <Spinner className="h-6 w-6" /> : beneficiaries.length === 0 && pendingBeneficiaries.length === 0 ? (
                     <p className="text-sm text-[var(--color-fg-quaternary)]">No beneficiaries yet.</p>
                   ) : (
                     <ul className="divide-y divide-[var(--color-border-secondary)]" data-testid="b2b-beneficiaries">
+                      {pendingBeneficiaries.map(r => (
+                        <li key={`request-${r.id}`} className="flex flex-wrap items-center justify-between gap-2 py-2 text-sm" data-testid={`b2b-ben-request-${r.id}`}>
+                          <span>
+                            <span className="font-medium">{requestLabel(t, r)}</span>{' '}
+                            <span className="text-[var(--color-fg-quaternary)]">
+                              {[r.beneficiaryType ? ref?.beneficiaryTypes[r.beneficiaryType] ?? r.beneficiaryType : null, r.groupName, r.externalReference].filter(Boolean).join(' · ')}
+                            </span>
+                          </span>
+                          <span className="flex items-center gap-2">
+                            <PendingMemberStatus request={r} />
+                            <WithdrawRequestButton request={r} disabled={busy} onWithdraw={() => withdrawRequest(r)} />
+                          </span>
+                        </li>
+                      ))}
                       {beneficiaries.map(b => (
                         <li key={b.id} className="flex flex-wrap items-center justify-between gap-2 py-2 text-sm">
                           <span>

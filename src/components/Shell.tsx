@@ -52,6 +52,7 @@ import { PhotoPanel } from './photo-panel';
 import { EVENTS_MODULE, HERO_IMAGES_ADMIN, PHOTO_HERO_UI } from '@/lib/flags';
 import { eventsAreaOpen, staffAreaOpen } from '@/lib/events';
 import { useAdminEventsSummary, useOrganizer } from './organizer-context';
+import { useCorporateEventsAvailable } from './events-options';
 import { useShopBannersAvailable } from './shop-banners-gate';
 import { useTaxRatesAvailable } from './tax-rates-gate';
 import { useHrToOrgRefresh } from './hr-to-org-refresh';
@@ -84,10 +85,13 @@ const ROOTS = new Set(['/admin', '/hr', '/org', '/vendor', '/organizer']);
 const ORG_PEOPLE = new Set(['owner', 'admin', 'manager', 'hr', 'analyst']);
 const ORG_BILLING = new Set(['owner', 'admin', 'finance']);
 const ORG_INSIGHTS = new Set(['owner', 'admin', 'manager', 'hr', 'finance', 'analyst']);
-const orgNav = (roles?: string[]): NavItem[] => [
+// Events S3 (spec §6.1): /org/events and /hr/events appear only with the build flag and the server's
+// `registration && corporate` options (probed once by useCorporateEventsAvailable); roster roles only (D18 gates placing inside).
+const orgNav = (roles?: string[], corporateEvents = false): NavItem[] => [
   ...(!roles || roles.some(r => ORG_INSIGHTS.has(r)) ? [{ href: '/org/insights', labelKey: 'org.nav.insights', icon: LineChart }] : []),
   ...(!roles || roles.some(r => ORG_PEOPLE.has(r)) ? [{ href: '/org/people', labelKey: 'org.nav.people', icon: Users }] : []),
   { href: '/org/programmes', labelKey: 'org.nav.programmes', icon: Network },
+  ...(corporateEvents && (!roles || roles.some(r => ORG_PEOPLE.has(r))) ? [{ href: '/org/events', labelKey: 'org.nav.events', icon: Flag }] : []),
   // Challenges, the rewards they earn, and groups: the same roles that see people.
   ...(!roles || roles.some(r => ORG_PEOPLE.has(r)) ? [
     { href: '/org/challenges', labelKey: 'hr.nav.challenges', icon: Trophy },
@@ -98,12 +102,13 @@ const orgNav = (roles?: string[]): NavItem[] => [
 ];
 
 // Company HR: their company's wellness challenges, nothing else.
-const HR_NAV: NavItem[] = [
+const hrNav = (corporateEvents = false): NavItem[] => [
   { href: '/hr', labelKey: 'hr.nav.challenges', icon: Trophy },
   { href: '/hr/rewards', labelKey: 'hr.nav.rewards', icon: Gift },
   { href: '/hr/groups', labelKey: 'hr.nav.groups', icon: Users },
   { href: '/hr/people', labelKey: 'hr.nav.people', icon: UserCheck },
   { href: '/hr/programmes', labelKey: 'hr.nav.programmes', icon: Network },
+  ...(corporateEvents ? [{ href: '/hr/events', labelKey: 'org.nav.events', icon: Flag }] : []),
   { href: '/hr/insights', labelKey: 'org.nav.insights', icon: LineChart },
 ];
 
@@ -122,8 +127,8 @@ const OPERATOR_NAV: NavItem[] = [
 
 // A business that sells on FitFlex (vendor portal, S2): each item needs its permission.
 function vendorNav(permissions: string[], tools: VendorTools | null | undefined, lowCount: number | null, waitingCount: number | null, bannersOn = false): NavItem[] {
-  const icons: Record<string, React.ElementType> = { '/vendor': LayoutDashboard, '/vendor/products': ShoppingBag, '/vendor/promotions': Megaphone, '/vendor/orders': ClipboardList, '/vendor/sales': Receipt, '/vendor/customers': Users, '/vendor/payouts': HandCoins, '/vendor/settings/tax': Landmark };
-  const labels: Record<string, string> = { '/vendor': 'vendor.nav.dashboard', '/vendor/products': 'vendor.nav.products', '/vendor/promotions': 'merch.nav', '/vendor/orders': 'vendor.nav.orders', '/vendor/sales': 'vendor.nav.sales', '/vendor/customers': 'vendor.nav.customers', '/vendor/payouts': 'vendor.nav.payouts', '/vendor/settings/tax': 'vendor.tax.title' };
+  const icons: Record<string, React.ElementType> = { '/vendor': LayoutDashboard, '/vendor/products': ShoppingBag, '/vendor/promotions': Megaphone, '/vendor/orders': ClipboardList, '/vendor/sales': Receipt, '/vendor/customers': Users, '/vendor/reports': BarChart3, '/vendor/payouts': HandCoins, '/vendor/settings/tax': Landmark };
+  const labels: Record<string, string> = { '/vendor': 'vendor.nav.dashboard', '/vendor/products': 'vendor.nav.products', '/vendor/promotions': 'merch.nav', '/vendor/orders': 'vendor.nav.orders', '/vendor/sales': 'vendor.nav.sales', '/vendor/customers': 'vendor.nav.customers', '/vendor/reports': 'vendor.nav.reports', '/vendor/payouts': 'vendor.nav.payouts', '/vendor/settings/tax': 'vendor.tax.title' };
   // S5: Settings → Tax details (VAT on; owner or staff with `payments`).
   const groups: Record<string, string> = { '/vendor/settings/tax': 'vendor.nav.group.settings' };
   return VENDOR_AREAS.filter(a => a.nav !== false && vendorAreaOpen(a, permissions, tools) && (a.href !== '/vendor/promotions' || bannersOn)).map(a => ({
@@ -465,6 +470,7 @@ export function Shell({ children }: { children: ReactNode }) {
   const isVendor      = !!token && VENDOR_USER_TYPES.has(user?.userType ?? '');
   const isOrganizer   = !!token && ORGANIZER_USER_TYPES.has(user?.userType ?? '');
   const adminEvents = useAdminEventsSummary(token, !!isAdminUser && hasPermission('events'));
+  const corporateEvents = useCorporateEventsAvailable(!!token && (!!isOrgUser || !!isHr));
   const bannersOn = useShopBannersAvailable(
     isVendor ? 'vendor' : 'admin', token,
     isVendor ? vendor.status === 'ready' && !!vendor.me?.permissions?.includes('products') : !!isAdminUser && (hasPermission('promotions') || hasPermission('promotions_approve')),
@@ -492,19 +498,20 @@ export function Shell({ children }: { children: ReactNode }) {
       }).map(item => (item.href === '/admin/events' && adminEvents.submitted > 0
         ? { ...item, count: { n: adminEvents.submitted, labelKey: 'admin.nav.eventsCount' as MessageKey, tone: 'warning' as const } }
         : item))
-    : isOrgUser ? orgNav(user?.organizationRoles)
-    : isHr ? HR_NAV
+    : isOrgUser ? orgNav(user?.organizationRoles, corporateEvents)
+    : isHr ? hrNav(corporateEvents)
     : OPERATOR_NAV.filter(item => !item.aclScope || user?.userType !== 'gym_staff' || hasPermission(item.aclScope));
 
   // Where this person must go instead of the current page, or null when they may see it. One decision
   // drives both the redirect and the render: a page's content (and its requests) waits until it passes.
   const path = pathname.replace(/\/$/, '') || '/';
-  const vendorPermissionMissing = (() => {
-    if (!isVendor || vendor.status !== 'ready') return false;
-    const area = [...VENDOR_AREAS].reverse().find(a => path === a.href || path.startsWith(`${a.href}/`));
-    // Its permission and, where it has one, its tool (S3 sales: walkInSales) — both fail closed.
-    return !!area && !vendorAreaOpen(area, vendor.me?.permissions ?? [], vendor.me?.tools);
-  })();
+  const vendorArea = isVendor && vendor.status === 'ready'
+    ? [...VENDOR_AREAS].reverse().find(a => path === a.href || path.startsWith(`${a.href}/`)) ?? null
+    : null;
+  // Its permission and, where it has one, its tool (S3 sales: walkInSales) — both fail closed.
+  const vendorPermissionMissing = !!vendorArea && !vendorAreaOpen(vendorArea, vendor.me?.permissions ?? [], vendor.me?.tools);
+  // S6 reports (spec §0.1): with the tool switched off, back home with no message (never "feature off").
+  const vendorBounceQuiet = !!vendorArea?.quietWhenOff && !!vendorArea.tool && vendor.me?.tools?.[vendorArea.tool] !== true;
   const redirectTo = ((): string | null => {
     if (!ready) return null;
     if (!token) return path !== '/login' && path !== '/' ? '/login' : null;
@@ -561,11 +568,11 @@ export function Shell({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!redirectTo) { if (!vendorPermissionMissing) bouncedFrom.current = null; return; }
     if (vendorPermissionMissing && bouncedFrom.current !== path) {
-      toast.error(t('vendor.noAccess'));
+      if (!vendorBounceQuiet) toast.error(t('vendor.noAccess'));
       bouncedFrom.current = path;
     }
     router.replace(redirectTo);
-  }, [redirectTo, vendorPermissionMissing, path, router, toast, t]);
+  }, [redirectTo, vendorPermissionMissing, vendorBounceQuiet, path, router, toast, t]);
 
   /* Close mobile drawer on route change */
   useEffect(() => { setMobileOpen(false); }, [pathname]);

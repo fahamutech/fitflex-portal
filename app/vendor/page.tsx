@@ -7,6 +7,7 @@ import { money } from '@/lib/admin-utils';
 import { canCustomers, canWalkInSales, countsOf, eatDateTime, eatToday, fmt, isOpenOrder, itemsKey, payoutWhyKey, statusKey, statusTone, type OrderCounts } from '@/lib/vendor';
 import { Badge, Button, Card, CardContent, CardHeader, EmptyState, PageHeader, Skeleton } from '@/components/shared';
 import { useVendor } from '@/components/vendor-context';
+import { reportAccess } from '@/lib/vendor-reports';
 import { useApp } from '../providers';
 
 type Loaded<T> = { state: 'loading' } | { state: 'failed' } | { state: 'ready'; data: T };
@@ -50,6 +51,8 @@ export default function VendorDashboardPage() {
   const canSales = canWalkInSales(vendor.me);
   // S4: money customers owe on pay-later sales — its own card, never added to app or shop sales.
   const canOwed = canCustomers(vendor.me);
+  // S6: a link to Reports in the header when allowed (tool on and `reports`); no new dashboard cards.
+  const canReports = reportAccess(vendor.me).open;
 
   const [payments, retryPayments] = useLoad<VendorPayments>(!!token && canPay, () => api.vendorPayments(token!));
   const [statements, retryStatements] = useLoad<VendorStatementList>(!!token && canPay, () => api.vendorStatements(token!));
@@ -90,7 +93,11 @@ export default function VendorDashboardPage() {
 
   return (
     <div className="space-y-6">
-      <PageHeader title={t('vendor.nav.dashboard')} description={vendor.me?.businessName ?? undefined} />
+      <PageHeader
+        title={t('vendor.nav.dashboard')}
+        description={vendor.me?.businessName ?? undefined}
+        actions={canReports ? <Link href="/vendor/reports/" className={linkCls} data-testid="dash-reports-link">{t('vendor.reports.dashLink')}</Link> : undefined}
+      />
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         {canPay && (

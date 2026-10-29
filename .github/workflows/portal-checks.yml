@@ -33,6 +33,10 @@ jobs:
       NEXT_PUBLIC_FIREBASE_PROJECT_ID: ${{ vars.NEXT_PUBLIC_FIREBASE_PROJECT_ID || 'fitflex-af-pilot' }}
       NEXT_PUBLIC_FIREBASE_APP_ID: ${{ vars.NEXT_PUBLIC_FIREBASE_APP_ID || '1:318978253903:web:49b58d5fda05603645f63a' }}
       NEXT_PUBLIC_GOOGLE_CLIENT_ID: ${{ vars.NEXT_PUBLIC_GOOGLE_CLIENT_ID || '318978253903-u6du2v8thfbdbmortdh49k1g06uv91v7.apps.googleusercontent.com' }}
+      # Login photo panel (src/lib/flags.ts PHOTO_HERO_UI). Off unless the
+      # repository variable is exactly 'true'. The photo manager flags
+      # (NEXT_PUBLIC_HERO_IMAGES_ADMIN / _REMOTE) are deliberately not wired.
+      NEXT_PUBLIC_PHOTO_HERO_UI: ${{ vars.NEXT_PUBLIC_PHOTO_HERO_UI || 'false' }}
 
     steps:
       - name: Checkout repository

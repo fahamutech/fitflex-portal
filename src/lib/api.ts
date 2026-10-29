@@ -775,7 +775,7 @@ export const api = {
     request<{ employee: CorporateEmployee }>(`/corporate/staff/${encodeURIComponent(employeeId)}/status`, { method: 'POST', body: JSON.stringify({ status }) }, token),
   /** Link an employee to their FitFlex member account (by email, mobile number or user id); `null` unlinks. */
   linkCorporateStaff: (token: string, employeeId: string, contact: UserContact | null) =>
-    request<{ employee: CorporateEmployee }>(`/corporate/staff/${encodeURIComponent(employeeId)}/link`, { method: 'POST', body: JSON.stringify(contact ?? { userId: null }) }, token),
+    request<{ employee: CorporateEmployee; unchanged?: boolean } | PendingMemberAcceptance>(`/corporate/staff/${encodeURIComponent(employeeId)}/link`, { method: 'POST', body: JSON.stringify(contact ?? { userId: null }) }, token),
   /** HR sign-in: email + password (not Firebase). */
   hrLogin: (email: string, password: string) =>
     // B5a (ORG_ONLY_SPONSORS on): a company HR login that reaches its organisation also gets the organisation marks.
@@ -806,14 +806,18 @@ export const api = {
     request<{ organization: B2BOrganization }>(`/admin/b2b/organizations/${encodeURIComponent(id)}/status`, { method: 'POST', body: JSON.stringify({ status, reason }) }, token),
   syncCorporateOrganizations: (token: string) =>
     request<{ created: number; existing: number }>('/admin/b2b/corporate-sync', { method: 'POST' }, token),
+  /** pendingMemberAcceptance: adds by user id the member has not accepted yet (absent on an older API). */
   b2bOrganizationUsers: (token: string, id: string, params: { status?: string; limit?: number } = {}) =>
-    request<Paged<B2BOrganizationUser>>(`/b2b/organizations/${encodeURIComponent(id)}/users${qs(params)}`, {}, token),
+    request<Paged<B2BOrganizationUser> & { pendingMemberAcceptance?: B2BMemberRequest[] }>(`/b2b/organizations/${encodeURIComponent(id)}/users${qs(params)}`, {}, token),
   addB2BOrganizationUser: (token: string, id: string, body: UserContact & { role: string; permissions?: string[] }) =>
-    request<{ organizationUser: B2BOrganizationUser }>(`/b2b/organizations/${encodeURIComponent(id)}/users`, { method: 'POST', body: JSON.stringify(body) }, token),
+    request<{ organizationUser: B2BOrganizationUser } | PendingMemberAcceptance>(`/b2b/organizations/${encodeURIComponent(id)}/users`, { method: 'POST', body: JSON.stringify(body) }, token),
   updateB2BOrganizationUser: (token: string, id: string, orgUserId: string, body: { role?: string; status?: string; permissions?: string[] }) =>
     request<{ organizationUser: B2BOrganizationUser }>(`/b2b/organizations/${encodeURIComponent(id)}/users/${encodeURIComponent(orgUserId)}`, { method: 'PUT', body: JSON.stringify(body) }, token),
   b2bBeneficiaries: (token: string, id: string, params: { status?: string; search?: string; limit?: number } = {}) =>
-    request<Paged<B2BBeneficiary>>(`/b2b/organizations/${encodeURIComponent(id)}/beneficiaries${qs(params)}`, {}, token),
+    request<Paged<B2BBeneficiary> & { pendingMemberAcceptance?: B2BMemberRequest[] }>(`/b2b/organizations/${encodeURIComponent(id)}/beneficiaries${qs(params)}`, {}, token),
+  /** Withdraw an add by user id the member has not answered (beneficiaries.manage / users.manage, by kind). */
+  cancelB2BMemberRequest: (token: string, id: string, requestId: string) =>
+    request<{ memberRequest: B2BMemberRequest }>(`/b2b/organizations/${encodeURIComponent(id)}/member-requests/${encodeURIComponent(requestId)}`, { method: 'DELETE' }, token),
   // Programme lifecycle: how long each has left, and its renewal.
   b2bProgramLifecycle: (token: string, id: string) =>
     request<{ today: string; items: B2BProgramLifecycle[] }>(`/b2b/organizations/${encodeURIComponent(id)}/program-lifecycle`, {}, token),
@@ -829,13 +833,19 @@ export const api = {
     request<{ invite: B2BBeneficiaryInvite }>(`/b2b/organizations/${encodeURIComponent(id)}/beneficiary-invites/${encodeURIComponent(inviteId)}/cancel`, { method: 'POST', body: '{}' }, token),
   resendB2BBeneficiaryInvite: (token: string, id: string, inviteId: string) =>
     request<{ invite: B2BBeneficiaryInvite; sent: { email: boolean; sms: boolean }; emailConfigured: boolean; smsConfigured: boolean }>(`/b2b/organizations/${encodeURIComponent(id)}/beneficiary-invites/${encodeURIComponent(inviteId)}/resend`, { method: 'POST', body: '{}' }, token),
-  // A company's organisation with ORG_ONLY_SPONSORS on (B5a): written through to its staff list; `pin` is shown once.
-  // By contact, displayName is required and the reply carries no userId/linked (it doesn't say who is a member).
+  // Organisations: by userId (org users) the member is asked first: 202 pending_member_acceptance (fitflex-functions#241).
+  // A company's organisation with ORG_ONLY_SPONSORS on (B5a, functions#252): org roles hr/admin; displayName required;
+  // written through to its staff list with an activation PIN (shown once). Name only → 201 { beneficiary, pin };
+  // also named by userId/email/phone → 202 pending_member_acceptance with the unlinked beneficiary and the PIN.
   enrollB2BBeneficiary: (token: string, id: string, body: UserContact & { displayName?: string; beneficiaryType?: string; externalReference?: string; groupName?: string; status?: string }) =>
-    request<{ beneficiary: B2BBeneficiary; pin?: string | null; writtenThrough?: 'corporate_staff' }>(`/b2b/organizations/${encodeURIComponent(id)}/beneficiaries`, { method: 'POST', body: JSON.stringify(body) }, token),
-  /** B5a: link a company employee to their FitFlex member account; `{}` unlinks. 404 not_found while ORG_ONLY_SPONSORS is off. */
+    request<({ beneficiary: B2BBeneficiary } | (PendingMemberAcceptance & { beneficiary?: B2BBeneficiary })) & CompanyStaffWrite>(`/b2b/organizations/${encodeURIComponent(id)}/beneficiaries`, { method: 'POST', body: JSON.stringify(body) }, token),
+  /**
+   * B5a: link a company employee to their FitFlex member account; `{}` unlinks (and withdraws an open request).
+   * An org user only asks the member (202 pending_member_acceptance); a FitFlex platform admin links directly.
+   * 404 not_found while ORG_ONLY_SPONSORS is off.
+   */
   linkB2BBeneficiary: (token: string, id: string, beneficiaryId: string, contact: UserContact | Record<string, never>) =>
-    request<{ beneficiary: B2BBeneficiary; writtenThrough?: 'corporate_staff' }>(`/b2b/organizations/${encodeURIComponent(id)}/beneficiaries/${encodeURIComponent(beneficiaryId)}/link`, { method: 'POST', body: JSON.stringify(contact) }, token),
+    request<({ beneficiary: B2BBeneficiary } | (PendingMemberAcceptance & { beneficiary?: B2BBeneficiary })) & CompanyStaffWrite>(`/b2b/organizations/${encodeURIComponent(id)}/beneficiaries/${encodeURIComponent(beneficiaryId)}/link`, { method: 'POST', body: JSON.stringify(contact) }, token),
   /**
    * B5a: what a sign-in would say about this session right now (functions#252): always { orgOnlySponsors };
    * for a company HR login that reaches its organisation while the flag is on, also the organisation fields.
@@ -1018,6 +1028,12 @@ export const api = {
   deleteGym: (token: string, id: string) =>
     request<{ ok: boolean; gym: Gym }>(`/admin/gyms/${id}`, { method: 'DELETE' }, token),
   gymOwners: (token: string) => request<GymOwner[]>('/admin/gym-owners', {}, token),
+  /** Who a gym's payouts go to, and its owners (ACL gyms or owners). */
+  gymPayoutOwner: (token: string, gymId: string) =>
+    request<GymPayoutOwnerView>(`/admin/gyms/${encodeURIComponent(gymId)}/payout-owner`, {}, token),
+  /** Name one of the gym's owners as its payout owner, or clear it with null. Audited; stored even while GYM_PAYOUT_OWNER is off. */
+  setGymPayoutOwner: (token: string, gymId: string, ownerId: string | null) =>
+    request<GymPayoutOwnerView>(`/admin/gyms/${encodeURIComponent(gymId)}/payout-owner`, { method: 'PUT', body: JSON.stringify({ ownerId }) }, token),
   /** View only, audited server-side: call only when an admin opens this owner's personal details. `id` is the owner user id. */
   adminGymOwnerPersonalDetails: (token: string, id: string) =>
     request<{ ownerId: string; personalDetails: PartnerPersonalDetails }>(`/admin/gym-owners/${encodeURIComponent(id)}/personal-details`, {}, token),
@@ -1064,7 +1080,8 @@ export const api = {
   /** `no_show` only with TRAINER_SESSION_OUTCOMES on (functions#231); flag off it is 400 invalid_status. */
   updateTrainerBooking: (token: string, id: string, status: 'confirmed' | 'completed' | 'cancelled' | 'no_show') =>
     request<TrainerBooking>(`/admin/trainer-bookings/${id}`, { method: 'POST', body: JSON.stringify({ status }) }, token),
-  paymentRequests: (token: string) => request<PaymentRequest[]>('/admin/payment-requests', {}, token),
+  /** `productType=EVENT_ORDER` (S4 §8 item 18) loads only event payments, so the queue stays small during a sale. */
+  paymentRequests: (token: string, query: { productType?: string } = {}) => request<PaymentRequest[]>(`/admin/payment-requests${qs(query)}`, {}, token),
   // Trainer and vendor payouts: weekly statements on the same path as gym statements.
   partnerSettlements: (token: string, kind: PayoutKind) => request<{ statements: PartnerSettlement[] }>(`/admin/${kind}-settlements`, {}, token),
   partnerSettlement: (token: string, kind: PayoutKind, id: string) =>
@@ -1078,7 +1095,7 @@ export const api = {
     request<{ refunds: Refund[] }>(`/admin/refunds${status ? `?status=${status}` : ''}`, {}, token),
   raiseRefund: (token: string, body: { paymentRequestId: string; amountTzs?: number; note?: string }) =>
     request<{ refund: Refund }>('/admin/refunds', { method: 'POST', body: JSON.stringify(body) }, token),
-  decideRefund: (token: string, id: string, body: { decision: 'approve' | 'reject'; note?: string; amountTzs?: number; endAccess?: boolean }) =>
+  decideRefund: (token: string, id: string, body: { decision: 'approve' | 'reject'; note?: string; noteSw?: string; amountTzs?: number; endAccess?: boolean }) =>
     request<{ refund: Refund }>(`/admin/refunds/${encodeURIComponent(id)}/decision`, { method: 'POST', body: JSON.stringify(body) }, token),
   markRefundPaid: (token: string, id: string, body: { paymentReference: string; paidTo?: string }) =>
     request<{ refund: Refund }>(`/admin/refunds/${encodeURIComponent(id)}/paid`, { method: 'POST', body: JSON.stringify(body) }, token),
@@ -1373,6 +1390,82 @@ export const api = {
   adminEventAudit: (token: string, id: string) => request<EventsPage<EventAuditRow>>(`/admin/events/${encodeURIComponent(id)}/audit`, {}, token),
   adminEventsAudit: (token: string, query: { action?: string; cursor?: string | null } = {}) =>
     request<EventsPage<EventAuditRow>>(`/admin/events/audit${qs(query)}`, {}, token),
+
+  // ─── Events S3 (spec events-s3-registration-and-orders §3.10, §3.13; D18, D19) ───
+  /** Public discovery (S2 §14.1): the corporate event picker lists open events. */
+  publicEvents: (query: { availability?: string; q?: string; cursor?: string | null; limit?: number } = {}, token?: string) =>
+    request<EventsPage<EventSummary>>(`/events${qs(query)}`, {}, token),
+  publicEvent: (idOrSlug: string, token?: string) => request<PublicEventDetail>(`/events/${encodeURIComponent(idOrSlug)}`, {}, token),
+  /** Dry run of a corporate roster (§3.10): nothing is written. */
+  validateEventRoster: (token: string, orgId: string, body: { eventId: string; rows?: Array<Partial<EventParticipantInput>>; rawText?: string }) =>
+    request<EventRosterValidation>(`/b2b/organizations/${encodeURIComponent(orgId)}/event-orders/roster/validate`, { method: 'POST', body: JSON.stringify(body) }, token),
+  /** Places the corporate order (§3.10). `Idempotency-Key` is required by the server (400 `idempotency_key_required`). */
+  createCorporateEventOrder: (token: string, orgId: string, body: CorporateEventOrderBody, idempotencyKey: string) =>
+    request<CorporateEventOrderCreated>(`/b2b/organizations/${encodeURIComponent(orgId)}/event-orders`, { method: 'POST', body: JSON.stringify(body), headers: { 'Idempotency-Key': idempotencyKey } }, token),
+  corporateEventOrders: (token: string, orgId: string, query: { status?: string; cursor?: string | null; limit?: number } = {}) =>
+    request<EventsPage<CorporateEventOrderRow>>(`/b2b/organizations/${encodeURIComponent(orgId)}/event-orders${qs(query)}`, {}, token),
+  corporateEventOrder: (token: string, orgId: string, orderId: string) =>
+    request<CorporateEventOrderDetail>(`/b2b/organizations/${encodeURIComponent(orgId)}/event-orders/${encodeURIComponent(orderId)}`, {}, token),
+  /** `expectedRefundTzs` (S4 §3.12.2) is required for a paid order: only an equality check against a fresh evaluation. */
+  cancelCorporateEventOrder: (token: string, orgId: string, orderId: string, reason: string, expectedRefundTzs?: number) =>
+    request<{ order?: EventOrder; registrations?: EventOrderRegistration[]; requested?: boolean }>(`/b2b/organizations/${encodeURIComponent(orgId)}/event-orders/${encodeURIComponent(orderId)}/cancel`, { method: 'POST', body: JSON.stringify(expectedRefundTzs == null ? { reason } : { reason, expectedRefundTzs }) }, token),
+  // Organizer reads (roles per §3.13; masked per status by the server).
+  organizerEventRegistrations: (token: string, id: string, query: { status?: string; categoryId?: string; q?: string; cursor?: string | null; limit?: number } = {}) =>
+    request<EventsPage<EventRegistrationRow>>(`/organizer/events/${encodeURIComponent(id)}/registrations${qs(query)}`, {}, token),
+  organizerEventRegistrationsSummary: (token: string, id: string) =>
+    request<EventRegistrationsSummary>(`/organizer/events/${encodeURIComponent(id)}/registrations/summary`, {}, token),
+  organizerEventOrders: (token: string, id: string, query: { status?: string; cursor?: string | null; limit?: number } = {}) =>
+    request<EventsPage<EventOrderRow>>(`/organizer/events/${encodeURIComponent(id)}/orders${qs(query)}`, {}, token),
+  // Admin, scope `events`: full names.
+  adminEventOrders: (token: string, id: string, query: { status?: string; cursor?: string | null; limit?: number } = {}) =>
+    request<EventsPage<EventOrderRow>>(`/admin/events/${encodeURIComponent(id)}/orders${qs(query)}`, {}, token),
+  adminEventOrder: (token: string, id: string, orderId: string) =>
+    request<AdminEventOrderDetail>(`/admin/events/${encodeURIComponent(id)}/orders/${encodeURIComponent(orderId)}`, {}, token),
+  adminEventRegistrations: (token: string, id: string, query: { status?: string; categoryId?: string; q?: string; cursor?: string | null; limit?: number } = {}) =>
+    request<EventsPage<EventRegistrationRow>>(`/admin/events/${encodeURIComponent(id)}/registrations${qs(query)}`, {}, token),
+  /** §3.8: releases an unpaid order with reason `admin`; the note goes to the audit row `events.order_cancelled`. */
+  adminCancelEventOrder: (token: string, id: string, orderId: string, note: string, refundMode?: AdminCancelRefundMode) =>
+    request<{ order: EventOrder; registrations: EventOrderRegistration[] }>(`/admin/events/${encodeURIComponent(id)}/orders/${encodeURIComponent(orderId)}/cancel`, { method: 'POST', body: JSON.stringify(refundMode ? { note, refundMode } : { note }) }, token),
+
+  // ─── Events S4 (spec events-s4-payments-and-tickets §3.4-§3.14) ───
+  /** Approve (amountTzs = what actually arrived, mandatory for event payments, §3.7.3) or reject (reasonCode, §3.7.5). */
+  decideEventPayment: (token: string, id: string, body:
+    { decision: 'approve'; amountTzs: number; reference?: string; note?: string } | { decision: 'reject'; reasonCode: EventRejectCode; memberNote?: string; memberNoteSw?: string; note?: string }) =>
+    request<EventPaymentDecision & Partial<PaymentRequest>>(`/admin/payment-requests/${encodeURIComponent(id)}/decision`, { method: 'POST', body: JSON.stringify(body) }, token),
+  /** §3.7.8: re-applies an approved payment whose order was not confirmed (scope payments); idempotent. */
+  repairEventPayment: (token: string, eventId: string, orderId: string) =>
+    request<unknown>(`/admin/events/${encodeURIComponent(eventId)}/orders/${encodeURIComponent(orderId)}/repair-payment`, { method: 'POST', body: JSON.stringify({}) }, token),
+  /** §3.12.5: a refund for an approved payment whose order could not be honoured. */
+  raiseEventPaymentRefund: (token: string, body: { eventPaymentId: string; amountTzs?: number; note: string }) =>
+    request<{ refund: Refund }>('/admin/refunds', { method: 'POST', body: JSON.stringify({ ...body, reasonCode: 'payment_error' }) }, token),
+  /** §3.12.3 preview for the admin dialog (NOT IN THE SPEC as an admin route: the member-style preview, 404 = no amounts shown). */
+  adminEventOrderCancelPreview: (token: string, eventId: string, orderId: string) =>
+    request<AdminOrderCancelPreview>(`/admin/events/${encodeURIComponent(eventId)}/orders/${encodeURIComponent(orderId)}/cancel-preview`, {}, token),
+  adminEventCancelPreview: (token: string, eventId: string) => request<EventCancelImpact>(`/admin/events/${encodeURIComponent(eventId)}/cancel-preview`, {}, token),
+  adminCancelEvent: (token: string, eventId: string, body: AdminEventCancelBody) =>
+    request<AdminEventCancelResult>(`/admin/events/${encodeURIComponent(eventId)}/cancel`, { method: 'POST', body: JSON.stringify(body) }, token),
+  adminEventRefundBatch: (token: string, eventId: string, body: { note?: string; expectedRefundableTzs?: number }) =>
+    request<EventRefundBatchResult>(`/admin/events/${encodeURIComponent(eventId)}/refund-batch`, { method: 'POST', body: JSON.stringify(body) }, token),
+  /** §3.12.4 helpers: approve every requested refund of a batch (equality checks), record payouts row by row. */
+  approveRefundBatch: (token: string, body: { batchId: string; expectedTotalTzs: number; expectedCount: number }) =>
+    request<RefundBatchDecisionResult>('/admin/refunds/batch-decision', { method: 'POST', body: JSON.stringify({ ...body, decision: 'approve' }) }, token),
+  recordRefundBatchPaid: (token: string, body: { batchId: string; items: Array<{ refundId: string; paymentReference: string; paidTo?: string }> }) =>
+    request<Record<string, unknown>>('/admin/refunds/batch-paid', { method: 'POST', body: JSON.stringify(body) }, token),
+  /** §3.14, roles finance | owner | admin. */
+  organizerEventFinance: (token: string, id: string) => request<EventFinance>(`/organizer/events/${encodeURIComponent(id)}/finance`, {}, token),
+  // Corporate payment (§3.4.3, §3.5): `Idempotency-Key` is required.
+  submitCorporateEventPayment: (token: string, orgId: string, orderId: string, body: CorporateEventPaymentBody, idempotencyKey: string) =>
+    request<{ payment: EventPaymentView; order: { id: string; status: EventOrderStatus; holdExpiresAt: string | null }; replayed?: boolean }>(
+      `/b2b/organizations/${encodeURIComponent(orgId)}/event-orders/${encodeURIComponent(orderId)}/payment`, { method: 'POST', body: JSON.stringify(body), headers: { 'Idempotency-Key': idempotencyKey } }, token),
+  corporateEventPaymentStatus: (token: string, orgId: string, orderId: string) =>
+    request<EventPaymentStatus>(`/b2b/organizations/${encodeURIComponent(orgId)}/event-orders/${encodeURIComponent(orderId)}/payment-status`, {}, token),
+  /** NOT IN THE SPEC as a route (§3.12.2 names only the corporate cancel twin): the corporate twin of the member preview. */
+  corporateEventCancelPreview: (token: string, orgId: string, orderId: string) =>
+    request<EventCancelPreview>(`/b2b/organizations/${encodeURIComponent(orgId)}/event-orders/${encodeURIComponent(orderId)}/cancel-preview`, {}, token),
+  /** §3.10 resend: a new link; the old one stops working. */
+  resendCorporateClaimInvitation: (token: string, orgId: string, orderId: string, registrationId: string) =>
+    request<{ sent: boolean; channel: 'sms' | 'email' | null; nextAllowedAt?: string | null }>(
+      `/b2b/organizations/${encodeURIComponent(orgId)}/event-orders/${encodeURIComponent(orderId)}/claim-invitations`, { method: 'POST', body: JSON.stringify({ registrationId }) }, token),
 };
 
 // ─── App photos (design spec photo-hero-screens §36–§37; backend functions#216) ───
@@ -1627,6 +1720,41 @@ export interface Gym {
   homepagePriority?: number;
   /** Trainer passes the owner sells — only trainers (and admins) see them. */
   trainerPass?: TrainerPassConfig;
+  /** Admin gym rows only (GET /admin/gyms): the named payout owner (stored even while GYM_PAYOUT_OWNER is off). */
+  payoutOwnerId?: string | null;
+  /** Admin gym rows only: every owner account of this gym, by name. */
+  owners?: GymOwnerSummary[];
+  /** Admin gym rows only: who would be paid now, under the current switch. */
+  payoutOwner?: GymPayoutOwnerState;
+}
+
+/** One owner account of a gym, as the payout-owner endpoints list it. */
+export interface GymOwnerSummary {
+  id: string;
+  displayName: string | null;
+  email: string | null;
+}
+
+export type GymPayoutOwnerSource = 'named' | 'only_owner' | 'first_owner';
+export type GymPayoutOwnerReason = 'payout_owner_required' | 'no_owner_account';
+
+/**
+ * Who a gym's payouts go to now. mode 'first_owner': GYM_PAYOUT_OWNER is off and the
+ * first owner account found is paid (ownerId null). mode 'named': the switch is on.
+ */
+export interface GymPayoutOwnerState {
+  mode: 'named' | 'first_owner';
+  ownerId: string | null;
+  source: GymPayoutOwnerSource | null;
+  reason: GymPayoutOwnerReason | null;
+}
+
+/** GET / PUT /admin/gyms/:id/payout-owner. */
+export interface GymPayoutOwnerView {
+  gymId: string;
+  payoutOwnerId: string | null;
+  owners: GymOwnerSummary[];
+  payoutOwner: GymPayoutOwnerState;
 }
 
 export type TrainerPassPeriod = 'daily' | 'weekly' | 'monthly';
@@ -1846,7 +1974,9 @@ export interface PartnerSettlementDetail {
 }
 
 export type RefundStatus = 'requested' | 'approved' | 'paid' | 'rejected';
-export type RefundKind = 'subscription' | 'trainer_booking' | 'shop_order';
+export type RefundKind = 'subscription' | 'trainer_booking' | 'shop_order' | 'event_order';
+/** Events S4 (spec §3.2, §3.12): what an event refund covers. */
+export type EventRefundScope = 'registration' | 'order' | 'event_cancelled' | 'unfulfilled_payment';
 
 /** Money FitFlex owes back to a payer: requested → approved → paid, or rejected. */
 export interface Refund {
@@ -1883,6 +2013,19 @@ export interface Refund {
   requestedByName?: string | null;
   decidedByName?: string | null;
   paidByName?: string | null;
+  /**
+   * Events S4 (spec §6.3): present on `kind = 'event_order'` rows. `policySnapshot` is {preset, percent, deadlineAt, evaluatedAt}
+   * (§3.12.2); `payerPhone` and `organizationName` are admin-only fields of the Refunds list.
+   */
+  event?: { id: string; title: string } | null;
+  orderReference?: string | null;
+  scope?: EventRefundScope | null;
+  batchId?: string | null;
+  policySnapshot?: { preset?: string | null; percent?: number | null; deadlineAt?: string | null; evaluatedAt?: string | null } | null;
+  payerPhone?: string | null;
+  organizationName?: string | null;
+  /** The server-built policy sentence for this refund (both languages), when it carries one. */
+  policy?: { generated?: { en: string; sw: string } | null } | null;
 }
 
 /** A1 second approver: where a payment or refund stands (flag MONEY_SECOND_APPROVER on only). */
@@ -1949,6 +2092,21 @@ export interface PaymentRequest {
   /** The admin who decided it (the row column; the list spreads the whole row). */
   decidedBy?: string | null;
   decidedByName?: string | null;
+  /** Events S4 (spec §3.7.1): `'EVENT_ORDER'` for an event order; the list adds the `eventOrder` projection. */
+  productType?: string | null;
+  eventOrderId?: string | null;
+  eventOrder?: AdminPaymentEventOrder | null;
+}
+/** The `eventOrder` projection of a payment-request row (spec §3.7.1; the `?` fields are not in the spec, see the PR). */
+export interface AdminPaymentEventOrder {
+  orderId: string; reference: string; status: string; eventId: string; eventTitle: string; placesCount: number; holdExpiresAt: string | null;
+  totalTzs: number; expectedTzs: number; organizationName: string | null; lateOutcome: 'none' | 'would_rehold' | 'would_refund';
+  /** NOT IN THE SPEC: approved request whose order was not updated (spec §6.2 reads `eventOrder.repairable`). */
+  repairable?: boolean;
+  /** NOT IN THE SPEC: the linked EventPayment status and failureReason, for the "needs attention" row. */
+  paymentStatus?: string | null; failureReason?: string | null; refundId?: string | null;
+  /** NOT IN THE SPEC: the event's own status, for the "Event cancelled" cell. */
+  eventStatus?: string | null;
 }
 
 export interface MemberProfile {
@@ -1998,6 +2156,8 @@ export interface GymOwner {
   gyms?: Gym[];
   accountStatus?: 'active' | 'suspended';
   approvalStatus?: 'pending_approval' | 'approved' | 'rejected';
+  /** POST /admin/gym-owners answer only (GYM_PAYOUT_OWNER on): gyms this change left with 2+ owners and no named payout owner. */
+  payoutOwnerRequiredGymIds?: string[];
 }
 
 export interface TrainerProfile {
@@ -2104,6 +2264,10 @@ export interface VendorTools {
   vat?: boolean;
   /** S5: VAT applies to this vendor's new sales now (registered, verified, certificate standing). */
   vatInForce?: boolean;
+  /** S6 (VENDOR_REPORTS): the Reports area. Missing = off. */
+  reports?: boolean;
+  /** S6: this caller may see commission and payouts (the report App sales after commission). Missing = no. */
+  canSeeOrderMoney?: boolean;
   [tool: string]: unknown;
 }
 
@@ -2789,6 +2953,43 @@ export interface CorporateEmployee {
   /** Their FitFlex member account, once linked; benefits only work for a linked employee. */
   userId?: string | null;
   status: string;
+  /** A link by user id the member has not accepted yet (fitflex-functions#241); null or absent when none. */
+  pendingLink?: B2BMemberRequest | null;
+}
+/**
+ * An add by user id waiting for the member to accept in the app (fitflex-functions#241). The organisation's
+ * view: never the member's contact details.
+ */
+export interface B2BMemberRequest {
+  /** null when nothing was stored (unknown id or not a member): the answer looks the same on purpose. */
+  id: string | null;
+  kind: 'beneficiary' | 'org_user' | 'employee_link';
+  status: 'pending_member_acceptance' | 'accepted' | 'declined' | 'expired' | 'cancelled';
+  organizationId: string | null;
+  corporateId: string | null;
+  employeeId: string | null;
+  userId: string;
+  /** null until the member accepts: the organisation never learns who the id belongs to before that. */
+  displayName: string | null;
+  role: string | null;
+  permissions: string[] | null;
+  beneficiaryType: string | null;
+  groupName: string | null;
+  externalReference: string | null;
+  beneficiaryStatus: string | null;
+  expiresAt: string;
+  createdAt: string;
+  decidedAt: string | null;
+  reason: string | null;
+}
+/** B5a: what a company staff write-through adds to a reply (functions#252): the activation PIN, shown once. */
+export type CompanyStaffWrite = { pin?: string | null; writtenThrough?: 'corporate_staff' };
+/** 202 answer to an add by user id: nobody is added until the member accepts. */
+export type PendingMemberAcceptance = { outcome: 'pending_member_acceptance'; memberRequest: B2BMemberRequest };
+/** True when an add answered "request sent" rather than "added" (older backends never do). */
+export function isPendingMemberAcceptance(r: unknown): r is PendingMemberAcceptance {
+  return !!r && typeof r === 'object' && (r as { outcome?: unknown }).outcome === 'pending_member_acceptance'
+    && !!(r as { memberRequest?: unknown }).memberRequest;
 }
 export interface CorporateAccount {
   id: string;
@@ -2862,6 +3063,8 @@ export interface B2BBeneficiary {
   linked?: boolean;
   email?: string | null;
   phone?: string | null;
+  /** B5a: a link the member has not accepted yet: when and until when, never who (hr/admin only). */
+  pendingLink?: { status: string; createdAt: string | null; expiresAt: string | null } | null;
 }
 export type B2BProgramStatus = 'draft' | 'pending' | 'active' | 'paused' | 'expired' | 'cancelled';
 export interface B2BProgramReference {
@@ -3483,8 +3686,18 @@ export interface SettlementAdjustment {
   rejectReason?: string | null;
 }
 
+/** Who a gym statement is paid to (admin statement detail, GYM_PAYOUT_OWNER on). */
+export interface SettlementPayee {
+  ownerId: string | null;
+  displayName: string | null;
+  source: 'destination_snapshot' | GymPayoutOwnerSource | null;
+  reason: GymPayoutOwnerReason | null;
+}
+
 export interface GymSettlementDetail {
   statement: GymSettlement;
+  /** Present only while GYM_PAYOUT_OWNER is on. */
+  payee?: SettlementPayee;
   lines: GymSettlementLine[];
   visits: SettlementVisit[];
   adjustments: SettlementAdjustment[];
@@ -3922,7 +4135,11 @@ export type OrganizerRole = 'owner' | 'admin' | 'ops' | 'finance' | 'timing';
 export type EventType = 'road' | 'trail' | 'fun' | 'charity' | 'virtual';
 export type EventStatus = 'draft' | 'submitted' | 'published' | 'registration_closed' | 'in_progress' | 'completed' | 'cancelled' | 'archived';
 export type EventAvailability = 'open' | 'closing_soon' | 'sold_out' | 'closed' | 'not_yet_open' | 'cancelled' | 'in_progress' | 'completed';
-export type RefundPolicyPreset = 'no_refund' | 'refund_until_close' | 'custom';
+export type RefundPolicyPreset = 'no_refund' | 'refund_until_close' | 'full_until_days' | 'tiered' | 'custom';
+/** Events S4 (spec §3.12.1, §6.7): `days` for full_until_days; up to three steps for tiered. */
+export type RefundPolicyTier = { daysBefore: number; percent: number };
+/** `generated` is the sentence members read, built by the server in both languages (the portal never words a policy). */
+export type EventRefundPolicy = { preset: RefundPolicyPreset | null; text: Bilingual | null; days?: number | null; tiers?: RefundPolicyTier[] | null; generated?: { en: string; sw: string } | null };
 /** POST /organizer/events/:id/<action> (§7.2); approve/reject are the admin's decision route. */
 export type EventOrganizerAction = 'submit' | 'withdraw' | 'cancel' | 'complete' | 'archive';
 /** `allowedActions` vocabulary on organizer and admin event documents (§7.2, §16.5). */
@@ -3932,6 +4149,13 @@ export type EventsPage<T> = { items: T[]; nextCursor: string | null; total?: num
 export interface EventsOptions {
   discovery: boolean; favourites: boolean; registration: boolean; currency: string; closingSoonHours: number;
   regions: Array<{ code: string; name: Bilingual }>; timezones: string[];
+  // Events S3 (spec §3.1): present only while the server's EVENTS_REGISTRATION is on.
+  holdTtlMinutes?: number; maxParticipantsPerOrder?: number; payment?: 'none' | 'manual' | 'provider';
+  teams?: boolean; corporate?: boolean; claim?: { smsCodes: boolean; emailCodes: boolean }; consentTextVersion?: string;
+  // Events S4 (spec §3.1): present only while EVENTS_REGISTRATION is on.
+  manualConfirmHours?: number; refundDays?: number;
+  hold?: { manualExtendHours: number; manualMaxHours: number; providerExtendMinutes: number; lateGraceHours: number };
+  tickets?: { qr: boolean; scanning: boolean };
 }
 export interface OrganizerMe {
   organizer: { id: string; name: string; status: OrganizerStatus; timezone: string; kycCaseId: string | null; kycStatus: KycCaseStatus | null; statusReason: string | null };
@@ -3975,10 +4199,12 @@ export interface EventDocument extends EventSummary {
   kitProvided: boolean;
   categories: EventCategory[]; collectionPoints: EventCollectionPoint[]; schedule: EventScheduleItem[]; sponsors: EventSponsor[];
   contact: { email: string | null; phone: string | null; whatsapp: string | null };
-  terms: Bilingual; refundPolicy: { preset: RefundPolicyPreset | null; text: Bilingual | null };
+  terms: Bilingual; refundPolicy: EventRefundPolicy;
   cancellation: { reason: string; note: Bilingual } | null;
   shareUrl: string | null; publishedAt: string | null; version: number; allowedActions: EventAllowedAction[];
   submittedAt: string | null; rejection: { reason: string; note: string; at: string } | null; changeLogCount: number;
+  /** Events S3 (spec §3.2, §3.3): which participant fields are collected and the duplicate rule. Absent on older documents. */
+  participantFields?: ParticipantFields | null; duplicatePolicy?: DuplicatePolicy | null;
 }
 /** PATCH /organizer/events/:id: the current version plus the fields that changed (nested lists carry ids for upsert). */
 export type EventPatch = { version: number; changeNote?: Bilingual } & Partial<Omit<EventDocument, 'id' | 'slug' | 'status' | 'version' | 'allowedActions' | 'organizer' | 'updatedAt'>>;
@@ -4007,3 +4233,189 @@ export interface MyKycAgreement {
   agreementType: string; version: string; reference: string; title: string; lang: 'en' | 'sw';
   sections: Array<{ heading: string; text: string }>; acceptedAt: string | null;
 }
+
+// ─── Events S3 (design spec events-s3-registration-and-orders §3; decisions D15–D22) ───
+export type ParticipantFieldPolicy = 'required' | 'optional' | 'off';
+export type ParticipantFieldKey = 'phone' | 'email' | 'dateOfBirth' | 'gender' | 'emergencyContact' | 'kitSize';
+export type ParticipantFields = Partial<Record<ParticipantFieldKey, ParticipantFieldPolicy>>;
+export type DuplicatePolicy = 'one_per_category' | 'allow';
+export type EventOrderStatus = 'awaiting_payment' | 'confirmed' | 'partially_cancelled' | 'refund_pending' | 'refunded' | 'cancelled' | 'expired';
+export type EventRegistrationStatus = 'reserved' | 'confirmed' | 'cancelled' | 'refunded';
+export type EventClaimState = 'self' | 'unclaimed' | 'claimed';
+export type EventConsentBasis = 'self' | 'purchaser_authorised' | 'organisation';
+export type EventKitSize = 'xs' | 's' | 'm' | 'l' | 'xl' | 'xxl' | 'xxxl';
+/** The participant wire shape (§3.3) plus the corporate `groupLabel` column (D19). */
+export interface EventParticipantInput {
+  ticketTypeId: string; firstName: string; lastName: string; phone?: string | null; email?: string | null; dateOfBirth?: string | null;
+  gender?: 'male' | 'female' | 'other' | null; emergencyContact?: { name: string; phone: string } | null; kitSize?: EventKitSize | null;
+  groupLabel?: string | null; consentBasis: EventConsentBasis;
+}
+export interface EventQuoteLine {
+  ticketTypeId: string; ticketTypeName: string; categoryId: string; categoryName: string; quantity: number;
+  unitPriceTzs: number; discountTzs: number; feesTzs: number; lineTotalTzs: number;
+}
+export interface EventQuote {
+  currency: string; lines: EventQuoteLine[]; subtotalTzs: number; discountTzs: number; feesTzs: number; totalTzs: number; feeLabel: Bilingual | null;
+}
+export type EventAvailabilityMap = Record<string, { availability: EventAvailability; remaining: number | null }>;
+/** §3.4 serves one text per basis as `{ version, en, sw }`; §6.2 reads `consentText.organisation`. Both shapes are accepted. */
+export type EventConsentText = { version?: string; en?: string; sw?: string; organisation?: Bilingual; self?: Bilingual; purchaser_authorised?: Bilingual };
+export interface EventRosterProblem { field: string; code: string; minAge?: number; ageOnEventDay?: number; registrationId?: string }
+export interface EventRosterRow {
+  index: number; line?: number; ok: boolean; participant: Partial<EventParticipantInput> & { categoryId?: string | null }; categoryId: string | null; ticketTypeId: string | null;
+  problems: EventRosterProblem[];
+  /** Real backend: notes on an ok row (e.g. `not_collected`); ok rows carry no problems. */
+  warnings?: EventRosterProblem[];
+}
+export interface EventRosterDuplicate { index: number; kind: 'in_list' | 'already_registered'; otherIndex?: number; registrationStatus?: string }
+/** POST /b2b/organizations/:id/event-orders/roster/validate (§3.10). */
+export interface EventRosterValidation {
+  rows: EventRosterRow[]; duplicates: EventRosterDuplicate[]; summary: { total: number; ok: number; problems: number; duplicates: number };
+  lines: Array<{ ticketTypeId: string; quantity: number }>; quote: EventQuote | null; availability: EventAvailabilityMap; fields: ParticipantFields;
+  consentText: EventConsentText; refundPolicy: EventRefundPolicy | null;
+  capacityShort: Array<{ ticketTypeId: string; requested: number; remaining: number }>;
+}
+export interface EventOrder {
+  id: string; reference: string; eventId: string; status: EventOrderStatus; currency: string; subtotalTzs: number; discountTzs: number; feesTzs: number;
+  totalTzs: number; holdExpiresAt: string | null; holdCycle?: number; createdAt: string; teamId: string | null; closedAt?: string | null; closeReason?: string | null;
+  organizationId?: string | null; costCentre?: string | null; purchaserReference?: string | null; termsAcceptedAt?: string | null; consentTextVersion?: string | null;
+  createdBy?: { name: string | null } | null;
+}
+export interface EventOrderRegistration {
+  id: string; ticketTypeId: string; categoryId: string; firstName: string; lastName: string; status: EventRegistrationStatus; consentBasis: EventConsentBasis;
+  isSelf?: boolean; claimState: EventClaimState;
+  /** NOT IN THE SPEC: when the claim invitation was sent (S3 column `claimInvitedAt`) and how often; null = none sent. */
+  claimInvitedAt?: string | null; claimInviteCount?: number; hasContact?: boolean;
+  /** Same data nested (backend S4): the portal reads the flat fields first, then this. */
+  invitation?: { sentAt: string | null; count: number; hasContact: boolean } | null;
+  phone?: string | null; email?: string | null; dateOfBirth?: string | null; gender?: string | null;
+  kitSize?: string | null; groupLabel?: string | null; cancelReason?: string | null; categoryName?: string; ticketTypeName?: string;
+}
+export type EventOrderEvent = { id: string; slug: string; title: string; startsAt: string; timezone: string; utcOffsetMinutes: number; timezoneAbbr: string; heroThumbUrl: string | null };
+/** GET /b2b/organizations/:id/event-orders rows (§3.6 shape + §3.10 extras). */
+export interface CorporateEventOrderRow {
+  id: string; reference: string; status: EventOrderStatus; event: EventOrderEvent; placesCount: number; totalTzs: number; currency: string;
+  holdExpiresAt: string | null; createdAt: string; closedAt: string | null; closeReason: string | null;
+  createdBy?: { name: string | null } | null; costCentre?: string | null; purchaserReference?: string | null;
+}
+export interface CorporateEventOrderDetail {
+  order: EventOrder; lines: EventQuoteLine[]; registrations: EventOrderRegistration[];
+  event: EventSummary & { refundPolicy?: EventRefundPolicy | null; contact?: { email: string | null; phone: string | null; whatsapp: string | null } | null; shareUrl?: string | null };
+  team: { id: string; name: string; teamType: string; memberCount: number } | null;
+  next: { payment: 'none' | 'manual' | 'provider'; instructions: EventOrgPaymentInstructions | null }; allowedActions: Array<'cancel' | 'cancel_refund'>;
+  createdBy?: { name: string | null } | null; costCentre?: string | null; purchaserReference?: string | null;
+  /** Events S4 (spec §3.5): latest payment and the order's refunds. */
+  payment?: EventPaymentView | null; refunds?: EventRefundView[];
+}
+/** 201 of POST /b2b/organizations/:id/event-orders (§3.5 + organizationId). */
+export interface CorporateEventOrderCreated {
+  order: EventOrder; lines: EventQuoteLine[]; registrations: EventOrderRegistration[]; holdExpiresAt: string | null;
+  next: { payment: 'none' | 'manual' | 'provider'; instructions: unknown | null }; event: EventSummary; replayed: boolean; organizationId?: string;
+}
+export interface CorporateEventOrderBody {
+  eventId: string; rows: Array<Partial<EventParticipantInput> & { ticketTypeId?: string | null; categoryId?: string | null; category?: string; ticketType?: string; group?: string | null }>;
+  costCentre?: string; purchaserReference?: string; team?: { create: { name: string } }; acceptedTerms: true; consentTextVersion: string; expectedTotalTzs: number;
+}
+/** Organizer and admin registration rows (§3.13): the server masks reserved names for organizers; never contact fields. */
+export interface EventRegistrationRow {
+  id: string; participant: { name: string }; categoryName: string; ticketTypeName: string; status: EventRegistrationStatus; orderReference: string;
+  teamName: string | null; kitSize: string | null; createdAt: string; claimed: boolean; groupLabel?: string | null;
+}
+export interface EventRegistrationsSummary {
+  byStatus: { reserved: number; confirmed: number; cancelled: number };
+  byCategory: Array<{ categoryId: string; name: string; capacity: number | null; sold: number; held: number }>;
+}
+export interface EventOrderRow {
+  id: string; reference: string; status: EventOrderStatus; purchaser: { type: 'member' | 'organization'; label: string }; placesCount: number;
+  totalTzs: number; feesTzs: number; currency: string; createdAt: string; holdExpiresAt: string | null; closedAt: string | null; closeReason: string | null;
+}
+/** GET /admin/events/:id/orders/:orderId (functions events-registration adminGetOrder): the order detail is nested, not flat. */
+export interface AdminEventOrderDetail {
+  order: EventOrder; lines: EventQuoteLine[]; registrations: EventOrderRegistration[];
+  event?: EventSummary | null; team?: { id: string; name: string; teamType: string; memberCount: number } | null;
+  next?: { payment: 'none' | 'manual' | 'provider'; instructions: unknown | null }; allowedActions?: string[];
+  purchaser?: { type: 'member' | 'organization'; id?: string | null; label: string | null }; createdBy?: { id?: string; name: string | null } | null;
+  /**
+   * Events S4 (backend #270): the staff view of the order's money is `paymentPanel` (payments newest first, with the EventPayment
+   * `status`), its ticket counts and refunds. The member-style `payment` is not used for staff data.
+   */
+  paymentPanel?: { payments?: AdminEventOrderPayment[]; tickets?: unknown; refunds?: EventRefundView[] } | null; refunds?: EventRefundView[];
+}
+// ─── Events S4: payments, refunds and finance (design spec events-s4-payments-and-tickets §3, §6; decisions D23-D28) ───
+// Whole TZS integers everywhere (D4). Fields marked "NOT IN THE SPEC" are read defensively (optional) and listed in the PR.
+export type EventPaymentState = 'none' | 'submitted' | 'processing' | 'confirmed' | 'rejected' | 'failed' | 'expired' | 'needs_attention';
+export type EventPaymentMethod = 'manual' | 'provider' | 'free';
+export type EventRejectCode = 'reference_not_found' | 'amount_mismatch' | 'wrong_account' | 'duplicate_reference' | 'other';
+/** PaymentView (§3.5): what the purchaser (and a corporate billing user) sees about their own payment. */
+export interface EventPaymentView {
+  id: string; state: EventPaymentState; method: EventPaymentMethod; amountTzs: number; currency: string;
+  reference: string | null; payerPhoneMasked: string | null; submittedAt: string | null; decidedAt: string | null; confirmTargetAt: string | null;
+  rejectCode: EventRejectCode | null; memberNote: string | null; late: boolean; canRetry: boolean; refundId: string | null;
+  /** NOT IN THE SPEC: the corporate method and paid-on day the billing user sent (stored on EventPayment, §3.4.3). */
+  payerMethod?: 'bank_transfer' | 'mobile_money' | null; paidOn?: string | null;
+}
+/** RefundView (§3.5). */
+export interface EventRefundView {
+  id: string; status: RefundStatus; scope: EventRefundScope; amountTzs: number; currency: string; requestedAt: string | null; decidedAt: string | null;
+  paidAt: string | null; paidTo: string | null; paymentReference: string | null; rejectionNote: string | null;
+}
+/** `next.instructions` of an organisation order (§3.4.3). */
+export interface EventOrgPaymentInstructions {
+  kind: 'organisation'; bankName: string | null; accountName: string | null; accountNumber: string | null; branch: string | null;
+  lipaNamba: string | null; lipaNambaName: string | null; notes: string | null; reference: string; amountTzs: number;
+}
+export interface EventPaymentStatus {
+  order: { id: string; status: EventOrderStatus; holdExpiresAt: string | null; totalTzs: number; currency: string };
+  payment: EventPaymentView | null; refund: EventRefundView | null;
+}
+/** Body of POST /b2b/organizations/:id/event-orders/:orderId/payment (§3.4.3). `paidOn` is an EAT day (YYYY-MM-DD). */
+export interface CorporateEventPaymentBody { method: 'bank_transfer' | 'mobile_money'; reference: string; paidOn: string; note?: string }
+/** GET …/cancel-preview (§3.12.2). */
+export type EventCancelBlock = 'payment_submitted' | 'refund_in_progress' | 'cancellation_window_closed' | 'event_cancelled' | 'purchaser_only' | 'kit_collected';
+export interface EventCancelPreview {
+  eligible: boolean; mode: 'auto' | 'none' | 'manual_review' | 'closed'; percent: number; paidTzs: number; refundTzs: number; currency: string;
+  deadlineAt: string | null; policy: { preset: RefundPolicyPreset | null; text: Bilingual | null; generated?: { en: string; sw: string } | null }; places?: Array<{ registrationId: string; name: string; paidTzs: number; refundTzs: number }>;
+  releaseInventory: boolean; blocked: EventCancelBlock | null;
+}
+/** Decision of an event payment: the request (or the row spread) plus the confirmation outcome (§3.9.4). */
+export interface EventPaymentDecision {
+  paymentRequest?: PaymentRequest; event?: { outcome: 'confirmed' | 'reheld' | 'refund_raised'; reason?: string; refundId?: string };
+}
+/** GET /organizer/events/:id/finance (§3.14): totals only, never a payer field. */
+export interface EventFinance {
+  eventId: string; currency: string; asOf: string; paidTzs: number; refundedTzs: number; refundPendingTzs: number; awaitingPaymentTzs: number;
+  commissionPct: number | null; commissionTzs: number; expectedNetTzs: number;
+  orders: { paid: number; refunded: number; partlyRefunded: number };
+  byTicketType: Array<{ ticketTypeId: string; name: string; sold: number; grossTzs: number }>;
+  settlement: { state: string };
+}
+/** GET /admin/events/:eventId/cancel-preview (§3.12.4). */
+export interface EventCancelImpact {
+  awaitingOrders: number; awaitingWithSubmittedPayment: number; paidOrders: number; paidPlaces: number; totalPaidTzs: number;
+  alreadyRefundedTzs: number; refundableTzs: number; openRefunds: number;
+}
+/** POST /admin/events/:eventId/refund-batch (§3.12.4). */
+export interface EventRefundBatchResult { batchId: string; created: number; existing: number; remaining: number; amountTzs: number }
+export type AdminEventCancelBody = { reason?: string; note?: Bilingual; refundPaidOrders?: boolean; expectedRefundableTzs?: number };
+/** Cancel response: `{ status }` today; the batch fields are read when the backend adds them (NOT IN THE SPEC, see the PR). */
+/** `batch.error` (with `resumeWith`) when raising the refunds failed after the event was cancelled (backend #270). */
+export type AdminEventCancelResult = { status: EventStatus; batch?: (Partial<EventRefundBatchResult> & { error?: string; status?: string | null; resumeWith?: string; released?: number; failed?: number }) | null } & Partial<EventRefundBatchResult>;
+/** GET /admin/events/:id/orders/:orderId/cancel-preview (backend #270): the amount per refund mode. */
+export interface AdminOrderCancelPreview {
+  eligible: boolean; blocked: string | null; paidTzs: number; currency: string; releaseInventory: boolean;
+  modes: { full: { refundTzs: number }; policy: { evaluable: boolean; refundTzs: number | null; mode?: string; percent?: number; error?: string }; none: { refundTzs: number; requiresScope?: string } };
+  policy: { preset: RefundPolicyPreset | null; generated?: { en: string; sw: string } | null };
+}
+export type RefundBatchDecisionResult = { approved?: number; failed?: number; results?: Array<{ refundId: string; ok: boolean; error?: string }> };
+export type AdminCancelRefundMode = 'full' | 'policy' | 'none';
+/** NOT IN THE SPEC: the payment block of GET /admin/events/:eventId/orders/:id (the S3 detail grows these for the order panel, §6.4). */
+export interface AdminEventOrderPayment {
+  id?: string; status: string; state?: EventPaymentState; method: EventPaymentMethod; amountTzs: number; expectedTzs?: number | null; currency?: string;
+  reference?: string | null; payerPhone?: string | null; submittedAt?: string | null; verifiedAt?: string | null; verifiedByName?: string | null;
+  decidedAt?: string | null; decidedByName?: string | null; rejectCode?: EventRejectCode | null; memberNote?: string | null; late?: boolean;
+  repairable?: boolean; failureReason?: string | null; refundId?: string | null; paymentRequestId?: string | null;
+  ticketsIssuedAt?: string | null; holdHistory?: Array<{ at: string; holdExpiresAt: string }>;
+}
+
+/** GET /events/:id (S2 §14.2): the public detail a corporate coordinator reads before registering staff. */
+export type PublicEventDetail = Omit<EventDocument, 'allowedActions' | 'submittedAt' | 'rejection' | 'changeLogCount' | 'version'> & { version?: number };
