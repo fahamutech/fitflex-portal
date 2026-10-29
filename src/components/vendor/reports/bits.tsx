@@ -8,7 +8,7 @@ import { money } from '@/lib/admin-utils';
 import type { MessageKey } from '@/lib/i18n';
 import { errorBody, errorCode, fmt } from '@/lib/vendor';
 import {
-  bucketWords, channelKey, clock12, periodWords, rangeProblemKey, reportsApi,
+  bucketWords, channelKey, reportClock, periodWords, rangeProblemKey, reportsApi,
   type ReportGroupBy, type ReportHead, type ReportOf, type ReportQuery, type ReportView,
 } from '@/lib/vendor-reports';
 import { Button, Card, EmptyState, ErrorState, Skeleton, SkeletonCard, SkeletonTable } from '@/components/shared';
@@ -20,6 +20,8 @@ export type Loaded<T> =
   | { state: 'loading' }
   | { state: 'failed' }
   | { state: 'invalid'; messageKey: MessageKey }
+  /** The server switched the area or this section off: nothing is shown while /vendor/me is asked again. */
+  | { state: 'off' }
   | { state: 'ready'; data: T };
 
 const RANGE_REASONS: Record<string, 'invalid' | 'future' | 'toBeforeFrom' | 'tooLong'> = {
@@ -64,6 +66,13 @@ export function useReport<V extends ReportView>(view: V, query: ReportQuery, ena
         setValue({ state: 'failed' });
         return;
       }
+      if (code === 'feature_disabled') {
+        // Reports (or this section's tool) switched off: leave loading, then the Shell sends the person home
+        // once /vendor/me says so, or the page drops the section (spec §0.1: never "feature off").
+        setValue({ state: 'off' });
+        vendor.handleError(err);
+        return;
+      }
       if (!vendor.handleError(err)) setValue({ state: 'failed' });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -91,7 +100,7 @@ export function HeaderLine({ head, view }: { head: ReportHead; view: ReportView 
   const period = `${periodWords(head.from, head.to, locale)}${head.inProgress ? ` ${t('vendor.reports.inProgress')}` : ''}`;
   return (
     <p className="text-sm text-[var(--color-fg-quaternary)]" data-testid="report-header-line">
-      {period} · {channel} · <span aria-live="polite">{fmt(t('vendor.reports.updated'), { time: clock12(head.generatedAt, locale) })}</span>
+      {period} · {channel} · <span aria-live="polite">{fmt(t('vendor.reports.updated'), { time: reportClock(head.generatedAt, locale) })}</span>
     </p>
   );
 }
@@ -149,6 +158,7 @@ export function ViewState<T>({ value, onRetry, children, cards }: { value: Loade
   const { t } = useApp();
   if (value.state === 'loading') return <ViewLoading cards={cards} />;
   if (value.state === 'failed') return <ViewFailed onRetry={onRetry} />;
+  if (value.state === 'off') return <div data-testid="report-off" />;
   if (value.state === 'invalid') return <p role="alert" className="text-sm font-medium text-[var(--color-error-700)]" data-testid="report-range-error">{t(value.messageKey)}</p>;
   return <>{children(value.data)}</>;
 }

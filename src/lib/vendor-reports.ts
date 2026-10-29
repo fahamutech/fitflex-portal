@@ -252,14 +252,17 @@ export function bucketWords(start: string, end: string, groupBy: ReportGroupBy |
   const [, m2, d2] = parts(end);
   return m1 === m2 ? `${d1}–${d2} ${monthName(locale, m2)}` : `${d1} ${monthName(locale, m1)} – ${d2} ${monthName(locale, m2)}`;
 }
-/** "2:05 pm" / "2:05 mchana" in EAT. */
-export function clock12(iso: string | null | undefined, locale: Locale) {
+/**
+ * The time of day in EAT, as the rest of the portal and the report PDF write it: English 24-hour "14:05";
+ * Swahili 12-hour with the part of the day "2:05 mchana" (glossary 2026-10-20).
+ */
+export function reportClock(iso: string | null | undefined, locale: Locale) {
   const ms = Date.parse(iso ?? '');
   if (!Number.isFinite(ms)) return '—';
   const d = new Date(ms + 3 * 3_600_000); // EAT has no DST: read the UTC fields of the shifted time.
   const h = d.getUTCHours();
-  const time = `${h % 12 === 0 ? 12 : h % 12}:${String(d.getUTCMinutes()).padStart(2, '0')}`;
-  return locale === 'sw' ? `${time} ${swDayPeriod(h)}` : `${time} ${h < 12 ? 'am' : 'pm'}`;
+  const mm = String(d.getUTCMinutes()).padStart(2, '0');
+  return locale === 'sw' ? `${h % 12 === 0 ? 12 : h % 12}:${mm} ${swDayPeriod(h)}` : `${String(h).padStart(2, '0')}:${mm}`;
 }
 
 /** Days of cover in words (spec §6, Q-9): the server's coverState and daysOfCover, never recomputed here. */
@@ -300,18 +303,18 @@ const slug = (text: string | null | undefined) =>
  * one date when from = to; the summary PDF is "report"; stock value is dated today. Used when the browser cannot read
  * Content-Disposition (cross-origin, the header is not exposed).
  */
-export function reportFileName(businessName: string | null | undefined, view: ReportView, from: string | undefined, to: string | undefined, today = eatToday()) {
+export function reportFileName(name: string | null | undefined, view: ReportView, from: string | undefined, to: string | undefined, today = eatToday()) {
   const section = view === 'overview' ? 'report' : SECTION_OF[view];
   const ext = view === 'overview' ? 'pdf' : 'csv';
   const [a, b] = view === 'stock' ? [today, null] : [from ?? '', to ?? null];
-  return `${slug(businessName || 'vendor')}_${section}_${a}${b && b !== a ? `_${b}` : ''}.${ext}`;
+  return `${slug(name || 'vendor')}_${section}_${a}${b && b !== a ? `_${b}` : ''}.${ext}`;
 }
 
 export const reportsApi = {
   get: <V extends ReportView>(token: string, view: V, query: ReportQuery, signal?: AbortSignal) =>
     request<ReportOf[V]>(`/vendor/reports/${SECTION_OF[view]}${qs(queryFor(view, query))}`, { signal }, token),
   /** CSV of a section, or the summary as PDF (overview). → the file and the server's file name. */
-  file: async (token: string, view: ReportView, query: ReportQuery, lang: Locale, businessName?: string | null) => {
+  file: async (token: string, view: ReportView, query: ReportQuery, lang: Locale, fileBaseName?: string | null) => {
     const format = view === 'overview' ? 'pdf' : 'csv';
     const q = { ...queryFor(view, { ...query, cursor: null, limit: undefined }), format, lang };
     const res = await fetch(`${API_BASE}/vendor/reports/${SECTION_OF[view]}${qs(q)}`, {
@@ -324,7 +327,7 @@ export const reportsApi = {
       throw new ApiError(res.status, body);
     }
     const disposition = res.headers.get('content-disposition') ?? '';
-    const name = /filename="?([^";]+)"?/i.exec(disposition)?.[1] ?? reportFileName(businessName, view, query.from, query.to);
+    const name = /filename="?([^";]+)"?/i.exec(disposition)?.[1] ?? reportFileName(fileBaseName, view, query.from, query.to);
     return { blob: await res.blob(), fileName: name };
   },
 };

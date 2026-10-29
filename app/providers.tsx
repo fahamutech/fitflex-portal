@@ -21,6 +21,8 @@ export interface PortalAppUser {
   organizationUser?: boolean;
   /** Their roles across the organisations they belong to (which screens to offer; the server decides what each shows). */
   organizationRoles?: string[];
+  /** The account's display name as the sign-in answer gave it (vendor reports name exported files with it). */
+  displayName?: string | null;
 }
 
 interface AppCtx {

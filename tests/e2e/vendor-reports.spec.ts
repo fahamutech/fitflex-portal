@@ -31,7 +31,7 @@ const eatToday = () => new Date(Date.now() + 3 * 3_600_000).toISOString().slice(
 const addDays = (day: string, n: number) => new Date(Date.parse(`${day}T00:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10);
 const TODAY = eatToday();
 const MONTH_START = `${TODAY.slice(0, 7)}-01`;
-// 11:05 UTC = 14:05 EAT → "2:05 pm" / "2:05 mchana".
+// 11:05 UTC = 14:05 EAT → "14:05" (English, 24-hour) / "2:05 mchana" (Swahili).
 const GENERATED = `${TODAY}T11:05:00.000Z`;
 
 const zero = () => ({ grossTzs: 0, discountTzs: 0, refundTzs: 0, netTzs: 0, vatIncludedTzs: 0, count: 0, itemsSold: 0 });
@@ -267,11 +267,11 @@ test.describe('gating', () => {
 });
 
 test.describe('views', () => {
-  test('overview: figures, header line with the 12-hour clock, chart summary and table, top products, methods', async ({ page }) => {
+  test('overview: figures, header line with the 24-hour clock (English), chart summary and table, top products, methods', async ({ page }) => {
     await signedInAs(page, VENDOR);
     const calls = await mockApi(page, base());
     await page.goto('/vendor/reports/');
-    await expect(page.getByTestId('report-header-line')).toContainText('(so far) · All sales · Updated 2:05 pm');
+    await expect(page.getByTestId('report-header-line')).toContainText('(so far) · All sales · Updated 14:05');
     await expect(page.getByTestId('ov-net')).toContainText('TSh 470,000');
     await expect(page.getByTestId('ov-net')).toContainText('Gross TSh 520,000 · Discounts TSh 20,000');
     await expect(page.getByTestId('ov-profit')).toContainText('TSh 123,000');
@@ -334,7 +334,7 @@ test.describe('views', () => {
     await signedInAs(page, VENDOR);
     const calls = await mockApi(page, base());
     await page.goto('/vendor/reports/?view=stock');
-    await expect(page.getByTestId('stock-as-of')).toHaveText('As of 2:05 pm today. The period you picked does not apply.');
+    await expect(page.getByTestId('stock-as-of')).toHaveText('As of 14:05 today. The period you picked does not apply.');
     await expect(page.getByTestId('stock-cost')).toContainText('TSh 500,000');
     await expect(page.getByTestId('stock-cost-unknown')).toHaveText('1 products in stock have no cost price, so they are not in the cost value.');
     await expect(page.getByTestId('stock-table').getByText('Unknown')).toBeVisible();
@@ -530,14 +530,94 @@ test.describe('export', () => {
   });
 });
 
+test.describe('review fixes', () => {
+  test('export refusals: 429 rate_limited names the minutes (rounded up, at least 1); 503 pdf_unavailable has its own message', async ({ page }) => {
+    await signedInAs(page, VENDOR);
+    let retryAfter: number | undefined = 61;
+    const calls = await mockApi(page, base({
+      'GET /vendor/reports/sales': req => (new URL(req.url()).searchParams.get('format') === 'csv'
+        ? { status: 429, json: { error: 'rate_limited', ...(retryAfter == null ? {} : { retryAfterSeconds: retryAfter }) }, headers: { 'retry-after': '61' } }
+        : { json: sales(req) }),
+      'GET /vendor/reports/summary': req => (new URL(req.url()).searchParams.get('format') === 'pdf'
+        ? { status: 503, json: { error: 'pdf_unavailable' } }
+        : { json: summary(req) }),
+    }));
+    await page.goto('/vendor/reports/?view=sales');
+    await expect(page.getByTestId('sales-net')).toBeVisible();
+    await page.getByTestId('report-export').click();
+    await page.getByTestId('export-sales').click();
+    await expect(page.getByTestId('report-export-notice')).toHaveText("You've downloaded too often. Try again in 2 minute(s).");
+    retryAfter = 5;
+    await page.getByTestId('export-sales').click();
+    await expect(page.getByTestId('report-export-notice')).toHaveText("You've downloaded too often. Try again in 1 minute(s).");
+    retryAfter = undefined;
+    await page.getByTestId('export-sales').click();
+    await expect(page.getByTestId('report-export-notice')).toHaveText("You've downloaded too often. Try again in 1 minute(s).");
+    await page.getByTestId('export-overview').click();
+    await expect(page.getByTestId('report-export-notice')).toHaveText("The PDF can't be made right now. Try again later, or download a CSV instead.");
+    expect(calls.outside).toEqual([]);
+  });
+
+  test('429 in Swahili', async ({ page }) => {
+    await signedInAs(page, VENDOR, 'sw');
+    await mockApi(page, base({
+      'GET /vendor/reports/summary': req => (new URL(req.url()).searchParams.get('format') === 'pdf'
+        ? { status: 429, json: { error: 'rate_limited', retryAfterSeconds: 150 } } : { json: summary(req) }),
+    }));
+    await page.goto('/vendor/reports/');
+    await page.getByTestId('report-export').click();
+    await page.getByTestId('export-overview').click();
+    await expect(page.getByTestId('report-export-notice')).toHaveText('Umepakua mara nyingi mno. Jaribu tena baada ya dakika 3.');
+  });
+
+  test('feature_disabled from a report: no endless loading; once /vendor/me says off, home with no message', async ({ page }) => {
+    await signedInAs(page, VENDOR);
+    let reportsOn = true;
+    await mockApi(page, base({
+      'GET /vendor/me': () => ({ json: me({ tools: tools({ reports: reportsOn }) }) }),
+      'GET /vendor/reports/summary': () => { reportsOn = false; return { status: 404, json: { error: 'feature_disabled' } }; },
+    }));
+    await page.goto('/vendor/reports/');
+    await expect(page).toHaveURL(/\/vendor\/$/);
+    await expect(page.getByText("You don't have access to that.")).toHaveCount(0);
+    await expect(page.getByTestId('report-loading')).toHaveCount(0);
+  });
+
+  test('feature_disabled for one section while the area is on: the section leaves loading', async ({ page }) => {
+    await signedInAs(page, VENDOR);
+    await mockApi(page, base({ 'GET /vendor/reports/stock-value': { status: 404, json: { error: 'feature_disabled' } } }));
+    await page.goto('/vendor/reports/?view=stock');
+    await expect(page.getByTestId('report-off')).toBeAttached();
+    await expect(page.getByTestId('report-loading')).toHaveCount(0);
+  });
+
+  test('file name fallback: no business name → the vendor display name, by the server slug rule', async ({ page }) => {
+    await signedInAs(page, { ...VENDOR, displayName: 'Rehema Ãlí & Co. Ltd' });
+    await mockApi(page, base({
+      'GET /vendor/me': { json: me({ businessName: null }) },
+      'GET /vendor/reports/sales': req => (new URL(req.url()).searchParams.get('format') === 'csv'
+        ? { body: 'x', headers: { 'content-type': 'text/csv; charset=utf-8' } } : { json: sales(req) }),
+    }));
+    await page.goto('/vendor/reports/?view=sales');
+    await expect(page.getByTestId('sales-net')).toBeVisible();
+    await page.getByTestId('report-export').click();
+    const download = page.waitForEvent('download');
+    await page.getByTestId('export-sales').click();
+    // slug(): NFKD, drop non-word characters, lower case, spaces → "-".
+    expect((await download).suggestedFilename()).toBe(`rehema-ali-co-ltd_sales_${MONTH_START}${MONTH_START === TODAY ? '' : `_${TODAY}`}.csv`);
+  });
+});
+
 test('Swahili: nav, labels and the 12-hour clock with the part of the day', async ({ page }) => {
   await signedInAs(page, VENDOR, 'sw');
   const calls = await mockApi(page, base());
   await page.goto('/vendor/reports/');
   await expect(nav(page).getByRole('link', { name: 'Ripoti', exact: true })).toBeVisible();
   await expect(page.getByTestId('report-header-line')).toContainText('(hadi sasa) · Mauzo yote · Imesasishwa 2:05 mchana');
-  await expect(page.getByTestId('ov-net')).toContainText('Mauzo halisi');
+  await expect(page.getByTestId('ov-net')).toContainText('Mauzo baada ya makato');
+  await expect(page.getByText(/halisi/)).toHaveCount(0);
   await page.getByRole('button', { name: 'Mauzo ya app baada ya kamisheni', exact: true }).click();
-  await expect(page.getByTestId('payouts-week').nth(0)).toContainText('Yamelipwa');
+  await expect(page.getByTestId('payouts-week').nth(0)).toContainText('Imelipwa');
+  await expect(page.getByTestId('payouts-waiting')).toContainText('Delivery imekamilika, inasubiri malipo');
   expect(calls.outside).toEqual([]);
 });

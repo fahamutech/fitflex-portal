@@ -7,7 +7,7 @@ import { formatNumber, money } from '@/lib/admin-utils';
 import type { MessageKey } from '@/lib/i18n';
 import { eatDayOf, fmt } from '@/lib/vendor';
 import {
-  bucketWords, clock12, coverText, dayShort, PRODUCT_SORTS, reportsApi,
+  bucketWords, reportClock, coverText, dayShort, PRODUCT_SORTS, reportsApi,
   type ProductRow, type ProductSort, type ProfitReport, type ReportQuery, type StockReport, type StockRow,
 } from '@/lib/vendor-reports';
 import { Alert, Badge, Button, Card, CardContent, CardHeader, Input, Segmented, Spinner, Table, TBody, Td, Th, THead, Tr } from '@/components/shared';
@@ -157,7 +157,7 @@ export function StockView() {
         const rows = [...d.rows].sort(STOCK_SORTERS[sort]);
         return (
           <div className="space-y-4">
-            <p className="text-sm text-[var(--color-fg-quaternary)]" data-testid="stock-as-of">{fmt(t('vendor.reports.stock.asOf'), { time: clock12(d.asOf, locale) })}</p>
+            <p className="text-sm text-[var(--color-fg-quaternary)]" data-testid="stock-as-of">{fmt(t('vendor.reports.stock.asOf'), { time: reportClock(d.asOf, locale) })}</p>
             <div className={figureGrid}>
               <Figure strong label={t('vendor.reports.stock.atRetail')} value={money(d.totals.atRetailTzs)} testId="stock-retail" />
               {cost && <Figure strong label={t('vendor.reports.stock.atCost')} value={money(d.totals.atCostTzs)} testId="stock-cost" />}
