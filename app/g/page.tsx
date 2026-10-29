@@ -15,7 +15,6 @@ type View =
   | { kind: 'rate_limited'; retryAfterSeconds: number | null }
   | { kind: 'error' };
 
-const money = (n: number) => n.toLocaleString('en-US');
 
 /** A section heading plus its content; nothing at all when there is nothing to show. */
 function Section({ title, testId, children }: { title: string; testId: string; children: React.ReactNode }) {
@@ -138,10 +137,10 @@ export default function PublicGymPage() {
 }
 
 function Profile({ profile }: { profile: WebGymProfile }) {
-  const { t } = useApp();
+  const { t, locale } = useApp();
   const g = profile.gym;
   const name = g.name ?? '';
-  const photos = (g.photos ?? []).map(safeImage).filter((x): x is string => !!x);
+  const photos = (g.photos ?? []).map(x => safeImage(x)).filter((x): x is string => !!x);
   const facilities = g.facilities ?? [];
   const amenities = (g.amenities ?? []).filter(a => !facilities.includes(a));
   const equipment = g.equipment ?? [];
@@ -153,7 +152,7 @@ function Profile({ profile }: { profile: WebGymProfile }) {
   const tiers = profile.membership?.passTiers ?? [];
   const hours = hoursView(g.operatingHours);
   const map = mapUrl(g.lat, g.lng);
-  const price = (n: number) => fmt(t('web.gym.price'), { amount: money(n) });
+  const price = (n: number) => fmt(t('web.gym.price'), { amount: n.toLocaleString(locale === 'sw' ? 'sw-TZ' : 'en-US') });
   const rated = typeof g.rating === 'number' && g.rating > 0;
   const hasReviews = typeof g.reviewCount === 'number' && g.reviewCount > 0;
 
@@ -192,7 +191,7 @@ function Profile({ profile }: { profile: WebGymProfile }) {
             <span className="inline-flex items-center gap-1 text-sm text-[var(--color-fg-secondary)]" data-testid="web-gym-rating">
               <Star aria-hidden="true" className="h-4 w-4 text-[var(--color-warning-500)]" />
               {(g.rating as number).toFixed(1)}
-              {hasReviews && <span className="text-[var(--color-fg-tertiary)]">({fmt(t('web.gym.reviews'), { n: g.reviewCount as number })})</span>}
+              {hasReviews && <span className="text-[var(--color-fg-tertiary)]">({g.reviewCount === 1 ? t('web.gym.reviewsOne') : fmt(t('web.gym.reviews'), { n: g.reviewCount as number })})</span>}
             </span>
           )}
         </div>
@@ -258,7 +257,7 @@ function Profile({ profile }: { profile: WebGymProfile }) {
         <Section title={t('web.gym.plans')} testId="web-gym-plans">
           <ul className="divide-y divide-[var(--color-border-secondary)]">
             {plans.map(p => (
-              <li key={p.plan} className="flex items-baseline justify-between py-2 text-sm">
+              <li key={p.plan} className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 py-2 text-sm">
                 <span className="font-medium text-[var(--color-fg-primary)]">{p.label}</span>
                 <span className="text-[var(--color-fg-secondary)]">{price(p.priceTzs)} <span className="text-[var(--color-fg-tertiary)]">{p.period}</span></span>
               </li>
@@ -271,8 +270,8 @@ function Profile({ profile }: { profile: WebGymProfile }) {
         <Section title={t('web.gym.passTiers')} testId="web-gym-pass-tiers">
           <ul className="divide-y divide-[var(--color-border-secondary)]">
             {tiers.map(p => (
-              <li key={p.key} className="flex items-baseline justify-between gap-3 py-2 text-sm">
-                <span className="font-medium text-[var(--color-fg-primary)]">{p.label}<span className="ml-2 font-normal text-[var(--color-fg-tertiary)]">{p.visitsLabel}</span></span>
+              <li key={p.key} className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 py-2 text-sm">
+                <span className="font-medium text-[var(--color-fg-primary)]">{p.label}<span className="block font-normal text-[var(--color-fg-tertiary)]">{p.visitsLabel}</span></span>
                 {typeof p.monthlyPriceTzs === 'number' && <span className="text-[var(--color-fg-secondary)]">{price(p.monthlyPriceTzs)}</span>}
               </li>
             ))}

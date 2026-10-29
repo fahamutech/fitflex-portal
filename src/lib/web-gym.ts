@@ -6,7 +6,7 @@ export type DayHours = string | { open: string | null; close: string | null } | 
 export type OperatingHours = null | string | Partial<Record<'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun' | 'default', DayHours>>;
 
 export interface WebGymClass { name: string; schedule: string | Record<string, unknown> | null; priceTzs: number | null; location: string | null }
-export interface WebGymTrainer { name: string | null; photoUrl: string | null; specialties: string[]; rating: number | null; reviewCount: number | null }
+export interface WebGymTrainer { name: string | null; photoUrl: string | null; specialties: string[]; rating: number | null; reviewCount?: number | null }
 export interface WebGym {
   publicRef: string; name: string | null; description: string | null; tier: string; venueType: string; verified: boolean;
   rating: number | null; reviewCount: number | null; photos: string[]; thumbnail: string | null; area: string | null; address: string | null;
@@ -15,7 +15,8 @@ export interface WebGym {
 }
 export interface WebGymProfile {
   lang: 'en' | 'sw';
-  labels: Record<string, string>;
+  /** Older replies carried heading labels; the page uses its own strings. Absent in newer replies. */
+  labels?: Record<string, string>;
   gym: WebGym;
   membership: {
     currency: 'TZS';
@@ -75,9 +76,14 @@ export function mapUrl(lat: number | null, lng: number | null): string | null {
   return `https://www.google.com/maps/search/?api=1&query=${lat},${lng}`;
 }
 
-/** Only images the page can show safely: a data URI image or an https address. */
-export function safeImage(src: unknown): string | null {
-  return typeof src === 'string' && (/^data:image\/(png|jpe?g|webp|gif);base64,/i.test(src) || /^https:\/\//i.test(src)) ? src : null;
+/** Only images the page can show safely: a data URI image, or an https address on the API's own origin. */
+export function safeImage(src: unknown, apiBase: string = API_BASE): string | null {
+  if (typeof src !== 'string') return null;
+  if (/^data:image\/(png|jpeg|webp|gif);base64,/i.test(src)) return src;
+  try {
+    const u = new URL(src);
+    return u.protocol === 'https:' && u.origin === new URL(apiBase).origin ? src : null;
+  } catch { return null; }
 }
 
 const DAYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'] as const;

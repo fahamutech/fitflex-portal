@@ -22,7 +22,7 @@ function profile(lang: 'en' | 'sw', over: Record<string, unknown> = {}) {
       amenities: ['Showers', 'Wi-Fi'], services: ['Yoga'],
       operatingHours: { mon: { open: '06:00', close: '21:00' }, sun: null, default: { open: '07:00', close: '20:00' } },
       classes: [{ name: 'Yoga', schedule: 'Mon 18:00', priceTzs: 5000, location: 'Studio' }],
-      trainers: [{ name: 'Asha M', photoUrl: null, specialties: ['Strength'], rating: 4.8, reviewCount: 3 }],
+      trainers: [{ name: 'Asha M', photoUrl: null, specialties: ['Strength'], rating: 4.8 }],
       ...over,
     },
     membership: {
@@ -59,7 +59,11 @@ test.describe('pure helpers', () => {
     expect(safeImage('javascript:alert(1)')).toBeNull();
     expect(safeImage('data:text/html;base64,AAAA')).toBeNull();
     expect(safeImage(PNG)).toBe(PNG);
-    expect(safeImage('https://x.test/a.jpg')).toBe('https://x.test/a.jpg');
+    expect(safeImage('https://x.test/a.jpg', 'https://api.test')).toBeNull();
+    expect(safeImage('https://api.test/storage/a.jpg', 'https://api.test')).toBe('https://api.test/storage/a.jpg');
+    expect(safeImage('http://api.test/storage/a.jpg', 'https://api.test')).toBeNull();
+    expect(safeImage('https://api.test.evil.com/a.jpg', 'https://api.test')).toBeNull();
+    expect(safeImage('data:image/svg+xml;base64,AAAA')).toBeNull();
     expect(hoursView(null)).toBeNull();
     expect(hoursView('Mon–Sat 6–9')).toEqual({ text: 'Mon–Sat 6–9' });
     const v = hoursView({ mon: { open: '06:00', close: '21:00' }, sun: null, default: { open: '07:00', close: '20:00' } });
@@ -132,6 +136,19 @@ test.describe(FLAG_ON ? 'flag on' : 'flag off', () => {
     for (const id of ['about', 'directions', 'hours', 'plans', 'pass-tiers', 'facilities', 'amenities', 'equipment', 'services', 'classes', 'trainers', 'photos', 'address', 'rating']) {
       await expect(page.getByTestId(`web-gym-${id}`)).toHaveCount(0);
     }
+  });
+
+  test('320 px wide in Swahili: rows wrap, nothing scrolls sideways, amounts use sw-TZ', async ({ page }) => {
+    await mockApi(page, (_n, lang) => ({ status: 200, body: profile(lang as 'en' | 'sw', { reviewCount: 1 }) }));
+    await page.setViewportSize({ width: 320, height: 700 });
+    await open(page, 'sw-TZ');
+    await expect(page.getByTestId('web-gym-pass-tiers')).toContainText('12 ziara');
+    await expect(page.getByTestId('web-gym-rating')).toContainText(messages.sw['web.gym.reviewsOne']);
+    const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+    expect(overflow).toBeLessThanOrEqual(0);
+    const li = page.getByTestId('web-gym-pass-tiers').locator('li').first();
+    const [lab, vis] = await Promise.all([li.locator('span').first().boundingBox(), li.locator('span > span').boundingBox()]);
+    expect(vis!.y).toBeGreaterThan(lab!.y);
   });
 
   test('not found (404) and no q', async ({ page }) => {
