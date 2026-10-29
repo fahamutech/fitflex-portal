@@ -155,7 +155,7 @@ export function newClientRef() {
 }
 
 /** Permissions (and, for some, a switched-on vendor tool) a vendor user needs for each area. */
-export const VENDOR_AREAS: ReadonlyArray<{ href: string; permission: string | null; tool?: keyof VendorTools; nav?: false; quietWhenOff?: true }> = [
+export const VENDOR_AREAS: ReadonlyArray<{ href: string; permission: string | null; tool?: keyof VendorTools; nav?: false; quietWhenOff?: true; noAccessKey?: MessageKey }> = [
   { href: '/vendor', permission: null },
   { href: '/vendor/products', permission: 'products' },
   // Shop banners (Phase 2 S1): owner + staff with `products` (spec Q-10). The nav item also waits for the
@@ -168,7 +168,7 @@ export const VENDOR_AREAS: ReadonlyArray<{ href: string; permission: string | nu
   { href: '/vendor/customers', permission: 'customers', tool: 'customers' },
   // S6: reports need the tool on (fails closed) and the `reports` permission. With the tool off a deep link goes
   // home with no message (spec §0.1, AC-1); without the permission it says "no access" (AC-3).
-  { href: '/vendor/reports', permission: 'reports', tool: 'reports', quietWhenOff: true },
+  { href: '/vendor/reports', permission: 'reports', tool: 'reports', quietWhenOff: true, noAccessKey: 'vendor.reports.noAccess' },
   { href: '/vendor/payouts', permission: 'payments' },
   // S5: the document view needs documents switched on (fails closed); each kind checks its own permission on the
   // page (sale: sales or customers · payment, statement: customers · order: orders). Not a nav item.

@@ -44,6 +44,8 @@ export interface ReportHead {
   timezone: string;
   inProgress: boolean;
   channels: { app: boolean; walkIn: boolean };
+  /** UAT D2 (backend adding it; name to be confirmed): false = this vendor has never sold. Absent = unknown. */
+  hasEverSold?: boolean;
 }
 export interface Voided { count: number; totalTzs: number }
 export interface ChannelTotals { grossTzs: number; discountTzs: number; refundTzs: number; netTzs: number; vatIncludedTzs: number; count: number; itemsSold: number }
@@ -76,7 +78,8 @@ export interface ProductRow {
   unitsSold: number; appUnits: number; walkInUnits: number; netRevenueTzs: number;
   lastSoldAt: string | null; stock: number | null; avgDailyUnits30: number; daysOfCover: number | null; coverState: CoverState;
   noSalesInPeriod: boolean;
-  profitTzs?: number;
+  /** canSeeCost only. null = no cost price (UAT D1; the backend is moving from 0 to null). */
+  profitTzs?: number | null;
 }
 export interface ProductsReport extends ReportHead {
   sort: ProductSort;
@@ -102,7 +105,10 @@ export interface ProfitReport extends ReportHead {
   hasVat: boolean;
   buckets: Array<ProfitFigures & { start: string; end: string; uncostedRevenueTzs: number }>;
   byChannel: { app: ProfitFigures; walkIn: ProfitFigures };
-  byProduct: Array<ProfitFigures & { productId: string; variant: string | null; name: string | null; removed: boolean; units: number }>;
+  byProduct: Array<Omit<ProfitFigures, 'profitTzs' | 'costTzs'> & {
+    productId: string; variant: string | null; name: string | null; removed: boolean; units: number;
+    profitTzs: number | null; costTzs?: number | null;
+  }>;
   uncostedProducts: Array<{ productId: string; variant: string | null; name: string | null; removed: boolean; units: number; revenueTzs: number }>;
 }
 export interface PayoutState { orders: number; grossTzs: number; commissionTzs: number; payoutTzs: number }

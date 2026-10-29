@@ -41,7 +41,7 @@ function ProductsInner() {
   const [categories, setCategories] = useState<Category[]>([]);
   useEffect(() => { api.shopCategories().then(r => setCategories(Array.isArray(r?.categories) ? r.categories : [])).catch(() => setCategories([])); }, []);
 
-  const filter = ledger && params.get('filter') === 'low' ? 'low' : 'all';
+  const filterParam = params.get('filter');
   const q = params.get('q') ?? '';
   const statusParam = params.get('status') as StatusFilter | null;
   const status: StatusFilter = statusParam && (STATUSES as readonly string[]).includes(statusParam) ? statusParam : 'all';
@@ -75,9 +75,20 @@ function ProductsInner() {
   const isLow = (p: VendorProduct) => lowSet.has(lowKey(p.id, null)) || variantsOf(p).some(v => lowSet.has(lowKey(p.id, v.name)));
   const lowProducts = (rows ?? []).filter(isLow);
   const showCost = canSeeCost && (rows ?? []).some(r => 'costTzs' in r);
+  // S6 UAT D7: products without a cost price (client-side; Reports links here from "Add cost prices"). Only for
+  // people who see cost; a variant without its own cost uses the product's (as the stock value report does).
+  const noCost = (p: VendorProduct) => {
+    const vs = variantsOf(p);
+    return vs.length ? vs.some(v => (v.effectiveCostTzs ?? v.costTzs ?? p.costTzs) == null) : p.costTzs == null;
+  };
+  const noCostProducts = showCost ? (rows ?? []).filter(noCost) : [];
+  // While the list loads, keep the asked-for filter (showCost is not known yet); a person who can't see cost gets all.
+  const filter: 'all' | 'low' | 'noCost' = filterParam === 'low' && ledger ? 'low'
+    : filterParam === 'noCost' && canSeeCost && (rows === null || showCost) ? 'noCost' : 'all';
 
   const shown = (rows ?? []).filter(p =>
     (filter !== 'low' || isLow(p))
+    && (filter !== 'noCost' || noCost(p))
     && matchesStatus(p, status)
     && (!q.trim() || p.name.toLowerCase().includes(q.trim().toLowerCase())));
 
@@ -150,6 +161,7 @@ function ProductsInner() {
     if (rows.length === 0) return <EmptyState icon={<PackageOpen />} title={t('vendor.products.empty')} body={t('vendor.products.emptyBody')} />;
     if (shown.length === 0) {
       if (filter === 'low' && !q && status === 'all') return <EmptyState title={t('vendor.stock.lowEmpty')} action={<Button variant="secondary" size="sm" onClick={() => setParam({ filter: null })}>{t('vendor.stock.all')}</Button>} />;
+      if (filter === 'noCost' && !q && status === 'all') return <EmptyState title={t('vendor.products.noCostEmpty')} action={<Button variant="secondary" size="sm" onClick={() => setParam({ filter: null })}>{t('vendor.stock.all')}</Button>} />;
       return <EmptyState title={t('vendor.products.noMatch')} action={<Button variant="secondary" size="sm" onClick={() => setParam({ filter: null, q: null, status: null })}>{t('vendor.products.clearFilters')}</Button>} />;
     }
     return (
@@ -293,12 +305,16 @@ function ProductsInner() {
           <option value="pending">{t('vendor.products.pendingApproval')}</option>
           <option value="rejected">{t('vendor.products.rejected')}</option>
         </Select>
-        {ledger && (
+        {(ledger || showCost) && (
           <Segmented
             className="w-fit flex-wrap"
             value={filter}
-            onChange={v => setParam({ filter: v === 'low' ? 'low' : null })}
-            options={[['all', t('vendor.stock.all')], ['low', fmt(t('vendor.stock.lowFilter'), { n: lowProducts.length })]]}
+            onChange={v => setParam({ filter: v === 'all' ? null : v })}
+            options={[
+              ['all', t('vendor.stock.all')],
+              ...(ledger ? [['low', fmt(t('vendor.stock.lowFilter'), { n: lowProducts.length })] as [string, string]] : []),
+              ...(showCost ? [['noCost', fmt(t('vendor.products.noCostFilter'), { n: noCostProducts.length })] as [string, string]] : []),
+            ]}
           />
         )}
       </div>

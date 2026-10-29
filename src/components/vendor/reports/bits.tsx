@@ -2,11 +2,12 @@
 // Shared pieces of the vendor Reports page (S6): the data hook (latest request wins, one failure per view), the
 // header line, small figure tiles, states and the bar chart with its spoken summary. Every label is an i18n key.
 import { ReactNode, useCallback, useEffect, useRef, useState } from 'react';
+import Link from 'next/link';
 import { Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { BarChart3 } from 'lucide-react';
 import { money } from '@/lib/admin-utils';
 import type { MessageKey } from '@/lib/i18n';
-import { errorBody, errorCode, fmt } from '@/lib/vendor';
+import { canWalkInSales, errorBody, errorCode, fmt } from '@/lib/vendor';
 import {
   bucketWords, channelKey, reportClock, periodWords, rangeProblemKey, reportsApi,
   type ReportGroupBy, type ReportHead, type ReportOf, type ReportQuery, type ReportView,
@@ -119,9 +120,36 @@ export function Figure({ label, value, sub, testId, strong = false }: { label: s
 }
 export const figureGrid = 'grid gap-3 grid-cols-2 lg:grid-cols-4';
 
-/** A minus sign and the word for money going out (refunds, commission); never red alone (§0.4). */
-export const minus = (n: number) => (n > 0 ? `− ${money(n)}` : money(0));
-export const pct = (n: number | null | undefined) => (n == null ? '—' : `${n}%`);
+/** Money going out (discounts, refunds, commission, cost): one format everywhere, "−TSh 39,000" (§0.4, UAT D11). */
+export const minus = (n: number) => (n > 0 ? `\u2212${money(n)}` : money(0));
+/** A percentage with one decimal, "25.0%" (UAT D12); "—" when there is none. */
+export const pct = (n: number | null | undefined) => (n == null || !Number.isFinite(Number(n)) ? '—' : `${Number(n).toFixed(1)}%`);
+
+/** "1 sale" / "3 sales" (UAT D10): the one-key for n = 1, else the many-key; {n} and the other values filled in. */
+export function plural(t: (k: MessageKey) => string, n: number, one: MessageKey, many: MessageKey, vars: Record<string, string | number> = {}) {
+  return fmt(t(n === 1 ? one : many), { n, ...vars });
+}
+
+/**
+ * Profit of a row (UAT D1): never "TSh 0" for a product without a cost price.
+ * - profitTzs null, or the row has a costTzs that is null → unknown, said as "No cost price".
+ * - Interim, until the backend sends null: a 0 with no cost information on the row → unknown ("—" only; a
+ *   Products row carries no costTzs, so it cannot say why).
+ */
+export function ProfitCell({ row }: { row: { profitTzs?: number | null; costTzs?: number | null } }) {
+  const { t } = useApp();
+  const noCost = row.profitTzs === null || ('costTzs' in row && row.costTzs == null);
+  if (noCost) {
+    return (
+      <span data-testid="profit-unknown">
+        <span aria-hidden="true">—</span>
+        <span className="block text-xs text-[var(--color-fg-quaternary)]">{t('vendor.reports.profit.noCostHeading')}</span>
+      </span>
+    );
+  }
+  if (row.profitTzs == null || (row.profitTzs === 0 && !('costTzs' in row))) return <span data-testid="profit-unknown">—</span>;
+  return <>{money(row.profitTzs)}</>;
+}
 
 export function ViewLoading({ cards = 4 }: { cards?: number }) {
   const { t } = useApp();
@@ -140,8 +168,29 @@ export function ViewFailed({ onRetry }: { onRetry: () => void }) {
   const { t } = useApp();
   return <ErrorState title={t('vendor.reports.failed')} onRetry={onRetry} retryLabel={t('common.tryAgain')} />;
 }
-export function NoSales({ from, to, onTryPeriod }: { from: string; to: string; onTryPeriod: () => void }) {
+export function NoSales({ from, to, onTryPeriod, hasEverSold }: { from: string; to: string; onTryPeriod: () => void; hasEverSold?: boolean }) {
   const { t, locale } = useApp();
+  const vendor = useVendor();
+  // UAT D2: a vendor who has never sold sees the first-use message with the actions their permissions allow.
+  // Only when the server says so (hasEverSold === false); absent → the period message as before.
+  if (hasEverSold === false) {
+    const sales = canWalkInSales(vendor.me);
+    const products = vendor.can('products');
+    return (
+      <div data-testid="report-empty-first">
+        <EmptyState
+          icon={<BarChart3 />}
+          title={t('vendor.reports.emptyFirst')}
+          action={(sales || products) ? (
+            <div className="flex flex-wrap justify-center gap-2">
+              {sales && <Link href="/vendor/sales/" className={actionLinkCls} data-testid="report-empty-sale">{t('vendor.reports.recordSale')}</Link>}
+              {products && <Link href="/vendor/products/" className={actionLinkCls} data-testid="report-empty-products">{t('vendor.reports.addProducts')}</Link>}
+            </div>
+          ) : undefined}
+        />
+      </div>
+    );
+  }
   return (
     <div data-testid="report-empty">
       <EmptyState
@@ -212,6 +261,10 @@ export function ReportBarChart({
 
 export const numCell = 'whitespace-nowrap text-right tabular-nums';
 export const linkCls = 'inline-flex min-h-11 items-center text-sm font-semibold text-[var(--color-brand-700)] underline-offset-4 hover:underline';
+/** A link styled as a secondary button (≥44px). */
+export const actionLinkCls = 'inline-flex min-h-11 items-center justify-center rounded-[var(--radius-lg)] border border-[var(--color-border-primary)] bg-[var(--color-bg-primary)] px-4 text-sm font-semibold text-[var(--color-fg-secondary)] hover:bg-[var(--color-bg-secondary)]';
+/** A link inside an Alert: underlined, with a tap target of at least 44px (UAT D7). */
+export const alertLinkCls = 'inline-flex min-h-11 items-center font-semibold underline underline-offset-4';
 /** "Product · variant" with "(removed)". */
 export function productLabel(row: { name: string | null; variant: string | null; removed: boolean }, t: (k: MessageKey) => string) {
   const name = row.name || '—';
