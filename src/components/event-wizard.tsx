@@ -287,7 +287,7 @@ export function EventWizard({ eventId, initialStep, view, onBack, onView }: {
   if (loadState === 'loading') return <PageLoading />;
   if (view === 'changes' && doc) return <EventChangeLog doc={doc} onBack={() => onView(doc.id, null)} />;
   // S3 §6.3: the roster and orders of this event, role-gated (§6.1); an unknown role falls back to the details.
-  if ((view === 'registrations' || view === 'orders' || view === 'finance' || view === 'kit' || view === 'bibs' || view === 'export') && doc) {
+  if ((view === 'registrations' || view === 'orders' || view === 'finance' || view === 'kit' || view === 'bibs' || view === 'export' || view === 'results') && doc) {
     if (!canSeeView(view, org.role)) return <OrganizerForbidden backHref="/organizer/events" />;
     return <OrganizerEventView doc={doc} view={view} role={org.role} onView={v => onView(doc.id, v)} onBack={onBack} />;
   }
@@ -334,7 +334,7 @@ export function EventWizard({ eventId, initialStep, view, onBack, onView }: {
       {doc?.rejection && status === 'draft' && (
         <div data-testid="rejected-banner"><Alert tone="warning">{fmt(t('events.rejected.banner'), { reason: t(rejectReasonKey(doc.rejection.reason)), note: doc.rejection.note ?? '' })}</Alert></div>
       )}
-      {doc && <EventViewTabs view="details" role={org.role} onView={v => onView(doc.id, v)} published={hasRegistrationData(doc)} />}
+      {doc && <EventViewTabs view="details" role={org.role} onView={v => onView(doc.id, v)} published={hasRegistrationData(doc)} eventId={doc.id} status={doc.status} />}
       {status === 'submitted' && <div data-testid="submitted-card"><Alert tone="info">{t('events.submitted.card')}</Alert></div>}
       {doc && !isEditableStatus(status) && status !== 'submitted' && <Alert tone="info">{fmt(t('events.wizard.readOnly'), { status: t(st.key) })}</Alert>}
       {doc && status === 'published' && doc.registrationClosesAt && <Alert tone="info">{fmt(t('events.autoHint.regCloses'), { when: eventDateTime(doc.registrationClosesAt, doc.timezone, locale, doc.timezoneAbbr) })}</Alert>}
