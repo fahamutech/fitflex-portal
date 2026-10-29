@@ -79,10 +79,12 @@ function sale(over: Json = {}): Json {
   };
 }
 const PASS = {
-  passes14DayRule: true, raisedAt: null, raisedOn: null, earliestStart: null,
+  passes14DayRule: true, raisedAt: null, raisedOn: null, earliestStart: null, lastRaiseAt: null,
+  passesHistoryRule: true, listedAt: '2026-09-01T09:00:00.000Z', historyEarliestStart: null,
   priceHistory: [
-    { at: '2026-10-12T09:00:00.000Z', fromTzs: 80000, toTzs: 85000, field: 'priceTzs', raised: true },
-    { at: '2026-10-05T09:00:00.000Z', fromTzs: 82000, toTzs: 79000, field: 'discountPriceTzs', raised: false },
+    { at: '2026-10-12T09:00:00.000Z', on: '2026-10-12', fromTzs: 80000, toTzs: 85000, field: 'priceTzs', raised: true, source: 'trigger' },
+    { at: '2026-10-05T09:00:00.000Z', on: '2026-10-05', fromTzs: 82000, toTzs: 79000, field: 'discountPriceTzs', raised: false, source: 'trigger' },
+    { at: '2026-10-01T09:00:00.000Z', on: '2026-10-01', fromTzs: null, toTzs: 80000, field: 'priceTzs', raised: false, source: 'migration_baseline' },
   ],
   discountLine: { pct: 18, savingTzs: 16000, sellerPays: true }, priceChangedSinceSubmit: false,
 };
@@ -102,6 +104,10 @@ function banner(): Json {
 const ADMIN_PRODUCTS = [
   { id: 'prd_1', vendorId: 'usr_vendor', name: 'Trail runner', priceTzs: 90000, stock: 4, status: 'active', approvalStatus: 'approved' },
   { id: 'prd_9', vendorId: 'usr_other', name: 'Paused rope', priceTzs: 20000, stock: 4, status: 'paused', approvalStatus: 'approved' },
+];
+const PICKER = [
+  { id: 'prd_1', name: 'Trail runner', vendorId: 'usr_vendor', vendorName: 'Dar Fitness Gear', priceTzs: 90000, discountPriceTzs: null, effectivePriceTzs: 90000, maxSalePriceTzs: 85500, stock: 4, image: null },
+  { id: 'prd_7', name: 'Skipping rope', vendorId: 'usr_other', vendorName: 'Arusha Sports', priceTzs: 15000, discountPriceTzs: null, effectivePriceTzs: 15000, maxSalePriceTzs: 14250, stock: 9, image: null },
 ];
 const ADMIN_VENDORS = [{ id: 'usr_vendor', displayName: 'Dar Fitness Gear', userType: 'vendor', approvalStatus: 'approved', accountStatus: 'active' }];
 
@@ -127,6 +133,10 @@ function adminRoutes(o: AdminOpts = {}): Array<[string, RegExp, Handler]> {
     ['POST', /^\/admin\/flash-sales\/([^/]+)\/reject$/, (_r, c, m) => { Object.assign(find(m[1])!, { status: 'rejected', effectiveStatus: 'rejected', statusReason: c.body?.code, statusReasonNote: c.body?.note ?? null, allowedActions: [] }); return { json: { sale: find(m[1]) } }; }],
     ['POST', /^\/admin\/flash-sales\/([^/]+)\/end$/, (_r, c, m) => { Object.assign(find(m[1])!, { status: 'ended', effectiveStatus: 'ended', statusReason: 'ended_by_fitflex', statusReasonNote: c.body?.note, allowedActions: [] }); return { json: { sale: find(m[1]) } }; }],
     ['GET', /^\/admin\/products$/, () => ({ json: ADMIN_PRODUCTS })],
+    ['GET', /^\/admin\/flash-sale-products$/, (_r, c) => {
+      const q = (c.search.get('q') ?? '').toLowerCase();
+      return { json: { items: PICKER.filter(p => !q || p.name.toLowerCase().includes(q)) } };
+    }],
     ['GET', /^\/admin\/vendors$/, () => ({ json: ADMIN_VENDORS })],
     ['GET', /^\/shop\/categories$/, () => ({ json: { categories: [] } })],
   ];
@@ -188,6 +198,8 @@ test.describe('admin: flash sales in the merch queue', () => {
     await expect(d.getByTestId('sale-rule-result')).toHaveText('Passes the 14-day rule');
     await expect(d.getByTestId('sale-price-history')).toContainText('12 Oct 2026: TSh 80,000 → TSh 85,000 (raised)');
     await expect(d.getByTestId('sale-price-history')).toContainText('5 Oct 2026: discount price TSh 82,000 → TSh 79,000');
+    await expect(d.getByTestId('sale-price-history')).toContainText('1 Oct 2026: TSh 80,000 (starting price when price history began)');
+    await expect(d.getByTestId('sale-history-result')).toHaveText('Has 14 days of price history');
     await expect(d.getByTestId('sale-discount-line')).toHaveText('−18% (TSh 16,000 off), seller pays');
     await expect(d.getByTestId('merch-history')).toContainText('Sent for approval');
     await d.getByTestId('merch-approve').click();
@@ -210,6 +222,18 @@ test.describe('admin: flash sales in the merch queue', () => {
     await expect(page.getByTestId('sale-approve-blocked')).toHaveText(fail);
     await expect(page.getByTestId('merch-approve')).toBeDisabled();
     await expect(page.getByTestId('merch-reject')).toBeEnabled();
+  });
+
+  test('price history rule fails (new or copied product): the fail line and Approve disabled', async ({ page }) => {
+    await signIn(page, SUPER);
+    const listedAt = '2026-10-25T07:00:00.000Z'; const hist = '2026-11-08T07:00:00.000Z';
+    await mockApi(page, adminRoutes({ banners: 'off', check: { ...PASS, passesHistoryRule: false, listedAt, historyEarliestStart: hist } }));
+    await page.goto('/admin/shop-merch/?item=fls_1&kind=flash_sale');
+    const fail = `Fails: listed on ${eatWhen(listedAt)}; needs 14 days of price history, earliest start ${eatWhen(hist)}`;
+    await expect(page.getByTestId('sale-rule-result')).toHaveText('Passes the 14-day rule');
+    await expect(page.getByTestId('sale-history-result')).toHaveText(fail);
+    await expect(page.getByTestId('sale-approve-blocked')).toHaveText(fail);
+    await expect(page.getByTestId('merch-approve')).toBeDisabled();
   });
 
   test('regular price moved since sending: danger alert and Approve disabled', async ({ page }) => {
@@ -344,19 +368,34 @@ test.describe('admin: flash sales in the merch queue', () => {
     await page.getByTestId('merch-approve').click();
     await page.getByTestId('merch-check-sale').check();
     await page.getByTestId('merch-approve-confirm').click();
-    await expect(page.getByTestId('merch-approve-error')).toHaveText("This seller isn't approved, so this flash sale can't be approved.");
+    await expect(page.getByTestId('merch-approve-error')).toHaveText("The seller can't run sales right now (not approved or not verified).");
   });
 
-  test('promotions without the Products (shop) permission: no Create flash sale, the reason is shown, a deep link explains too', async ({ page }) => {
+  test('staff picker: promotions alone can create (no shop scope); approve-only staff cannot; search asks the server', async ({ page }) => {
     await signIn(page, VIEWER);
+    const calls = await mockApi(page, adminRoutes({ banners: 'off' }));
+    await page.goto('/admin/shop-merch/');
+    await page.getByTestId('merch-create-sale').click();
+    await page.getByTestId('sale-product-picker').getByRole('button', { name: /Product/ }).click();
+    await expect(page.getByRole('option', { name: /Skipping rope/ })).toBeVisible();
+    await page.keyboard.press('Escape');
+    await page.getByTestId('sale-product-search').fill('rope');
+    await expect.poll(() => only(calls, 'GET', '/admin/flash-sale-products').some(c => c.search.get('q') === 'rope')).toBe(true);
+    expect(only(calls, 'GET', '/admin/products')).toHaveLength(0);
+    await page.getByTestId('sale-product-picker').getByRole('button', { name: /Product/ }).click();
+    await expect(page.getByRole('option', { name: /Trail runner/ })).toHaveCount(0);
+    await page.getByRole('option', { name: /Skipping rope/ }).click();
+    await expect(page.getByTestId('sale-regular')).toContainText('Regular price TSh 15,000');
+  });
+
+  test('approve-only staff: no Create flash sale; a deep link says no permission', async ({ page }) => {
+    await signIn(page, { id: 'admin-a', userType: 'admin', portalUser: true, aclPermissions: ['promotions_approve'] });
     await mockApi(page, adminRoutes({ banners: 'off' }));
     await page.goto('/admin/shop-merch/');
     await expect(page.getByTestId('merch-row-fls_1')).toBeVisible();
     await expect(page.getByTestId('merch-create-sale')).toHaveCount(0);
-    await expect(page.getByTestId('merch-sale-needs-shop')).toHaveText('Creating a flash sale needs the "Products" permission, to pick a product. Ask a super-admin.');
     await page.goto('/admin/shop-merch/?new=sale');
-    await expect(page.getByTestId('merch-sale-needs-shop')).toBeVisible();
-    await expect(page.getByTestId('sale-form')).toHaveCount(0);
+    await expect(page.getByTestId('merch-sale-no-create')).toBeVisible();
   });
 
   test('Swahili: price check, seller pays and type label', async ({ page }) => {
@@ -396,6 +435,7 @@ const VENDOR_SALES = () => [
   vsale({ id: 's_pending', allowedActions: ['edit', 'withdraw'] }),
   vsale({ id: 's_draft', status: 'draft', effectiveStatus: 'draft', expiresAt: null, submittedAt: null, allowedActions: ['edit', 'submit', 'withdraw'] }),
   vsale({ id: 's_ended', status: 'ended', effectiveStatus: 'ended', startsAt: at(-80), endsAt: at(-10), endedAt: at(-12), expiresAt: null, statusReason: 'ended_by_fitflex', statusReasonNote: 'Wrong product photo.', endedByFitflex: true, allowedActions: [] }),
+  vsale({ id: 's_susp', status: 'ended', effectiveStatus: 'ended', startsAt: at(-50), endsAt: at(-20), endedAt: at(-30), expiresAt: null, statusReason: 'vendor_suspended', endedByFitflex: true, allowedActions: [] }),
   vsale({ id: 's_expired', status: 'expired', effectiveStatus: 'expired', statusReason: 'not_reviewed_in_time', allowedActions: [] }),
   vsale({ id: 's_rejected', status: 'rejected', effectiveStatus: 'rejected', statusReason: 'timing', statusReasonNote: 'Clashes with a holiday.', expiresAt: null, allowedActions: ['edit'] }),
   vsale({ id: 's_staff', origin: 'staff', productName: 'Yoga mat', status: 'approved', effectiveStatus: 'approved', startsAt: at(30), endsAt: at(60), expiresAt: null, allowedActions: [] }),
@@ -403,7 +443,7 @@ const VENDOR_SALES = () => [
 type CheckFn = (productId: string, startsAt: number) => Json;
 const passCheck: CheckFn = productId => {
   const p = PRODUCTS.find(x => x.id === productId)!;
-  return { ok: true, productId, regularPriceTzs: p.priceTzs, discountPriceTzs: p.discountPriceTzs ?? null, effectivePriceTzs: p.discountPriceTzs ?? p.priceTzs, maxSalePriceTzs: Math.floor(p.priceTzs * 0.95), raisedAt: null, raisedOn: null, earliestStart: null, lockedBy: null };
+  return { ok: true, productId, regularPriceTzs: p.priceTzs, discountPriceTzs: p.discountPriceTzs ?? null, effectivePriceTzs: p.discountPriceTzs ?? p.priceTzs, maxSalePriceTzs: Math.floor(p.priceTzs * 0.95), raisedAt: null, raisedOn: null, earliestStart: null, listedAt: '2026-09-01T09:00:00.000Z', historyEarliestStart: null, lockedBy: null };
 };
 function vendorRoutes(items: Json[], o: { check?: CheckFn; extra?: Array<[string, RegExp, Handler]>; tools?: Json; salesOff?: boolean; open?: Json } = {}): Array<[string, RegExp, Handler]> {
   const find = (id: string) => items.find(s => s.id === id);
@@ -448,6 +488,7 @@ test.describe('vendor: flash sales on /vendor/promotions', () => {
     await expect(page.getByTestId('sale-line-s_pending')).toContainText('Expires');
     await expect(page.getByTestId('sale-status-s_ended')).toHaveText('Ended');
     await expect(page.getByTestId('sale-line-s_ended')).toContainText('by FitFlex: Wrong product photo.');
+    await expect(page.getByTestId('sale-line-s_susp')).toContainText("Ended because the seller's account was suspended");
     await expect(page.getByTestId('sale-status-s_expired')).toHaveText('Expired');
     await expect(page.getByTestId('sale-line-s_expired')).toHaveText('Not reviewed in time');
     await expect(page.getByTestId('sale-line-s_rejected')).toHaveText("Reason: The dates don't work: Clashes with a holiday.");
@@ -594,7 +635,7 @@ test.describe('vendor: flash sales on /vendor/promotions', () => {
     let refuse = true;
     const calls = await mockApi(page, vendorRoutes([], {
       check: (productId, start) => (productId === 'prd_4' && start < Date.parse(earliest)
-        ? { ...passCheck(productId, start), ok: false, listedAt, earliestStart: earliest }
+        ? { ...passCheck(productId, start), ok: false, listedAt, historyEarliestStart: earliest }
         : passCheck(productId, start)),
       extra: [['POST', /^\/vendor\/flash-sales$/, () => (refuse
         ? { status: 422, json: { error: 'price_history_too_short', listedAt, earliestStart: earliest } }
@@ -684,6 +725,7 @@ test.describe('vendor: flash sales on /vendor/promotions', () => {
     await expect(page.getByTestId('sale-line-s_ended')).toContainText('Iliisha');
     await expect(page.getByTestId('sale-line-s_ended')).toContainText('imesitishwa na FitFlex: Wrong product photo.');
     await expect(page.getByTestId('sale-line-s_expired')).toHaveText('Haikukaguliwa kwa wakati');
+    await expect(page.getByTestId('sale-line-s_susp')).toContainText('Iliisha kwa sababu akaunti ya muuzaji ilisimamishwa');
     await expect(page.getByTestId('sale-line-s_rejected')).toHaveText('Sababu: Tarehe hazifai: Clashes with a holiday.');
     await expect(page.getByTestId('sale-group-scheduled')).toContainText('Zimepangwa');
     await expect(page.getByTestId('sale-end-s_live')).toHaveAttribute('aria-label', 'Sitisha sasa ofa ya muda mfupi ya Trail runner');

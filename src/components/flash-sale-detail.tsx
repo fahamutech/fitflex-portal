@@ -7,7 +7,7 @@ import { eatDateTime, eatDay, fmt } from '@/lib/vendor';
 import { PHASE_TONE, phaseOf, type AuditRow } from '@/lib/shop-banners';
 import {
   SALE_HIST_KEY, SALE_PHASE_KEY, SALE_REJECT_CODES, SALE_REJECT_KEY, discountPctOf, saleCan, saleErrorCode, saleMessageOf, saleReasonText, salesApi,
-  type AdminPriceCheck, type FlashSale, type SaleRejectCode,
+  type AdminPriceCheck, type FlashSale, type PriceHistoryRow, type SaleRejectCode,
 } from '@/lib/flash-sales';
 import { Alert, Badge, Button, Card, CardContent, CardHeader, Checkbox, Field, Radio, Spinner, Textarea } from './shared';
 import { Dialog } from './dialog';
@@ -70,7 +70,9 @@ export function FlashSaleDetail({ id, fallback, onBack, onEdit, onChanged }: {
   const showDecide = pending && canApproveScope;
   const decideBlocked = showDecide && !!own;
   const priceMoved = !!(check?.priceChangedSinceSubmit ?? sale.priceChangedSinceSubmit);
-  const fails = !!check && !check.passes14DayRule;
+  // Contract rev 2: a new or copied product also needs 14 days of price history (passesHistoryRule false blocks Approve).
+  const historyFails = !!check && check.passesHistoryRule === false;
+  const fails = !!check && (!check.passes14DayRule || historyFails);
   // Approve waits for the price check (the detail answer) and is blocked when it fails or the price moved (§8.5).
   const approveBlocked = decideBlocked || !loaded || !check || fails || priceMoved || !saleCan(sale, 'approve');
   const was = sale.wasPriceTzs ?? sale.regularPriceTzs;
@@ -103,9 +105,19 @@ export function FlashSaleDetail({ id, fallback, onBack, onEdit, onChanged }: {
   );
   const person = (idv?: string | null, name?: string | null) => name || idv || '';
   const seller = sale.vendorName || sale.vendorId;
-  const histLine = (h: { at: string; fromTzs: number | null; toTzs: number | null; field: string; raised: boolean }) => fmt(t(h.field === 'discountPriceTzs' ? 'merchAdmin.priceHistDiscount' : h.raised ? 'merchAdmin.priceHistRaised' : 'merchAdmin.priceHistLowered'), {
-    date: eatDay(h.at, locale), from: h.fromTzs == null ? '—' : money(h.fromTzs), to: h.toTzs == null ? '—' : money(h.toTzs),
-  });
+  /** One price-history row. `on` is the Tanzania date; fromTzs null = the first price; source migration_baseline = the starting row. */
+  const histLine = (h: PriceHistoryRow) => {
+    const date = eatDay(h.on || h.at, locale);
+    const to = h.toTzs == null ? '—' : money(h.toTzs);
+    if (h.source === 'migration_baseline') return fmt(t('merchAdmin.priceHistBaseline'), { date, to });
+    if (h.fromTzs == null && h.field === 'priceTzs') return fmt(t('merchAdmin.priceHistListed'), { date, to });
+    return fmt(t(h.field === 'discountPriceTzs' ? 'merchAdmin.priceHistDiscount' : h.raised ? 'merchAdmin.priceHistRaised' : 'merchAdmin.priceHistLowered'), {
+      date, from: h.fromTzs == null ? '—' : money(h.fromTzs), to,
+    });
+  };
+  const failText = () => (check && !check.passes14DayRule
+    ? fmt(t('merchAdmin.fail'), { date: check.raisedOn ? eatDay(check.raisedOn, locale) : eatDateTime(check.raisedAt, locale), earliest: eatDateTime(check.earliestStart, locale) })
+    : fmt(t('merchAdmin.historyFail'), { listed: eatDateTime(check?.listedAt, locale), earliest: eatDateTime(check?.historyEarliestStart, locale) }));
 
   return (
     <div className="space-y-6" data-testid="sale-detail">
@@ -178,6 +190,12 @@ export function FlashSaleDetail({ id, fallback, onBack, onEdit, onChanged }: {
                         date: check.raisedOn ? eatDay(check.raisedOn, locale) : eatDateTime(check.raisedAt, locale), earliest: eatDateTime(check.earliestStart, locale),
                       })}
                     </p>
+                    {check.passesHistoryRule !== undefined && (
+                      <p className={`flex items-start gap-2 text-sm font-medium ${check.passesHistoryRule ? 'text-[var(--color-success-700)]' : 'text-[var(--color-error-700)]'}`} data-testid="sale-history-result">
+                        {check.passesHistoryRule ? <CheckCircle2 aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0" /> : <XCircle aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0" />}
+                        {check.passesHistoryRule ? t('merchAdmin.historyPass') : fmt(t('merchAdmin.historyFail'), { listed: eatDateTime(check.listedAt, locale), earliest: eatDateTime(check.historyEarliestStart, locale) })}
+                      </p>
+                    )}
                     <div>
                       <p className="text-xs font-semibold uppercase tracking-wide text-[var(--color-fg-quaternary)]">{t('merchAdmin.priceHistory')}</p>
                       {check.priceHistory.length === 0
@@ -201,7 +219,7 @@ export function FlashSaleDetail({ id, fallback, onBack, onEdit, onChanged }: {
             {decideBlocked && <p id={ownHintId} className="rounded-[var(--radius-md)] bg-[var(--color-bg-secondary)] p-3 text-sm" data-testid="merch-own-item">{t(own === 'worked' ? 'merchAdmin.saleOwnWork' : 'merchAdmin.saleOwnItem')}</p>}
             {showDecide && !decideBlocked && (fails || priceMoved) && (
               <p id={blockHintId} className="rounded-[var(--radius-md)] bg-[var(--color-error-50)] p-3 text-sm text-[var(--color-error-700)]" data-testid="sale-approve-blocked">
-                {priceMoved ? t('merchAdmin.priceMoved') : fmt(t('merchAdmin.fail'), { date: check?.raisedOn ? eatDay(check.raisedOn, locale) : eatDateTime(check?.raisedAt, locale), earliest: eatDateTime(check?.earliestStart, locale) })}
+                {priceMoved ? t('merchAdmin.priceMoved') : failText()}
               </p>
             )}
             <div className="flex flex-wrap gap-2">

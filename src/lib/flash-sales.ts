@@ -62,6 +62,13 @@ export interface FlashSale {
   priceChangedSinceSubmit?: boolean;
 }
 
+/** GET /admin/flash-sale-products item. */
+export interface PickerProduct {
+  id: string; name: string; vendorId: string; vendorName?: string | null;
+  priceTzs: number; discountPriceTzs?: number | null; effectivePriceTzs?: number | null; maxSalePriceTzs?: number | null;
+  stock?: number | null; image?: string | null;
+}
+
 export interface SaleInput { productId: string; salePriceTzs: number; startsAt: string; endsAt: string }
 export type SalePatch = Partial<Omit<SaleInput, 'productId'>>;
 
@@ -87,16 +94,34 @@ export interface PriceCheck {
   raisedOn: string | null;
   earliestStart: string | null;
   lockedBy: SaleLock | null;
-  /** Review 2026-10-29 (functions#285): a new or copied product needs 14 days of price history; when it was listed. */
+  /** Contract rev 2: the product's first price row (listing, copy or migration baseline). */
   listedAt?: string | null;
+  /** Contract rev 2: set when the price history is too short (listedAt + 14 days). */
+  historyEarliestStart?: string | null;
 }
-export type PriceHistoryRow = { at: string; fromTzs: number | null; toTzs: number | null; field: 'priceTzs' | 'discountPriceTzs'; raised: boolean };
+/** The earliest valid start from a price check: the later of the 14-day raise rule and the price-history rule. */
+export function earliestValidStart(c: Pick<PriceCheck, 'earliestStart' | 'historyEarliestStart'>): string | null {
+  const times = [c.earliestStart, c.historyEarliestStart].filter((v): v is string => !!v && Number.isFinite(Date.parse(v)));
+  if (!times.length) return null;
+  return times.reduce((a, b) => (Date.parse(a) >= Date.parse(b) ? a : b));
+}
+/** `on` = Tanzania date of `at`; `fromTzs` null = the first price (or the migration baseline). */
+export type PriceHistoryRow = {
+  at: string; on?: string | null; fromTzs: number | null; toTzs: number | null; field: 'priceTzs' | 'discountPriceTzs'; raised: boolean;
+  source?: 'trigger' | 'migration_baseline' | string | null;
+};
 /** GET /admin/flash-sales/:id priceCheck. */
 export interface AdminPriceCheck {
   passes14DayRule: boolean;
   raisedAt: string | null;
   raisedOn: string | null;
   earliestStart: string | null;
+  /** The latest raise in the 14 days before startsAt, or null. */
+  lastRaiseAt?: string | null;
+  /** Contract rev 2: the price-history rule (new or copied products). Absent = not reported. */
+  passesHistoryRule?: boolean;
+  listedAt?: string | null;
+  historyEarliestStart?: string | null;
   priceHistory: PriceHistoryRow[];
   discountLine: { pct: number; savingTzs: number; sellerPays: boolean } | null;
   priceChangedSinceSubmit: boolean;
@@ -132,6 +157,11 @@ export const salesApi = {
   adminGet: async (token: string, id: string) => {
     const body = await request<{ sale: FlashSale; history?: AuditRow[]; priceCheck?: AdminPriceCheck | null }>(`/admin/flash-sales/${enc(id)}`, {}, token);
     return { sale: oneOf(body), history: Array.isArray(body?.history) ? body.history : [], priceCheck: body?.priceCheck ?? null };
+  },
+  /** Staff product picker (contract rev 2; `promotions` or `promotions_approve`): products a buyer can find, of vendors allowed to run a sale. */
+  adminPickerProducts: async (token: string, f: { q?: string; vendorId?: string; limit?: number } = {}) => {
+    const body = await request<{ items?: PickerProduct[] }>(`/admin/flash-sale-products${qs({ q: f.q, vendorId: f.vendorId, limit: f.limit ?? 50 })}`, {}, token);
+    return Array.isArray(body?.items) ? body.items : [];
   },
   adminCreate: async (token: string, body: SaleInput) => oneOf(await request<unknown>('/admin/flash-sales', post(body), token)),
   adminUpdate: async (token: string, id: string, body: SalePatch) => oneOf(await request<unknown>(`/admin/flash-sales/${enc(id)}`, patch(body), token)),
@@ -240,6 +270,8 @@ export const SALE_REJECT_KEY: Record<SaleRejectCode, MessageKey> = {
 export function saleReasonText(s: Pick<FlashSale, 'status' | 'effectiveStatus' | 'statusReason' | 'statusReasonNote'>, t: (k: MessageKey) => string): string {
   const code = s.statusReason ?? '';
   const note = (s.statusReasonNote ?? '').trim();
+  // Contract rev 2: ended because FitFlex suspended the seller.
+  if (code === 'vendor_suspended') return t('merch.sale.endedSuspended');
   const label = (s.effectiveStatus ?? s.status) === 'rejected' && code in SALE_REJECT_KEY ? t(SALE_REJECT_KEY[code as SaleRejectCode]) : '';
   return label && note ? `${label}: ${note}` : label || note;
 }

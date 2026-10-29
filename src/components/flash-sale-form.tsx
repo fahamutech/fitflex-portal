@@ -7,7 +7,7 @@ import { money } from '@/lib/admin-utils';
 import type { MessageKey } from '@/lib/i18n';
 import { eatDateTime, eatDay, fmt } from '@/lib/vendor';
 import {
-  DEFAULT_RULES, HOUR_MS, discountPctOf, earliestStartOf, maxSalePriceOf, parsePrice, productImageUrl, saleErrorCode, saleMessageOf, saleReasonText, salesApi, standingDiscountOf, validateSale,
+  DEFAULT_RULES, HOUR_MS, discountPctOf, earliestStartOf, earliestValidStart, maxSalePriceOf, parsePrice, productImageUrl, saleErrorCode, saleMessageOf, saleReasonText, salesApi, standingDiscountOf, validateSale,
   type FlashSale, type PriceCheck, type SaleErrors, type SaleRules,
 } from '@/lib/flash-sales';
 import { Alert, Button, Card, CardContent, Field, Input } from './shared';
@@ -58,7 +58,7 @@ type CheckState = { state: 'idle' | 'loading' | 'done' | 'failed'; result: Price
  * with the server as soon as product and start are set (vendor). Saved as a draft, then sent for approval
  * (vendor: to FitFlex; staff: to another admin). The server re-checks every rule.
  */
-export function FlashSaleForm({ mode, sale, template, initialProductId, products, vendors, rules, onCancel, onDone }: {
+export function FlashSaleForm({ mode, sale, template, initialProductId, products, vendors, rules, onProductSearch, onCancel, onDone }: {
   mode: 'vendor' | 'staff';
   sale: FlashSale | null;
   /** "Copy to new": a past sale's product and price (no dates). */
@@ -69,6 +69,8 @@ export function FlashSaleForm({ mode, sale, template, initialProductId, products
   products: ShopProduct[];
   vendors?: VendorSummary[];
   rules?: SaleRules | null;
+  /** Staff: the picker asks the server by name (GET /admin/flash-sale-products?q=, at most 50 a time). */
+  onProductSearch?: (q: string) => void;
   onCancel: () => void;
   onDone: (s: FlashSale) => void;
 }) {
@@ -128,8 +130,10 @@ export function FlashSaleForm({ mode, sale, template, initialProductId, products
   // Another sale holds the product (the one being edited never counts against itself).
   const lock = res?.lockedBy && res.lockedBy.saleId !== saved?.id ? res.lockedBy : null;
   const raised = !!res && !res.ok && !!res.raisedAt && !!res.earliestStart;
-  // New or copied product: not 14 days of price history yet (functions#285); the check names the earliest start.
-  const historyShort = !!res && !res.ok && !res.raisedAt && !!res.earliestStart && !lock;
+  // Contract rev 2: new or copied product without 14 days of price history (historyEarliestStart = listedAt + 14 days).
+  const historyShort = !!res && !res.ok && !!res.historyEarliestStart;
+  // "Start on" sets the later of the two rules' earliest starts, so one click passes both.
+  const validFrom = res ? earliestValidStart(res) : null;
   // Send waits for the check to pass; a failed check blocks until retried (the app does the same).
   const checkBlocks = isVendor && (check.state === 'loading' || check.state === 'failed' || raised || historyShort || !!lock);
 
@@ -216,9 +220,10 @@ export function FlashSaleForm({ mode, sale, template, initialProductId, products
             <label htmlFor={fid('productId')} className="text-sm font-medium text-[var(--color-fg-secondary)]">{t('merch.sale.product')}<span aria-hidden="true" className="text-[var(--color-error-600)]"> *</span></label>
             {fixedProduct
               ? <p id={fid('productId')} tabIndex={-1} className="text-sm font-medium" data-testid="sale-product-fixed">{saved?.productName || product?.name || saved?.productId}</p>
-              : products.length === 0
+              : products.length === 0 && !onProductSearch
                 ? <p className="text-sm text-[var(--color-fg-tertiary)]" data-testid="sale-no-products">{t(isVendor ? 'merch.sale.noProducts' : 'merchAdmin.noProducts')}</p>
-                : <div id={fid('productId')} tabIndex={-1} data-testid="sale-product-picker"><SearchableSelect options={productOptions} value={d.productId} onChange={v => set({ productId: String(v) })}
+                : <div id={fid('productId')} tabIndex={-1} className="space-y-2" data-testid="sale-product-picker">
+                    {onProductSearch && <ProductSearch onSearch={onProductSearch} disabled={busy} />}<SearchableSelect options={productOptions} value={d.productId} onChange={v => set({ productId: String(v) })}
                     placeholder={t('merch.sale.pickProduct')} ariaLabel={t('merch.sale.product')} disabled={busy} /></div>}
             {errors.productId && <span className="text-xs text-[var(--color-error-700)]" data-testid="sale-product-error">{err('productId')}</span>}
             {product && (product.stock ?? 0) <= 0 && <p className="text-xs text-[var(--color-warning-700)]" data-testid="sale-oos">{t('merch.sale.oos')}</p>}
@@ -267,7 +272,7 @@ export function FlashSaleForm({ mode, sale, template, initialProductId, products
           <Alert tone="error">
             <span className="flex flex-col items-start gap-2" data-testid="sale-raised">
               <span>{fmt(t('merch.sale.raised'), { date: res.raisedOn ? eatDay(res.raisedOn, locale) : eatDateTime(res.raisedAt, locale), earliest: eatDateTime(res.earliestStart, locale) })}</span>
-              <Button type="button" size="sm" variant="secondary" onClick={() => startOnEarliest(res.earliestStart)} data-testid="sale-start-on">{fmt(t('merch.sale.startOn'), { date: eatDateTime(new Date(earliestFrom(res.earliestStart!)).toISOString(), locale) })}</Button>
+              {!historyShort && <Button type="button" size="sm" variant="secondary" onClick={() => startOnEarliest(validFrom)} data-testid="sale-start-on">{fmt(t('merch.sale.startOn'), { date: eatDateTime(new Date(earliestFrom(validFrom!)).toISOString(), locale) })}</Button>}
             </span>
           </Alert>
         )}
@@ -275,9 +280,9 @@ export function FlashSaleForm({ mode, sale, template, initialProductId, products
           <Alert tone="error">
             <span className="flex flex-col items-start gap-2" data-testid="sale-history-short">
               <span>{res.listedAt
-                ? fmt(t('merch.sale.historyShort'), { listed: eatDateTime(res.listedAt, locale), earliest: eatDateTime(res.earliestStart, locale) })
-                : fmt(t('merch.sale.historyShortNoDate'), { earliest: eatDateTime(res.earliestStart, locale) })}</span>
-              <Button type="button" size="sm" variant="secondary" onClick={() => startOnEarliest(res.earliestStart)} data-testid="sale-start-on">{fmt(t('merch.sale.startOn'), { date: eatDateTime(new Date(earliestFrom(res.earliestStart!)).toISOString(), locale) })}</Button>
+                ? fmt(t('merch.sale.historyShort'), { listed: eatDateTime(res.listedAt, locale), earliest: eatDateTime(res.historyEarliestStart, locale) })
+                : fmt(t('merch.sale.historyShortNoDate'), { earliest: eatDateTime(res.historyEarliestStart, locale) })}</span>
+              <Button type="button" size="sm" variant="secondary" onClick={() => startOnEarliest(validFrom)} data-testid="sale-start-on">{fmt(t('merch.sale.startOn'), { date: eatDateTime(new Date(earliestFrom(validFrom!)).toISOString(), locale) })}</Button>
             </span>
           </Alert>
         )}
@@ -319,4 +324,17 @@ export function FlashSaleForm({ mode, sale, template, initialProductId, products
       </Dialog>
     </div>
   );
+}
+
+/** Staff product search (server side, debounced): the picker lists the first 50 matches. */
+function ProductSearch({ onSearch, disabled }: { onSearch: (q: string) => void; disabled?: boolean }) {
+  const { t } = useApp();
+  const [q, setQ] = useState('');
+  const first = useRef(true);
+  useEffect(() => {
+    if (first.current) { first.current = false; return; }
+    const timer = window.setTimeout(() => onSearch(q.trim()), 300);
+    return () => window.clearTimeout(timer);
+  }, [q]); // eslint-disable-line react-hooks/exhaustive-deps
+  return <Input type="search" value={q} onChange={e => setQ(e.target.value)} disabled={disabled} placeholder={t('merchAdmin.saleProductSearch')} aria-label={t('merchAdmin.saleProductSearch')} data-testid="sale-product-search" />;
 }

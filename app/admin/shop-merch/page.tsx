@@ -8,7 +8,7 @@ import {
   MERCH_EMPTY_KEY, MERCH_TABS, MERCH_TAB_KEY, PHASE_KEY, PHASE_TONE, bannersApi, errorCodeOf, errorKeyOf, headlineOf, phaseOf, tabOfBanner,
   type BannerConfirmation, type MerchKind, type MerchTab, type ShopBanner,
 } from '@/lib/shop-banners';
-import { SALE_PHASE_KEY, discountPctOf, salesApi, saleErrorCode, type FlashSale } from '@/lib/flash-sales';
+import { SALE_PHASE_KEY, discountPctOf, salesApi, saleErrorCode, type FlashSale, type PickerProduct } from '@/lib/flash-sales';
 import { money } from '@/lib/admin-utils';
 import { FlashSaleDetail } from '@/components/flash-sale-detail';
 import { FlashSaleForm, SaleThumb } from '@/components/flash-sale-form';
@@ -105,8 +105,9 @@ export default function ShopMerchPage() {
   }, [token, t]);
   useEffect(() => { void load(); }, [load]);
 
-  // Pickers for the staff form. Each is optional: a failure leaves the list empty.
-  const needsCatalogue = !!view.edit || !!view.creating;
+  // Pickers for the staff banner form. Each is optional: a failure leaves the list empty.
+  const saleForm = view.creating === 'flash_sale' || (!!view.edit && view.kind === 'flash_sale');
+  const needsCatalogue = !saleForm && (!!view.edit || !!view.creating);
   useEffect(() => {
     if (!token || !needsCatalogue) return;
     if (hasPermission('shop') || hasPermission('promotions')) {
@@ -116,9 +117,24 @@ export default function ShopMerchPage() {
     api.shopCategories().then(r => setCategories(r.categories ?? [])).catch(() => setCategories([]));
   }, [token, needsCatalogue, hasPermission]);
 
-  // Staff create picks from GET /admin/products, which needs `shop` today (review 2026-10-29; the backend will open it to
-  // `promotions`, functions#285). Until then the button is hidden without `shop`, and the list says why.
-  const canCreateSale = hasPermission('promotions') && hasPermission('shop');
+  // Staff sale form: its own picker, GET /admin/flash-sale-products (contract rev 2; `promotions` or
+  // `promotions_approve`, no `shop` needed): only products buyers can find, of sellers allowed to run a sale.
+  const [pickerQ, setPickerQ] = useState('');
+  const [picker, setPicker] = useState<PickerProduct[]>([]);
+  useEffect(() => {
+    if (!token || !saleForm) return;
+    let live = true;
+    salesApi.adminPickerProducts(token, { q: pickerQ || undefined }).then(items => { if (live) setPicker(items); }).catch(() => { if (live) setPicker([]); });
+    return () => { live = false; };
+  }, [token, saleForm, pickerQ]);
+  const pickerProducts: ShopProduct[] = picker.map(p => ({
+    id: p.id, vendorId: p.vendorId, name: p.name, priceTzs: p.priceTzs, discountPriceTzs: p.discountPriceTzs ?? null,
+    stock: p.stock ?? 1, images: p.image ? [p.image] : [], status: 'active', approvalStatus: 'approved',
+  }));
+  const pickerVendors = Array.from(new Map(picker.map(p => [p.vendorId, { id: p.vendorId, displayName: p.vendorName || p.vendorId } as VendorSummary])).values());
+
+  // Creating needs `promotions` (contract: create/edit/submit/withdraw FitFlex-created sales).
+  const canCreateSale = hasPermission('promotions');
   if (!token || user?.userType !== 'admin') return null;
 
   if (disabled) {
@@ -131,8 +147,8 @@ export default function ShopMerchPage() {
   }
 
   // Flash sale: create (?new=sale) or edit a FitFlex-created one (?edit=&kind=flash_sale).
-  if ((view.creating === 'flash_sale' || (view.edit && view.kind === 'flash_sale')) && !canCreateSale) {
-    return <div className="space-y-4"><Alert tone="warning"><span data-testid="merch-sale-needs-shop">{t('merchAdmin.saleNeedsShop')}</span></Alert><Button variant="secondary" onClick={() => go('')}>{t('merchAdmin.back')}</Button></div>;
+  if (saleForm && !canCreateSale) {
+    return <div className="space-y-4"><Alert tone="warning"><span data-testid="merch-sale-no-create">{t('merch.noPermission')}</span></Alert><Button variant="secondary" onClick={() => go('')}>{t('merchAdmin.back')}</Button></div>;
   }
   if (view.creating === 'flash_sale' || (view.edit && view.kind === 'flash_sale')) {
     const editing = view.edit ? sales?.find(r => r.id === view.edit) ?? null : null;
@@ -145,9 +161,8 @@ export default function ShopMerchPage() {
           <ArrowLeft className="h-4 w-4" />{t('merchAdmin.back')}
         </Button>
         <PageHeader title={t(editing ? 'merchAdmin.editSale' : 'merchAdmin.createSale')} description={t('merchAdmin.saleCreateNote')} />
-        {/* Any vendor's product that is on sale and approved; the server checks eligibility again. */}
-        <FlashSaleForm mode="staff" sale={editing} vendors={vendors}
-          products={products.filter(p => p.status === 'active' && (p.approvalStatus ?? 'approved') === 'approved')}
+        {/* Any seller's product a buyer can find (the picker endpoint); the server checks eligibility again. */}
+        <FlashSaleForm mode="staff" sale={editing} vendors={pickerVendors} products={pickerProducts} onProductSearch={setPickerQ}
           onCancel={back} onDone={s => { void load(); go(qItem({ kind: 'flash_sale', id: s.id })); }} />
       </div>
     );
@@ -249,7 +264,6 @@ export default function ShopMerchPage() {
           </div>
         )}
       />
-      {kindsOn.flash_sale && hasPermission('promotions') && !canCreateSale && <p className="text-sm text-[var(--color-fg-tertiary)]" data-testid="merch-sale-needs-shop">{t('merchAdmin.saleNeedsShop')}</p>}
       {error && <Alert tone="error"><span className="flex flex-wrap items-center justify-between gap-2">{error}<Button size="sm" variant="secondary" onClick={() => void load()} data-testid="merch-retry">{t('common.tryAgain')}</Button></span></Alert>}
       <div className="flex flex-wrap items-center gap-3">
         <div role="tablist" aria-label={t('merchAdmin.title')} className="flex max-w-full flex-wrap gap-1 rounded-[var(--radius-lg)] bg-[var(--color-bg-secondary)] p-1 w-fit">

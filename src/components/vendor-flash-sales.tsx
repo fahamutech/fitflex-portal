@@ -158,6 +158,8 @@ export function VendorFlashSales({ tabs }: { tabs: ReactNode }) {
     if (p === 'withdrawn') return t('merch.sale.line.youWithdrew');
     if (p === 'ended') {
       const on = fmt(t('merch.sale.line.endedOn'), { date: eatDateTime(s.endedAt ?? s.endsAt, locale) });
+      // Contract rev 2: FitFlex suspended the seller, so the sale ended.
+      if (s.statusReason === 'vendor_suspended') return `${on} · ${t('merch.sale.endedSuspended')}`;
       const byFitflex = s.endedByFitflex ?? s.statusReason === 'ended_by_fitflex';
       if (!byFitflex) return on;
       const why = saleReasonText(s, t);
