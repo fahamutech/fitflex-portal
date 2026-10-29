@@ -75,6 +75,19 @@ type NavItem = {
 };
 const scopesOf = (item: NavItem) => [item.aclScope, ...(item.aclAny ?? [])].filter(Boolean) as string[];
 
+/**
+ * The admin nav item that owns a path: the longest matching href, on a path boundary. A plain prefix match let
+ * /admin/b2b-billing resolve to the /admin/b2b item and redirect staff who only hold b2b_billing. Roots match exactly.
+ */
+function matchAdminNav(path: string): NavItem | undefined {
+  let best: NavItem | undefined;
+  for (const item of ADMIN_NAV) {
+    const hit = ROOTS.has(item.href) ? path === item.href : path === item.href || path.startsWith(`${item.href}/`);
+    if (hit && (!best || item.href.length > best.href.length)) best = item;
+  }
+  return best;
+}
+
 // Section roots highlight only on themselves, not on their sub-pages.
 const ROOTS = new Set(['/admin', '/hr', '/org', '/vendor', '/organizer']);
 
@@ -209,9 +222,9 @@ const ADMIN_NAV: NavItem[] = [
   { href: '/admin/promotion-analytics', labelKey: 'admin.nav.promotionAnalytics', icon: BarChart3, groupKey: 'nav.group.promotion', aclScope: 'promotion_analytics' },
   { href: '/admin/promotion-limits', labelKey: 'admin.nav.promotionLimits', icon: SlidersHorizontal, groupKey: 'nav.group.promotion', aclScope: 'campaigns', aclAny: ['promotions', 'promotions_approve'] },
   { href: '/admin/distributions', labelKey: 'admin.nav.distributions',  icon: BarChart3,       groupKey: 'nav.group.finance',  aclScope: 'payments' },
-  { href: '/admin/settlements',   labelKey: 'admin.nav.settlements',    icon: HandCoins,       groupKey: 'nav.group.finance',  aclScope: 'payments' },
-  { href: '/admin/trainer-settlements', labelKey: 'admin.nav.trainerSettlements', icon: Dumbbell, groupKey: 'nav.group.finance', aclScope: 'payments' },
-  { href: '/admin/vendor-settlements', labelKey: 'admin.nav.vendorSettlements', icon: Store, groupKey: 'nav.group.finance', aclScope: 'payments' },
+  { href: '/admin/settlements',   labelKey: 'admin.nav.settlements',    icon: HandCoins,       groupKey: 'nav.group.finance',  aclScope: 'payments', aclAny: ['settlements_prepare', 'settlements_approve', 'settlements_pay'] },
+  { href: '/admin/trainer-settlements', labelKey: 'admin.nav.trainerSettlements', icon: Dumbbell, groupKey: 'nav.group.finance', aclScope: 'payments', aclAny: ['settlements_prepare', 'settlements_approve', 'settlements_pay'] },
+  { href: '/admin/vendor-settlements', labelKey: 'admin.nav.vendorSettlements', icon: Store, groupKey: 'nav.group.finance', aclScope: 'payments', aclAny: ['settlements_prepare', 'settlements_approve', 'settlements_pay'] },
   { href: '/admin/settlement-config', labelKey: 'admin.nav.settlementConfig', icon: SlidersHorizontal, groupKey: 'nav.group.finance', aclScope: 'payments' },
   { href: '/admin/b2b-billing',   labelKey: 'admin.nav.b2bBilling',     icon: Receipt,         groupKey: 'nav.group.finance',  aclScope: 'b2b_billing', aclAny: ['b2b', 'b2b_billing_approve', 'b2b_payments'] },
   // S5: VAT rates with maker ≠ checker; shown only while the server has VAT on (useTaxRatesAvailable).
@@ -542,7 +555,7 @@ export function Shell({ children }: { children: ReactNode }) {
 
     // Portal staff: away from pages outside their ACL, to the first permitted page (or the overview)
     if (isPortalStaff && path.startsWith('/admin')) {
-      const matchedItem = ADMIN_NAV.find(item => (ROOTS.has(item.href) ? path === item.href : path.startsWith(item.href)));
+      const matchedItem = matchAdminNav(path);
       if (matchedItem?.aclScope && !scopesOf(matchedItem).some(hasPermission)) {
         const firstAllowed = ADMIN_NAV.find(i => !i.aclScope || scopesOf(i).some(hasPermission));
         const to = firstAllowed?.href ?? '/admin';
