@@ -36,7 +36,7 @@ import {
   Star,
   HandCoins,
   SlidersHorizontal,
-  Undo2, Receipt, KeyRound, ShieldAlert, Images, Landmark, Percent, CalendarCheck
+  Undo2, Receipt, KeyRound, ShieldAlert, Images, Landmark, Percent, CalendarCheck, ImageUp, Plug
 } from 'lucide-react';
 import { useApp } from '../../app/providers';
 import { ChangePasswordGate } from './change-password-gate';
@@ -49,10 +49,11 @@ import { useVendor } from './vendor-context';
 import { BrandLogo } from './brand-logo';
 import { LanguageToggle } from './language-toggle';
 import { PhotoPanel } from './photo-panel';
-import { EVENTS_MODULE, HERO_IMAGES_ADMIN, PHOTO_HERO_UI } from '@/lib/flags';
+import { EVENTS_MODULE, HERO_IMAGES_ADMIN, PARTNER_MEDIA_ADMIN, PHOTO_HERO_UI } from '@/lib/flags';
 import { eventsAreaOpen, staffAreaOpen } from '@/lib/events';
 import { useAdminEventsSummary, useOrganizer } from './organizer-context';
-import { useCorporateEventsAvailable } from './events-options';
+import { useCorporateEventsAvailable, useEventsOptions } from './events-options';
+import { opsOf } from '@/lib/events-ops';
 import { useShopBannersAvailable } from './shop-banners-gate';
 import { useTaxRatesAvailable } from './tax-rates-gate';
 import { useHrToOrgRefresh } from './hr-to-org-refresh';
@@ -139,12 +140,14 @@ function vendorNav(permissions: string[], tools: VendorTools | null | undefined,
 }
 
 // Events S2 (spec §3): a running-event organizer and their staff. Items open by organizer status and role.
-function organizerNav(status: OrganizerStatus | null, role: OrganizerRole | null): NavItem[] {
+function organizerNav(status: OrganizerStatus | null, role: OrganizerRole | null, integrations = false): NavItem[] {
   return [
     { href: '/organizer', labelKey: 'nav.organizer.overview', icon: LayoutDashboard },
     { href: '/organizer/onboarding', labelKey: 'nav.organizer.onboarding', icon: ShieldCheck },
     ...(eventsAreaOpen(status) ? [{ href: '/organizer/events', labelKey: 'nav.organizer.events', icon: Flag }] : []),
     ...(staffAreaOpen(status, role) ? [{ href: '/organizer/staff', labelKey: 'nav.organizer.staff', icon: Users }] : []),
+    // Events S5 §8.1: owner/admin of an active organizer, and only while the server says the API or webhooks are on.
+    ...(integrations && staffAreaOpen(status, role) ? [{ href: '/organizer/integrations', labelKey: 'organizer.nav.integrations', icon: Plug }] : []),
   ];
 }
 
@@ -203,6 +206,9 @@ const ADMIN_NAV: NavItem[] = [
   { href: '/admin/vendors',       labelKey: 'admin.nav.vendors',        icon: Store,           groupKey: 'nav.group.platform', aclScope: 'shop' },
   { href: '/admin/promotion-overview', labelKey: 'admin.nav.promotionOverview', icon: LineChart, groupKey: 'nav.group.promotion', aclScope: 'promotions', aclAny: ['promotions_approve', 'campaigns'] },
   { href: '/admin/moderation',    labelKey: 'admin.nav.moderation',     icon: ShieldAlert,     groupKey: 'nav.group.promotion', aclScope: 'moderation', aclAny: ['moderation_decide'] },
+  // Partner photos (spec photo-hero-screens §43.1): only in builds with NEXT_PUBLIC_PARTNER_MEDIA_ADMIN=true. The queue needs
+  // moderation or moderation_decide; brand_media alone reaches only the per-partner dialog on the gyms/trainers/vendors pages.
+  ...(PARTNER_MEDIA_ADMIN ? [{ href: '/admin/partner-media', labelKey: 'admin.nav.partnerMedia', icon: ImageUp, groupKey: 'nav.group.promotion', aclScope: 'moderation', aclAny: ['moderation_decide'] }] : []),
   { href: '/admin/promotions',    labelKey: 'admin.nav.promotions',     icon: Megaphone,       groupKey: 'nav.group.promotion', aclScope: 'promotions', aclAny: ['promotions_approve', 'campaigns'] },
   // Shop banners (Phase 2 S1): shown only while the server has SHOP_BANNERS on (see visibleNav).
   { href: '/admin/shop-merch',    labelKey: 'admin.nav.shopMerch',      icon: Images,          groupKey: 'nav.group.promotion', aclScope: 'promotions', aclAny: ['promotions_approve'] },
@@ -470,6 +476,8 @@ export function Shell({ children }: { children: ReactNode }) {
   const isVendor      = !!token && VENDOR_USER_TYPES.has(user?.userType ?? '');
   const isOrganizer   = !!token && ORGANIZER_USER_TYPES.has(user?.userType ?? '');
   const adminEvents = useAdminEventsSummary(token, !!isAdminUser && hasPermission('events'));
+  const organizerOptions = useEventsOptions(isOrganizer && EVENTS_MODULE);
+  const integrationsOn = opsOf(organizerOptions).api || opsOf(organizerOptions).webhooks;
   const corporateEvents = useCorporateEventsAvailable(!!token && (!!isOrgUser || !!isHr));
   const bannersOn = useShopBannersAvailable(
     isVendor ? 'vendor' : 'admin', token,
@@ -486,7 +494,7 @@ export function Shell({ children }: { children: ReactNode }) {
   const visibleNav = isVendor
     ? (vendor.status === 'ready' ? vendorNav(vendor.me?.permissions ?? [], vendor.me?.tools, vendor.lowCount, vendor.waitingCount, bannersOn) : [])
     : isOrganizer
-    ? (!EVENTS_MODULE ? [] : organizer.status === 'ready' ? organizerNav(organizer.organizer?.status ?? null, organizer.role) : organizerNav(null, null))
+    ? (!EVENTS_MODULE ? [] : organizer.status === 'ready' ? organizerNav(organizer.organizer?.status ?? null, organizer.role, integrationsOn) : organizerNav(null, null))
     : isAdminUser
     ? ADMIN_NAV.filter(item => {
         if (item.href === '/admin/shop-merch' && !bannersOn) return false;

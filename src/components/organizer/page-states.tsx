@@ -78,7 +78,7 @@ export function OrganizerStatusBadge({ status }: { status: string | null | undef
  * The shared gate for an organizer page (§3, §4.4): flag, server flag, load state, then the page's own rule.
  * `area` decides who may see the page: events (verified or suspended) · staff (verified owner/admin) · any (overview).
  */
-export function OrganizerPage({ area, children }: { area: 'overview' | 'events' | 'staff'; children: ReactNode }) {
+export function OrganizerPage({ area, children }: { area: 'overview' | 'events' | 'staff' | 'integrations'; children: ReactNode }) {
   const org = useOrganizer();
   if (!EVENTS_MODULE || org.status === 'off') return <EventsUnavailable />;
   if (org.status === 'loading' || org.status === 'none') return <PageLoading />;
@@ -86,6 +86,8 @@ export function OrganizerPage({ area, children }: { area: 'overview' | 'events' 
   if (org.status === 'no_organizer') return <OrganizerGate />;
   const status = org.organizer?.status ?? null;
   if (area === 'events' && !eventsAreaOpen(status)) return <OrganizerGate />;
+  // Events S5 §8.7: integrations are for owner/admin; a suspended organizer sees them read-only.
+  if (area === 'integrations') return !eventsAreaOpen(status) ? <OrganizerGate /> : org.role === 'owner' || org.role === 'admin' ? <>{children}</> : <OrganizerForbidden />;
   // Staff: verified owner/admin only. Not verified → gate; verified but ops/finance/timing → forbidden (§9.2).
   if (area === 'staff' && !staffAreaOpen(status, org.role)) return status === 'active' ? <OrganizerForbidden /> : <OrganizerGate />;
   return <>{children}</>;
