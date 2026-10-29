@@ -514,8 +514,11 @@ export function Shell({ children }: { children: ReactNode }) {
   const vendorPermissionMissing = !!vendorArea && !vendorAreaOpen(vendorArea, vendor.me?.permissions ?? [], vendor.me?.tools);
   // S6 reports (spec §0.1): with the tool switched off, back home with no message (never "feature off").
   const vendorBounceQuiet = !!vendorArea?.quietWhenOff && !!vendorArea.tool && vendor.me?.tools?.[vendorArea.tool] !== true;
+  // The public gym page (/g, opened from a gym's QR code) is for everyone, signed in or not: no redirect, no sidebar.
+  const isPublicGymPage = path === '/g' || path.startsWith('/g/');
   const redirectTo = ((): string | null => {
     if (!ready) return null;
+    if (isPublicGymPage) return null;
     if (!token) return path !== '/login' && path !== '/' ? '/login' : null;
 
     // A business (vendor or vendor staff) only ever sees /vendor; nobody else does.
@@ -629,7 +632,7 @@ export function Shell({ children }: { children: ReactNode }) {
     );
   }
 
-  const isLoginPage = path === '/login' || !token;
+  const isLoginPage = path === '/login' || !token || isPublicGymPage;
 
   /* Public / login layout — no sidebar */
   if (isLoginPage) {
@@ -642,7 +645,7 @@ export function Shell({ children }: { children: ReactNode }) {
             <BrandLogo className="h-7 w-7 rounded-[var(--radius-md)]" />
             <span className="text-sm font-semibold text-[var(--color-fg-primary)]">FitFlex Af</span>
           </div>
-          <LanguageToggle className="justify-self-end" />
+          {isPublicGymPage ? <div className="w-24" /> : <LanguageToggle className="justify-self-end" />}
         </header>
         <main className="flex-1">{redirectTo ? <div aria-busy="true" data-testid="shell-redirecting" /> : children}</main>
       </div>
