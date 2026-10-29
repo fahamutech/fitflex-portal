@@ -36,7 +36,7 @@ import {
   Star,
   HandCoins,
   SlidersHorizontal,
-  Undo2, Receipt, KeyRound, ShieldAlert, Images, Landmark, Percent, CalendarCheck, Plug
+  Undo2, Receipt, KeyRound, ShieldAlert, Images, Landmark, Percent, CalendarCheck, ImageUp, Plug
 } from 'lucide-react';
 import { useApp } from '../../app/providers';
 import { ChangePasswordGate } from './change-password-gate';
@@ -49,7 +49,7 @@ import { useVendor } from './vendor-context';
 import { BrandLogo } from './brand-logo';
 import { LanguageToggle } from './language-toggle';
 import { PhotoPanel } from './photo-panel';
-import { EVENTS_MODULE, HERO_IMAGES_ADMIN, PHOTO_HERO_UI } from '@/lib/flags';
+import { EVENTS_MODULE, HERO_IMAGES_ADMIN, PARTNER_MEDIA_ADMIN, PHOTO_HERO_UI } from '@/lib/flags';
 import { eventsAreaOpen, staffAreaOpen } from '@/lib/events';
 import { useAdminEventsSummary, useOrganizer } from './organizer-context';
 import { useCorporateEventsAvailable, useEventsOptions } from './events-options';
@@ -126,8 +126,8 @@ const OPERATOR_NAV: NavItem[] = [
 
 // A business that sells on FitFlex (vendor portal, S2): each item needs its permission.
 function vendorNav(permissions: string[], tools: VendorTools | null | undefined, lowCount: number | null, waitingCount: number | null, bannersOn = false): NavItem[] {
-  const icons: Record<string, React.ElementType> = { '/vendor': LayoutDashboard, '/vendor/products': ShoppingBag, '/vendor/promotions': Megaphone, '/vendor/orders': ClipboardList, '/vendor/sales': Receipt, '/vendor/customers': Users, '/vendor/payouts': HandCoins, '/vendor/settings/tax': Landmark };
-  const labels: Record<string, string> = { '/vendor': 'vendor.nav.dashboard', '/vendor/products': 'vendor.nav.products', '/vendor/promotions': 'merch.nav', '/vendor/orders': 'vendor.nav.orders', '/vendor/sales': 'vendor.nav.sales', '/vendor/customers': 'vendor.nav.customers', '/vendor/payouts': 'vendor.nav.payouts', '/vendor/settings/tax': 'vendor.tax.title' };
+  const icons: Record<string, React.ElementType> = { '/vendor': LayoutDashboard, '/vendor/products': ShoppingBag, '/vendor/promotions': Megaphone, '/vendor/orders': ClipboardList, '/vendor/sales': Receipt, '/vendor/customers': Users, '/vendor/reports': BarChart3, '/vendor/payouts': HandCoins, '/vendor/settings/tax': Landmark };
+  const labels: Record<string, string> = { '/vendor': 'vendor.nav.dashboard', '/vendor/products': 'vendor.nav.products', '/vendor/promotions': 'merch.nav', '/vendor/orders': 'vendor.nav.orders', '/vendor/sales': 'vendor.nav.sales', '/vendor/customers': 'vendor.nav.customers', '/vendor/reports': 'vendor.nav.reports', '/vendor/payouts': 'vendor.nav.payouts', '/vendor/settings/tax': 'vendor.tax.title' };
   // S5: Settings → Tax details (VAT on; owner or staff with `payments`).
   const groups: Record<string, string> = { '/vendor/settings/tax': 'vendor.nav.group.settings' };
   return VENDOR_AREAS.filter(a => a.nav !== false && vendorAreaOpen(a, permissions, tools) && (a.href !== '/vendor/promotions' || bannersOn)).map(a => ({
@@ -202,6 +202,9 @@ const ADMIN_NAV: NavItem[] = [
   { href: '/admin/vendors',       labelKey: 'admin.nav.vendors',        icon: Store,           groupKey: 'nav.group.platform', aclScope: 'shop' },
   { href: '/admin/promotion-overview', labelKey: 'admin.nav.promotionOverview', icon: LineChart, groupKey: 'nav.group.promotion', aclScope: 'promotions', aclAny: ['promotions_approve', 'campaigns'] },
   { href: '/admin/moderation',    labelKey: 'admin.nav.moderation',     icon: ShieldAlert,     groupKey: 'nav.group.promotion', aclScope: 'moderation', aclAny: ['moderation_decide'] },
+  // Partner photos (spec photo-hero-screens §43.1): only in builds with NEXT_PUBLIC_PARTNER_MEDIA_ADMIN=true. The queue needs
+  // moderation or moderation_decide; brand_media alone reaches only the per-partner dialog on the gyms/trainers/vendors pages.
+  ...(PARTNER_MEDIA_ADMIN ? [{ href: '/admin/partner-media', labelKey: 'admin.nav.partnerMedia', icon: ImageUp, groupKey: 'nav.group.promotion', aclScope: 'moderation', aclAny: ['moderation_decide'] }] : []),
   { href: '/admin/promotions',    labelKey: 'admin.nav.promotions',     icon: Megaphone,       groupKey: 'nav.group.promotion', aclScope: 'promotions', aclAny: ['promotions_approve', 'campaigns'] },
   // Shop banners (Phase 2 S1): shown only while the server has SHOP_BANNERS on (see visibleNav).
   { href: '/admin/shop-merch',    labelKey: 'admin.nav.shopMerch',      icon: Images,          groupKey: 'nav.group.promotion', aclScope: 'promotions', aclAny: ['promotions_approve'] },
@@ -504,12 +507,13 @@ export function Shell({ children }: { children: ReactNode }) {
   // Where this person must go instead of the current page, or null when they may see it. One decision
   // drives both the redirect and the render: a page's content (and its requests) waits until it passes.
   const path = pathname.replace(/\/$/, '') || '/';
-  const vendorPermissionMissing = (() => {
-    if (!isVendor || vendor.status !== 'ready') return false;
-    const area = [...VENDOR_AREAS].reverse().find(a => path === a.href || path.startsWith(`${a.href}/`));
-    // Its permission and, where it has one, its tool (S3 sales: walkInSales) — both fail closed.
-    return !!area && !vendorAreaOpen(area, vendor.me?.permissions ?? [], vendor.me?.tools);
-  })();
+  const vendorArea = isVendor && vendor.status === 'ready'
+    ? [...VENDOR_AREAS].reverse().find(a => path === a.href || path.startsWith(`${a.href}/`)) ?? null
+    : null;
+  // Its permission and, where it has one, its tool (S3 sales: walkInSales) — both fail closed.
+  const vendorPermissionMissing = !!vendorArea && !vendorAreaOpen(vendorArea, vendor.me?.permissions ?? [], vendor.me?.tools);
+  // S6 reports (spec §0.1): with the tool switched off, back home with no message (never "feature off").
+  const vendorBounceQuiet = !!vendorArea?.quietWhenOff && !!vendorArea.tool && vendor.me?.tools?.[vendorArea.tool] !== true;
   const redirectTo = ((): string | null => {
     if (!ready) return null;
     if (!token) return path !== '/login' && path !== '/' ? '/login' : null;
@@ -558,11 +562,11 @@ export function Shell({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!redirectTo) { if (!vendorPermissionMissing) bouncedFrom.current = null; return; }
     if (vendorPermissionMissing && bouncedFrom.current !== path) {
-      toast.error(t('vendor.noAccess'));
+      if (!vendorBounceQuiet) toast.error(t('vendor.noAccess'));
       bouncedFrom.current = path;
     }
     router.replace(redirectTo);
-  }, [redirectTo, vendorPermissionMissing, path, router, toast, t]);
+  }, [redirectTo, vendorPermissionMissing, vendorBounceQuiet, path, router, toast, t]);
 
   /* Close mobile drawer on route change */
   useEffect(() => { setMobileOpen(false); }, [pathname]);

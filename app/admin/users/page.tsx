@@ -7,7 +7,7 @@ import { useApp } from '../../providers';
 import { api, PortalUser, ApiError } from '@/lib/api';
 import { Button, PageHeader, Alert, Spinner, Card, Badge, Field, Table, TBody, Td, Th, THead, Tr } from '@/components/shared';
 import { ConfirmDialog } from '@/components/dialog';
-import { EVENTS_MODULE, HERO_IMAGES_ADMIN } from '@/lib/flags';
+import { EVENTS_MODULE, HERO_IMAGES_ADMIN, PARTNER_MEDIA_ADMIN } from '@/lib/flags';
 import { fmt } from '@/lib/vendor';
 
 const ALL_ACL_SCOPES = [
@@ -51,7 +51,8 @@ const ALL_ACL_SCOPES = [
 ] as const;
 
 type AclScope = typeof ALL_ACL_SCOPES[number]['key'];
-const ACL_SCOPES = ALL_ACL_SCOPES.filter(s => (s.key !== 'brand_media' || HERO_IMAGES_ADMIN) && (s.key !== 'events' || EVENTS_MODULE));
+// brand_media is also what sets a partner's photo or logo (Partner photos, NEXT_PUBLIC_PARTNER_MEDIA_ADMIN), so either flag offers it.
+const ACL_SCOPES = ALL_ACL_SCOPES.filter(s => (s.key !== 'brand_media' || HERO_IMAGES_ADMIN || PARTNER_MEDIA_ADMIN) && (s.key !== 'events' || EVENTS_MODULE));
 
 const ROLE_PRESETS = [
   { key: 'custom',      label: 'Custom',      scopes: [] as AclScope[] },

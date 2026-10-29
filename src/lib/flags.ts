@@ -20,3 +20,11 @@ export const HERO_IMAGES_REMOTE = process.env.NEXT_PUBLIC_HERO_IMAGES_REMOTE ===
  * Off, those pages render the "not available yet" state. The server has its own EVENTS_MODULE flag. Default off.
  */
 export const EVENTS_MODULE = process.env.NEXT_PUBLIC_EVENTS_MODULE === 'true';
+
+/**
+ * Partner photos (design spec photo-hero-screens §43, §44.5; backend functions#277): the admin "Partner photos"
+ * queue (/admin/partner-media) and its nav item, and the "Home photo and logo" row action and dialog on the gyms,
+ * trainers and vendors pages. Off, the nav item and row actions are absent and the page is the not-found page.
+ * The server has its own PARTNER_MEDIA flag. Default off.
+ */
+export const PARTNER_MEDIA_ADMIN = process.env.NEXT_PUBLIC_PARTNER_MEDIA_ADMIN === 'true';
