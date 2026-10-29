@@ -398,6 +398,114 @@ test.describe('admin: flash sales in the merch queue', () => {
     await expect(page.getByTestId('merch-sale-no-create')).toBeVisible();
   });
 
+  test('QA1 #1: at 1280 the Item cell is one line with an ellipsis and the full name in its title; Seller wraps on word boundaries', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await signIn(page, SUPER);
+    const long = 'Whey Protein Isolate Ultra Premium Chocolate Flavour 2kg Tub';
+    await mockApi(page, adminRoutes({ banners: [banner()], sales: [sale({ productName: long, vendorName: 'Dar es Salaam Fitness Gear and Supplements' })] }));
+    await page.goto('/admin/shop-merch/');
+    const title = page.getByTestId('merch-title-fls_1');
+    await expect(title).toHaveAttribute('title', long);
+    const css = await title.evaluate(el => { const c = getComputedStyle(el); return [c.whiteSpace, c.textOverflow, c.overflow]; });
+    expect(css).toEqual(['nowrap', 'ellipsis', 'hidden']);
+    const wrap = await page.getByTestId('merch-seller-fls_1').evaluate(el => getComputedStyle(el).overflowWrap);
+    expect(wrap).toBe('break-word');
+    // Each line of the seller name ends at a space, never inside a word.
+    const lines = await page.getByTestId('merch-seller-fls_1').evaluate(el => {
+      const range = document.createRange(); const text = el.firstChild!; const out: string[] = []; let last = -1; let cur = '';
+      for (let i = 0; i < (text.textContent ?? '').length; i += 1) {
+        range.setStart(text, i); range.setEnd(text, i + 1);
+        const top = Math.round(range.getBoundingClientRect().top);
+        if (last !== -1 && top !== last) { out.push(cur); cur = ''; }
+        last = top; cur += text.textContent![i];
+      }
+      out.push(cur); return out;
+    });
+    for (const l of lines.slice(0, -1)) expect(l.endsWith(' ')).toBe(true);
+  });
+
+  test('QA1 #2: Approve, Reject, Edit, Withdraw, the checklist row and the product picker are at least 44 px', async ({ page }) => {
+    await signIn(page, SUPER);
+    await mockApi(page, adminRoutes({ banners: 'off', sales: [
+      sale(),
+      sale({ id: 'fls_mine', origin: 'staff', status: 'draft', effectiveStatus: 'draft', createdBy: 'admin-x', ownItem: true, allowedActions: ['edit', 'submit', 'withdraw'] }),
+    ] }));
+    await page.goto('/admin/shop-merch/?item=fls_1&kind=flash_sale');
+    for (const id of ['merch-approve', 'merch-reject']) expect((await page.getByTestId(id).boundingBox())!.height).toBeGreaterThanOrEqual(44);
+    await page.getByTestId('merch-approve').click();
+    const row = page.getByTestId('merch-approve-dialog').locator('label').filter({ has: page.getByTestId('merch-check-sale') });
+    const box = (await row.boundingBox())!;
+    expect(box.height).toBeGreaterThanOrEqual(44);
+    const fieldset = (await page.getByTestId('merch-approve-dialog').locator('fieldset').boundingBox())!;
+    expect(box.width).toBeGreaterThanOrEqual(fieldset.width - 1);
+    await page.keyboard.press('Escape');
+    await page.goto('/admin/shop-merch/?item=fls_mine&kind=flash_sale');
+    for (const id of ['merch-edit', 'merch-withdraw', 'merch-submit']) expect((await page.getByTestId(id).boundingBox())!.height).toBeGreaterThanOrEqual(44);
+    await page.goto('/admin/shop-merch/?new=sale');
+    const trigger = page.getByTestId('sale-product-picker').getByRole('button', { name: /Product/ });
+    expect((await trigger.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+  });
+
+  test('QA1 #4: closing the approve dialog returns focus to Approve; after approving, focus goes to the title', async ({ page }) => {
+    await signIn(page, SUPER);
+    await mockApi(page, adminRoutes({ banners: 'off' }));
+    await page.goto('/admin/shop-merch/?item=fls_1&kind=flash_sale');
+    await page.getByTestId('merch-approve').focus();
+    await page.keyboard.press('Enter');
+    await expect(page.getByTestId('merch-approve-dialog')).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(page.getByTestId('merch-approve')).toBeFocused();
+    await page.keyboard.press('Enter');
+    await page.getByTestId('merch-approve-dialog').getByRole('button', { name: 'Cancel' }).click();
+    await expect(page.getByTestId('merch-approve')).toBeFocused();
+    await page.getByTestId('merch-approve').click();
+    await page.getByTestId('merch-check-sale').check();
+    await page.getByTestId('merch-approve-confirm').click();
+    await expect(page.getByTestId('sale-status')).toHaveText('Scheduled');
+    await expect(page.getByTestId('sale-title')).toBeFocused();
+  });
+
+  test('QA1 #5/#6: staff create below 5% shows only the 5% message; the discount line says "the product\'s"', async ({ page }) => {
+    await signIn(page, SUPER);
+    await mockApi(page, adminRoutes({ banners: 'off', extra: [
+      ['GET', /^\/admin\/flash-sale-products$/, () => ({ json: { items: [...PICKER, { id: 'prd_8', name: 'Gym gloves', vendorId: 'usr_vendor', vendorName: 'Dar Fitness Gear', priceTzs: 40000, discountPriceTzs: 36000, effectivePriceTzs: 36000, maxSalePriceTzs: 38000, stock: 5, image: null }] } })],
+    ] }));
+    await page.goto('/admin/shop-merch/?new=sale');
+    await page.getByTestId('sale-product-picker').getByRole('button', { name: /Product/ }).click();
+    await page.getByRole('option', { name: /Trail runner/ }).click();
+    await page.getByTestId('sale-price').fill('86000');
+    await expect(page.getByText('The sale price must be at least 5% below the regular price: TSh 85,500 or less.')).toBeVisible();
+    await expect(page.getByTestId('sale-live')).toHaveCount(0);
+    await page.getByTestId('sale-price').fill('69000');
+    await expect(page.getByTestId('sale-live')).toHaveText('23% off · buyers save TSh 21,000');
+    await page.goto('/admin/shop-merch/?new=sale');
+    await page.getByTestId('sale-product-picker').getByRole('button', { name: /Product/ }).click();
+    await page.getByRole('option', { name: /Gym gloves/ }).click();
+    await expect(page.getByTestId('sale-current-discount')).toHaveText("The product's current discount price TSh 36,000");
+    await page.getByTestId('sale-price').fill('37000');
+    await expect(page.getByText("The sale price must be lower than the product's current discount price of TSh 36,000.")).toBeVisible();
+    await expect(page.getByTestId('sale-live')).toHaveCount(0);
+  });
+
+  test('QA1 #3/#7 Swahili: sale rows agree with "ofa", the header says "ofa uliyounda", dates on a 12-hour clock with the part of the day', async ({ page }) => {
+    await signIn(page, SUPER, 'sw');
+    // 16:37 UTC = 19:37 Tanzania time → "7:37 usiku"; 05:10 UTC = 08:10 → "8:10 asubuhi".
+    await mockApi(page, adminRoutes({ banners: 'off', sales: [sale({ submittedAt: at(-2), expiresAt: at(20), startsAt: '2026-11-02T16:37:00.000Z', endsAt: '2026-11-03T05:10:00.000Z' })] }));
+    await page.goto('/admin/shop-merch/');
+    await expect(page.getByText('Huwezi kuidhinisha ofa uliyounda.', { exact: false })).toBeVisible();
+    await expect(page.getByTestId('merch-table').getByRole('columnheader', { name: 'Ilitumwa' })).toBeVisible();
+    await expect(page.getByTestId('merch-expires-fls_1')).toHaveText('Itaisha muda baada ya saa 20');
+    await expect(page.getByTestId('merch-row-fls_1')).toContainText('2 Nov, 7:37 usiku');
+    await expect(page.getByTestId('merch-row-fls_1')).toContainText('3 Nov, 8:10 asubuhi');
+    await page.goto('/admin/shop-merch/?item=fls_1&kind=flash_sale');
+    await expect(page.getByTestId('sale-dates')).toContainText('2 Nov, 7:37 usiku → 3 Nov, 8:10 asubuhi');
+    // Phone: the card says "Ilitumwa saa 2 zilizopita".
+    await page.setViewportSize({ width: 375, height: 800 });
+    await page.goto('/admin/shop-merch/');
+    await expect(page.getByTestId('merch-card-fls_1')).toContainText('Ilitumwa saa 2 zilizopita');
+    await expect(page.getByTestId('merch-card-fls_1')).not.toContainText('Lilitumwa');
+  });
+
   test('Swahili: price check, seller pays and type label', async ({ page }) => {
     await signIn(page, SUPER, 'sw');
     await mockApi(page, adminRoutes({ banners: 'off' }));

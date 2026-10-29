@@ -3,7 +3,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { ArrowLeft, ImageIcon, Megaphone, Plus, RefreshCw, Search } from 'lucide-react';
 import { useApp } from '../../providers';
 import { api, type ShopProduct, type VendorSummary } from '@/lib/api';
-import { eatDateTime, fmt, type Category } from '@/lib/vendor';
+import { eatDateTime, eatWhen, fmt, type Category } from '@/lib/vendor';
 import {
   MERCH_EMPTY_KEY, MERCH_TABS, MERCH_TAB_KEY, PHASE_KEY, PHASE_TONE, bannersApi, errorCodeOf, errorKeyOf, headlineOf, phaseOf, tabOfBanner,
   type BannerConfirmation, type MerchKind, type MerchTab, type ShopBanner,
@@ -224,17 +224,25 @@ export default function ShopMerchPage() {
       return pa - pb || Date.parse(a.startsAt) - Date.parse(b.startsAt);
     });
   // Under 72 hours to expiry: warn; under a day, in hours (spec §5.3.1, QA1 #5).
-  const expiryText = (b: ShopBanner | FlashSale): string | null => {
+  // Flash sale rows use their own keys: Swahili agrees with "ofa" (I-), not "bango" (Li-) (slice 4 QA1 #3).
+  const EXP_KEYS = {
+    banner: { soon: 'merchAdmin.expiresSoon', oneHour: 'merchAdmin.expiresInOneHour', hours: 'merchAdmin.expiresInHours', oneDay: 'merchAdmin.expiresInOne', days: 'merchAdmin.expiresIn', sent: 'merchAdmin.sentAgo' },
+    flash_sale: { soon: 'merchAdmin.sale.expiresSoon', oneHour: 'merchAdmin.sale.expiresInOneHour', hours: 'merchAdmin.sale.expiresInHours', oneDay: 'merchAdmin.sale.expiresInOne', days: 'merchAdmin.sale.expiresIn', sent: 'merchAdmin.sale.sentAgo' },
+  } as const;
+  const expiryText = (b: ShopBanner | FlashSale, kindOf: MerchKind): string | null => {
     if (phaseOf(b, now) !== 'pending') return null;
     const left = Date.parse(b.expiresAt ?? b.startsAt) - now;
     if (!Number.isFinite(left) || left <= 0 || left >= 72 * HOUR) return null;
-    if (left < HOUR) return t('merchAdmin.expiresSoon');
+    const k = EXP_KEYS[kindOf];
+    if (left < HOUR) return t(k.soon);
     // Rounded to the nearest hour or day (QA2 #2): ~5 h reads "5 hours", ~2 days "2 days".
     const h = Math.round(left / HOUR);
-    if (h < 24) return h === 1 ? t('merchAdmin.expiresInOneHour') : fmt(t('merchAdmin.expiresInHours'), { n: h });
+    if (h < 24) return h === 1 ? t(k.oneHour) : fmt(t(k.hours), { n: h });
     const d = Math.max(1, Math.round(left / (24 * HOUR)));
-    return d === 1 ? t('merchAdmin.expiresInOne') : fmt(t('merchAdmin.expiresIn'), { n: d });
+    return d === 1 ? t(k.oneDay) : fmt(t(k.days), { n: d });
   };
+  // Sale rows: Swahili times on a 12-hour clock with the part of the day (glossary; slice 4 QA1 #7). Banner rows unchanged.
+  const when = (r: Row, iso: string) => (r.kind === 'flash_sale' ? eatWhen(iso, locale) : eatDateTime(iso, locale));
   const sentText = (b: ShopBanner | FlashSale) => relative(b.submittedAt ?? b.createdAt, now, locale);
   // A staff banner has no seller ("FitFlex"); a staff flash sale is still on a seller's product.
   const seller = (r: Row) => (r.kind === 'banner'
@@ -255,7 +263,7 @@ export default function ShopMerchPage() {
     <div className="space-y-6">
       <PageHeader
         title={t('merchAdmin.title')}
-        description={t('merchAdmin.description')}
+        description={t(kindsOn.banner && kindsOn.flash_sale ? 'merchAdmin.descriptionAny' : kindsOn.flash_sale ? 'merchAdmin.descriptionSale' : 'merchAdmin.description')}
         actions={(
           <div className="flex flex-wrap gap-2">
             <Button variant="secondary" size="sm" className="min-h-11" onClick={() => void load()} data-testid="merch-refresh"><RefreshCw className="h-4 w-4" />{t('mod.refresh')}</Button>
@@ -298,18 +306,18 @@ export default function ShopMerchPage() {
               {shown.map(r => {
                 const b = itemOf(r);
                 const phase = phaseOf(b, now);
-                const exp = expiryText(b);
+                const exp = expiryText(b, r.kind);
                 return (
                   <li key={`${r.kind}-${r.id}`}>
                     <button type="button" onClick={() => go(qItem(r))} className="flex w-full min-h-11 items-start gap-3 p-4 text-left hover:bg-[var(--color-bg-secondary)]" data-testid={`merch-card-${b.id}`}>
                       {thumb(r)}
-                      <span className="min-w-0 flex-1 space-y-1 [overflow-wrap:anywhere]">
+                      <span className="min-w-0 flex-1 space-y-1 [overflow-wrap:break-word]">
                         <span className="block font-medium">{titleOf(r)}</span>
                         <span className="block text-xs text-[var(--color-fg-tertiary)]">{typeOf(r)} · {seller(r)}</span>
                         {r.kind === 'flash_sale' && <span className="block text-xs font-semibold text-[var(--color-fuel)]">{discountOf(r)}</span>}
-                        <span className="block text-xs text-[var(--color-fg-tertiary)]">{eatDateTime(b.startsAt, locale)} → {eatDateTime(b.endsAt, locale)}</span>
+                        <span className="block text-xs text-[var(--color-fg-tertiary)]">{when(r, b.startsAt)} → {when(r, b.endsAt)}</span>
                         <span className="flex flex-wrap items-center gap-2"><Badge tone={PHASE_TONE[phase]} dot>{t((r.kind === 'flash_sale' ? SALE_PHASE_KEY : PHASE_KEY)[phase])}</Badge>
-                          {sentText(b) && <span className="text-xs text-[var(--color-fg-quaternary)]">{fmt(t('merchAdmin.sentAgo'), { when: sentText(b)! })}</span>}</span>
+                          {sentText(b) && <span className="text-xs text-[var(--color-fg-quaternary)]">{fmt(t(EXP_KEYS[r.kind].sent), { when: sentText(b)! })}</span>}</span>
                         {exp && <span className="block text-xs text-[var(--color-warning-700)]">{exp}</span>}
                       </span>
                     </button>
@@ -328,26 +336,27 @@ export default function ShopMerchPage() {
                   {wants('flash_sale') && <Th>{t('merchAdmin.col.discount')}</Th>}
                   {wants('banner') && <Th>{t('merchAdmin.col.position')}</Th>}
                   <Th>{t('merchAdmin.col.status')}</Th>
-                  <Th>{t('merchAdmin.col.sent')}</Th>
+                  <Th>{t(kindsOn.banner && kindsOn.flash_sale ? 'merchAdmin.col.sentAny' : kindsOn.flash_sale ? 'merchAdmin.sale.colSent' : 'merchAdmin.col.sent')}</Th>
                 </Tr>
               </THead>
               <TBody>
                 {shown.map(r => {
                   const b = itemOf(r);
                   const phase = phaseOf(b, now);
-                  const exp = expiryText(b);
+                  const exp = expiryText(b, r.kind);
                   const open = () => go(qItem(r));
                   return (
                     <Tr key={`${r.kind}-${r.id}`} tabIndex={0} onKeyDown={e => { if (e.key === 'Enter') open(); }} onClick={open} className="cursor-pointer hover:bg-[var(--color-bg-secondary)]" data-testid={`merch-row-${b.id}`}>
-                      <Td className="max-w-[20rem]">
+                      <Td className="min-w-[14rem] max-w-[20rem]">
                         <span className="flex items-center gap-3">
                           {thumb(r)}
-                          <span className="min-w-0 font-medium [overflow-wrap:anywhere]">{titleOf(r)}</span>
+                          {/* One line with an ellipsis; the full name in the tooltip (QA1 #1: never broken mid-word). */}
+                          <span className="block min-w-0 truncate font-medium" title={titleOf(r)} data-testid={`merch-title-${b.id}`}>{titleOf(r)}</span>
                         </span>
                       </Td>
                       <Td>{typeOf(r)}</Td>
-                      <Td className="[overflow-wrap:anywhere]">{seller(r)}{suspended(r) && <p className="text-xs text-[var(--color-warning-700)]">{t('merchAdmin.sellerSuspendedShort')}</p>}</Td>
-                      <Td className="whitespace-nowrap text-xs">{eatDateTime(b.startsAt, locale)}<br />→ {eatDateTime(b.endsAt, locale)}</Td>
+                      <Td className="min-w-[10rem] [overflow-wrap:break-word]" data-testid={`merch-seller-${b.id}`}>{seller(r)}{suspended(r) && <p className="text-xs text-[var(--color-warning-700)]">{t('merchAdmin.sellerSuspendedShort')}</p>}</Td>
+                      <Td className="whitespace-nowrap text-xs">{when(r, b.startsAt)}<br />→ {when(r, b.endsAt)}</Td>
                       {wants('flash_sale') && <Td className="whitespace-nowrap tabular-nums" data-testid={`merch-discount-${b.id}`}>{discountOf(r)}</Td>}
                       {wants('banner') && <Td className="tabular-nums">{r.kind === 'banner' ? r.b.position ?? '—' : '—'}</Td>}
                       <Td>

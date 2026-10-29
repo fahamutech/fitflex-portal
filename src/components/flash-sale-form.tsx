@@ -5,7 +5,7 @@ import { cn } from '@/lib/cn';
 import type { ShopProduct, VendorSummary } from '@/lib/api';
 import { money } from '@/lib/admin-utils';
 import type { MessageKey } from '@/lib/i18n';
-import { eatDateTime, eatDay, fmt } from '@/lib/vendor';
+import { eatWhen, eatDay, fmt } from '@/lib/vendor';
 import {
   DEFAULT_RULES, HOUR_MS, discountPctOf, earliestStartOf, earliestValidStart, maxSalePriceOf, parsePrice, productImageUrl, saleErrorCode, saleMessageOf, saleReasonText, salesApi, standingDiscountOf, validateSale,
   type FlashSale, type PriceCheck, type SaleErrors, type SaleRules,
@@ -47,7 +47,7 @@ export function SalePriceBlock({ sale, was, pct, size = 'md', testId }: { sale: 
   );
 }
 
-const fmtDeps = (locale: 'en' | 'sw') => ({ money: (n: number) => money(n), when: (iso: string) => eatDateTime(iso, locale), day: (ymd: string) => eatDay(ymd, locale) });
+const fmtDeps = (locale: 'en' | 'sw') => ({ money: (n: number) => money(n), when: (iso: string) => eatWhen(iso, locale), day: (ymd: string) => eatDay(ymd, locale) });
 
 type CheckState = { state: 'idle' | 'loading' | 'done' | 'failed'; result: PriceCheck | null };
 
@@ -155,7 +155,7 @@ export function FlashSaleForm({ mode, sale, template, initialProductId, products
 
   const deps = fmtDeps(locale);
   function localErrors(): SaleErrors {
-    return validateSale(d, prices, deps.money, { rules: r, checkStart: !saved || d.startsAt !== saved.startsAt });
+    return validateSale(d, prices, deps.money, { rules: r, checkStart: !saved || d.startsAt !== saved.startsAt, staff: !isVendor });
   }
   const focusFirst = (e: SaleErrors) => {
     const first = (['productId', 'salePriceTzs', 'startsAt', 'endsAt'] as const).find(f => e[f]);
@@ -199,7 +199,7 @@ export function FlashSaleForm({ mode, sale, template, initialProductId, products
 
   const err = (f: keyof SaleErrors) => (errors[f] ? fmt(t(errors[f]!.key), errors[f]!.vars ?? errVars[f] ?? {}) : undefined);
   // The price rules show while typing (S4-AC-02/03): under 5% off, or not below the standing discount.
-  const livePriceErr = d.salePrice ? validateSale({ ...d, startsAt: '', endsAt: '' }, prices, deps.money, { rules: r }).salePriceTzs : undefined;
+  const livePriceErr = d.salePrice ? validateSale({ ...d, startsAt: '', endsAt: '' }, prices, deps.money, { rules: r, staff: !isVendor }).salePriceTzs : undefined;
   const priceErr = err('salePriceTzs') ?? (livePriceErr ? fmt(t(livePriceErr.key), livePriceErr.vars ?? {}) : undefined);
   const productOptions = products.map(p => ({
     value: p.id, label: p.name,
@@ -223,7 +223,7 @@ export function FlashSaleForm({ mode, sale, template, initialProductId, products
               : products.length === 0 && !onProductSearch
                 ? <p className="text-sm text-[var(--color-fg-tertiary)]" data-testid="sale-no-products">{t(isVendor ? 'merch.sale.noProducts' : 'merchAdmin.noProducts')}</p>
                 : <div id={fid('productId')} tabIndex={-1} className="space-y-2" data-testid="sale-product-picker">
-                    {onProductSearch && <ProductSearch onSearch={onProductSearch} disabled={busy} />}<SearchableSelect options={productOptions} value={d.productId} onChange={v => set({ productId: String(v) })}
+                    {onProductSearch && <ProductSearch onSearch={onProductSearch} disabled={busy} />}<SearchableSelect touchTarget options={productOptions} value={d.productId} onChange={v => set({ productId: String(v) })}
                     placeholder={t('merch.sale.pickProduct')} ariaLabel={t('merch.sale.product')} disabled={busy} /></div>}
             {errors.productId && <span className="text-xs text-[var(--color-error-700)]" data-testid="sale-product-error">{err('productId')}</span>}
             {product && (product.stock ?? 0) <= 0 && <p className="text-xs text-[var(--color-warning-700)]" data-testid="sale-oos">{t('merch.sale.oos')}</p>}
@@ -233,19 +233,20 @@ export function FlashSaleForm({ mode, sale, template, initialProductId, products
           {regular != null && (
             <div className="space-y-0.5 rounded-[var(--radius-md)] bg-[var(--color-bg-secondary)] p-3 text-sm" data-testid="sale-regular">
               <p>{fmt(t('merch.sale.regular'), { price: money(regular) })}</p>
-              {standing != null && <p className="text-[var(--color-fg-tertiary)]" data-testid="sale-current-discount">{fmt(t('merch.sale.currentDiscount'), { price: money(standing) })}</p>}
+              {standing != null && <p className="text-[var(--color-fg-tertiary)]" data-testid="sale-current-discount">{fmt(t(isVendor ? 'merch.sale.currentDiscount' : 'merch.sale.currentDiscountStaff'), { price: money(standing) })}</p>}
             </div>
           )}
 
           {/* 3. Sale price with live % and TSh */}
           <Field label={t('merch.sale.price')} required error={priceErr}
-            hint={livePct != null && regular != null
+            // Staff (QA1 #5): while the price breaks a rule only the rule shows, not the "% off" line.
+            hint={livePct != null && regular != null && !(priceErr && !isVendor)
               ? <span className={cn('font-semibold', FUEL_TEXT)} data-testid="sale-live">{fmt(t('merch.sale.live'), { pct: livePct, saving: money(regular - salePrice) })}</span>
               : regular != null ? fmt(t('merch.sale.maxHint'), { max: money(maxSalePriceOf(regular, r.minDiscountPct)) }) : undefined}>
             <Input id={fid('salePriceTzs')} inputMode="numeric" autoComplete="off" value={d.salePrice} disabled={busy}
               onChange={e => set({ salePrice: e.target.value.replace(/[^\d,]/g, '') })} data-testid="sale-price" />
           </Field>
-          {priceErr && livePct != null && regular != null && (
+          {priceErr && isVendor && livePct != null && regular != null && (
             <p className={cn('-mt-3 text-xs font-semibold', FUEL_TEXT)} data-testid="sale-live">{fmt(t('merch.sale.live'), { pct: livePct, saving: money(regular - salePrice) })}</p>
           )}
 
@@ -258,7 +259,7 @@ export function FlashSaleForm({ mode, sale, template, initialProductId, products
                 <span id={`${fid(k)}-msg`} className={cn('text-xs', errors[k] ? 'text-[var(--color-error-700)]' : 'text-[var(--color-fg-quaternary)]')} data-testid={`sale-${k}-msg`}>{err(k) ?? t('merch.dates.tzNote')}</span>
                 {k === 'startsAt' && serverEarliest && (
                   <Button type="button" size="sm" variant="secondary" className="self-start" onClick={() => startOnEarliest(serverEarliest)} data-testid="sale-start-on-server">
-                    {fmt(t('merch.sale.startOn'), { date: eatDateTime(new Date(earliestFrom(serverEarliest)).toISOString(), locale) })}
+                    {fmt(t('merch.sale.startOn'), { date: eatWhen(new Date(earliestFrom(serverEarliest)).toISOString(), locale) })}
                   </Button>
                 )}
               </div>
@@ -271,8 +272,8 @@ export function FlashSaleForm({ mode, sale, template, initialProductId, products
         {isVendor && raised && res && (
           <Alert tone="error">
             <span className="flex flex-col items-start gap-2" data-testid="sale-raised">
-              <span>{fmt(t('merch.sale.raised'), { date: res.raisedOn ? eatDay(res.raisedOn, locale) : eatDateTime(res.raisedAt, locale), earliest: eatDateTime(res.earliestStart, locale) })}</span>
-              {!historyShort && <Button type="button" size="sm" variant="secondary" onClick={() => startOnEarliest(validFrom)} data-testid="sale-start-on">{fmt(t('merch.sale.startOn'), { date: eatDateTime(new Date(earliestFrom(validFrom!)).toISOString(), locale) })}</Button>}
+              <span>{fmt(t('merch.sale.raised'), { date: res.raisedOn ? eatDay(res.raisedOn, locale) : eatWhen(res.raisedAt, locale), earliest: eatWhen(res.earliestStart, locale) })}</span>
+              {!historyShort && <Button type="button" size="sm" variant="secondary" onClick={() => startOnEarliest(validFrom)} data-testid="sale-start-on">{fmt(t('merch.sale.startOn'), { date: eatWhen(new Date(earliestFrom(validFrom!)).toISOString(), locale) })}</Button>}
             </span>
           </Alert>
         )}
@@ -280,13 +281,13 @@ export function FlashSaleForm({ mode, sale, template, initialProductId, products
           <Alert tone="error">
             <span className="flex flex-col items-start gap-2" data-testid="sale-history-short">
               <span>{res.listedAt
-                ? fmt(t('merch.sale.historyShort'), { listed: eatDateTime(res.listedAt, locale), earliest: eatDateTime(res.historyEarliestStart, locale) })
-                : fmt(t('merch.sale.historyShortNoDate'), { earliest: eatDateTime(res.historyEarliestStart, locale) })}</span>
-              <Button type="button" size="sm" variant="secondary" onClick={() => startOnEarliest(validFrom)} data-testid="sale-start-on">{fmt(t('merch.sale.startOn'), { date: eatDateTime(new Date(earliestFrom(validFrom!)).toISOString(), locale) })}</Button>
+                ? fmt(t('merch.sale.historyShort'), { listed: eatWhen(res.listedAt, locale), earliest: eatWhen(res.historyEarliestStart, locale) })
+                : fmt(t('merch.sale.historyShortNoDate'), { earliest: eatWhen(res.historyEarliestStart, locale) })}</span>
+              <Button type="button" size="sm" variant="secondary" onClick={() => startOnEarliest(validFrom)} data-testid="sale-start-on">{fmt(t('merch.sale.startOn'), { date: eatWhen(new Date(earliestFrom(validFrom!)).toISOString(), locale) })}</Button>
             </span>
           </Alert>
         )}
-        {isVendor && lock && <Alert tone="error"><span data-testid="sale-overlap">{fmt(t('merch.sale.overlap'), { start: eatDateTime(lock.startsAt, locale), end: eatDateTime(lock.endsAt, locale) })}</span></Alert>}
+        {isVendor && lock && <Alert tone="error"><span data-testid="sale-overlap">{fmt(t('merch.sale.overlap'), { start: eatWhen(lock.startsAt, locale), end: eatWhen(lock.endsAt, locale) })}</span></Alert>}
         {isVendor && check.state === 'failed' && (
           <Alert tone="warning">
             <span className="flex flex-col items-start gap-2">

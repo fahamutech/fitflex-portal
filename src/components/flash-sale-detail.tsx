@@ -1,9 +1,9 @@
 'use client';
-import { useCallback, useEffect, useId, useState } from 'react';
+import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { ArrowLeft, CheckCircle2, XCircle } from 'lucide-react';
 import type { MessageKey } from '@/lib/i18n';
 import { money } from '@/lib/admin-utils';
-import { eatDateTime, eatDay, fmt } from '@/lib/vendor';
+import { eatWhen, eatDay, fmt } from '@/lib/vendor';
 import { PHASE_TONE, phaseOf, type AuditRow } from '@/lib/shop-banners';
 import {
   SALE_HIST_KEY, SALE_PHASE_KEY, SALE_REJECT_CODES, SALE_REJECT_KEY, discountPctOf, saleCan, saleErrorCode, saleMessageOf, saleReasonText, salesApi,
@@ -45,9 +45,19 @@ export function FlashSaleDetail({ id, fallback, onBack, onEdit, onChanged }: {
   const [error, setError] = useState<string | null>(null);
   const [notFound, setNotFound] = useState(false);
   const [dialog, setDialog] = useState<'approve' | 'reject' | 'end' | 'withdraw' | null>(null);
+  // QA1 #4: focus goes back to the button that opened a dialog; when that button is gone (the sale moved on), to the title.
+  const openerRef = useRef<HTMLElement | null>(null);
+  const titleRef = useRef<HTMLHeadingElement>(null);
+  const openDialog = (d: 'approve' | 'reject' | 'end' | 'withdraw') => { openerRef.current = document.activeElement as HTMLElement | null; setDialog(d); };
+  const restoreFocus = () => requestAnimationFrame(() => {
+    const o = openerRef.current;
+    if (o && o.isConnected && !o.hasAttribute('disabled')) o.focus();
+    else titleRef.current?.focus();
+  });
+  const closeDialog = () => { setDialog(null); restoreFocus(); };
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
-  const deps = { money: (n: number) => money(n), when: (iso: string) => eatDateTime(iso, locale), day: (ymd: string) => eatDay(ymd, locale) };
+  const deps = { money: (n: number) => money(n), when: (iso: string) => eatWhen(iso, locale), day: (ymd: string) => eatDay(ymd, locale) };
 
   const load = useCallback(async () => {
     if (!token) return;
@@ -86,12 +96,13 @@ export function FlashSaleDetail({ id, fallback, onBack, onEdit, onChanged }: {
     if (next?.id) setSale(next);
     await load();
     onChanged();
+    restoreFocus();
   };
   /** 409 sale_changed (or the price moved): close, reload and say why; never decide on what wasn't seen. */
   const stale = (err: unknown) => {
     setDialog(null);
     setNotice(t(saleMessageOf(err, deps, 'merchAdmin.actionFailed', 'admin').key));
-    void load(); onChanged();
+    void load().then(restoreFocus); onChanged();
   };
   const simple = async (fn: () => Promise<FlashSale>, doneKey: MessageKey) => {
     if (busy) return;
@@ -116,8 +127,8 @@ export function FlashSaleDetail({ id, fallback, onBack, onEdit, onChanged }: {
     });
   };
   const failText = () => (check && !check.passes14DayRule
-    ? fmt(t('merchAdmin.fail'), { date: check.raisedOn ? eatDay(check.raisedOn, locale) : eatDateTime(check.raisedAt, locale), earliest: eatDateTime(check.earliestStart, locale) })
-    : fmt(t('merchAdmin.historyFail'), { listed: eatDateTime(check?.listedAt, locale), earliest: eatDateTime(check?.historyEarliestStart, locale) }));
+    ? fmt(t('merchAdmin.fail'), { date: check.raisedOn ? eatDay(check.raisedOn, locale) : eatWhen(check.raisedAt, locale), earliest: eatWhen(check.earliestStart, locale) })
+    : fmt(t('merchAdmin.historyFail'), { listed: eatWhen(check?.listedAt, locale), earliest: eatWhen(check?.historyEarliestStart, locale) }));
 
   return (
     <div className="space-y-6" data-testid="sale-detail">
@@ -129,7 +140,7 @@ export function FlashSaleDetail({ id, fallback, onBack, onEdit, onChanged }: {
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0 max-w-full [overflow-wrap:anywhere]">
           <p className="text-xs uppercase tracking-wide text-[var(--color-fg-quaternary)]">{t('merchAdmin.type.sale')} · {seller}{sale.origin === 'staff' ? ` · ${t('merchAdmin.setByFitflex')}` : ''}</p>
-          <h1 className="text-xl font-semibold" data-testid="sale-title">{sale.productName || sale.productId}</h1>
+          <h1 ref={titleRef} tabIndex={-1} className="text-xl font-semibold focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand-500)]" data-testid="sale-title">{sale.productName || sale.productId}</h1>
           {saleReasonText(sale, t) && <p className="mt-1 text-sm text-[var(--color-fg-tertiary)]" data-testid="sale-reason">{fmt(t('merch.line.reason'), { reason: saleReasonText(sale, t) })}</p>}
         </div>
         <Badge tone={PHASE_TONE[phase]} dot><span data-testid="sale-status">{t(SALE_PHASE_KEY[phase])}</span></Badge>
@@ -147,7 +158,7 @@ export function FlashSaleDetail({ id, fallback, onBack, onEdit, onChanged }: {
                 <div className="min-w-0 space-y-1">
                   <p className="line-clamp-2 text-sm font-medium">{sale.productName || sale.productId}</p>
                   <SalePriceBlock sale={sale.salePriceTzs} was={was} pct={pct} />
-                  <p className="text-xs text-[var(--color-fg-tertiary)]">{fmt(t('merch.sale.line.ends'), { date: eatDateTime(sale.endsAt, locale) })}</p>
+                  <p className="text-xs text-[var(--color-fg-tertiary)]">{fmt(t('merch.sale.line.ends'), { date: eatWhen(sale.endsAt, locale) })}</p>
                 </div>
               </div>
             </CardContent>
@@ -164,8 +175,8 @@ export function FlashSaleDetail({ id, fallback, onBack, onEdit, onChanged }: {
                 {sale.discountPriceTzs != null && sale.discountPriceTzs > 0 && sale.discountPriceTzs < sale.regularPriceTzs && row(t('merchAdmin.standingDiscount'), money(sale.discountPriceTzs), 'sale-standing')}
                 {row(t('merchAdmin.salePrice'), money(sale.salePriceTzs), 'sale-price')}
                 {row(t('merchAdmin.col.discount'), pct != null ? fmt(t('merchAdmin.discountCell'), { pct, saving: money(saving) }) : '—', 'sale-discount')}
-                {row(t('merchAdmin.col.dates'), `${eatDateTime(sale.startsAt, locale)} → ${eatDateTime(sale.endsAt, locale)} (${t('merch.dates.tzNote')})`, 'sale-dates')}
-                {phase === 'pending' && sale.expiresAt && row(t('merchAdmin.expiresAt'), eatDateTime(sale.expiresAt, locale), 'sale-expires')}
+                {row(t('merchAdmin.col.dates'), `${eatWhen(sale.startsAt, locale)} → ${eatWhen(sale.endsAt, locale)} (${t('merch.dates.tzNote')})`, 'sale-dates')}
+                {phase === 'pending' && sale.expiresAt && row(t('merchAdmin.expiresAt'), eatWhen(sale.expiresAt, locale), 'sale-expires')}
                 {row(t('merchAdmin.people'), [
                   sale.createdBy && `${t('merchAdmin.sale.createdBy')}: ${person(sale.createdBy, sale.createdByName)}`,
                   sale.submittedBy && `${t('merchAdmin.sale.submittedBy')}: ${person(sale.submittedBy, sale.submittedByName)}`,
@@ -187,13 +198,13 @@ export function FlashSaleDetail({ id, fallback, onBack, onEdit, onChanged }: {
                     <p className={`flex items-start gap-2 text-sm font-medium ${check.passes14DayRule ? 'text-[var(--color-success-700)]' : 'text-[var(--color-error-700)]'}`} data-testid="sale-rule-result">
                       {check.passes14DayRule ? <CheckCircle2 aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0" /> : <XCircle aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0" />}
                       {check.passes14DayRule ? t('merchAdmin.pass') : fmt(t('merchAdmin.fail'), {
-                        date: check.raisedOn ? eatDay(check.raisedOn, locale) : eatDateTime(check.raisedAt, locale), earliest: eatDateTime(check.earliestStart, locale),
+                        date: check.raisedOn ? eatDay(check.raisedOn, locale) : eatWhen(check.raisedAt, locale), earliest: eatWhen(check.earliestStart, locale),
                       })}
                     </p>
                     {check.passesHistoryRule !== undefined && (
                       <p className={`flex items-start gap-2 text-sm font-medium ${check.passesHistoryRule ? 'text-[var(--color-success-700)]' : 'text-[var(--color-error-700)]'}`} data-testid="sale-history-result">
                         {check.passesHistoryRule ? <CheckCircle2 aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0" /> : <XCircle aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0" />}
-                        {check.passesHistoryRule ? t('merchAdmin.historyPass') : fmt(t('merchAdmin.historyFail'), { listed: eatDateTime(check.listedAt, locale), earliest: eatDateTime(check.historyEarliestStart, locale) })}
+                        {check.passesHistoryRule ? t('merchAdmin.historyPass') : fmt(t('merchAdmin.historyFail'), { listed: eatWhen(check.listedAt, locale), earliest: eatWhen(check.historyEarliestStart, locale) })}
                       </p>
                     )}
                     <div>
@@ -225,14 +236,14 @@ export function FlashSaleDetail({ id, fallback, onBack, onEdit, onChanged }: {
             <div className="flex flex-wrap gap-2">
               {showDecide && (
                 <>
-                  <Button size="sm" disabled={approveBlocked} aria-describedby={decideBlocked ? ownHintId : fails || priceMoved ? blockHintId : undefined} onClick={() => setDialog('approve')} data-testid="merch-approve">{t('merchAdmin.approve')}</Button>
-                  <Button size="sm" variant="secondary" disabled={decideBlocked || !saleCan(sale, 'reject')} aria-describedby={decideBlocked ? ownHintId : undefined} onClick={() => setDialog('reject')} data-testid="merch-reject">{t('merchAdmin.reject')}</Button>
+                  <Button size="sm" className="min-h-11" disabled={approveBlocked} aria-describedby={decideBlocked ? ownHintId : fails || priceMoved ? blockHintId : undefined} onClick={() => openDialog('approve')} data-testid="merch-approve">{t('merchAdmin.approve')}</Button>
+                  <Button size="sm" className="min-h-11" variant="secondary" disabled={decideBlocked || !saleCan(sale, 'reject')} aria-describedby={decideBlocked ? ownHintId : undefined} onClick={() => openDialog('reject')} data-testid="merch-reject">{t('merchAdmin.reject')}</Button>
                 </>
               )}
-              {saleCan(sale, 'submit') && <Button size="sm" loading={busy} onClick={() => void simple(() => salesApi.adminSubmit(token!, sale.id), 'merchAdmin.sale.done.sent')} data-testid="merch-submit">{t('merch.send')}</Button>}
-              {saleCan(sale, 'end') && <Button size="sm" variant="secondary" onClick={() => setDialog('end')} data-testid="merch-end">{t('merchAdmin.end')}</Button>}
-              {saleCan(sale, 'edit') && sale.origin === 'staff' && <Button size="sm" variant="secondary" onClick={() => onEdit(sale.id)} data-testid="merch-edit">{t('merch.action.edit')}</Button>}
-              {saleCan(sale, 'withdraw') && sale.origin === 'staff' && <Button size="sm" variant="ghost" onClick={() => setDialog('withdraw')} data-testid="merch-withdraw">{t('merch.action.withdraw')}</Button>}
+              {saleCan(sale, 'submit') && <Button size="sm" className="min-h-11" loading={busy} onClick={() => void simple(() => salesApi.adminSubmit(token!, sale.id), 'merchAdmin.sale.done.sent')} data-testid="merch-submit">{t('merch.send')}</Button>}
+              {saleCan(sale, 'end') && <Button size="sm" className="min-h-11" variant="secondary" onClick={() => openDialog('end')} data-testid="merch-end">{t('merchAdmin.end')}</Button>}
+              {saleCan(sale, 'edit') && sale.origin === 'staff' && <Button size="sm" className="min-h-11" variant="secondary" onClick={() => onEdit(sale.id)} data-testid="merch-edit">{t('merch.action.edit')}</Button>}
+              {saleCan(sale, 'withdraw') && sale.origin === 'staff' && <Button size="sm" className="min-h-11" variant="ghost" onClick={() => openDialog('withdraw')} data-testid="merch-withdraw">{t('merch.action.withdraw')}</Button>}
             </div>
             {!showDecide && !(sale.allowedActions ?? []).length && <p className="text-sm text-[var(--color-fg-quaternary)]" data-testid="merch-no-actions">{t('merchAdmin.saleNoActions')}</p>}
           </CardContent>
@@ -250,7 +261,7 @@ export function FlashSaleDetail({ id, fallback, onBack, onEdit, onChanged }: {
                 return (
                   <li key={h.id ?? i} className="border-l-2 border-[var(--color-border-secondary)] pl-3 text-sm [overflow-wrap:anywhere]">
                     <p className="font-medium">{t(SALE_HIST_KEY[verb] ?? 'merchAdmin.hist.other')}</p>
-                    <p className="text-xs text-[var(--color-fg-quaternary)]">{eatDateTime(h.at ?? h.createdAt, locale)} · {h.actorName || h.actor || '—'}</p>
+                    <p className="text-xs text-[var(--color-fg-quaternary)]">{eatWhen(h.at ?? h.createdAt, locale)} · {h.actorName || h.actor || '—'}</p>
                     {note && <p className="mt-1 text-[var(--color-fg-secondary)]">{note}</p>}
                   </li>
                 );
@@ -260,12 +271,12 @@ export function FlashSaleDetail({ id, fallback, onBack, onEdit, onChanged }: {
         </Card>
       )}
 
-      {dialog === 'approve' && <ApproveSaleDialog sale={sale} onClose={() => setDialog(null)} onDone={s => after('merchAdmin.sale.done.approved', s)} onStale={stale} />}
-      {dialog === 'reject' && <RejectSaleDialog sale={sale} onClose={() => setDialog(null)} onDone={s => after('merchAdmin.done.rejected', s)} onStale={stale} />}
-      {dialog === 'end' && <EndSaleDialog sale={sale} onClose={() => setDialog(null)} onDone={s => after('merchAdmin.sale.done.ended', s)} />}
-      <Dialog open={dialog === 'withdraw'} onClose={() => setDialog(null)} title={t('merch.withdrawSale.title')} description={t('merch.sale.withdrawBody')} size="sm">
+      {dialog === 'approve' && <ApproveSaleDialog sale={sale} onClose={closeDialog} onDone={s => after('merchAdmin.sale.done.approved', s)} onStale={stale} />}
+      {dialog === 'reject' && <RejectSaleDialog sale={sale} onClose={closeDialog} onDone={s => after('merchAdmin.done.rejected', s)} onStale={stale} />}
+      {dialog === 'end' && <EndSaleDialog sale={sale} onClose={closeDialog} onDone={s => after('merchAdmin.sale.done.ended', s)} />}
+      <Dialog open={dialog === 'withdraw'} onClose={closeDialog} title={t('merch.withdrawSale.title')} description={t('merch.sale.withdrawBody')} size="sm">
         <div className="flex flex-wrap justify-end gap-2">
-          <Button variant="secondary" onClick={() => setDialog(null)}>{t('merch.sale.keep')}</Button>
+          <Button variant="secondary" onClick={closeDialog}>{t('merch.sale.keep')}</Button>
           <Button variant="destructive" loading={busy} onClick={() => void simple(() => salesApi.adminWithdraw(token!, sale.id), 'merch.sale.withdrawn')} data-testid="merch-withdraw-confirm">{t('merch.withdraw.confirm')}</Button>
         </div>
       </Dialog>
@@ -283,7 +294,7 @@ function useSaleAction(onDone: (s: FlashSale) => void, onStale?: (err: unknown) 
     try { onDone(await fn()); }
     catch (err) {
       if (saleErrorCode(err) === 'sale_changed' && onStale) { onStale(err); return; }
-      const m = saleMessageOf(err, { money: n => money(n), when: iso => eatDateTime(iso, locale), day: ymd => eatDay(ymd, locale) }, 'merchAdmin.actionFailed', 'admin');
+      const m = saleMessageOf(err, { money: n => money(n), when: iso => eatWhen(iso, locale), day: ymd => eatDay(ymd, locale) }, 'merchAdmin.actionFailed', 'admin');
       setError(fmt(t(m.key), m.vars)); setBusy(false);
     }
   };
@@ -301,7 +312,7 @@ function ApproveSaleDialog({ sale, onClose, onDone, onStale }: { sale: FlashSale
         {error && <Alert tone="error"><span data-testid="merch-approve-error">{error}</span></Alert>}
         <fieldset className="flex flex-col">
           <legend className="text-sm font-medium text-[var(--color-fg-secondary)]">{t('merchAdmin.checklist')}</legend>
-          <Checkbox checked={ok} onChange={e => setOk(e.target.checked)} label={t('merchAdmin.check.sale')} data-testid="merch-check-sale" />
+          <Checkbox checked={ok} onChange={e => setOk(e.target.checked)} label={t('merchAdmin.check.sale')} labelClassName="flex w-full" data-testid="merch-check-sale" />
         </fieldset>
         <div className={footer}>
           <Button type="button" variant="secondary" onClick={onClose}>{t('common.cancel')}</Button>

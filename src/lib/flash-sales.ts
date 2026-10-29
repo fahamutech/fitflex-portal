@@ -215,7 +215,7 @@ export type SaleErrors = Partial<Record<'productId' | 'salePriceTzs' | 'startsAt
  * `money` formats amounts for the messages.
  */
 export function validateSale(d: { productId: string; salePrice: string; startsAt: string; endsAt: string }, prices: { regular: number; discount: number | null } | null,
-  money: (n: number) => string, opts: { now?: number; checkStart?: boolean; rules?: SaleRules } = {}): SaleErrors {
+  money: (n: number) => string, opts: { now?: number; checkStart?: boolean; rules?: SaleRules; staff?: boolean } = {}): SaleErrors {
   const now = opts.now ?? Date.now();
   const rules = opts.rules ?? DEFAULT_RULES;
   const e: SaleErrors = {};
@@ -228,7 +228,8 @@ export function validateSale(d: { productId: string; salePrice: string; startsAt
     const max = maxSalePriceOf(prices.regular, rules.minDiscountPct);
     const standing = standingDiscountOf(prices.regular, prices.discount);
     if (sale > max) e.salePriceTzs = { key: 'merch.sale.min5', vars: { max: money(max) } };
-    else if (standing != null && sale >= standing) e.salePriceTzs = { key: 'merch.sale.belowDiscount', vars: { discount: money(standing) } };
+    // Staff create for a seller: "the product's" discount, not "your" (QA1 #6).
+    else if (standing != null && sale >= standing) e.salePriceTzs = { key: opts.staff ? 'merch.sale.belowDiscountStaff' : 'merch.sale.belowDiscount', vars: { discount: money(standing) } };
   }
   const start = Date.parse(d.startsAt); const end = Date.parse(d.endsAt);
   if (!d.startsAt || !Number.isFinite(start)) e.startsAt = { key: 'merch.required' };
@@ -346,7 +347,7 @@ export function saleMessageOf(err: unknown, fmt: { money: (n: number) => string;
   if (audience === 'admin' && ADMIN_PLAIN[code]) return { key: ADMIN_PLAIN[code], vars: {} };
   switch (code) {
     case 'discount_out_of_range':
-      if (b.reason === 'not_below_effective') return { key: 'merch.sale.belowDiscount', vars: { discount: fmt.money(b.effectivePriceTzs ?? b.discountPriceTzs ?? 0) }, field: 'salePriceTzs' };
+      if (b.reason === 'not_below_effective') return { key: audience === 'admin' ? 'merch.sale.belowDiscountStaff' : 'merch.sale.belowDiscount', vars: { discount: fmt.money(b.effectivePriceTzs ?? b.discountPriceTzs ?? 0) }, field: 'salePriceTzs' };
       return { key: 'merch.sale.min5', vars: { max: fmt.money(b.maxSalePriceTzs ?? 0) }, field: 'salePriceTzs' };
     case 'price_raised_recently':
       return { key: 'merch.sale.raised', vars: { date: b.raisedOn ? fmt.day(b.raisedOn) : fmt.when(b.raisedAt ?? ''), earliest: fmt.when(b.earliestStart ?? '') }, field: 'startsAt' };
