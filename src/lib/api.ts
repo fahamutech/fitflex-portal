@@ -1433,6 +1433,81 @@ export const api = {
     request<Record<string, unknown>>('/admin/refunds/batch-paid', { method: 'POST', body: JSON.stringify(body) }, token),
   /** §3.14, roles finance | owner | admin. */
   organizerEventFinance: (token: string, id: string) => request<EventFinance>(`/organizer/events/${encodeURIComponent(id)}/finance`, {}, token),
+
+  // ─── Events S5 (spec events-s5-venue-api-and-webhooks §4, §5, §7) ───
+  /** §4.1: read-only. A scan outcome is a 200; 400 `not_event_ticket` / `invalid_payload`. */
+  verifyEventTicket: (token: string, eventId: string, body: { payload: string; collectionPointId?: string }) =>
+    request<KitVerifyResult>(`/organizer/events/${encodeURIComponent(eventId)}/tickets/verify`, { method: 'POST', body: JSON.stringify(body), cache: 'no-store' }, token),
+  /** §4.2: `Idempotency-Key` required (8 to 100 chars). */
+  collectEventKit: (token: string, eventId: string, body: KitCollectBody, idempotencyKey: string) =>
+    request<{ collection: { id: string; status: string; collectedAt: string; collectionPointId: string | null }; card: KitCard }>(
+      `/organizer/events/${encodeURIComponent(eventId)}/kit-collections`, { method: 'POST', body: JSON.stringify(body), headers: { 'Idempotency-Key': idempotencyKey } }, token),
+  correctEventKit: (token: string, eventId: string, collectionId: string, body: { action: 'void' | 'recollect'; reason: string }, idempotencyKey: string) =>
+    request<Record<string, unknown>>(`/organizer/events/${encodeURIComponent(eventId)}/kit-collections/${encodeURIComponent(collectionId)}/corrections`, { method: 'POST', body: JSON.stringify(body), headers: { 'Idempotency-Key': idempotencyKey } }, token),
+  eventKitCollections: (token: string, eventId: string, query: { cursor?: string | null; limit?: number; status?: string; collectionPointId?: string } = {}) =>
+    request<{ items: KitCollectionRow[]; nextCursor: string | null }>(`/organizer/events/${encodeURIComponent(eventId)}/kit-collections${qs(query)}`, {}, token),
+  eventKitSummary: (token: string, eventId: string) => request<KitSummary>(`/organizer/events/${encodeURIComponent(eventId)}/kit/summary`, {}, token),
+  eventKitLookup: (token: string, eventId: string, q: string) =>
+    request<{ items: KitLookupItem[] }>(`/organizer/events/${encodeURIComponent(eventId)}/kit/lookup${qs({ q })}`, {}, token),
+  eventBibs: (token: string, eventId: string, query: { cursor?: string | null; limit?: number; categoryId?: string; filter?: string; q?: string } = {}) =>
+    request<BibList>(`/organizer/events/${encodeURIComponent(eventId)}/bib-assignments${qs(query)}`, {}, token),
+  assignEventBib: (token: string, eventId: string, body: { registrationId: string; bibNumber: string; reason?: string; replace?: boolean }, idempotencyKey: string) =>
+    request<Record<string, unknown>>(`/organizer/events/${encodeURIComponent(eventId)}/bib-assignments`, { method: 'POST', body: JSON.stringify(body), headers: { 'Idempotency-Key': idempotencyKey } }, token),
+  releaseEventBib: (token: string, eventId: string, assignmentId: string, reason: string, idempotencyKey: string) =>
+    request<Record<string, unknown>>(`/organizer/events/${encodeURIComponent(eventId)}/bib-assignments/${encodeURIComponent(assignmentId)}/release`, { method: 'POST', body: JSON.stringify({ reason }), headers: { 'Idempotency-Key': idempotencyKey } }, token),
+  previewEventBibsBulk: (token: string, eventId: string, body: BibBulkBody) =>
+    request<BibBulkPreview>(`/organizer/events/${encodeURIComponent(eventId)}/bib-assignments/bulk/preview`, { method: 'POST', body: JSON.stringify(body) }, token),
+  applyEventBibsBulk: (token: string, eventId: string, body: BibBulkBody & { previewHash: string }, idempotencyKey: string) =>
+    request<Record<string, unknown>>(`/organizer/events/${encodeURIComponent(eventId)}/bib-assignments/bulk`, { method: 'POST', body: JSON.stringify(body), headers: { 'Idempotency-Key': idempotencyKey } }, token),
+  previewEventBibsImport: (token: string, eventId: string, csv: string) =>
+    request<BibImportPreview>(`/organizer/events/${encodeURIComponent(eventId)}/bib-assignments/import/preview`, { method: 'POST', body: JSON.stringify({ csv }) }, token),
+  applyEventBibsImport: (token: string, eventId: string, body: { csv: string; previewHash: string }, idempotencyKey: string) =>
+    request<Record<string, unknown>>(`/organizer/events/${encodeURIComponent(eventId)}/bib-assignments/import`, { method: 'POST', body: JSON.stringify(body), headers: { 'Idempotency-Key': idempotencyKey } }, token),
+  /** §4.5: an authenticated fetch -> Blob (a plain link cannot carry the bearer). 429 `rate_limited { retryAfterSeconds }`. */
+  exportEventRegistrations: async (token: string, eventId: string): Promise<Blob> => {
+    const res = await fetch(`${BASE}/organizer/events/${encodeURIComponent(eventId)}/exports/registrations.csv`, { headers: { authorization: `Bearer ${token}`, 'x-fitflex-client': IDENTITY_V2_CLIENT }, cache: 'no-store' });
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      if (res.status === 401) notifyUnauthorized();
+      throw new ApiError(res.status, body);
+    }
+    return res.blob();
+  },
+  /** §3.1: a FitFlex admin with scope `events`, published events; `reason` is 10 to 300 chars. */
+  adminSetPayoutSchedule: (token: string, eventId: string, body: { payoutSchedule: PayoutSchedule; reason: string }) =>
+    request<unknown>(`/admin/events/${encodeURIComponent(eventId)}/payout-schedule`, { method: 'POST', body: JSON.stringify(body) }, token),
+
+  // §5.1 API clients (owner/admin). The list/detail envelopes are not spelled out in the spec; see the PR.
+  apiClients: (token: string) => request<{ items: ApiClientRow[]; max?: number; accessEnabled?: boolean }>('/organizer/api-clients', {}, token),
+  apiClient: (token: string, id: string) => request<ApiClientDetail>(`/organizer/api-clients/${encodeURIComponent(id)}`, {}, token),
+  createApiClient: (token: string, body: { name: string; environment: 'live' | 'sandbox'; scopes: string[]; eventIds?: string[]; expiresInDays?: number }) =>
+    request<{ client: ApiClientRow; clientSecret: string }>('/organizer/api-clients', { method: 'POST', body: JSON.stringify(body) }, token),
+  rotateApiClient: (token: string, id: string, graceHours: 0 | 24 | 72) =>
+    request<{ client: ApiClientRow; clientSecret: string }>(`/organizer/api-clients/${encodeURIComponent(id)}/rotate`, { method: 'POST', body: JSON.stringify({ graceHours }) }, token),
+  revokeApiClient: (token: string, id: string, reason?: string) =>
+    request<unknown>(`/organizer/api-clients/${encodeURIComponent(id)}/revoke`, { method: 'POST', body: JSON.stringify(reason ? { reason } : {}) }, token),
+
+  // §7.2 webhook endpoints (owner/admin) and §7.5 delivery log.
+  webhookEndpoints: (token: string) => request<{ items: WebhookEndpointRow[]; max?: number; types?: string[]; available?: boolean }>('/organizer/webhook-endpoints', {}, token),
+  /** `{ endpoint, attempts }`: the endpoint with its last 10 attempts (verification and test sends included). */
+  webhookEndpoint: (token: string, id: string) => request<{ endpoint: WebhookEndpointRow; attempts: WebhookAttempt[] }>(`/organizer/webhook-endpoints/${encodeURIComponent(id)}`, {}, token),
+  /** Runs the handshake now: `{ ok, host, reason? }`. */
+  verifyWebhookEndpoint: (token: string, id: string) => request<{ ok: boolean; host: string; reason?: string }>(`/organizer/webhook-endpoints/${encodeURIComponent(id)}/verify`, { method: 'POST', body: JSON.stringify({}) }, token),
+  createWebhookEndpoint: (token: string, body: { url: string; events: string[]; eventIds?: string[]; description?: string }) =>
+    request<{ endpoint: WebhookEndpointRow; signingSecret: string }>('/organizer/webhook-endpoints', { method: 'POST', body: JSON.stringify(body) }, token),
+  rotateWebhookSecret: (token: string, id: string, graceHours: 0 | 24 | 72) =>
+    request<{ endpoint?: WebhookEndpointRow; signingSecret: string }>(`/organizer/webhook-endpoints/${encodeURIComponent(id)}/rotate-secret`, { method: 'POST', body: JSON.stringify({ graceHours }) }, token),
+  testWebhookEndpoint: (token: string, id: string) =>
+    request<WebhookTestResult>(`/organizer/webhook-endpoints/${encodeURIComponent(id)}/test`, { method: 'POST', body: JSON.stringify({}) }, token),
+  setWebhookEndpointState: (token: string, id: string, action: 'disable' | 'enable') =>
+    request<unknown>(`/organizer/webhook-endpoints/${encodeURIComponent(id)}/${action}`, { method: 'POST', body: JSON.stringify({}) }, token),
+  webhookDeliveries: (token: string, query: { endpointId?: string; status?: string; eventId?: string; cursor?: string | null } = {}) =>
+    request<{ items: WebhookDeliveryRow[]; nextCursor: string | null }>(`/organizer/webhook-deliveries${qs(query)}`, {}, token),
+  /** `{ delivery, attempts, payload, manualRetriesLeft }`. */
+  webhookDelivery: (token: string, id: string) => request<WebhookDeliveryDetail>(`/organizer/webhook-deliveries/${encodeURIComponent(id)}`, {}, token),
+  retryWebhookDelivery: (token: string, id: string) =>
+    request<{ alreadyQueued?: boolean }>(`/organizer/webhook-deliveries/${encodeURIComponent(id)}/retry`, { method: 'POST', body: JSON.stringify({}) }, token),
+  integrationsHealth: (token: string) => request<IntegrationsHealth>('/organizer/integrations/health', {}, token),
   // Corporate payment (§3.4.3, §3.5): `Idempotency-Key` is required.
   submitCorporateEventPayment: (token: string, orgId: string, orderId: string, body: CorporateEventPaymentBody, idempotencyKey: string) =>
     request<{ payment: EventPaymentView; order: { id: string; status: EventOrderStatus; holdExpiresAt: string | null }; replayed?: boolean }>(
@@ -4120,7 +4195,12 @@ export interface EventsOptions {
   manualConfirmHours?: number; refundDays?: number;
   hold?: { manualExtendHours: number; manualMaxHours: number; providerExtendMinutes: number; lateGraceHours: number };
   tickets?: { qr: boolean; scanning: boolean };
+  // Events S5 (spec events-s5-venue-api-and-webhooks §11.1): the server's flags, so the portal never infers availability from the build flag alone.
+  ops?: { kit: boolean; api: boolean; webhooks: boolean };
+  payoutSchedules?: PayoutSchedule[];
 }
+/** D33: the two payout schedules an event may choose (S5 §3). */
+export type PayoutSchedule = 'biweekly' | 'monthly';
 export interface OrganizerMe {
   organizer: { id: string; name: string; status: OrganizerStatus; timezone: string; kycCaseId: string | null; kycStatus: KycCaseStatus | null; statusReason: string | null };
   role: OrganizerRole;
@@ -4169,6 +4249,8 @@ export interface EventDocument extends EventSummary {
   submittedAt: string | null; rejection: { reason: string; note: string; at: string } | null; changeLogCount: number;
   /** Events S3 (spec §3.2, §3.3): which participant fields are collected and the duplicate rule. Absent on older documents. */
   participantFields?: ParticipantFields | null; duplicatePolicy?: DuplicatePolicy | null;
+  /** Events S5 §3.1: null until chosen (required at submit); never on public payloads. */
+  payoutSchedule?: PayoutSchedule | null;
 }
 /** PATCH /organizer/events/:id: the current version plus the fields that changed (nested lists carry ids for upsert). */
 export type EventPatch = { version: number; changeNote?: Bilingual } & Partial<Omit<EventDocument, 'id' | 'slug' | 'status' | 'version' | 'allowedActions' | 'organizer' | 'updatedAt'>>;
@@ -4284,6 +4366,8 @@ export interface CorporateEventOrderBody {
 export interface EventRegistrationRow {
   id: string; participant: { name: string }; categoryName: string; ticketTypeName: string; status: EventRegistrationStatus; orderReference: string;
   teamName: string | null; kitSize: string | null; createdAt: string; claimed: boolean; groupLabel?: string | null;
+  /** Events S5 §4.5. */
+  bibNumber?: string | null; kit?: { state: KitState; collectedAt?: string | null };
 }
 export interface EventRegistrationsSummary {
   byStatus: { reserved: number; confirmed: number; cancelled: number };
@@ -4352,6 +4436,8 @@ export interface EventFinance {
   orders: { paid: number; refunded: number; partlyRefunded: number };
   byTicketType: Array<{ ticketTypeId: string; name: string; sold: number; grossTzs: number }>;
   settlement: { state: string };
+  /** Events S5 §3.1. */
+  payoutSchedule?: PayoutSchedule | null;
 }
 /** GET /admin/events/:eventId/cancel-preview (§3.12.4). */
 export interface EventCancelImpact {
@@ -4383,3 +4469,89 @@ export interface AdminEventOrderPayment {
 
 /** GET /events/:id (S2 §14.2): the public detail a corporate coordinator reads before registering staff. */
 export type PublicEventDetail = Omit<EventDocument, 'allowedActions' | 'submittedAt' | 'rejection' | 'changeLogCount' | 'version'> & { version?: number };
+
+
+// ─── Events S5 types (spec events-s5-venue-api-and-webhooks §4, §5, §7) ───
+export type KitState = 'not_ready' | 'ready' | 'collected' | 'exception';
+export type KitResult = 'valid' | 'already_collected' | 'wrong_event' | 'revoked' | 'unpaid' | 'unknown';
+export type KitWarning = 'bib_missing' | 'kit_size_missing' | 'outside_collection_window' | 'bib_changed_after_collection' | 'claim_pending';
+/** The masked card: first name + last initial, never contact data. */
+export interface KitCard {
+  displayName: string; ticketCode: string; categoryName: string; distanceM: number; ticketTypeName: string; teamName: string | null;
+  bibNumber: string | null; kitSize: string | null;
+  kit: { state: KitState; collectedAt?: string | null; collectionPointName?: string | null };
+  payment: 'paid' | 'unpaid' | 'refunded';
+}
+export interface KitVerifyResult {
+  result: KitResult; registrationId?: string; card?: KitCard; warnings: KitWarning[];
+  revokedReason?: 'cancelled' | 'refunded' | 'event_cancelled' | 'admin' | 'replaced'; otherEvent?: { title: string };
+  canCollect: boolean; canOverride: boolean;
+  /** Backend is adding it on `already_collected` (verify and the 409): the handover an override corrects. */
+  collectionId?: string;
+  /** Present on `already_collected` (§4.1 step 6). */
+  collectedAt?: string; collectionPointName?: string | null; byFirstName?: string | null;
+}
+export interface KitCollectBody {
+  method: 'scan' | 'manual'; payload?: string; registrationId?: string;
+  manualReason?: 'phone_lost' | 'no_signal' | 'screen_damaged' | 'other'; collectionPointId?: string; kitSize?: string; bibNumber?: string;
+  status?: 'collected' | 'exception'; note?: string;
+}
+export interface KitCollectionRow {
+  id: string; registrationId: string; displayName: string; bibNumber: string | null; status: 'collected' | 'exception' | 'corrected'; collectedAt: string;
+  collectionPointName: string | null; byFirstName: string | null; method: 'scan' | 'manual' | 'api'; manualReason?: string | null; correctionReason?: string | null;
+}
+export interface KitSummary {
+  confirmed: number; collected: number; remaining: number; exceptions: number;
+  byCategory?: Array<{ categoryId?: string; name?: string; collected?: number; confirmed?: number }>; byCollectionPoint?: Array<{ collectionPointId?: string; name?: string; collected?: number }>;
+}
+/** A lookup hit is "the masked card of §4.1": the card fields may sit at the top level or under `card`. */
+export type KitLookupItem = Partial<KitCard> & { registrationId?: string; card?: KitCard; result?: KitResult; warnings?: KitWarning[]; canCollect?: boolean };
+export interface BibRow {
+  registrationId: string; displayName: string; categoryName: string; bibNumber: string | null; assignedAt: string | null; kit: { state: KitState };
+  /** Not in the spec's list item; the release route needs it (see the PR). */
+  assignmentId?: string | null; warnings?: KitWarning[];
+}
+export interface BibList { items: BibRow[]; nextCursor: string | null; counts: { assigned: number; unassigned: number } }
+export interface BibBulkBody { categoryId?: string; start: number; end?: number; prefix?: string; padTo?: number; order: 'registered_at' | 'last_name' }
+export interface BibBulkPreview { previewHash: string; count: number; first: string | null; last: string | null; conflicts: Array<Record<string, unknown>>; shortfall: number }
+export interface BibImportPreview {
+  previewHash?: string; total?: number; ok?: number; bad?: number;
+  rows: Array<{ line: number; status: 'ok' | 'error'; code?: string | null; bibNumber?: string }>;
+}
+
+export type ApiScope = 'registrations:read' | 'registrations:demographics' | 'kit:write' | 'bibs:write' | 'webhooks:manage' | 'results:write';
+export interface ApiClientRow {
+  id: string; clientId: string; name: string; environment: 'live' | 'sandbox'; scopes: ApiScope[]; eventIds: string[] | null;
+  status: 'active' | 'revoked' | 'expired'; expiresAt: string | null; lastUsedAt: string | null; createdAt: string; createdBy?: { name: string | null } | null;
+  rotation?: { inGrace: boolean; graceEndsAt: string | null } | null; rateLimitPerMinute?: number;
+}
+/** `GET /organizer/api-clients/:id`: "detail + usage" (the envelope is not spelled out; both `{client, usage}` and a flat row are read). */
+export type ApiClientDetail = { client: ApiClientRow; usage?: ApiClientUsage; history?: Array<{ at: string; action: string }> };
+export interface ApiClientUsage { days: Array<{ day: string; requests: number; errors: number; rateLimited: number }> }
+
+export type WebhookHealth = 'healthy' | 'degraded' | 'failing' | 'disabled' | 'unverified';
+export interface WebhookEndpointRow {
+  id: string; url: string; host?: string; events: string[]; eventIds?: string[] | null; description?: string | null;
+  status: 'active' | 'disabled'; verifiedAt: string | null; lastSuccessAt: string | null;
+  last24h: { delivered: number; failed: number; dead: number }; pending: number; oldestPendingAgeSeconds?: number | null; consecutiveFailures: number;
+  health: WebhookHealth; disabledReason?: string | null; disabledAt?: string | null; secretHint?: string | null;
+  rotation?: { inGrace: boolean; graceEndsAt: string | null }; createdAt?: string;
+}
+export type WebhookDeliveryStatus = 'pending' | 'delivered' | 'failed' | 'dead';
+export interface WebhookDeliveryRow {
+  /** `eventId` is the OUTBOX id (the backend renames it to `outboxEventId`; both are read). */
+  id: string; endpointId: string; eventType: string; eventId?: string; outboxEventId?: string; status: WebhookDeliveryStatus; attemptCount: number;
+  createdAt: string; lastAttemptAt: string | null; nextAttemptAt: string | null; responseCode: number | null; lastError: string | null;
+}
+export interface WebhookAttempt {
+  id?: string; attemptNo: number; trigger: 'auto' | 'manual' | 'test' | 'verify'; startedAt: string; durationMs: number | null;
+  outcome: 'success' | 'http_error' | 'timeout' | 'network_error' | 'tls_error' | 'blocked_address' | 'redirect_not_followed' | 'organizer_mismatch';
+  responseCode: number | null; responseSnippet: string | null; errorCode: string | null; nextAttemptAt: string | null;
+}
+export interface WebhookDeliveryDetail { delivery: WebhookDeliveryRow; attempts: WebhookAttempt[]; payload?: unknown; manualRetriesLeft?: number }
+/** The test-send answer is shown inline; the spec does not fix its shape (see the PR). */
+export interface WebhookTestResult { ok?: boolean; outcome?: WebhookAttempt['outcome']; responseCode?: number | null; durationMs?: number | null; errorCode?: string | null; snippet?: string | null }
+export interface IntegrationsHealth {
+  webhooks: { endpoints: number; healthy: number; degraded: number; failing: number; disabled: number; unverified?: number; deadLast24h: number } | null;
+  apiClients: { active: number; expiringSoon: number } | null;
+}

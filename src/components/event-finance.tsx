@@ -7,6 +7,7 @@ import { RefreshCw } from 'lucide-react';
 import { api, type EventFinance } from '@/lib/api';
 import { money } from '@/lib/admin-utils';
 import { eventDateTime, fmt, isFeatureOff, isForbidden, trackEventsS4Analytics } from '@/lib/events';
+import type { MessageKey } from '@/lib/i18n';
 import { Alert, Button, Card, CardContent, EmptyState, MetricCard, SkeletonTable } from '@/components/shared';
 import { DataTable, type ColumnDef } from '@/components/data-table';
 import { EventsUnavailable, OrganizerForbidden, PageError } from '@/components/organizer/page-states';
@@ -69,6 +70,9 @@ export function EventFinanceView({ eventId, timezone, timezoneAbbr, published }:
           </CardContent></Card>
         </>
       )}
+      <p className="text-sm font-medium text-[var(--color-fg-primary)]" data-testid="finance-payout">
+        {fmt(t('events.payout.finance'), { schedule: data.payoutSchedule ? t(`events.payout.${data.payoutSchedule}` as MessageKey) : t('events.payout.notSet') })}
+      </p>
       <Alert tone="info">{t('events.finance.note')}</Alert>
       <p className="text-xs text-[var(--color-fg-quaternary)]" data-testid="finance-privacy">{t('events.finance.privacy')}</p>
     </div>
