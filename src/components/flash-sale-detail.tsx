@@ -4,9 +4,9 @@ import { ArrowLeft, CheckCircle2, XCircle } from 'lucide-react';
 import type { MessageKey } from '@/lib/i18n';
 import { money } from '@/lib/admin-utils';
 import { eatDateTime, eatDay, fmt } from '@/lib/vendor';
-import { PHASE_KEY, PHASE_TONE, phaseOf, type AuditRow } from '@/lib/shop-banners';
+import { PHASE_TONE, phaseOf, type AuditRow } from '@/lib/shop-banners';
 import {
-  SALE_REJECT_CODES, SALE_REJECT_KEY, discountPctOf, saleCan, saleErrorCode, saleMessageOf, saleReasonText, salesApi,
+  SALE_HIST_KEY, SALE_PHASE_KEY, SALE_REJECT_CODES, SALE_REJECT_KEY, discountPctOf, saleCan, saleErrorCode, saleMessageOf, saleReasonText, salesApi,
   type AdminPriceCheck, type FlashSale, type SaleRejectCode,
 } from '@/lib/flash-sales';
 import { Alert, Badge, Button, Card, CardContent, CardHeader, Checkbox, Field, Radio, Spinner, Textarea } from './shared';
@@ -15,10 +15,6 @@ import { SalePriceBlock, SaleThumb } from './flash-sale-form';
 import { useToast } from './ui/toast';
 import { useApp } from '../../app/providers';
 
-const HIST_KEY: Record<string, MessageKey> = {
-  created: 'merchAdmin.hist.created', updated: 'merchAdmin.hist.updated', submitted: 'merchAdmin.hist.submitted', approved: 'merchAdmin.hist.approved',
-  rejected: 'merchAdmin.hist.rejected', withdrawn: 'merchAdmin.hist.withdrawn', ended: 'merchAdmin.hist.ended', expired: 'merchAdmin.hist.expired',
-};
 const NOTE_MIN = 10;
 const NOTE_MAX = 500;
 
@@ -59,7 +55,7 @@ export function FlashSaleDetail({ id, fallback, onBack, onEdit, onChanged }: {
     try { const r = await salesApi.adminGet(token, id); setSale(r.sale); setHistory(r.history); setCheck(r.priceCheck); setLoaded(true); }
     catch (err) {
       if (saleErrorCode(err) === 'sale_not_found') setNotFound(true);
-      else setError(t(saleMessageOf(err, deps, 'merchAdmin.loadFailed').key));
+      else setError(t(saleMessageOf(err, deps, 'merchAdmin.loadFailed', 'admin').key));
     }
   }, [token, id, t]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { void load(); }, [load]);
@@ -92,14 +88,14 @@ export function FlashSaleDetail({ id, fallback, onBack, onEdit, onChanged }: {
   /** 409 sale_changed (or the price moved): close, reload and say why; never decide on what wasn't seen. */
   const stale = (err: unknown) => {
     setDialog(null);
-    setNotice(t(saleMessageOf(err, deps).key));
+    setNotice(t(saleMessageOf(err, deps, 'merchAdmin.actionFailed', 'admin').key));
     void load(); onChanged();
   };
   const simple = async (fn: () => Promise<FlashSale>, doneKey: MessageKey) => {
     if (busy) return;
     setBusy(true);
     try { await after(doneKey, await fn()); }
-    catch (err) { const m = saleMessageOf(err, deps, 'merchAdmin.actionFailed'); toast.error(fmt(t(m.key), m.vars)); }
+    catch (err) { const m = saleMessageOf(err, deps, 'merchAdmin.actionFailed', 'admin'); toast.error(fmt(t(m.key), m.vars)); }
     finally { setBusy(false); }
   };
   const row = (label: string, value: React.ReactNode, testId?: string) => (
@@ -124,7 +120,7 @@ export function FlashSaleDetail({ id, fallback, onBack, onEdit, onChanged }: {
           <h1 className="text-xl font-semibold" data-testid="sale-title">{sale.productName || sale.productId}</h1>
           {saleReasonText(sale, t) && <p className="mt-1 text-sm text-[var(--color-fg-tertiary)]" data-testid="sale-reason">{fmt(t('merch.line.reason'), { reason: saleReasonText(sale, t) })}</p>}
         </div>
-        <Badge tone={PHASE_TONE[phase]} dot><span data-testid="sale-status">{t(PHASE_KEY[phase])}</span></Badge>
+        <Badge tone={PHASE_TONE[phase]} dot><span data-testid="sale-status">{t(SALE_PHASE_KEY[phase])}</span></Badge>
       </div>
       {sale.sellerSuspended && <Alert tone="warning">{t('merchAdmin.saleSellerSuspended')}</Alert>}
 
@@ -139,7 +135,7 @@ export function FlashSaleDetail({ id, fallback, onBack, onEdit, onChanged }: {
                 <div className="min-w-0 space-y-1">
                   <p className="line-clamp-2 text-sm font-medium">{sale.productName || sale.productId}</p>
                   <SalePriceBlock sale={sale.salePriceTzs} was={was} pct={pct} />
-                  <p className="text-xs text-[var(--color-fg-tertiary)]">{fmt(t('merch.line.ends'), { date: eatDateTime(sale.endsAt, locale) })}</p>
+                  <p className="text-xs text-[var(--color-fg-tertiary)]">{fmt(t('merch.sale.line.ends'), { date: eatDateTime(sale.endsAt, locale) })}</p>
                 </div>
               </div>
             </CardContent>
@@ -159,9 +155,9 @@ export function FlashSaleDetail({ id, fallback, onBack, onEdit, onChanged }: {
                 {row(t('merchAdmin.col.dates'), `${eatDateTime(sale.startsAt, locale)} → ${eatDateTime(sale.endsAt, locale)} (${t('merch.dates.tzNote')})`, 'sale-dates')}
                 {phase === 'pending' && sale.expiresAt && row(t('merchAdmin.expiresAt'), eatDateTime(sale.expiresAt, locale), 'sale-expires')}
                 {row(t('merchAdmin.people'), [
-                  sale.createdBy && `${t('merchAdmin.createdBy')}: ${person(sale.createdBy, sale.createdByName)}`,
-                  sale.submittedBy && `${t('merchAdmin.submittedBy')}: ${person(sale.submittedBy, sale.submittedByName)}`,
-                  sale.approvedBy && `${t('merchAdmin.approvedBy')}: ${person(sale.approvedBy, sale.approvedByName)}`,
+                  sale.createdBy && `${t('merchAdmin.sale.createdBy')}: ${person(sale.createdBy, sale.createdByName)}`,
+                  sale.submittedBy && `${t('merchAdmin.sale.submittedBy')}: ${person(sale.submittedBy, sale.submittedByName)}`,
+                  sale.approvedBy && `${t('merchAdmin.sale.approvedBy')}: ${person(sale.approvedBy, sale.approvedByName)}`,
                   sale.endedBy && `${t('merchAdmin.endedBy')}: ${person(sale.endedBy, sale.endedByName)}`,
                 ].filter(Boolean).join(' · ') || '—')}
               </dl>
@@ -215,7 +211,7 @@ export function FlashSaleDetail({ id, fallback, onBack, onEdit, onChanged }: {
                   <Button size="sm" variant="secondary" disabled={decideBlocked || !saleCan(sale, 'reject')} aria-describedby={decideBlocked ? ownHintId : undefined} onClick={() => setDialog('reject')} data-testid="merch-reject">{t('merchAdmin.reject')}</Button>
                 </>
               )}
-              {saleCan(sale, 'submit') && <Button size="sm" loading={busy} onClick={() => void simple(() => salesApi.adminSubmit(token!, sale.id), 'merchAdmin.done.sent')} data-testid="merch-submit">{t('merch.send')}</Button>}
+              {saleCan(sale, 'submit') && <Button size="sm" loading={busy} onClick={() => void simple(() => salesApi.adminSubmit(token!, sale.id), 'merchAdmin.sale.done.sent')} data-testid="merch-submit">{t('merch.send')}</Button>}
               {saleCan(sale, 'end') && <Button size="sm" variant="secondary" onClick={() => setDialog('end')} data-testid="merch-end">{t('merchAdmin.end')}</Button>}
               {saleCan(sale, 'edit') && sale.origin === 'staff' && <Button size="sm" variant="secondary" onClick={() => onEdit(sale.id)} data-testid="merch-edit">{t('merch.action.edit')}</Button>}
               {saleCan(sale, 'withdraw') && sale.origin === 'staff' && <Button size="sm" variant="ghost" onClick={() => setDialog('withdraw')} data-testid="merch-withdraw">{t('merch.action.withdraw')}</Button>}
@@ -235,7 +231,7 @@ export function FlashSaleDetail({ id, fallback, onBack, onEdit, onChanged }: {
                 const note = typeof h.after?.note === 'string' ? h.after.note : typeof h.after?.reason === 'string' ? h.after.reason : null;
                 return (
                   <li key={h.id ?? i} className="border-l-2 border-[var(--color-border-secondary)] pl-3 text-sm [overflow-wrap:anywhere]">
-                    <p className="font-medium">{t(HIST_KEY[verb] ?? 'merchAdmin.hist.other')}</p>
+                    <p className="font-medium">{t(SALE_HIST_KEY[verb] ?? 'merchAdmin.hist.other')}</p>
                     <p className="text-xs text-[var(--color-fg-quaternary)]">{eatDateTime(h.at ?? h.createdAt, locale)} · {h.actorName || h.actor || '—'}</p>
                     {note && <p className="mt-1 text-[var(--color-fg-secondary)]">{note}</p>}
                   </li>
@@ -246,13 +242,13 @@ export function FlashSaleDetail({ id, fallback, onBack, onEdit, onChanged }: {
         </Card>
       )}
 
-      {dialog === 'approve' && <ApproveSaleDialog sale={sale} onClose={() => setDialog(null)} onDone={s => after('merchAdmin.done.approved', s)} onStale={stale} />}
+      {dialog === 'approve' && <ApproveSaleDialog sale={sale} onClose={() => setDialog(null)} onDone={s => after('merchAdmin.sale.done.approved', s)} onStale={stale} />}
       {dialog === 'reject' && <RejectSaleDialog sale={sale} onClose={() => setDialog(null)} onDone={s => after('merchAdmin.done.rejected', s)} onStale={stale} />}
-      {dialog === 'end' && <EndSaleDialog sale={sale} onClose={() => setDialog(null)} onDone={s => after('merchAdmin.done.ended', s)} />}
-      <Dialog open={dialog === 'withdraw'} onClose={() => setDialog(null)} title={t('merch.withdrawSale.title')} description={t('merch.withdraw.body')} size="sm">
+      {dialog === 'end' && <EndSaleDialog sale={sale} onClose={() => setDialog(null)} onDone={s => after('merchAdmin.sale.done.ended', s)} />}
+      <Dialog open={dialog === 'withdraw'} onClose={() => setDialog(null)} title={t('merch.withdrawSale.title')} description={t('merch.sale.withdrawBody')} size="sm">
         <div className="flex flex-wrap justify-end gap-2">
-          <Button variant="secondary" onClick={() => setDialog(null)}>{t('merch.withdraw.keep')}</Button>
-          <Button variant="destructive" loading={busy} onClick={() => void simple(() => salesApi.adminWithdraw(token!, sale.id), 'merch.withdrawn')} data-testid="merch-withdraw-confirm">{t('merch.withdraw.confirm')}</Button>
+          <Button variant="secondary" onClick={() => setDialog(null)}>{t('merch.sale.keep')}</Button>
+          <Button variant="destructive" loading={busy} onClick={() => void simple(() => salesApi.adminWithdraw(token!, sale.id), 'merch.sale.withdrawn')} data-testid="merch-withdraw-confirm">{t('merch.withdraw.confirm')}</Button>
         </div>
       </Dialog>
     </div>
@@ -269,7 +265,7 @@ function useSaleAction(onDone: (s: FlashSale) => void, onStale?: (err: unknown) 
     try { onDone(await fn()); }
     catch (err) {
       if (saleErrorCode(err) === 'sale_changed' && onStale) { onStale(err); return; }
-      const m = saleMessageOf(err, { money: n => money(n), when: iso => eatDateTime(iso, locale), day: ymd => eatDay(ymd, locale) }, 'merchAdmin.actionFailed');
+      const m = saleMessageOf(err, { money: n => money(n), when: iso => eatDateTime(iso, locale), day: ymd => eatDay(ymd, locale) }, 'merchAdmin.actionFailed', 'admin');
       setError(fmt(t(m.key), m.vars)); setBusy(false);
     }
   };
@@ -341,7 +337,7 @@ function EndSaleDialog({ sale, onClose, onDone }: { sale: FlashSale; onClose: ()
           <Textarea rows={3} value={reason} onChange={e => setReason(e.target.value)} maxLength={NOTE_MAX} data-testid="merch-end-reason" />
         </Field>
         <div className={footer}>
-          <Button type="button" variant="secondary" onClick={onClose}>{t('merch.withdraw.keep')}</Button>
+          <Button type="button" variant="secondary" onClick={onClose}>{t('merch.sale.keep')}</Button>
           <Button type="submit" variant="destructive" disabled={!ok} loading={busy} data-testid="merch-end-confirm">{t('merchAdmin.end')}</Button>
         </div>
       </form>

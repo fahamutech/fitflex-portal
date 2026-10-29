@@ -5,7 +5,7 @@
 // No user-facing strings here: every label is an i18n key.
 import { API_BASE, ApiError, qs, request } from './api';
 import type { MessageKey } from './i18n';
-import { isNetworkError, type AuditRow, type BannerEffectiveStatus, type BannerStatus, type MerchTab } from './shop-banners';
+import { isNetworkError, type AuditRow, type BannerEffectiveStatus, type BannerPhase, type BannerStatus, type MerchTab, type VendorGroup } from './shop-banners';
 
 // ─── Contract ───────────────────────────────────────────────────────────────
 
@@ -87,6 +87,8 @@ export interface PriceCheck {
   raisedOn: string | null;
   earliestStart: string | null;
   lockedBy: SaleLock | null;
+  /** Review 2026-10-29 (functions#285): a new or copied product needs 14 days of price history; when it was listed. */
+  listedAt?: string | null;
 }
 export type PriceHistoryRow = { at: string; fromTzs: number | null; toTzs: number | null; field: 'priceTzs' | 'discountPriceTzs'; raised: boolean };
 /** GET /admin/flash-sales/:id priceCheck. */
@@ -212,13 +214,27 @@ export const parsePrice = (text: string) => { const raw = text.replace(/[,\s]/g,
 /** A product photo address: absolute as sent, root-relative ones are on the API server. */
 export const productImageUrl = (src: string | null | undefined) => (!src ? null : src.startsWith('/') ? `${API_BASE}${src}` : src);
 
+// ─── Labels (sale-only keys: Swahili agrees with "ofa", class N, not the banner's li-/ma- forms) ──
+
+export const SALE_PHASE_KEY: Record<BannerPhase, MessageKey> = {
+  draft: 'merch.sale.status.draft', pending: 'merch.status.pending', scheduled: 'merch.status.approved', live: 'merch.status.live', ended: 'merch.status.ended',
+  rejected: 'merch.status.rejected', expired: 'merch.status.expired', withdrawn: 'merch.status.withdrawn',
+};
+export const SALE_GROUP_KEY: Record<VendorGroup, MessageKey> = {
+  live: 'merch.sale.group.live', scheduled: 'merch.sale.group.scheduled', waiting: 'merch.sale.group.waiting', drafts: 'merch.sale.group.drafts', past: 'merch.sale.group.past',
+};
+export const SALE_HIST_KEY: Record<string, MessageKey> = {
+  created: 'merchAdmin.sale.hist.created', updated: 'merchAdmin.sale.hist.updated', submitted: 'merchAdmin.sale.hist.submitted', approved: 'merchAdmin.sale.hist.approved',
+  rejected: 'merchAdmin.hist.rejected', withdrawn: 'merchAdmin.sale.hist.withdrawn', ended: 'merchAdmin.sale.hist.ended', expired: 'merchAdmin.sale.hist.expired',
+};
+
 // ─── Reasons ────────────────────────────────────────────────────────────────
 
 /** Admin reject reasons for sales (server: price_not_credible | product | timing | other). */
 export const SALE_REJECT_CODES = ['price_not_credible', 'product', 'timing', 'other'] as const;
 export type SaleRejectCode = typeof SALE_REJECT_CODES[number];
 export const SALE_REJECT_KEY: Record<SaleRejectCode, MessageKey> = {
-  price_not_credible: 'merchAdmin.saleReason.price', product: 'merchAdmin.saleReason.product', timing: 'merchAdmin.saleReason.timing', other: 'merchAdmin.reason.other',
+  price_not_credible: 'merchAdmin.saleReason.price', product: 'merchAdmin.saleReason.product', timing: 'merchAdmin.saleReason.timing', other: 'merchAdmin.saleReason.other',
 };
 /** The reason line in the reader's language: rejected → the code's label, then the note; ended by FitFlex → the note. */
 export function saleReasonText(s: Pick<FlashSale, 'status' | 'effectiveStatus' | 'statusReason' | 'statusReasonNote'>, t: (k: MessageKey) => string): string {
@@ -233,7 +249,7 @@ export function saleReasonText(s: Pick<FlashSale, 'status' | 'effectiveStatus' |
 export type SaleErrorBody = {
   error?: string; field?: string; reason?: string;
   maxSalePriceTzs?: number; regularPriceTzs?: number; effectivePriceTzs?: number; discountPriceTzs?: number | null; minDiscountPct?: number;
-  raisedAt?: string; raisedOn?: string; earliestStart?: string; fromTzs?: number; toTzs?: number;
+  raisedAt?: string; raisedOn?: string; earliestStart?: string; listedAt?: string; fromTzs?: number; toTzs?: number;
   saleId?: string; startsAt?: string; endsAt?: string; effectiveStatus?: string;
   retryAfterSeconds?: number; open?: number; max?: number; revision?: number; regularPriceTzsAtSubmit?: number; currentStatus?: string;
 };
@@ -263,6 +279,7 @@ const PLAIN: Record<string, [MessageKey, (keyof SaleErrors)?]> = {
   not_editable: ['merch.sale.notEditable'],
   invalid_transition: ['merch.sale.notEditable'],
   sale_not_found: ['merch.notYours'],
+  vendor_not_found: ['merch.sale.vendorNotFound'],
   vendor_suspended: ['merch.sale.suspended'],
   vendor_not_approved: ['merch.pendingBody'],
   feature_disabled: ['merch.unavailable'],
@@ -271,29 +288,50 @@ const PLAIN: Record<string, [MessageKey, (keyof SaleErrors)?]> = {
   acl_forbidden: ['merch.noPermission'],
 };
 
+/** Refusals worded for staff (the seller's state, not "your account"). */
+const ADMIN_PLAIN: Record<string, MessageKey> = {
+  vendor_not_approved: 'merchAdmin.saleSellerNotApproved',
+  vendor_suspended: 'merchAdmin.saleSellerSuspended',
+  vendor_not_found: 'merchAdmin.saleSellerNotFound',
+};
+
+/** When a start date refusal says the earliest allowed start (14-day rule, short price history), else null. */
+export function earliestStartOf(err: unknown): string | null {
+  const b = saleErrorBody(err);
+  return b && (b.error === 'price_raised_recently' || b.error === 'price_history_too_short') && b.earliestStart ? b.earliestStart : null;
+}
+
 /**
  * Every refusal the contract lists, worded with its numbers; anything unknown → `fallback`
  * (generic "Couldn't save. Try again."). `money` and `when`/`day` format amounts, times and Tanzania dates.
+ * `audience: 'admin'` words the seller's state for staff ("This seller isn't approved").
  */
 export function saleMessageOf(err: unknown, fmt: { money: (n: number) => string; when: (iso: string) => string; day: (ymd: string) => string },
-  fallback: MessageKey = 'merch.saveFailed'): SaleMessage {
-  if (isNetworkError(err)) return { key: 'merch.notSentOffline', vars: {} };
+  fallback: MessageKey = 'merch.saveFailed', audience: 'vendor' | 'admin' = 'vendor'): SaleMessage {
+  if (isNetworkError(err)) return { key: 'merch.sale.notSentOffline', vars: {} };
   const b = saleErrorBody(err) ?? {};
   const code = b.error ?? '';
+  if (audience === 'admin' && ADMIN_PLAIN[code]) return { key: ADMIN_PLAIN[code], vars: {} };
   switch (code) {
     case 'discount_out_of_range':
       if (b.reason === 'not_below_effective') return { key: 'merch.sale.belowDiscount', vars: { discount: fmt.money(b.effectivePriceTzs ?? b.discountPriceTzs ?? 0) }, field: 'salePriceTzs' };
       return { key: 'merch.sale.min5', vars: { max: fmt.money(b.maxSalePriceTzs ?? 0) }, field: 'salePriceTzs' };
     case 'price_raised_recently':
       return { key: 'merch.sale.raised', vars: { date: b.raisedOn ? fmt.day(b.raisedOn) : fmt.when(b.raisedAt ?? ''), earliest: fmt.when(b.earliestStart ?? '') }, field: 'startsAt' };
+    case 'price_history_too_short':
+      return { key: b.listedAt ? 'merch.sale.historyShort' : 'merch.sale.historyShortNoDate', vars: { listed: fmt.when(b.listedAt ?? ''), earliest: fmt.when(b.earliestStart ?? '') }, field: 'startsAt' };
     case 'sale_overlap':
-      return { key: 'merch.sale.overlap', vars: { start: fmt.when(b.startsAt ?? ''), end: fmt.when(b.endsAt ?? '') }, field: 'startsAt' };
+      // Without its dates the clash is still named, just not when.
+      return b.startsAt && b.endsAt
+        ? { key: 'merch.sale.overlap', vars: { start: fmt.when(b.startsAt), end: fmt.when(b.endsAt) }, field: 'startsAt' }
+        : { key: 'merch.sale.overlapNoDates', vars: {}, field: 'startsAt' };
     case 'sale_conflict':
       return { key: 'vendor.priceLocked', vars: { start: fmt.when(b.startsAt ?? ''), end: fmt.when(b.endsAt ?? '') } };
     case 'start_too_soon':
       return { key: b.earliestStart ? 'merch.sale.startFrom' : 'merch.dates.startSoon', vars: { earliest: fmt.when(b.earliestStart ?? '') }, field: 'startsAt' };
     case 'rate_limited':
-      return b.retryAfterSeconds ? { key: 'merch.sale.rateLimited', vars: { n: Math.max(1, Math.ceil(b.retryAfterSeconds)) } } : { key: 'merch.rateLimited', vars: {} };
+      if (!b.retryAfterSeconds) return { key: 'merch.rateLimited', vars: {} };
+      { const n = Math.max(1, Math.ceil(b.retryAfterSeconds)); return n === 1 ? { key: 'merch.sale.rateLimitedOne', vars: {} } : { key: 'merch.sale.rateLimited', vars: { n } }; }
     case 'too_many_open_proposals':
       return { key: 'merch.sale.tooManyOpen', vars: { open: b.open ?? '—', max: b.max ?? '—' } };
     default: {

@@ -7,7 +7,7 @@ import { money } from '@/lib/admin-utils';
 import type { MessageKey } from '@/lib/i18n';
 import { eatDateTime, eatDay, fmt } from '@/lib/vendor';
 import {
-  DEFAULT_RULES, HOUR_MS, discountPctOf, maxSalePriceOf, parsePrice, productImageUrl, saleErrorCode, saleMessageOf, saleReasonText, salesApi, standingDiscountOf, validateSale,
+  DEFAULT_RULES, HOUR_MS, discountPctOf, earliestStartOf, maxSalePriceOf, parsePrice, productImageUrl, saleErrorCode, saleMessageOf, saleReasonText, salesApi, standingDiscountOf, validateSale,
   type FlashSale, type PriceCheck, type SaleErrors, type SaleRules,
 } from '@/lib/flash-sales';
 import { Alert, Button, Card, CardContent, Field, Input } from './shared';
@@ -94,6 +94,9 @@ export function FlashSaleForm({ mode, sale, template, initialProductId, products
   const [confirmResend, setConfirmResend] = useState(false);
   const [confirmDiscard, setConfirmDiscard] = useState(false);
   const checkSeq = useRef(0);
+  // Retry a failed check (same as the app); a server refusal naming the earliest start offers "Start on" too.
+  const [checkNonce, setCheckNonce] = useState(0);
+  const [serverEarliest, setServerEarliest] = useState<string | null>(null);
 
   const product = products.find(p => p.id === d.productId) ?? null;
   const fixedProduct = !!saved; // productId can't change after create (400 product_not_editable)
@@ -112,7 +115,7 @@ export function FlashSaleForm({ mode, sale, template, initialProductId, products
         .catch(err => { if (seq === checkSeq.current && !(err instanceof DOMException && err.name === 'AbortError')) setCheck({ state: 'failed', result: null }); });
     }, 300);
     return () => { window.clearTimeout(timer); ctrl.abort(); };
-  }, [isVendor, token, d.productId, d.startsAt]);
+  }, [isVendor, token, d.productId, d.startsAt, checkNonce]);
 
   const res = check.state === 'done' ? check.result : null;
   // The server's prices win (they are "now"); the product row is the first guess.
@@ -124,17 +127,23 @@ export function FlashSaleForm({ mode, sale, template, initialProductId, products
   const livePct = regular != null && Number.isInteger(salePrice) && salePrice > 0 && salePrice < regular ? discountPctOf(regular, salePrice) : null;
   // Another sale holds the product (the one being edited never counts against itself).
   const lock = res?.lockedBy && res.lockedBy.saleId !== saved?.id ? res.lockedBy : null;
-  const raised = !!res?.raisedAt && !!res.earliestStart;
-  const checkBlocks = isVendor && (check.state === 'loading' || raised || !!lock);
+  const raised = !!res && !res.ok && !!res.raisedAt && !!res.earliestStart;
+  // New or copied product: not 14 days of price history yet (functions#285); the check names the earliest start.
+  const historyShort = !!res && !res.ok && !res.raisedAt && !!res.earliestStart && !lock;
+  // Send waits for the check to pass; a failed check blocks until retried (the app does the same).
+  const checkBlocks = isVendor && (check.state === 'loading' || check.state === 'failed' || raised || historyShort || !!lock);
 
   const set = (patch: Partial<typeof d>) => {
     setD(cur => ({ ...cur, ...patch }));
     setErrors(e => { const next = { ...e }; for (const k of Object.keys(patch)) delete next[(k === 'salePrice' ? 'salePriceTzs' : k) as keyof SaleErrors]; return next; });
     setGeneral(null);
+    if ('startsAt' in patch) setServerEarliest(null);
   };
-  const startOnEarliest = () => {
-    if (!res?.earliestStart) return;
-    const earliest = Math.max(Date.parse(res.earliestStart), Date.now() + r.minLeadMs);
+  /** The start the "Start on" button sets: the earliest allowed, but never less than the lead time from now. */
+  const earliestFrom = (iso: string) => Math.max(Date.parse(iso), Date.now() + r.minLeadMs);
+  const startOnEarliest = (iso: string | null | undefined) => {
+    if (!iso) return;
+    const earliest = earliestFrom(iso);
     const start = Date.parse(d.startsAt); const end = Date.parse(d.endsAt);
     const len = Number.isFinite(start) && Number.isFinite(end) && end - start >= r.minLengthMs && end - start <= r.maxLengthMs ? end - start : 24 * HOUR_MS;
     set({ startsAt: new Date(earliest).toISOString(), endsAt: new Date(earliest + len).toISOString() });
@@ -167,10 +176,11 @@ export function FlashSaleForm({ mode, sale, template, initialProductId, products
       // A draft (new, or rejected and changed) is sent: to FitFlex (vendor) or another admin (staff). Pending stays pending;
       // a scheduled one went back to pending with the edit.
       if (current.status === 'draft') current = isVendor ? await salesApi.vendorSubmit(token, current.id) : await salesApi.adminSubmit(token, current.id);
-      toast.success(t(isVendor ? 'merch.sent' : 'merchAdmin.saleCreated'));
+      toast.success(t(isVendor ? 'merch.sale.sent' : 'merchAdmin.saleCreated'));
       onDone(current);
     } catch (err) {
-      const m = saleMessageOf(err, deps);
+      const m = saleMessageOf(err, deps, 'merch.saveFailed', isVendor ? 'vendor' : 'admin');
+      setServerEarliest(earliestStartOf(err));
       if (m.field) {
         const fe: SaleErrors = { [m.field]: { key: m.key, vars: m.vars } };
         setErrors(fe); setErrVars({ [m.field]: m.vars }); focusFirst(fe);
@@ -197,7 +207,7 @@ export function FlashSaleForm({ mode, sale, template, initialProductId, products
     <div className="max-w-[640px] space-y-6" data-testid="sale-form">
       <form noValidate onSubmit={e => { e.preventDefault(); void save(); }} className="space-y-6">
         {general && <Alert tone="error"><span data-testid="sale-general-error">{general}</span></Alert>}
-        {resends && <Alert tone="warning">{t('merch.resend.body')}</Alert>}
+        {resends && <Alert tone="warning">{t('merch.sale.resend.body')}</Alert>}
         {saved?.status === 'rejected' && saleReasonText(saved, t) && <Alert tone="warning">{fmt(t('merch.line.reason'), { reason: saleReasonText(saved, t) })}</Alert>}
 
         <Card><CardContent className="space-y-5 p-5">
@@ -238,9 +248,14 @@ export function FlashSaleForm({ mode, sale, template, initialProductId, products
           <div className="grid gap-4 sm:grid-cols-2">
             {(['startsAt', 'endsAt'] as const).map(k => (
               <div key={k} className="flex flex-col gap-1.5">
-                <label htmlFor={fid(k)} className="text-sm font-medium text-[var(--color-fg-secondary)]">{t(k === 'startsAt' ? 'merch.dates.starts' : 'merch.dates.ends')}<span aria-hidden="true" className="text-[var(--color-error-600)]"> *</span></label>
+                <label htmlFor={fid(k)} className="text-sm font-medium text-[var(--color-fg-secondary)]">{t(k === 'startsAt' ? 'merch.sale.starts' : 'merch.sale.ends')}<span aria-hidden="true" className="text-[var(--color-error-600)]"> *</span></label>
                 <EatDateTime id={fid(k)} value={d[k]} onChange={v => set({ [k]: v })} invalid={!!errors[k]} describedBy={`${fid(k)}-msg`} testId={`sale-${k}`} />
                 <span id={`${fid(k)}-msg`} className={cn('text-xs', errors[k] ? 'text-[var(--color-error-700)]' : 'text-[var(--color-fg-quaternary)]')} data-testid={`sale-${k}-msg`}>{err(k) ?? t('merch.dates.tzNote')}</span>
+                {k === 'startsAt' && serverEarliest && (
+                  <Button type="button" size="sm" variant="secondary" className="self-start" onClick={() => startOnEarliest(serverEarliest)} data-testid="sale-start-on-server">
+                    {fmt(t('merch.sale.startOn'), { date: eatDateTime(new Date(earliestFrom(serverEarliest)).toISOString(), locale) })}
+                  </Button>
+                )}
               </div>
             ))}
           </div>
@@ -252,12 +267,29 @@ export function FlashSaleForm({ mode, sale, template, initialProductId, products
           <Alert tone="error">
             <span className="flex flex-col items-start gap-2" data-testid="sale-raised">
               <span>{fmt(t('merch.sale.raised'), { date: res.raisedOn ? eatDay(res.raisedOn, locale) : eatDateTime(res.raisedAt, locale), earliest: eatDateTime(res.earliestStart, locale) })}</span>
-              <Button type="button" size="sm" variant="secondary" onClick={startOnEarliest} data-testid="sale-start-on">{fmt(t('merch.sale.startOn'), { date: eatDateTime(new Date(Math.max(Date.parse(res.earliestStart!), Date.now() + r.minLeadMs)).toISOString(), locale) })}</Button>
+              <Button type="button" size="sm" variant="secondary" onClick={() => startOnEarliest(res.earliestStart)} data-testid="sale-start-on">{fmt(t('merch.sale.startOn'), { date: eatDateTime(new Date(earliestFrom(res.earliestStart!)).toISOString(), locale) })}</Button>
+            </span>
+          </Alert>
+        )}
+        {isVendor && historyShort && res && (
+          <Alert tone="error">
+            <span className="flex flex-col items-start gap-2" data-testid="sale-history-short">
+              <span>{res.listedAt
+                ? fmt(t('merch.sale.historyShort'), { listed: eatDateTime(res.listedAt, locale), earliest: eatDateTime(res.earliestStart, locale) })
+                : fmt(t('merch.sale.historyShortNoDate'), { earliest: eatDateTime(res.earliestStart, locale) })}</span>
+              <Button type="button" size="sm" variant="secondary" onClick={() => startOnEarliest(res.earliestStart)} data-testid="sale-start-on">{fmt(t('merch.sale.startOn'), { date: eatDateTime(new Date(earliestFrom(res.earliestStart!)).toISOString(), locale) })}</Button>
             </span>
           </Alert>
         )}
         {isVendor && lock && <Alert tone="error"><span data-testid="sale-overlap">{fmt(t('merch.sale.overlap'), { start: eatDateTime(lock.startsAt, locale), end: eatDateTime(lock.endsAt, locale) })}</span></Alert>}
-        {isVendor && check.state === 'failed' && <Alert tone="warning"><span data-testid="sale-check-failed">{t('merch.sale.checkFailed')}</span></Alert>}
+        {isVendor && check.state === 'failed' && (
+          <Alert tone="warning">
+            <span className="flex flex-col items-start gap-2">
+              <span data-testid="sale-check-failed">{t('merch.sale.checkFailed')}</span>
+              <Button type="button" size="sm" variant="secondary" onClick={() => setCheckNonce(n => n + 1)} data-testid="sale-check-retry">{t('common.tryAgain')}</Button>
+            </span>
+          </Alert>
+        )}
 
         {/* Always-visible notes (S4-AC-06) */}
         <Alert tone="info">
@@ -273,9 +305,9 @@ export function FlashSaleForm({ mode, sale, template, initialProductId, products
         </div>
       </form>
 
-      <Dialog open={confirmResend} onClose={() => setConfirmResend(false)} title={t('merch.resend.title')} description={t('merch.resend.body')} size="sm">
+      <Dialog open={confirmResend} onClose={() => setConfirmResend(false)} title={t('merch.sale.resend.title')} description={t('merch.sale.resend.body')} size="sm">
         <DialogFooter>
-          <Button variant="secondary" onClick={() => setConfirmResend(false)} data-testid="sale-resend-keep">{t('merch.resend.keep')}</Button>
+          <Button variant="secondary" onClick={() => setConfirmResend(false)} data-testid="sale-resend-keep">{t('merch.sale.resend.keep')}</Button>
           <Button onClick={() => void save()} data-testid="sale-resend-confirm">{t('merch.resend.confirm')}</Button>
         </DialogFooter>
       </Dialog>

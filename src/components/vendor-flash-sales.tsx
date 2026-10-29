@@ -5,9 +5,9 @@ import { ArrowLeft, Plus, Zap } from 'lucide-react';
 import { api, type VendorProduct } from '@/lib/api';
 import { money } from '@/lib/admin-utils';
 import { eatDateTime, eatDay, fmt } from '@/lib/vendor';
-import { PHASE_KEY, PHASE_TONE, VENDOR_GROUPS, VENDOR_GROUP_KEY, isNetworkError, phaseOf, vendorGroupOf } from '@/lib/shop-banners';
+import { PHASE_TONE, VENDOR_GROUPS, isNetworkError, phaseOf, vendorGroupOf } from '@/lib/shop-banners';
 import {
-  discountPctOf, saleCan, saleErrorCode, saleMessageOf, saleReasonText, salesApi,
+  SALE_GROUP_KEY, SALE_PHASE_KEY, discountPctOf, saleCan, saleErrorCode, saleMessageOf, saleReasonText, salesApi,
   type FlashSale, type SaleRules,
 } from '@/lib/flash-sales';
 import { Alert, Badge, Button, Card, EmptyState, ErrorState, PageHeader, SkeletonCard } from './shared';
@@ -98,7 +98,7 @@ export function VendorFlashSales({ tabs }: { tabs: ReactNode }) {
     return by;
   }, [rows]);
 
-  const act = async (fn: () => Promise<FlashSale>, doneKey: 'merch.withdrawn' | 'merch.ended' | 'merch.sent', after?: () => void) => {
+  const act = async (fn: () => Promise<FlashSale>, doneKey: 'merch.sale.withdrawn' | 'merch.sale.ended' | 'merch.sale.sent', after?: () => void) => {
     if (!token || busy) return;
     setBusy(true);
     try { await fn(); toast.success(t(doneKey)); after?.(); void load(); }
@@ -150,20 +150,20 @@ export function VendorFlashSales({ tabs }: { tabs: ReactNode }) {
 
   const extraLine = (s: FlashSale) => {
     const p = phaseOf(s);
-    if (p === 'pending') return fmt(t('merch.line.expires'), { date: eatDateTime(s.expiresAt ?? s.startsAt, locale) });
-    if (p === 'scheduled') return fmt(t('merch.line.starts'), { date: eatDateTime(s.startsAt, locale) });
-    if (p === 'live') return fmt(t('merch.line.ends'), { date: eatDateTime(s.endsAt, locale) });
+    if (p === 'pending') return fmt(t('merch.sale.line.expires'), { date: eatDateTime(s.expiresAt ?? s.startsAt, locale) });
+    if (p === 'scheduled') return fmt(t('merch.sale.line.starts'), { date: eatDateTime(s.startsAt, locale) });
+    if (p === 'live') return fmt(t('merch.sale.line.ends'), { date: eatDateTime(s.endsAt, locale) });
     if (p === 'rejected') return saleReasonText(s, t) ? fmt(t('merch.line.reason'), { reason: saleReasonText(s, t) }) : t('merch.status.rejected');
-    if (p === 'expired') return t('merch.line.notReviewed');
-    if (p === 'withdrawn') return t('merch.line.youWithdrew');
+    if (p === 'expired') return t('merch.sale.line.notReviewed');
+    if (p === 'withdrawn') return t('merch.sale.line.youWithdrew');
     if (p === 'ended') {
-      const on = fmt(t('merch.line.endedOn'), { date: eatDateTime(s.endedAt ?? s.endsAt, locale) });
+      const on = fmt(t('merch.sale.line.endedOn'), { date: eatDateTime(s.endedAt ?? s.endsAt, locale) });
       const byFitflex = s.endedByFitflex ?? s.statusReason === 'ended_by_fitflex';
       if (!byFitflex) return on;
       const why = saleReasonText(s, t);
-      return `${on} · ${why ? fmt(t('merch.sale.byFitflexReason'), { reason: why }) : t('merch.sale.byFitflex')}`;
+      return `${on} · ${why ? fmt(t('merch.sale.endedByFitflexReason'), { reason: why }) : t('merch.sale.endedByFitflex')}`;
     }
-    return t('merch.line.draft');
+    return t('merch.sale.line.draft');
   };
 
   const card = (s: FlashSale) => {
@@ -178,14 +178,14 @@ export function VendorFlashSales({ tabs }: { tabs: ReactNode }) {
           <div className="min-w-0 flex-1 space-y-1 [overflow-wrap:anywhere]">
             <div className="flex flex-wrap items-start justify-between gap-2">
               <h3 className="font-semibold">{name}</h3>
-              <Badge tone={PHASE_TONE[p]} dot><span data-testid={`sale-status-${s.id}`}>{t(PHASE_KEY[p])}</span></Badge>
+              <Badge tone={PHASE_TONE[p]} dot><span data-testid={`sale-status-${s.id}`}>{t(SALE_PHASE_KEY[p])}</span></Badge>
             </div>
             <SalePriceBlock sale={s.salePriceTzs} was={was} pct={pct} size="sm" testId={`sale-price-${s.id}`} />
             <p className="text-xs text-[var(--color-fg-tertiary)]">{eatDateTime(s.startsAt, locale)} → {eatDateTime(s.endsAt, locale)} ({t('merch.dates.tzNote')})</p>
             <p className="text-sm text-[var(--color-fg-secondary)]" data-testid={`sale-line-${s.id}`}>{extraLine(s)}</p>
             {s.origin === 'staff' && <p className="text-xs text-[var(--color-fg-tertiary)]" data-testid={`sale-staff-${s.id}`}>{t('merch.sale.setByFitflex')}</p>}
             <div className="flex flex-wrap gap-1 pt-1">
-              {mayChange && saleCan(s, 'submit') && <Button size="sm" className="min-h-11" disabled={busy} onClick={() => void act(() => salesApi.vendorSubmit(token!, s.id), 'merch.sent')} aria-label={fmt(t('merch.sale.sendA11y'), { product: name })} data-testid={`sale-submit-${s.id}`}>{t('merch.send')}</Button>}
+              {mayChange && saleCan(s, 'submit') && <Button size="sm" className="min-h-11" disabled={busy} onClick={() => void act(() => salesApi.vendorSubmit(token!, s.id), 'merch.sale.sent')} aria-label={fmt(t('merch.sale.sendA11y'), { product: name })} data-testid={`sale-submit-${s.id}`}>{t('merch.send')}</Button>}
               {mayChange && saleCan(s, 'edit') && <Button size="sm" variant="ghost" className="min-h-11" onClick={() => go(`edit=${encodeURIComponent(s.id)}`)} aria-label={fmt(t('merch.sale.editA11y'), { product: name })} data-testid={`sale-edit-${s.id}`}>{t('merch.action.edit')}</Button>}
               {saleCan(s, 'end') && <Button size="sm" variant="ghost" className="min-h-11" disabled={busy} onClick={() => setEnding(s)} aria-label={fmt(t('merch.sale.endA11y'), { product: name })} data-testid={`sale-end-${s.id}`}>{t('merch.action.endNow')}</Button>}
               {saleCan(s, 'withdraw') && <Button size="sm" variant="ghost" className="min-h-11" disabled={busy} onClick={() => setWithdrawing(s)} aria-label={fmt(t('merch.sale.withdrawA11y'), { product: name })} data-testid={`sale-withdraw-${s.id}`}>{t('merch.action.withdraw')}</Button>}
@@ -225,23 +225,25 @@ export function VendorFlashSales({ tabs }: { tabs: ReactNode }) {
         const shown = g === 'past' && !showAllPast ? list.slice(0, PAST_SHOWN) : list;
         return (
           <section key={g} className="space-y-3" data-testid={`sale-group-${g}`} aria-labelledby={`sale-group-${g}-h`}>
-            <h2 id={`sale-group-${g}-h`} className="text-sm font-semibold uppercase tracking-wide text-[var(--color-fg-tertiary)]">{t(VENDOR_GROUP_KEY[g])} · {list.length}</h2>
+            <h2 id={`sale-group-${g}-h`} className="text-sm font-semibold uppercase tracking-wide text-[var(--color-fg-tertiary)]">{t(SALE_GROUP_KEY[g])} · {list.length}</h2>
             <div className="grid gap-3 lg:grid-cols-2">{shown.map(card)}</div>
             {g === 'past' && list.length > PAST_SHOWN && !showAllPast && <Button variant="ghost" className="min-h-11" onClick={() => setShowAllPast(true)}>{t('merch.action.showMore')}</Button>}
           </section>
         );
       })}
 
+      {/* Owner ruling 2026-10-29: a vendor may end a sale FitFlex set on its products too (when the server allows "end"). */}
       <Dialog open={!!ending} onClose={() => setEnding(null)} title={t('merch.endSale.title')} description={t('merch.endSale.body')} size="sm">
+        {ending?.origin === 'staff' && <p className="mb-3 text-sm text-[var(--color-fg-secondary)]" data-testid="sale-end-staff-note">{t('merch.sale.endStaffNote')}</p>}
         <div className="flex flex-wrap justify-end gap-2">
-          <Button variant="secondary" onClick={() => setEnding(null)} data-testid="sale-end-keep">{t('merch.withdraw.keep')}</Button>
-          <Button variant="destructive" loading={busy} onClick={() => ending && void act(() => salesApi.vendorEnd(token!, ending.id), 'merch.ended', () => setEnding(null))} data-testid="sale-end-confirm">{t('merch.action.endNow')}</Button>
+          <Button variant="secondary" onClick={() => setEnding(null)} data-testid="sale-end-keep">{t('merch.sale.keep')}</Button>
+          <Button variant="destructive" loading={busy} onClick={() => ending && void act(() => salesApi.vendorEnd(token!, ending.id), 'merch.sale.ended', () => setEnding(null))} data-testid="sale-end-confirm">{t('merch.action.endNow')}</Button>
         </div>
       </Dialog>
-      <Dialog open={!!withdrawing} onClose={() => setWithdrawing(null)} title={t('merch.withdrawSale.title')} description={t('merch.withdraw.body')} size="sm">
+      <Dialog open={!!withdrawing} onClose={() => setWithdrawing(null)} title={t('merch.withdrawSale.title')} description={t('merch.sale.withdrawBody')} size="sm">
         <div className="flex flex-wrap justify-end gap-2">
-          <Button variant="secondary" onClick={() => setWithdrawing(null)} data-testid="sale-withdraw-keep">{t('merch.withdraw.keep')}</Button>
-          <Button variant="destructive" loading={busy} onClick={() => withdrawing && void act(() => salesApi.vendorWithdraw(token!, withdrawing.id), 'merch.withdrawn', () => setWithdrawing(null))} data-testid="sale-withdraw-confirm">{t('merch.withdraw.confirm')}</Button>
+          <Button variant="secondary" onClick={() => setWithdrawing(null)} data-testid="sale-withdraw-keep">{t('merch.sale.keep')}</Button>
+          <Button variant="destructive" loading={busy} onClick={() => withdrawing && void act(() => salesApi.vendorWithdraw(token!, withdrawing.id), 'merch.sale.withdrawn', () => setWithdrawing(null))} data-testid="sale-withdraw-confirm">{t('merch.withdraw.confirm')}</Button>
         </div>
       </Dialog>
     </div>

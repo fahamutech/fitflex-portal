@@ -8,7 +8,7 @@ import {
   MERCH_EMPTY_KEY, MERCH_TABS, MERCH_TAB_KEY, PHASE_KEY, PHASE_TONE, bannersApi, errorCodeOf, errorKeyOf, headlineOf, phaseOf, tabOfBanner,
   type BannerConfirmation, type MerchKind, type MerchTab, type ShopBanner,
 } from '@/lib/shop-banners';
-import { discountPctOf, salesApi, saleErrorCode, type FlashSale } from '@/lib/flash-sales';
+import { SALE_PHASE_KEY, discountPctOf, salesApi, saleErrorCode, type FlashSale } from '@/lib/flash-sales';
 import { money } from '@/lib/admin-utils';
 import { FlashSaleDetail } from '@/components/flash-sale-detail';
 import { FlashSaleForm, SaleThumb } from '@/components/flash-sale-form';
@@ -116,6 +116,9 @@ export default function ShopMerchPage() {
     api.shopCategories().then(r => setCategories(r.categories ?? [])).catch(() => setCategories([]));
   }, [token, needsCatalogue, hasPermission]);
 
+  // Staff create picks from GET /admin/products, which needs `shop` today (review 2026-10-29; the backend will open it to
+  // `promotions`, functions#285). Until then the button is hidden without `shop`, and the list says why.
+  const canCreateSale = hasPermission('promotions') && hasPermission('shop');
   if (!token || user?.userType !== 'admin') return null;
 
   if (disabled) {
@@ -128,6 +131,9 @@ export default function ShopMerchPage() {
   }
 
   // Flash sale: create (?new=sale) or edit a FitFlex-created one (?edit=&kind=flash_sale).
+  if ((view.creating === 'flash_sale' || (view.edit && view.kind === 'flash_sale')) && !canCreateSale) {
+    return <div className="space-y-4"><Alert tone="warning"><span data-testid="merch-sale-needs-shop">{t('merchAdmin.saleNeedsShop')}</span></Alert><Button variant="secondary" onClick={() => go('')}>{t('merchAdmin.back')}</Button></div>;
+  }
   if (view.creating === 'flash_sale' || (view.edit && view.kind === 'flash_sale')) {
     const editing = view.edit ? sales?.find(r => r.id === view.edit) ?? null : null;
     if (view.edit && !editing) return sales == null ? <Spinner className="h-6 w-6" /> : <Alert tone="warning">{t('merch.notYours')}</Alert>;
@@ -239,10 +245,11 @@ export default function ShopMerchPage() {
           <div className="flex flex-wrap gap-2">
             <Button variant="secondary" size="sm" className="min-h-11" onClick={() => void load()} data-testid="merch-refresh"><RefreshCw className="h-4 w-4" />{t('mod.refresh')}</Button>
             {hasPermission('promotions') && kindsOn.banner && <Button size="sm" className="min-h-11" onClick={() => go('new=banner')} data-testid="merch-create-banner"><Plus className="h-4 w-4" />{t('merchAdmin.createBanner')}</Button>}
-            {hasPermission('promotions') && kindsOn.flash_sale && <Button size="sm" className="min-h-11" onClick={() => go('new=sale')} data-testid="merch-create-sale"><Plus className="h-4 w-4" />{t('merchAdmin.createSale')}</Button>}
+            {canCreateSale && kindsOn.flash_sale && <Button size="sm" className="min-h-11" onClick={() => go('new=sale')} data-testid="merch-create-sale"><Plus className="h-4 w-4" />{t('merchAdmin.createSale')}</Button>}
           </div>
         )}
       />
+      {kindsOn.flash_sale && hasPermission('promotions') && !canCreateSale && <p className="text-sm text-[var(--color-fg-tertiary)]" data-testid="merch-sale-needs-shop">{t('merchAdmin.saleNeedsShop')}</p>}
       {error && <Alert tone="error"><span className="flex flex-wrap items-center justify-between gap-2">{error}<Button size="sm" variant="secondary" onClick={() => void load()} data-testid="merch-retry">{t('common.tryAgain')}</Button></span></Alert>}
       <div className="flex flex-wrap items-center gap-3">
         <div role="tablist" aria-label={t('merchAdmin.title')} className="flex max-w-full flex-wrap gap-1 rounded-[var(--radius-lg)] bg-[var(--color-bg-secondary)] p-1 w-fit">
@@ -287,7 +294,7 @@ export default function ShopMerchPage() {
                         <span className="block text-xs text-[var(--color-fg-tertiary)]">{typeOf(r)} · {seller(r)}</span>
                         {r.kind === 'flash_sale' && <span className="block text-xs font-semibold text-[var(--color-fuel)]">{discountOf(r)}</span>}
                         <span className="block text-xs text-[var(--color-fg-tertiary)]">{eatDateTime(b.startsAt, locale)} → {eatDateTime(b.endsAt, locale)}</span>
-                        <span className="flex flex-wrap items-center gap-2"><Badge tone={PHASE_TONE[phase]} dot>{t(PHASE_KEY[phase])}</Badge>
+                        <span className="flex flex-wrap items-center gap-2"><Badge tone={PHASE_TONE[phase]} dot>{t((r.kind === 'flash_sale' ? SALE_PHASE_KEY : PHASE_KEY)[phase])}</Badge>
                           {sentText(b) && <span className="text-xs text-[var(--color-fg-quaternary)]">{fmt(t('merchAdmin.sentAgo'), { when: sentText(b)! })}</span>}</span>
                         {exp && <span className="block text-xs text-[var(--color-warning-700)]">{exp}</span>}
                       </span>
@@ -330,7 +337,7 @@ export default function ShopMerchPage() {
                       {wants('flash_sale') && <Td className="whitespace-nowrap tabular-nums" data-testid={`merch-discount-${b.id}`}>{discountOf(r)}</Td>}
                       {wants('banner') && <Td className="tabular-nums">{r.kind === 'banner' ? r.b.position ?? '—' : '—'}</Td>}
                       <Td>
-                        <Badge tone={PHASE_TONE[phase]} dot>{t(PHASE_KEY[phase])}</Badge>
+                        <Badge tone={PHASE_TONE[phase]} dot>{t((r.kind === 'flash_sale' ? SALE_PHASE_KEY : PHASE_KEY)[phase])}</Badge>
                       </Td>
                       <Td className="text-xs">
                         <span className="whitespace-nowrap">{sentText(b) ?? '—'}</span>

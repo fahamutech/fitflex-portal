@@ -270,12 +270,12 @@ test.describe('admin: flash sales in the merch queue', () => {
     await page.goto('/admin/shop-merch/?item=fls_1&kind=flash_sale');
     await page.getByTestId('merch-reject').click();
     const dlg = page.getByTestId('merch-reject-dialog');
-    for (const label of ['Price not credible', 'Wrong or unsuitable product', 'Timing', 'Other']) await expect(dlg.getByText(label, { exact: true })).toBeVisible();
+    for (const label of ["The regular price doesn't look genuine", 'Problem with the product', "The dates don't work", 'Other']) await expect(dlg.getByText(label, { exact: true })).toBeVisible();
     await dlg.getByTestId('merch-reason-timing').check();
     await dlg.getByTestId('merch-reject-note').fill('Starts during a public holiday sale.');
     await dlg.getByTestId('merch-reject-confirm').click();
     await expect(page.getByTestId('sale-status')).toHaveText('Rejected');
-    await expect(page.getByTestId('sale-reason')).toHaveText('Reason: Timing: Starts during a public holiday sale.');
+    await expect(page.getByTestId('sale-reason')).toHaveText("Reason: The dates don't work: Starts during a public holiday sale.");
     expect(only(calls, 'POST', '/admin/flash-sales/fls_1/reject')[0].body).toEqual({ revision: 3, code: 'timing', note: 'Starts during a public holiday sale.' });
 
     await page.goto('/admin/shop-merch/?item=fls_live&kind=flash_sale');
@@ -335,6 +335,30 @@ test.describe('admin: flash sales in the merch queue', () => {
     await expect(page.getByTestId('merch-own-item')).toBeVisible();
   });
 
+  test('approve refused because the seller is not approved: worded for staff', async ({ page }) => {
+    await signIn(page, SUPER);
+    await mockApi(page, adminRoutes({ banners: 'off', extra: [
+      ['POST', /^\/admin\/flash-sales\/fls_1\/approve$/, () => ({ status: 409, json: { error: 'vendor_not_approved' } })],
+    ] }));
+    await page.goto('/admin/shop-merch/?item=fls_1&kind=flash_sale');
+    await page.getByTestId('merch-approve').click();
+    await page.getByTestId('merch-check-sale').check();
+    await page.getByTestId('merch-approve-confirm').click();
+    await expect(page.getByTestId('merch-approve-error')).toHaveText("This seller isn't approved, so this flash sale can't be approved.");
+  });
+
+  test('promotions without the Products (shop) permission: no Create flash sale, the reason is shown, a deep link explains too', async ({ page }) => {
+    await signIn(page, VIEWER);
+    await mockApi(page, adminRoutes({ banners: 'off' }));
+    await page.goto('/admin/shop-merch/');
+    await expect(page.getByTestId('merch-row-fls_1')).toBeVisible();
+    await expect(page.getByTestId('merch-create-sale')).toHaveCount(0);
+    await expect(page.getByTestId('merch-sale-needs-shop')).toHaveText('Creating a flash sale needs the "Products" permission, to pick a product. Ask a super-admin.');
+    await page.goto('/admin/shop-merch/?new=sale');
+    await expect(page.getByTestId('merch-sale-needs-shop')).toBeVisible();
+    await expect(page.getByTestId('sale-form')).toHaveCount(0);
+  });
+
   test('Swahili: price check, seller pays and type label', async ({ page }) => {
     await signIn(page, SUPER, 'sw');
     await mockApi(page, adminRoutes({ banners: 'off' }));
@@ -342,6 +366,11 @@ test.describe('admin: flash sales in the merch queue', () => {
     await expect(page.getByText('Ukaguzi wa bei', { exact: true })).toBeVisible();
     await expect(page.getByTestId('sale-rule-result')).toHaveText('Inakidhi sheria ya siku 14');
     await expect(page.getByTestId('sale-discount-line')).toHaveText('−18% (punguzo TSh 16,000), muuzaji analipia');
+    // Sale-only I- forms, never the banner's li- forms.
+    await expect(page.getByTestId('sale-terms')).toContainText('Imeundwa na: Rehema');
+    await expect(page.getByTestId('sale-terms')).toContainText('Imetumwa na: Rehema');
+    await expect(page.getByTestId('merch-history')).toContainText('Imetumwa kwa idhini');
+    await expect(page.getByTestId('sale-preview')).toContainText('Inaisha');
   });
 });
 
@@ -421,7 +450,7 @@ test.describe('vendor: flash sales on /vendor/promotions', () => {
     await expect(page.getByTestId('sale-line-s_ended')).toContainText('by FitFlex: Wrong product photo.');
     await expect(page.getByTestId('sale-status-s_expired')).toHaveText('Expired');
     await expect(page.getByTestId('sale-line-s_expired')).toHaveText('Not reviewed in time');
-    await expect(page.getByTestId('sale-line-s_rejected')).toHaveText('Reason: Timing: Clashes with a holiday.');
+    await expect(page.getByTestId('sale-line-s_rejected')).toHaveText("Reason: The dates don't work: Clashes with a holiday.");
     await expect(page.getByTestId('sale-staff-s_staff')).toHaveText('FitFlex set this sale on your product. You pay for the discount.');
     await expect(page.getByTestId('sale-card-s_staff').getByRole('button')).toHaveCount(0);
     await expect(page.getByTestId('sale-withdraw-s_live')).toHaveCount(0);
@@ -545,6 +574,90 @@ test.describe('vendor: flash sales on /vendor/promotions', () => {
     await expect(page.getByTestId('sale-submit')).toBeDisabled();
   });
 
+  test('a FitFlex-made sale the server lets the vendor end: End with the confirm note, then POST end', async ({ page }) => {
+    await signIn(page, VENDOR);
+    const items = [vsale({ id: 's_fx', origin: 'staff', productName: 'Yoga mat', status: 'approved', effectiveStatus: 'live', startsAt: at(-1), endsAt: at(20), expiresAt: null, allowedActions: ['end'] })];
+    const calls = await mockApi(page, vendorRoutes(items));
+    await page.goto('/vendor/promotions/?tab=sales');
+    await expect(page.getByTestId('sale-staff-s_fx')).toBeVisible();
+    await page.getByTestId('sale-end-s_fx').click();
+    await expect(page.getByTestId('sale-end-staff-note')).toHaveText('FitFlex set this sale on your product. You can end it: buyers pay the regular price from now.');
+    await page.getByTestId('sale-end-confirm').click();
+    await expect.poll(() => only(calls, 'POST', '/vendor/flash-sales/s_fx/end').length).toBe(1);
+    await expect(page.getByTestId('sale-status-s_fx')).toHaveText('Ended');
+  });
+
+  test('short price history: from the check (listedAt) and from the server (price_history_too_short), each with "Start on"', async ({ page }) => {
+    await signIn(page, VENDOR);
+    const listedAt = new Date(Date.now() - 3 * DAY).toISOString();
+    const earliest = new Date(Date.parse(listedAt) + 14 * DAY).toISOString();
+    let refuse = true;
+    const calls = await mockApi(page, vendorRoutes([], {
+      check: (productId, start) => (productId === 'prd_4' && start < Date.parse(earliest)
+        ? { ...passCheck(productId, start), ok: false, listedAt, earliestStart: earliest }
+        : passCheck(productId, start)),
+      extra: [['POST', /^\/vendor\/flash-sales$/, () => (refuse
+        ? { status: 422, json: { error: 'price_history_too_short', listedAt, earliestStart: earliest } }
+        : { status: 201, json: { sale: vsale({ id: 's_h', status: 'draft', effectiveStatus: 'draft' }) } })],
+      ['POST', /^\/vendor\/flash-sales\/s_h\/submit$/, () => ({ json: { sale: vsale({ id: 's_h' }) } })]],
+    }));
+    // From the check.
+    await page.goto('/vendor/promotions/?tab=sales&new=sale&product=prd_4');
+    await page.getByTestId('sale-price').fill('40000');
+    const start = Date.now() + DAY;
+    await page.getByTestId('sale-startsAt').fill(eatInput(start));
+    await page.getByTestId('sale-endsAt').fill(eatInput(start + DAY));
+    await expect(page.getByTestId('sale-history-short')).toContainText(`This product was listed on ${eatWhen(listedAt)}. A flash sale needs 14 days of price history, so it can start on ${eatWhen(earliest)} or later.`);
+    await expect(page.getByTestId('sale-submit')).toBeDisabled();
+    await page.getByTestId('sale-start-on').click();
+    await expect(page.getByTestId('sale-history-short')).toHaveCount(0);
+    // From the server (the check passed for this product).
+    await page.goto('/vendor/promotions/?tab=sales&new=sale&product=prd_1');
+    await page.getByTestId('sale-price').fill('72000');
+    await page.getByTestId('sale-startsAt').fill(eatInput(start));
+    await page.getByTestId('sale-endsAt').fill(eatInput(start + DAY));
+    await page.getByTestId('sale-submit').click();
+    await expect(page.getByTestId('sale-startsAt-msg')).toHaveText(`This product was listed on ${eatWhen(listedAt)}. A flash sale needs 14 days of price history, so it can start on ${eatWhen(earliest)} or later.`);
+    refuse = false;
+    await page.getByTestId('sale-start-on-server').click();
+    await expect(page.getByTestId('sale-start-on-server')).toHaveCount(0);
+    await page.getByTestId('sale-submit').click();
+    await expect(page).toHaveURL(/tab=sales$/);
+    expect(only(calls, 'POST', '/vendor/flash-sales').at(-1)!.body!.startsAt).toBe(earliest);
+  });
+
+  test('price check failed: Send disabled until a retry passes; overlap without dates, 1-second wait and vendor_not_found are worded', async ({ page }) => {
+    await signIn(page, VENDOR);
+    let checkDown = true;
+    let answer: Json = {};
+    await mockApi(page, vendorRoutes([], { extra: [
+      ['GET', /^\/vendor\/flash-sales\/price-check$/, (_r, c) => (checkDown ? { status: 500, json: { error: 'server_error' } } : { json: passCheck(c.search.get('productId')!, Date.now() + DAY) })],
+      ['POST', /^\/vendor\/flash-sales$/, () => answer],
+    ] }));
+    await page.goto('/vendor/promotions/?tab=sales&new=sale&product=prd_1');
+    await expect(page.getByTestId('sale-check-failed')).toHaveText("Couldn't check the 14-day rule. Try again.");
+    await page.getByTestId('sale-price').fill('72000');
+    const start = Date.now() + 2 * DAY;
+    await page.getByTestId('sale-startsAt').fill(eatInput(start));
+    await page.getByTestId('sale-endsAt').fill(eatInput(start + DAY));
+    // The check for the new start failed too (wait for it: the check is debounced).
+    await expect(page.getByTestId('sale-check-retry')).toBeVisible();
+    await expect(page.getByTestId('sale-submit')).toBeDisabled();
+    checkDown = false;
+    await page.getByTestId('sale-check-retry').click();
+    await expect(page.getByTestId('sale-check-failed')).toHaveCount(0);
+    await expect(page.getByTestId('sale-submit')).toBeEnabled();
+    answer = { status: 409, json: { error: 'sale_overlap' } };
+    await page.getByTestId('sale-submit').click();
+    await expect(page.getByTestId('sale-startsAt-msg')).toHaveText('This product already has a flash sale at that time.');
+    answer = { status: 429, json: { error: 'rate_limited', retryAfterSeconds: 1 } };
+    await page.getByTestId('sale-submit').click();
+    await expect(page.getByTestId('sale-general-error')).toHaveText('Too many tries. Wait 1 second and try again.');
+    answer = { status: 404, json: { error: 'vendor_not_found' } };
+    await page.getByTestId('sale-submit').click();
+    await expect(page.getByTestId('sale-general-error')).toHaveText("Your business account wasn't found. Sign in again or contact FitFlex.");
+  });
+
   test('Swahili: tab, notes and live line', async ({ page }) => {
     await signIn(page, VENDOR, 'sw');
     await mockApi(page, vendorRoutes([]));
@@ -558,6 +671,27 @@ test.describe('vendor: flash sales on /vendor/promotions', () => {
     await expect(notes).toContainText('Wewe unalipia punguzo. Kamisheni yako inahesabiwa kwa bei ya ofa.');
     await expect(notes).toContainText('Ofa ya muda mfupi haiwezi kuanza ndani ya siku 14 baada ya kuongeza bei.');
     await expect(notes).toContainText('FitFlex hukagua kila ofa. Isipokaguliwa ndani ya siku 14, au kabla ya kuanza, itaisha muda.');
+    await expect(page.getByText(/^Inaanza/).first()).toBeVisible();
+  });
+
+  test('Swahili list: I- forms for sales (Sitisha, Iliisha, Itaisha muda, Haijatumwa), never the banner li- forms', async ({ page }) => {
+    await signIn(page, VENDOR, 'sw');
+    await mockApi(page, vendorRoutes(VENDOR_SALES()));
+    await page.goto('/vendor/promotions/?tab=sales');
+    await expect(page.getByTestId('sale-status-s_draft')).toHaveText('Haijatumwa');
+    await expect(page.getByTestId('sale-line-s_draft')).toHaveText('Bado haijatumwa kwa idhini');
+    await expect(page.getByTestId('sale-line-s_pending')).toContainText('Itaisha muda');
+    await expect(page.getByTestId('sale-line-s_ended')).toContainText('Iliisha');
+    await expect(page.getByTestId('sale-line-s_ended')).toContainText('imesitishwa na FitFlex: Wrong product photo.');
+    await expect(page.getByTestId('sale-line-s_expired')).toHaveText('Haikukaguliwa kwa wakati');
+    await expect(page.getByTestId('sale-line-s_rejected')).toHaveText('Sababu: Tarehe hazifai: Clashes with a holiday.');
+    await expect(page.getByTestId('sale-group-scheduled')).toContainText('Zimepangwa');
+    await expect(page.getByTestId('sale-end-s_live')).toHaveAttribute('aria-label', 'Sitisha sasa ofa ya muda mfupi ya Trail runner');
+    await page.getByTestId('sale-end-s_live').click();
+    await expect(page.getByRole('dialog')).toContainText('Usitishe ofa hii sasa?');
+    await expect(page.getByTestId('sale-end-keep')).toHaveText('Iache');
+    const body = await page.locator('main').innerText();
+    for (const banned of ['Liliisha', 'Litaisha', 'Halijatumwa', 'Halikukaguliwa', 'simamisha']) expect(body).not.toContain(banned);
   });
 
   test('SHOP_FLASH_SALES off: no Flash sales tab; a deep link says the tool is not available', async ({ page }) => {
