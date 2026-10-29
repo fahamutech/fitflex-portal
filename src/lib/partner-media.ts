@@ -68,6 +68,12 @@ export interface PartnerMediaItem {
 
 export interface PartnerMediaList { items: PartnerMediaItem[]; total: number; next: number | string | null }
 
+/** GET /admin/partner-media/subjects (functions#286): names and ids only, sorted by name. */
+export interface PartnerSubjectList { items: PartnerSubject[]; total: number }
+/** The picker searches only once the name has this many characters (the server answers 400 q_too_short below it). */
+export const SUBJECT_QUERY_MIN = 2;
+export const SUBJECT_PAGE_SIZE = 25;
+
 export interface PartnerMediaLimits {
   hero: { minWidth: number; maxBytes: number; types: string[] };
   logo: { minSide: number; maxBytes: number; types: string[]; maxSide?: number };
@@ -132,6 +138,14 @@ export const partnerMediaApi = {
   /** moderation, moderation_decide or brand_media. */
   list: (token: string, f: PartnerMediaQuery = {}) =>
     request<PartnerMediaList>(`/admin/partner-media?${listQuery(f)}`, {}, token),
+  /**
+   * Partner picker (functions#286): find gyms, trainers or vendors by name for "Set photo for a partner".
+   * moderation, moderation_decide or brand_media. `id` is exactly the subjectId POST /admin/partner-media takes.
+   */
+  subjects: (token: string, f: { type: PartnerSubjectType; q: string; limit?: number }, signal?: AbortSignal) => {
+    const q = new URLSearchParams({ type: f.type, q: f.q.trim(), limit: String(f.limit ?? SUBJECT_PAGE_SIZE) });
+    return request<PartnerSubjectList>(`/admin/partner-media/subjects?${q.toString()}`, { signal }, token);
+  },
   /** brand_media: the texts an admin confirms when setting a partner's photo or logo. */
   confirmation: (token: string) => request<AdminConfirmation>('/admin/partner-media/confirmation', {}, token),
   /** moderation_decide: "Looks fine". */
@@ -346,6 +360,7 @@ const ERROR_KEYS: Record<string, MessageKey> = {
   rate_limited: 'partnerMedia.error.rate_limited',
   image_taken_down_before: 'partnerMedia.error.image_taken_down_before',
   partner_media_failed: 'partnerMedia.error.image_save_failed',
+  q_too_short: 'partnerMedia.picker.searchHint',
   // Security review of functions#277 (6cc45ec).
   image_service_busy: 'partnerMedia.error.image_service_busy',
   rate_limit_unavailable: 'partnerMedia.error.rate_limit_unavailable',

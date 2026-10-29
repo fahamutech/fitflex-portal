@@ -240,14 +240,6 @@ test.describe('Partner photos queue (flag on)', () => {
     await expect(card).toContainText('needs the "Moderation: approve, reject, suspend, hide" permission');
   });
 
-  test('brand_media only: no queue nav item', async ({ page }) => {
-    await signInAs(page, staff(['brand_media', 'gyms']));
-    await mockPartnerMediaApi(page, seed());
-    await page.goto('/admin/gyms/');
-    await expect(nav(page).getByRole('link', { name: 'Gyms' })).toBeVisible();
-    await expect(nav(page).getByRole('link', { name: 'Partner photos' })).toHaveCount(0);
-  });
-
   test('Looks fine sends the revision, leaves To review, stays in Live; own upload is disabled', async ({ page }) => {
     const s = seed();
     s.items[1].ownUpload = true;
@@ -561,3 +553,104 @@ test.describe('Home photo and logo dialog (flag on)', () => {
   });
 });
 
+// ── Flag on: Set photo for a partner (functions#286 partner picker) ────────
+test.describe('Set photo for a partner (flag on)', () => {
+  test.skip(!FLAG_ON, 'portal under test was built without NEXT_PUBLIC_PARTNER_MEDIA_ADMIN=true');
+  const subjectCalls = (s: PmState) => s.calls.filter(c => c.path === '/admin/partner-media/subjects');
+
+  test('brand_media only: nav entry, picker without the queue, keyboard pick opens the Set dialog', async ({ page }) => {
+    const s = seed();
+    await openQueue(page, s, { user: staff(['brand_media']) });
+    await expect(nav(page).getByRole('link', { name: 'Partner photos' })).toBeVisible();
+    await expect(page.getByTestId('partner-media-set-only')).toBeVisible();
+    await expect(page.getByText('Reviewing partner uploads needs the "Moderation: view" permission.', { exact: false })).toBeVisible();
+    await expect(page.getByRole('button', { name: /^To review/ })).toHaveCount(0);
+    // No queue request at all (brand_media alone may not list the queue).
+    expect(listCalls(s)).toHaveLength(0);
+
+    const box = page.getByRole('combobox', { name: 'Partner name' });
+    await page.getByTestId('partner-picker-type').selectOption('vendor');
+    await box.fill('n');
+    await expect(page.getByTestId('partner-picker-status')).toHaveText('Type at least 2 letters of the name.');
+    await page.waitForTimeout(500);
+    expect(subjectCalls(s)).toHaveLength(0); // too short: no request
+    await box.pressSequentially('eem', { delay: 30 });
+    const option = page.getByTestId('partner-picker-list').getByRole('option', { name: /Neema Supplements/ });
+    await expect(option).toBeVisible();
+    await expect(box).toHaveAttribute('aria-expanded', 'true');
+    // Debounced: one request for the whole word, with the contract's query.
+    expect(subjectCalls(s)).toHaveLength(1);
+    expect(subjectCalls(s)[0].query).toEqual({ type: 'vendor', q: 'neem', limit: '25' });
+    await expect(option).toHaveAttribute('aria-selected', 'true');
+    await box.press('Enter');
+    const dialog = page.getByRole('dialog', { name: 'Home photo and logo: Neema Supplements' });
+    await expect(dialog).toBeVisible();
+    expect(listCalls(s).at(-1)!.query).toMatchObject({ tab: 'live', subjectType: 'vendor', subjectId: VENDOR.id });
+    await expect(dialog.getByTestId('partner-set-open-hero')).toBeVisible(); // brand_media can set
+    await expect(dialog.getByTestId('partner-set-take-down-logo')).toHaveCount(0); // no moderation_decide
+  });
+
+  test('arrow keys move through matches; truncated results say so; no match; errors', async ({ page }) => {
+    const s = seed();
+    await openQueue(page, s, { user: staff(['brand_media']) });
+    const box = page.getByRole('combobox', { name: 'Partner name' });
+    await box.fill('fit club');
+    await expect(page.getByTestId('partner-picker-status')).toHaveText('Showing 25 of 30. Type more of the name to narrow it down.');
+    await expect(page.getByTestId('partner-picker-list').getByRole('option')).toHaveCount(25);
+    await box.press('ArrowDown');
+    await box.press('ArrowDown');
+    const third = page.getByTestId('partner-picker-list').getByRole('option').nth(2);
+    await expect(third).toHaveAttribute('aria-selected', 'true');
+    await expect(box).toHaveAttribute('aria-activedescendant', (await third.getAttribute('id'))!);
+    await box.press('End');
+    await expect(page.getByTestId('partner-picker-list').getByRole('option').nth(24)).toHaveAttribute('aria-selected', 'true');
+    await box.press('Escape');
+    await expect(box).toHaveAttribute('aria-expanded', 'false');
+
+    await box.fill('zzz');
+    await expect(page.getByTestId('partner-picker-status')).toHaveText('No partner matches "zzz".');
+
+    s.fail.subjects = Array.from({ length: 3 }, () => ({ status: 429, json: { error: 'rate_limited', retryAfterSeconds: 30 } }));
+    await box.fill('kinondoni');
+    await expect(page.getByTestId('partner-picker-status')).toHaveText('Too many searches. Wait a moment and try again.');
+    s.fail.subjects = Array.from({ length: 3 }, () => ({ status: 404, json: { error: 'feature_disabled' } }));
+    await box.fill('kinond');
+    await expect(page.getByTestId('partner-picker-status')).toHaveText('This feature is turned off on the server.');
+    s.fail.subjects = [];
+    await box.fill('kinon');
+    await expect(page.getByTestId('partner-picker-list').getByRole('option', { name: /Kinondoni Fit/ })).toBeVisible();
+    // Mouse pick works too.
+    await page.getByTestId('partner-picker-list').getByRole('option', { name: /Kinondoni Fit/ }).click();
+    await expect(page.getByRole('dialog', { name: `Home photo and logo: ${GYM.name}` })).toBeVisible();
+  });
+
+  test('moderation + brand_media: queue plus the "Set photo for a partner" action; moderation alone has no action', async ({ page }) => {
+    const s = seed();
+    await openQueue(page, s, { user: staff(['moderation', 'brand_media']) });
+    await expect(page.getByRole('button', { name: /^To review/ })).toBeVisible();
+    await page.getByTestId('partner-picker-open').click();
+    const picker = page.getByRole('dialog', { name: 'Set photo for a partner' });
+    await picker.getByRole('combobox', { name: 'Partner name' }).fill('juma');
+    await picker.getByTestId('partner-picker-type').selectOption('trainer');
+    await expect(picker.getByRole('option', { name: /Juma Coach/ })).toHaveAttribute('aria-selected', 'true');
+    await picker.getByRole('combobox', { name: 'Partner name' }).press('ArrowDown');
+    await picker.getByRole('combobox', { name: 'Partner name' }).press('Enter');
+    await expect(page.getByRole('dialog', { name: `Home photo and logo: ${TRAINER.displayName}` })).toBeVisible();
+    await expect(picker).toHaveCount(0);
+  });
+
+  test('moderation alone: no picker action', async ({ page }) => {
+    await openQueue(page, seed(), { user: staff(['moderation']) });
+    await expect(page.getByRole('button', { name: /^To review/ })).toBeVisible();
+    await expect(page.getByTestId('partner-picker-open')).toHaveCount(0);
+  });
+
+  test('Swahili picker', async ({ page }) => {
+    await openQueue(page, seed(), { user: staff(['brand_media']), locale: 'sw' });
+    await expect(page.getByRole('heading', { level: 2, name: 'Weka picha kwa mshirika' })).toBeVisible();
+    const box = page.getByRole('combobox', { name: 'Jina la mshirika' });
+    await expect(page.getByTestId('partner-picker-status')).toHaveText('Andika angalau herufi 2 za jina.');
+    await box.fill('qqq');
+    await expect(page.getByTestId('partner-picker-status')).toHaveText('Hakuna mshirika anayelingana na "qqq".');
+  });
+});

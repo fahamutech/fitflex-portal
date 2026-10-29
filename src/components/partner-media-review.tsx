@@ -19,6 +19,9 @@ import {
   Alert, Badge, Button, Card, CardContent, EmptyState, ErrorState, Input, PageHeader, Segmented, Select, SkeletonCard, useToast,
 } from './shared';
 import { Dialog, DialogFooter } from './dialog';
+import { PartnerPicker } from './partner-media-picker';
+import { PartnerMediaSetDialog } from './partner-media-set-dialog';
+import type { PartnerSubject } from '@/lib/partner-media';
 import {
   BandFigure, BothPlates, CompanionStore, DANGER_GHOST, FileDeleted, itemAlt, PartnerCompanionProvider, PartnerPreviewProvider, reportActionError,
   subjectName, TakedownDialog, useCompanion, useInView, usePreview,
@@ -226,6 +229,9 @@ function Queue() {
   const { t, token, hasPermission } = useApp();
   const toast = useToast();
   const canDecide = hasPermission('moderation_decide');
+  const canBrand = hasPermission('brand_media');
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [setSubject, setSetSubject] = useState<PartnerSubject | null>(null);
   const [tab, setTab] = useState<PartnerMediaTab>('to_review');
   const [type, setType] = useState<PartnerSubjectType | ''>('');
   const [kind, setKind] = useState<PartnerMediaKind | ''>('');
@@ -354,7 +360,15 @@ function Queue() {
   return (
     <PartnerCompanionProvider store={companions}>
     <div data-testid="partner-media-page">
-      <PageHeader title={t('partnerMedia.title')} description={t('partnerMedia.subtitle')} />
+      <PageHeader
+        title={t('partnerMedia.title')}
+        description={t('partnerMedia.subtitle')}
+        actions={canBrand ? (
+          <Button variant="secondary" className="min-h-11" onClick={() => setPickerOpen(true)} data-testid="partner-picker-open">
+            <ImageUp aria-hidden="true" className="h-4 w-4" />{t('partnerMedia.picker.open')}
+          </Button>
+        ) : undefined}
+      />
       {status === 'off' ? (
         <EmptyState icon={<ImageUp />} title={t('partnerMedia.off.title')} body={t('partnerMedia.off.body')} />
       ) : (
@@ -397,11 +411,45 @@ function Queue() {
         onClose={() => setTakingDown(null)}
         onDone={(outcome) => { if (takingDown) afterTakedown(outcome, takingDown); }}
       />
+      {canBrand && (
+        <Dialog open={pickerOpen} onClose={() => setPickerOpen(false)} title={t('partnerMedia.picker.open')} description={t('partnerMedia.picker.intro')} size="lg">
+          <PartnerPicker onPick={subject => { setPickerOpen(false); setSetSubject(subject); }} />
+          <DialogFooter>
+            <Button variant="secondary" className="min-h-11" onClick={() => setPickerOpen(false)}>{t('common.close')}</Button>
+          </DialogFooter>
+        </Dialog>
+      )}
+      {/* Something set here may now be live or replace a card: reload when the dialog closes. */}
+      <PartnerMediaSetDialog subject={setSubject} onClose={() => { setSetSubject(null); void load(true); }} />
     </div>
     </PartnerCompanionProvider>
   );
 }
 
+/** brand_media without moderation: only "Set photo for a partner" (no queue, no list request). */
+function SetOnly() {
+  const { t } = useApp();
+  const [subject, setSubject] = useState<PartnerSubject | null>(null);
+  return (
+    <div data-testid="partner-media-set-only">
+      <PageHeader title={t('partnerMedia.title')} description={t('partnerMedia.picker.intro')} />
+      <div className="space-y-6">
+        <Alert tone="info">{t('partnerMedia.picker.brandOnly')}</Alert>
+        <Card>
+          <CardContent className="space-y-4">
+            <h2 className="text-base font-semibold text-[var(--color-fg-primary)]">{t('partnerMedia.picker.open')}</h2>
+            <PartnerPicker onPick={setSubject} />
+          </CardContent>
+        </Card>
+      </div>
+      <PartnerMediaSetDialog subject={subject} onClose={() => setSubject(null)} />
+    </div>
+  );
+}
+
 export function PartnerMediaReview() {
-  return <PartnerPreviewProvider><Queue /></PartnerPreviewProvider>;
+  const { hasPermission } = useApp();
+  // The queue needs moderation or moderation_decide (functions#277 L3: brand_media alone may not list it).
+  const canQueue = hasPermission('moderation') || hasPermission('moderation_decide');
+  return <PartnerPreviewProvider>{canQueue ? <Queue /> : <SetOnly />}</PartnerPreviewProvider>;
 }
