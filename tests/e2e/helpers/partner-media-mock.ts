@@ -48,6 +48,15 @@ export const ADMIN_CONFIRMATION = {
   },
 };
 
+/** Partners the picker can find (GET /admin/partner-media/subjects, functions#286). */
+export const SUBJECTS: Array<{ type: string; id: string; name: string }> = [
+  { type: 'gym', id: GYM.id, name: GYM.name },
+  { type: 'gym', id: 'gym_2', name: 'Mazoezi Arena' },
+  ...Array.from({ length: 30 }, (_, i) => ({ type: 'gym', id: `gym_fit_${i}`, name: `Fit Club ${String(i).padStart(2, '0')}` })),
+  { type: 'trainer', id: TRAINER.id, name: TRAINER.displayName },
+  { type: 'vendor', id: VENDOR.id, name: VENDOR.vendorProfile.businessName },
+];
+
 export type Call = { method: string; path: string; query: Record<string, string>; body: Json | null; authorization?: string; contentType?: string; raw?: Buffer };
 
 export type PmState = {
@@ -122,6 +131,17 @@ export async function mockPartnerMediaApi(page: Page, s: PmState, opts: { server
       if (method === 'POST' && path === '/admin/partner-media') call.raw = req.postDataBuffer() ?? Buffer.alloc(0);
       s.calls.push(call);
 
+      if (path === '/admin/partner-media/subjects') {
+        const f = failOnce(s, 'subjects');
+        if (f) return route.fulfill(f);
+        const type = query.type || query.subjectType;
+        if (!['gym', 'trainer', 'vendor'].includes(type)) return route.fulfill({ status: 400, json: { error: 'invalid_subject_type', allowed: ['gym', 'trainer', 'vendor'] } });
+        const q = (query.q || '').trim();
+        if (q.length < 2) return route.fulfill({ status: 400, json: { error: 'q_too_short', minLength: 2 } });
+        const limit = Math.min(Number(query.limit) || 10, 25);
+        const all = SUBJECTS.filter(x => x.type === type && x.name.toLowerCase().includes(q.toLowerCase())).sort((a, b) => a.name.localeCompare(b.name));
+        return route.fulfill({ json: { items: all.slice(0, limit), total: all.length } });
+      }
       if (path === '/admin/partner-media/confirmation') {
         const f = failOnce(s, 'confirmation');
         return f ? route.fulfill(f) : route.fulfill({ json: s.confirmation });

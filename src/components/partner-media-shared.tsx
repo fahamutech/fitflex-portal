@@ -16,6 +16,7 @@ import {
   type PartnerMediaItem, type PartnerPreviewWidth, type PartnerSubject, type PlateTone, type TakedownReason,
 } from '@/lib/partner-media';
 import type { MessageKey } from '@/lib/i18n';
+import type { PartnerMediaKind, PartnerSubjectType } from '@/lib/partner-media';
 import { cn } from '@/lib/cn';
 import { focalToObjectPosition } from './photo-panel';
 import { ScaledFrame } from './hero-image-manager';
@@ -75,6 +76,69 @@ export function PartnerPreviewProvider({ children }: { children: ReactNode }) {
   useEffect(() => { store.open(); return () => store.close(); }, [store]);
   return <PreviewCtx.Provider value={store}>{children}</PreviewCtx.Provider>;
 }
+
+/* ── Companion lookup: the partner's other live item (spec §43.2) ─────────
+   A photo card draws the partner's live logo plate over the photo, and a logo card draws its plate over the
+   partner's live photo. Each partner is looked up once per kind (GET /admin/partner-media?tab=live&subjectType=
+   &subjectId=&kind=&limit=1, which moderation, moderation_decide and brand_media may all read), one request at
+   a time, only when the card is on screen. clear() forgets everything (the list was reloaded). */
+export class CompanionStore {
+  private entries = new Map<string, PartnerMediaItem | null>();
+  private started = new Set<string>();
+  private listeners = new Set<() => void>();
+  private queue: Promise<void> = Promise.resolve();
+  private closed = false;
+  constructor(private token: string | null) {}
+  open() { this.closed = false; this.started.clear(); }
+  private key(type: PartnerSubjectType, id: string, kind: PartnerMediaKind) { return `${type}:${id}:${kind}`; }
+  get(type: PartnerSubjectType, id: string, kind: PartnerMediaKind) { return this.entries.get(this.key(type, id, kind)); }
+  subscribe(fn: () => void) { this.listeners.add(fn); return () => { this.listeners.delete(fn); }; }
+  private emit() { this.listeners.forEach(fn => fn()); }
+  load(type: PartnerSubjectType, id: string, kind: PartnerMediaKind) {
+    const k = this.key(type, id, kind);
+    if (this.started.has(k) || !this.token || this.closed) return;
+    this.started.add(k);
+    const token = this.token;
+    this.queue = this.queue.then(async () => {
+      if (this.closed) return;
+      try {
+        const res = await partnerMediaApi.list(token, { tab: 'live', subjectType: type, subjectId: id, kind, limit: 1 });
+        if (this.closed) return;
+        this.entries.set(k, res.items.find(i => i.subject.id === id && i.kind === kind && i.status === 'live') ?? null);
+      } catch {
+        this.started.delete(k); // the card still shows its own preview; a later view may try again
+        return;
+      }
+      this.emit();
+    });
+  }
+  clear() { this.entries.clear(); this.started.clear(); this.emit(); }
+  close() { this.closed = true; this.entries.clear(); this.listeners.clear(); }
+}
+const CompanionCtx = createContext<CompanionStore | null>(null);
+
+/** Gives its children one companion cache (see CompanionStore). */
+export function PartnerCompanionProvider({ store, children }: { store: CompanionStore; children: ReactNode }) {
+  useEffect(() => { store.open(); return () => store.close(); }, [store]);
+  return <CompanionCtx.Provider value={store}>{children}</CompanionCtx.Provider>;
+}
+
+/** The partner's live item of the other kind (logo for a photo, photo for a logo); undefined while unknown. */
+export function useCompanion(item: Pick<PartnerMediaItem, 'kind' | 'subject' | 'status'> | null | undefined, visible = true): PartnerMediaItem | null | undefined {
+  const store = useContext(CompanionCtx);
+  const [, bump] = useState(0);
+  const other: PartnerMediaKind | null = item ? (item.kind === 'hero' ? 'logo' : 'hero') : null;
+  const type = item?.subject.type; const id = item?.subject.id;
+  useEffect(() => store?.subscribe(() => bump(n => n + 1)), [store]);
+  useEffect(() => { if (store && type && id && other && visible) store.load(type, id, other); }, [store, type, id, other, visible]);
+  return store && type && id && other ? store.get(type, id, other) : undefined;
+}
+
+/**
+ * Take down / remove as an inline action: a ghost button in the error colour, as the app's Remove
+ * (FFButtonVariant.ghost, danger: true). The confirm inside the takedown dialog stays the solid destructive button.
+ */
+export const DANGER_GHOST = 'text-[var(--color-error-700)] hover:bg-[var(--color-error-50)] hover:text-[var(--color-error-800)]';
 
 /** The object URL of a live item's preview (nothing for a deleted file). */
 export function usePreview(item: Pick<PartnerMediaItem, 'previewUrl'> | null | undefined, w: PartnerPreviewWidth, visible = true): PreviewStatus {
