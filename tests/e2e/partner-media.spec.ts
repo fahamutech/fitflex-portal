@@ -1,7 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 import { messages } from '../../src/lib/i18n';
 import {
-  autoPlate, checkFileBasics, checkFileSize, PARTNER_MEDIA_ERROR_CODES, partnerMediaErrorText, reasonsFor, takedownReady,
+  autoPlate, checkFileBasics, checkFileSize, eatDateTime, PARTNER_MEDIA_ERROR_CODES, partnerMediaErrorText, reasonsFor, takedownReady,
 } from '../../src/lib/partner-media';
 import { ApiError } from '../../src/lib/api';
 import {
@@ -36,6 +36,7 @@ test.describe('rules', () => {
     expect(checkFileSize('hero', { width: 1080, height: 600 })).toEqual({ ok: true });
     expect(checkFileSize('logo', { width: 1000, height: 200 })).toMatchObject({ ok: false, key: 'partnerMedia.error.image_too_small.logo' });
     expect(checkFileSize('logo', { width: 4100, height: 300 })).toMatchObject({ ok: false, key: 'partnerMedia.error.too_many_pixels' });
+    expect(checkFileSize('hero', { width: 9000, height: 6000 })).toMatchObject({ ok: false, key: 'partnerMedia.error.too_many_pixels.photo', vars: { maxMp: 50 } });
     // A changed limit changes the check (AC-P23).
     const limits = { hero: { minWidth: 2000, maxBytes: 1024, types: ['image/png'] }, logo: { minSide: 10, maxBytes: 1024, types: ['image/png'] } };
     expect(checkFileSize('hero', { width: 1500, height: 900 }, limits)).toMatchObject({ ok: false, vars: { minWidth: 2000 } });
@@ -50,6 +51,13 @@ test.describe('rules', () => {
     expect(takedownReady('other', '  ')).toBe(false);
     expect(takedownReady('other', 'why')).toBe(true);
     expect(takedownReady('rights', 'x'.repeat(501))).toBe(false);
+  });
+
+  test('times: English 24-hour, Swahili 12-hour with the part of the day (EAT)', () => {
+    expect(eatDateTime('2026-10-29T11:05:00.000Z', 'en')).toBe('29 Oct 2026, 14:05');
+    expect(eatDateTime('2026-10-29T11:05:00.000Z', 'sw')).toBe('29 Okt 2026, 2:05 mchana');
+    expect(eatDateTime('2026-10-27T06:00:00.000Z', 'sw')).toBe('27 Okt 2026, 9:00 asubuhi');
+    expect(eatDateTime(null, 'en')).toBe('—');
   });
 
   test('automatic plate: white logo gets dark, dark logo gets light, transparent pixels ignored', () => {
@@ -79,6 +87,20 @@ test.describe('rules', () => {
     for (const code of ['image_service_busy', 'rate_limit_unavailable', 'reinstate_requires_moderation_decide', 'override_reason_required', 'override_reason_too_long']) {
       expect(PARTNER_MEDIA_ERROR_CODES).toContain(code);
     }
+    // file_too_large: maxPixels and maxSide both get the too-many-pixels text; maxBytes the size text.
+    expect(partnerMediaErrorText(en2 as never, new ApiError(413, { error: 'file_too_large', maxPixels: 50_000_000 }))).toBe('This photo has too many pixels. Use one of at most 50 megapixels.');
+    expect(partnerMediaErrorText(en2 as never, new ApiError(413, { error: 'file_too_large', maxSide: 4000 }))).toBe('This logo is too large. Use one at most 4000 pixels on each side.');
+    expect(partnerMediaErrorText(en2 as never, new ApiError(413, { error: 'file_too_large', maxBytes: 2097152 }), 'logo')).toBe('This file is too large. The limit is 2 MB.');
+    expect(partnerMediaErrorText(en2 as never, new ApiError(429, { error: 'rate_limited', scope: 'partner_attempts' }))).toBe(en['partnerMedia.error.rate_limited.partnerAttempts']);
+    // Swahili glossary (2026-10-29 review): "Chagua kisanduku", "Hakiki", li-class "faili", "Imeshindikana … Jaribu tena."
+    const swPm = keys.map(k => sw[k]).join('\n');
+    expect(swPm).not.toMatch(/weka alama|mwonekano|Faili za|Hatukuweza|Kuna hitilafu/i);
+    expect(sw['partnerMedia.confirmRequired']).toBe('Chagua kisanduku hiki kuthibitisha.');
+    expect(sw['partnerMedia.preview.failed']).toMatch(/^Imeshindikana .*Jaribu tena\.$/);
+    // Permission names as the Users page labels them.
+    expect(en['partnerMedia.noDecide']).toContain('"Moderation: approve, reject, suspend, hide"');
+    expect(en['partnerMedia.noBrandMedia']).toContain(`"${en['admin.nav.heroImages']}"`);
+    expect(sw['partnerMedia.noBrandMedia']).toContain(`"${sw['admin.nav.heroImages']}"`);
     // No copy says the partner is told when FitFlex sets their photo (O-P3).
     expect(en['partnerMedia.setDialog.note']).not.toMatch(/told|notif/i);
     expect(sw['partnerMedia.setDialog.note']).not.toMatch(/julish/i);
@@ -176,7 +198,7 @@ test.describe('Partner photos queue (flag on)', () => {
     const card = page.getByTestId('partner-card-pm_old');
     await expect(card.getByRole('button', { name: 'Looks fine' })).toBeDisabled();
     await expect(card.getByRole('button', { name: 'Take down' })).toBeDisabled();
-    await expect(card).toContainText('needs the "Moderation: decide" permission');
+    await expect(card).toContainText('needs the "Moderation: approve, reject, suspend, hide" permission');
   });
 
   test('brand_media only: no queue nav item', async ({ page }) => {
@@ -315,6 +337,7 @@ test.describe('Partner photos queue (flag on)', () => {
     await openQueue(page, seed(), { locale: 'sw' });
     await expect(page.getByRole('heading', { level: 1, name: 'Picha za washirika' })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Za kukagua (2)' })).toBeVisible();
+    await expect(page.getByTestId('partner-card-pm_old')).toContainText('Imepakiwa 27 Okt 2026, 9:00 asubuhi na Asha Owner (mmiliki wa gym)');
     await page.getByTestId('partner-take-down-pm_old').click();
     await expect(page.getByRole('dialog', { name: 'Uondoe picha hii?' })).toContainText('Sababu nyingine');
   });
@@ -416,7 +439,7 @@ test.describe('Home photo and logo dialog (flag on)', () => {
     await expect(form.getByTestId('partner-set-file-error')).toHaveText('This logo is too small. Use one at least 256 pixels on the short side.');
     expect(s.calls.length).toBe(before); // refused before any request
     await form.getByTestId('partner-set-file').setInputFiles({ name: 'logo.png', mimeType: 'image/png', buffer: png(300, 300, { rgb: [250, 250, 250] }) });
-    await expect(form.getByRole('button', { name: 'Automatic (Dark)' })).toBeVisible();
+    await expect(form.getByRole('button', { name: 'Automatic (dark)' })).toBeVisible();
     await form.getByRole('button', { name: 'Light', exact: true }).click();
     await expect(form.getByTestId('partner-band-band-plate')).toHaveAttribute('data-tone', 'light');
     await form.getByText(s.confirmation.adminConfirmation.rights.en).click();
@@ -453,7 +476,7 @@ test.describe('Home photo and logo dialog (flag on)', () => {
     await form.getByTestId('partner-set-rights').check();
     const submit = form.getByTestId('partner-set-submit');
     await submit.click();
-    await expect(form.getByText('This file was taken down before. Putting it back needs the "Moderation: decide" permission.')).toBeVisible();
+    await expect(form.getByText('This file was taken down before. Putting it back needs the "Moderation: approve, reject, suspend, hide" permission.')).toBeVisible();
     await submit.click();
     await expect(form.getByText('The image service is busy. Try again in a few seconds.')).toBeVisible();
     await submit.click();
@@ -476,7 +499,7 @@ test.describe('Home photo and logo dialog (flag on)', () => {
     await page.goto('/admin/trainers/');
     await page.getByTestId(`partner-media-row-trainer-${TRAINER.id}`).click();
     const dialog = page.getByRole('dialog', { name: `Home photo and logo: ${TRAINER.displayName}` });
-    await expect(dialog.getByTestId('partner-set-no-brand')).toHaveText('Setting a photo needs the "Brand media" permission.');
+    await expect(dialog.getByTestId('partner-set-no-brand')).toHaveText('Setting a photo needs the "App photos" permission.');
     await expect(dialog.getByTestId('partner-set-open-hero')).toHaveCount(0);
     expect(listCalls(s)[0].query).toMatchObject({ subjectType: 'trainer', subjectId: TRAINER.id });
     expect(s.calls.some(c => c.path === '/admin/partner-media/confirmation')).toBe(false);

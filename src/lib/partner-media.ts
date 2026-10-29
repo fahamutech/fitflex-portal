@@ -12,6 +12,7 @@
 // - Owner decision O-P3 (2026-10-29): the partner is NOT notified when FitFlex sets their photo or logo.
 import { API_BASE, ApiError, IDENTITY_V2_CLIENT, notifyUnauthorized, request } from './api';
 import type { Locale, MessageKey } from './i18n';
+import { receiptDateTime } from './vendor';
 
 // ─── Contract ───────────────────────────────────────────────────────────────
 
@@ -205,6 +206,9 @@ export const partnerMediaApi = {
 // ─── Rules ──────────────────────────────────────────────────────────────────
 
 /** Used until GET /admin/partner-media/confirmation answers (the server checks again). */
+/** The server refuses photos over 50 megapixels (functions#277 hero-image-file HERO_LIMITS.maxPixels → 413 file_too_large { maxPixels }). */
+export const HERO_MAX_PIXELS = 50_000_000;
+
 export const DEFAULT_LIMITS: PartnerMediaLimits = {
   hero: { minWidth: 1080, maxBytes: 15 * 1024 * 1024, types: ['image/jpeg', 'image/png', 'image/webp'] },
   logo: { minSide: 256, maxBytes: 2 * 1024 * 1024, maxSide: 4000, types: ['image/png', 'image/jpeg', 'image/webp'] },
@@ -269,7 +273,9 @@ export function checkFileBasics(kind: PartnerMediaKind, file: { name: string; ty
 export function checkFileSize(kind: PartnerMediaKind, size: { width: number; height: number }, limits: PartnerMediaLimits = DEFAULT_LIMITS): FileCheck {
   if (kind === 'hero') {
     const minWidth = limits.hero.minWidth;
-    return size.width < minWidth ? { ok: false, key: 'partnerMedia.error.image_too_small.hero', vars: { minWidth } } : { ok: true };
+    if (size.width < minWidth) return { ok: false, key: 'partnerMedia.error.image_too_small.hero', vars: { minWidth } };
+    if (size.width * size.height > HERO_MAX_PIXELS) return { ok: false, key: 'partnerMedia.error.too_many_pixels.photo', vars: { maxMp: HERO_MAX_PIXELS / 1_000_000 } };
+    return { ok: true };
   }
   const { minSide } = limits.logo;
   const maxSide = limits.logo.maxSide ?? DEFAULT_LIMITS.logo.maxSide!;
@@ -372,11 +378,14 @@ export function partnerMediaErrorText(t: Translate, e: unknown, kind?: PartnerMe
   }
   if (code === 'file_too_large') {
     if (body?.maxSide) return fill(t('partnerMedia.error.too_many_pixels'), { maxSide: Number(body.maxSide) });
+    if (body?.maxPixels) return fill(t('partnerMedia.error.too_many_pixels.photo'), { maxMp: Math.round(Number(body.maxPixels) / 1_000_000) });
     const max = Number(body?.maxBytes) || DEFAULT_LIMITS[kind ?? 'hero'].maxBytes;
     return fill(t('partnerMedia.error.file_too_large'), { maxMb: Math.round(max / 1024 / 1024) });
   }
-  if (code === 'rate_limited' && (body?.scope === 'person' || body?.scope === 'partner')) {
-    return t(body.scope === 'person' ? 'partnerMedia.error.rate_limited.person' : 'partnerMedia.error.rate_limited.partner');
+  if (code === 'rate_limited') {
+    if (body?.scope === 'person') return t('partnerMedia.error.rate_limited.person');
+    if (body?.scope === 'partner') return t('partnerMedia.error.rate_limited.partner');
+    if (body?.scope === 'partner_attempts') return t('partnerMedia.error.rate_limited.partnerAttempts');
   }
   const key = ERROR_KEYS[code];
   return key ? t(key) : fill(t('partnerMedia.error.unknown'), { code });
@@ -406,16 +415,10 @@ const ROLE_KEYS: Record<string, MessageKey> = {
 };
 export const roleLabel = (t: Translate, role: string | null | undefined) => (role && ROLE_KEYS[role] ? t(ROLE_KEYS[role]) : role || '—');
 
-const EAT = 'Africa/Dar_es_Salaam';
-/** "29 Oct 2026, 14:05" in East Africa Time. */
-export function eatDateTime(iso: string | null | undefined, locale: Locale): string {
-  if (!iso) return '—';
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return '—';
-  const l = locale === 'sw' ? 'sw-TZ' : 'en-GB';
-  const day = d.toLocaleDateString(l, { day: '2-digit', month: 'short', year: 'numeric', timeZone: EAT });
-  const time = d.toLocaleTimeString(l, { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: EAT });
-  return `${day}, ${time}`;
-}
+/**
+ * "29 Oct 2026, 14:05" in English; Swahili uses the 12-hour clock with the part of the day,
+ * "29 Okt 2026, 2:05 mchana" (the shared receipt clock in src/lib/vendor.ts). East Africa Time.
+ */
+export const eatDateTime = (iso: string | null | undefined, locale: Locale): string => receiptDateTime(iso, locale);
 
 export { fill as fillTemplate };

@@ -195,7 +195,8 @@ function SetForm({ kind, subject, confirmation, onReloadConfirmation, photoItem,
   }
 
   const tone: PlateTone = plate === 'auto' ? chosen?.autoTone ?? 'light' : plate;
-  const toneLabel = t(tone === 'dark' ? 'partnerMedia.plate.dark' : 'partnerMedia.plate.light');
+  // "Automatic (light)": the tone in lower case inside the brackets.
+  const toneLabel = t(tone === 'dark' ? 'partnerMedia.plate.dark' : 'partnerMedia.plate.light').toLocaleLowerCase(locale === 'sw' ? 'sw' : 'en');
   const pct = Math.round(progress * 100);
   const lang = locale === 'sw' ? 'sw' : 'en';
 
