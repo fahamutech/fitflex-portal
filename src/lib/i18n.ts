@@ -5334,6 +5334,8 @@ export const messages = {
     "vendor.reports.rateLimited": "You've downloaded too often. Try again in {n} minute(s).",
     "vendor.reports.pdfUnavailable": "The PDF can't be made right now. Try again later, or download a CSV instead.",
     "vendor.reports.a11y.exportRow": "Download {section} as {format} for {period}",
+    // Phase B · B5b: company HR in the organisation area (src/lib/i18n-hr-org.ts).
+    ...hrOrgMessages.en,
   },
   sw: {
     'app.title': 'FitFlex Af — Portal ya Waendeshaji',
@@ -10678,8 +10680,13 @@ export const messages = {
     "vendor.reports.rateLimited": "Umepakua mara nyingi mno. Jaribu tena baada ya dakika {n}.",
     "vendor.reports.pdfUnavailable": "Imeshindikana kutengeneza PDF kwa sasa. Jaribu tena baadaye, au pakua CSV.",
     "vendor.reports.a11y.exportRow": "Pakua {section} kama {format} kwa {period}",
+    ...hrOrgMessages.sw,
   }
 } as const;
+
+// Imported here, not at the top, so it doesn't overlap other open i18n changes (portal#52).
+// ES imports are hoisted, so this is the same as importing at the top.
+import { hrOrgMessages } from './i18n-hr-org';
 
 export type MessageKey = keyof typeof messages['en'];
 
