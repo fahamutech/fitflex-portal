@@ -38,6 +38,15 @@ async function companyOrg(page: Page, user: Json = MARKED_HR, permissions = HR_A
 }
 /** An add-by-contact reply: no userId or linked (functions#252 f4c0928), so it can't tell who is a member. */
 const byContact = ({ userId, linked, ...rest }: Json) => rest; // eslint-disable-line @typescript-eslint/no-unused-vars
+/**
+ * 202 for an add or link named by email, number or user id (functions#252 8e911a4): the member is asked first.
+ * By email/number memberRequest.id and userId are null, so the reply never says whether a member is behind it.
+ */
+const pendingReply = (extra: Json) => ({ status: 202, json: {
+  outcome: 'pending_member_acceptance',
+  memberRequest: { id: null, kind: 'employee_link', status: 'pending_member_acceptance', organizationId: 'org-3', corporateId: 'corp-1', employeeId: extra.beneficiary?.id ?? null, userId: null, displayName: null, role: null, permissions: null, beneficiaryType: null, groupName: null, externalReference: null, beneficiaryStatus: null, expiresAt: '2026-11-12T08:00:00Z', createdAt: '2026-10-29T08:00:00Z', decidedAt: null, reason: null },
+  writtenThrough: 'corporate_staff', ...extra,
+} });
 const storedUser = (page: Page) => page.evaluate(() => JSON.parse(localStorage.getItem('user') || 'null'));
 
 // `next dev` compiles each page on its first visit (seconds for /org/insights with its charts), and these tests
@@ -49,6 +58,9 @@ test.describe('sign-in and routing', () => {
   test.beforeEach(async ({ page }) => {
     // Nothing may reach a real service (live API, Firebase, Google).
     await page.route(/^https?:\/\/(?!localhost[:/])/, route => route.abort());
+    // `next dev` compiles a page on its first request; a first compile in the middle of the sign-in redirect could
+    // leave the page on /login. Ask for the pages these tests land on first (the shipped static export has no compile step).
+    for (const path of ['/login/', '/org/people/', '/hr/']) await page.request.get(path, { timeout: 60_000 });
   });
 
   test('an HR login the server marks for the organisation lands in /org and keeps the marks', async ({ page }) => {
@@ -168,9 +180,9 @@ test.describe('company people in /org (flag on)', () => {
   test('add a person: request body, PIN shown once with copy and warning', async ({ page, context }) => {
     await context.grantPermissions(['clipboard-read', 'clipboard-write']);
     const mock = await companyOrg(page);
-    mock.on('POST', /^\/b2b\/organizations\/org-3\/beneficiaries$/, c => ({
+    mock.on('POST', /^\/b2b\/organizations\/org-3\/beneficiaries$/, c => pendingReply({
       beneficiary: byContact({ ...EMPLOYEES[1], id: 'cemp_new', displayName: c.body?.displayName, status: 'active', employeeStatus: 'active' }),
-      pin: '4821', writtenThrough: 'corporate_staff',
+      pin: '4821',
     }));
     await page.goto('/org/people');
     const form = page.getByTestId('org-staff-add');
@@ -189,7 +201,8 @@ test.describe('company people in /org (flag on)', () => {
     await page.getByTestId('org-staff-pin-copy').click();
     await expect(page.getByTestId('org-staff-pin-copy')).toHaveText('Copied');
     expect(await page.evaluate(() => navigator.clipboard.readText())).toBe('4821');
-    await expect(page.getByText('Neema Said was added. If the email or number is confirmed in their FitFlex app', { exact: false })).toBeVisible();
+    // Named by email: added unlinked, the member is asked first (RC's consent wording, portal#141).
+    await expect(page.getByText('Neema Said added. Request sent. The member must accept in the FitFlex app before they\'re linked.')).toBeVisible();
     await page.getByTestId('org-staff-pin-done').click();
     await expect(pin).toHaveCount(0);
     // Gone for good: the PIN is nowhere on the page any more.
@@ -198,7 +211,7 @@ test.describe('company people in /org (flag on)', () => {
 
   test('the name is required; pending when "Active now" is unticked', async ({ page }) => {
     const mock = await companyOrg(page);
-    mock.on('POST', /^\/b2b\/organizations\/org-3\/beneficiaries$/, c => ({ beneficiary: byContact({ ...EMPLOYEES[0], id: 'cemp_new', displayName: c.body?.displayName }), pin: '1111', writtenThrough: 'corporate_staff' }));
+    mock.on('POST', /^\/b2b\/organizations\/org-3\/beneficiaries$/, c => pendingReply({ beneficiary: byContact({ ...EMPLOYEES[1], id: 'cemp_new', displayName: c.body?.displayName }), pin: '1111' }));
     await page.goto('/org/people');
     const form = page.getByTestId('org-staff-add');
     // A contact alone is not enough (functions#252 f4c0928: by contact, displayName is required).
@@ -210,7 +223,35 @@ test.describe('company people in /org (flag on)', () => {
     await page.getByTestId('org-staff-add-button').click();
     await expect.poll(() => mock.writes(/\/org-3\/beneficiaries$/).length).toBe(1);
     expect(mock.writes(/\/org-3\/beneficiaries$/)[0].body).toEqual({ displayName: 'Asha Member', phone: '0712345678', status: 'pending' });
-    await expect(page.getByText('Asha Member was added.', { exact: false })).toBeVisible();
+    await expect(page.getByText('Asha Member added. Request sent.', { exact: false })).toBeVisible();
+  });
+
+  test('name only: added (201) with the PIN, nobody asked', async ({ page }) => {
+    const mock = await companyOrg(page);
+    mock.on('POST', /^\/b2b\/organizations\/org-3\/beneficiaries$/, c => ({ beneficiary: byContact({ ...EMPLOYEES[1], id: 'cemp_new', displayName: c.body?.displayName }), pin: '2468', writtenThrough: 'corporate_staff' }));
+    await page.goto('/org/people');
+    await page.getByTestId('org-staff-name').fill('Baraka Mushi');
+    await page.getByTestId('org-staff-add-button').click();
+    await expect.poll(() => mock.writes(/\/org-3\/beneficiaries$/).length).toBe(1);
+    expect(mock.writes(/\/org-3\/beneficiaries$/)[0].body).toEqual({ displayName: 'Baraka Mushi', status: 'active' });
+    await expect(page.getByTestId('org-staff-pin-value')).toHaveValue('2468');
+    await expect(page.getByText('Baraka Mushi was added. Link their FitFlex account below so they can use the benefits.')).toBeVisible();
+  });
+
+  test('a link waiting for the member: badge with expiry, withdraw sends an empty body', async ({ page }) => {
+    const mock = await companyOrg(page);
+    mock.on('GET', /^\/b2b\/organizations\/org-3\/beneficiaries$/, () => ({ items: [EMPLOYEES[0], { ...EMPLOYEES[1], pendingLink: { status: 'pending_member_acceptance', createdAt: '2026-10-29T08:00:00Z', expiresAt: '2026-11-12T08:00:00Z' } }], total: 2, nextCursor: null }));
+    mock.on('POST', /^\/b2b\/organizations\/org-3\/beneficiaries\/cemp_2\/link$/, () => ({ beneficiary: { ...EMPLOYEES[1], pendingLink: null }, writtenThrough: 'corporate_staff' }));
+    await page.goto('/org/people');
+    const pending = page.getByTestId('org-staff-pending-cemp_2');
+    await expect(pending).toContainText('Waiting for member');
+    await expect(pending).toContainText('Request expires 12 Nov 2026');
+    // Waiting: no second link box for that row.
+    await expect(page.getByTestId('org-staff-link-cemp_2')).toHaveCount(0);
+    await pending.getByRole('button', { name: 'Withdraw' }).click();
+    await expect.poll(() => mock.writes(/cemp_2\/link$/).length).toBe(1);
+    expect(mock.writes(/cemp_2\/link$/)[0].body).toEqual({});
+    await expect(page.getByText('Request withdrawn.')).toBeVisible();
   });
 
   test('status changes: suspend, activate, left (confirmed) send active|suspended|inactive', async ({ page }) => {
@@ -233,13 +274,16 @@ test.describe('company people in /org (flag on)', () => {
 
   test('link by number and unlink with an empty body', async ({ page }) => {
     const mock = await companyOrg(page);
-    mock.on('POST', /^\/b2b\/organizations\/org-3\/beneficiaries\/([^/]+)\/link$/, (c, m) => ({ beneficiary: { ...EMPLOYEES.find(e => e.id === m[1]), linked: !!Object.keys(c.body ?? {}).length }, writtenThrough: 'corporate_staff' }));
+    // Linking asks the member (202); an empty body unlinks (200).
+    mock.on('POST', /^\/b2b\/organizations\/org-3\/beneficiaries\/([^/]+)\/link$/, (c, m) => (Object.keys(c.body ?? {}).length
+      ? pendingReply({ beneficiary: { ...EMPLOYEES.find(e => e.id === m[1]), linked: false } })
+      : { beneficiary: { ...EMPLOYEES.find(e => e.id === m[1]), linked: false, userId: null }, writtenThrough: 'corporate_staff' }));
     await page.goto('/org/people');
     await page.getByTestId('org-staff-link-cemp_2').fill('0712345678');
     await page.getByTestId('org-staff-row-cemp_2').getByRole('button', { name: 'Link', exact: true }).click();
     await expect.poll(() => mock.writes(/cemp_2\/link$/).length).toBe(1);
     expect(mock.writes(/cemp_2\/link$/)[0].body).toEqual({ phone: '0712345678' });
-    await expect(page.getByText('Juma Kileo is linked to their FitFlex account.')).toBeVisible();
+    await expect(page.getByText('Request sent. Juma Kileo is linked once the member accepts in the FitFlex app.')).toBeVisible();
     await page.getByTestId('org-staff-row-cemp_1').getByRole('button', { name: 'Unlink' }).click();
     await expect.poll(() => mock.writes(/cemp_1\/link$/).length).toBe(1);
     expect(mock.writes(/cemp_1\/link$/)[0].body).toEqual({});
@@ -259,7 +303,7 @@ test.describe('company people in /org (flag on)', () => {
     const preview = page.getByTestId('org-staff-import-preview');
     await expect(preview).toContainText('Will be added');
     await expect(preview).toContainText('Free seats: 5');
-    await expect(page.getByTestId('org-staff-import-problems')).toContainText('No name, and no FitFlex account behind the email or number');
+    await expect(page.getByTestId('org-staff-import-problems')).toContainText('No name given');
     expect(mock.writes(/\/import$/)[0].body).toMatchObject({ dryRun: true });
     await page.getByTestId('org-staff-import-confirm').click();
     await expect.poll(() => mock.writes(/\/import$/).length).toBe(2);
@@ -309,6 +353,31 @@ test.describe('company people in /org (flag on)', () => {
       await page.getByTestId('org-staff-add-button').click();
       await expect(page.getByRole('alert').filter({ hasText: text })).toBeVisible();
     }
+  });
+
+  test('member-consent refusals are explained (member_request_pending, cooldown, rate_limited)', async ({ page }) => {
+    const mock = await companyOrg(page);
+    let reply: Json = { status: 409, json: { error: 'member_request_pending' } };
+    mock.on('POST', /^\/b2b\/organizations\/org-3\/beneficiaries\/cemp_2\/link$/, () => reply);
+    await page.goto('/org/people');
+    const tryLink = async (label = 'Link') => {
+      await page.getByTestId('org-staff-link-cemp_2').fill('juma@x.test');
+      await page.getByTestId('org-staff-row-cemp_2').getByRole('button', { name: label, exact: true }).click();
+    };
+    await tryLink();
+    await expect(page.getByRole('alert').filter({ hasText: 'A request to this member is already waiting.' })).toBeVisible();
+    reply = { status: 429, json: { error: 'member_request_cooldown', retryAfter: '2026-11-05T08:00:00Z' } };
+    await tryLink();
+    await expect(page.getByRole('alert').filter({ hasText: 'This member was asked recently. You can ask again after 5 Nov 2026.' })).toBeVisible();
+    reply = { status: 429, json: { error: 'rate_limited', retryAfterSeconds: 60 } };
+    await tryLink();
+    await expect(page.getByRole('alert').filter({ hasText: 'Too many requests. Try again in a few minutes.' })).toBeVisible();
+    // Swahili.
+    await page.addInitScript(() => localStorage.setItem('locale', 'sw'));
+    await page.reload();
+    reply = { status: 409, json: { error: 'member_request_pending' } };
+    await tryLink('Unganisha');
+    await expect(page.getByRole('alert').filter({ hasText: 'Ombi kwa mwanachama huyu tayari linasubiri.' })).toBeVisible();
   });
 
   test('status and link errors are explained (invalid_transition, link_not_supported)', async ({ page }) => {

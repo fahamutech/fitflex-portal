@@ -2,13 +2,14 @@
 import { ReactNode, useEffect, useState } from 'react';
 import { RefreshCw, Upload } from 'lucide-react';
 import { useApp } from '../../app/providers';
-import { api, userContact, type B2BBeneficiary, type B2BImportResult } from '@/lib/api';
-import { messages, type MessageKey } from '@/lib/i18n';
+import { api, isPendingMemberAcceptance, userContact, type B2BBeneficiary, type B2BImportResult } from '@/lib/api';
+import { messages, type Locale, type MessageKey } from '@/lib/i18n';
 import { errorBody, fmt } from '@/lib/vendor';
 import {
   Alert, Badge, Button, Card, CardContent, Checkbox, Field, Input, Spinner, Table, TBody, Td, Textarea, Th, THead, Tr,
 } from '@/components/shared';
 import { ConfirmDialog, Dialog, DialogFooter } from '@/components/dialog';
+import { fill, memberRequestError } from '@/components/b2b-member-requests';
 
 /**
  * Phase B · B5b: a company's staff list, managed from its organisation (/org/people) while the server has
@@ -23,7 +24,10 @@ type T = (key: MessageKey) => string;
 const known = (key: string): key is MessageKey => key in messages.en;
 
 /** The message for an error the server answered with, or the fallback. */
-function errorText(t: T, err: unknown, fallback: MessageKey): string {
+function errorText(t: T, locale: Locale, err: unknown, fallback: MessageKey): string {
+  // Member-consent refusals (member_request_pending, member_request_cooldown, rate_limited, …): RC's texts (portal#141).
+  const consent = memberRequestError(err, t, locale);
+  if (consent) return consent;
   const body = errorBody<{ seatsAvailable?: number; requested?: number; requiredRoles?: string[] }>(err);
   const code = body?.error;
   // Company staff are managed by the organisation's HR and admin users only (owner decision, functions#252 7bee485).
@@ -39,6 +43,10 @@ function errorText(t: T, err: unknown, fallback: MessageKey): string {
 const STATUS_TONE: Record<string, 'success' | 'warning' | 'danger' | 'gray'> = { active: 'success', pending: 'warning', suspended: 'danger', inactive: 'gray' };
 const statusLabel = (t: T, status: string) => { const key = `b2b.hrOrg.status.${status}`; return known(key) ? t(key) : status; };
 const problemLabel = (t: T, problem: string) => { const key = `b2b.hrOrg.problem.${problem}`; return known(key) ? t(key) : problem; };
+const dayText = (locale: Locale, iso: string) => {
+  const d = new Date(iso);
+  return Number.isNaN(+d) ? iso : d.toLocaleDateString(locale === 'sw' ? 'sw-TZ' : 'en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+};
 const countLabel = (t: T, base: 'b2b.hrOrg.count' | 'b2b.hrOrg.import.confirm', n: number) => fmt(t(`${base}.${n === 1 ? 'one' : 'other'}` as MessageKey), { n });
 
 // ── Is ORG_ONLY_SPONSORS on? ─────────────────────────────────────────────────
@@ -76,7 +84,7 @@ export function CompanyPeopleOr({ token, mine, children }: { token: string; mine
 // ── The staff list ───────────────────────────────────────────────────────────
 
 export function CompanyPeople({ token, mine }: { token: string; mine: Mine }) {
-  const { t } = useApp();
+  const { t, locale } = useApp();
   const orgId = mine.organization.id;
   // Owner decision (functions#252 7bee485): only org roles hr and admin manage a company's staff, so the
   // server says so (access.companyStaffManage); beneficiaries.manage alone is not enough here.
@@ -108,7 +116,7 @@ export function CompanyPeople({ token, mine }: { token: string; mine: Mine }) {
       if (told) setNotice(told);
       await load().catch(() => undefined);
     } catch (e) {
-      setError(errorText(t, e, fallback));
+      setError(errorText(t, locale, e, fallback));
     } finally {
       setBusy(false);
     }
@@ -124,12 +132,14 @@ export function CompanyPeople({ token, mine }: { token: string; mine: Mine }) {
         ...(form.groupName.trim() ? { groupName: form.groupName.trim() } : {}),
         status: form.active ? 'active' : 'pending',
       });
-      const name = out.beneficiary.displayName ?? form.displayName.trim();
+      // Always the name the organisation gave: nothing of the member's is shown before they accept.
+      const name = form.displayName.trim();
       setForm({ displayName: '', email: '', phone: '', groupName: form.groupName, active: form.active });
       // The activation PIN comes back once: show it now, keep it nowhere else.
       if (out.pin) setPin({ name, pin: out.pin });
-      // By contact the reply never says whether a member account was linked (so the form can't be used to
-      // test who is a member); the reloaded list shows it.
+      // Named by email or number: the row is added unlinked and the member (if any; the answer is the same
+      // either way) is asked to accept the link in the app. RC's consent wording (portal#141).
+      if (isPendingMemberAcceptance(out)) return fill(t('b2b.memberRequest.employeeAddedSent'), { employee: name });
       return fmt(t('b2b.hrOrg.add.done'), { name });
     }, 'b2b.hrOrg.add.failed');
   };
@@ -215,15 +225,28 @@ export function CompanyPeople({ token, mine }: { token: string; mine: Mine }) {
                             </Button>
                           )}
                         </span>
+                      ) : p.pendingLink ? (
+                        // Waiting for the member to accept: when and until when, never who.
+                        <span className="flex flex-wrap items-center gap-2" data-testid={`org-staff-pending-${p.id}`}>
+                          <Badge tone="warning">{t('b2b.memberRequest.waiting')}</Badge>
+                          {p.pendingLink.expiresAt && <span className="text-xs text-[var(--color-fg-quaternary)]">{fmt(t('b2b.memberRequest.expires'), { date: dayText(locale, p.pendingLink.expiresAt) })}</span>}
+                          {editable(p) && (
+                            <Button variant="link" className="h-auto px-0 text-xs font-normal" disabled={busy}
+                              onClick={() => run(async () => { await api.linkB2BBeneficiary(token, orgId, p.id, {}); return t('b2b.memberRequest.withdrawn'); }, 'b2b.memberRequest.withdrawFailed')}>
+                              {t('b2b.memberRequest.withdraw')}
+                            </Button>
+                          )}
+                        </span>
                       ) : editable(p) && p.status !== 'inactive' ? (
                         <span className="flex flex-wrap items-center gap-2">
                           <Input className="!w-52" value={link[p.id] ?? ''} onChange={e => setLink({ ...link, [p.id]: e.target.value })}
                             placeholder={t('b2b.hrOrg.link.placeholder')} aria-label={fmt(t('b2b.hrOrg.link.label'), { name: name(p) })} data-testid={`org-staff-link-${p.id}`} />
                           <Button size="sm" variant="secondary" disabled={busy || !(link[p.id] ?? '').trim()}
                             onClick={() => run(async () => {
-                              await api.linkB2BBeneficiary(token, orgId, p.id, userContact(link[p.id]));
+                              const out = await api.linkB2BBeneficiary(token, orgId, p.id, userContact(link[p.id]));
                               setLink({ ...link, [p.id]: '' });
-                              return fmt(t('b2b.hrOrg.link.done'), { name: name(p) });
+                              // An org user only asks the member; the record is linked when they accept.
+                              return fmt(t(isPendingMemberAcceptance(out) ? 'b2b.hrOrg.link.requested' : 'b2b.hrOrg.link.done'), { name: name(p) });
                             }, 'b2b.hrOrg.link.failed')}>
                             {t('b2b.hrOrg.link.button')}
                           </Button>
@@ -306,7 +329,7 @@ function saveCsv(filename: string, csv: string) {
 }
 
 function CompanyStaffImport({ token, orgId, onChanged }: { token: string; orgId: string; onChanged: () => void }) {
-  const { t } = useApp();
+  const { t, locale } = useApp();
   const [open, setOpen] = useState(false);
   const [text, setText] = useState('');
   const [preview, setPreview] = useState<B2BImportResult | null>(null);
@@ -333,7 +356,7 @@ function CompanyStaffImport({ token, orgId, onChanged }: { token: string; orgId:
       setCredentials(out.credentials ?? []);
       onChanged();
     } catch (e) {
-      setError(errorText(t, e, dryRun ? 'b2b.hrOrg.import.checkFailed' : 'b2b.hrOrg.import.addFailed'));
+      setError(errorText(t, locale, e, dryRun ? 'b2b.hrOrg.import.checkFailed' : 'b2b.hrOrg.import.addFailed'));
     } finally {
       setBusy(false);
     }
