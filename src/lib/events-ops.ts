@@ -86,7 +86,8 @@ export const hostOf = (url: string) => { try { return new URL(url).host; } catch
 export const EXPORT_COLUMNS = ['registrationId', 'ticketCode', 'firstName', 'lastName', 'categoryName', 'ticketTypeName', 'status', 'bibNumber', 'kitStatus', 'kitCollectedAt', 'kitSize', 'teamName', 'groupLabel', 'claimed'] as const;
 export const BIB_SAMPLE_CSV = 'registrationId,bibNumber\nereg_example1,5K-001\nereg_example2,5K-002\n';
 export const BIB_CSV_MAX_BYTES = 512 * 1024;
-export const BIB_PATTERN = /^[A-Za-z0-9-]{1,12}$/;
+/** 1 to 12 of A-Z 0-9 and dashes, not starting with a dash (the backend answers 422 bib_invalid otherwise). */
+export const BIB_PATTERN = /^[A-Za-z0-9][A-Za-z0-9-]{0,11}$/;
 
 /** Saves a Blob through a temporary link (the bearer rides the fetch, a plain link could not carry it). */
 export function saveBlob(blob: Blob, filename: string) {

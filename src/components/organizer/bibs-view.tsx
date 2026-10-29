@@ -4,8 +4,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Download, Upload } from 'lucide-react';
 import { api, type BibBulkPreview, type BibImportPreview, type BibRow, type EventDocument, type OrganizerRole } from '@/lib/api';
-import { errorCode, errorKey, fmt, isFeatureOff, isForbidden } from '@/lib/events';
-import { BIB_CSV_MAX_BYTES, BIB_SAMPLE_CSV, canOverrideKit, newIdempotencyKey, saveBlob } from '@/lib/events-ops';
+import { errorCode, errorKey, eventDay, fmt, isFeatureOff, isForbidden } from '@/lib/events';
+import { BIB_CSV_MAX_BYTES, BIB_SAMPLE_CSV, KIT_ROLES, canOverrideKit, hasRole, newIdempotencyKey, saveBlob } from '@/lib/events-ops';
 import type { MessageKey } from '@/lib/i18n';
 import { Alert, Badge, Button, Card, CardContent, EmptyState, Field, Input, MetricCard, Select, SkeletonTable, useToast } from '@/components/shared';
 import { DataTable, type ColumnDef } from '@/components/data-table';
@@ -18,7 +18,7 @@ import { useApp } from '../../../app/providers';
 const FILTERS = ['', 'assigned', 'unassigned'] as const;
 
 export function BibsView({ doc, role, readOnly, onOpenRegistration }: { doc: EventDocument; role: OrganizerRole | null; readOnly: boolean; onOpenRegistration: (registrationId: string) => void }) {
-  const { t, token } = useApp();
+  const { t, token, locale } = useApp();
   const toast = useToast();
   const options = useEventsOptions();
   const eventId = doc.id;
@@ -36,7 +36,8 @@ export function BibsView({ doc, role, readOnly, onOpenRegistration }: { doc: Eve
   const [importOpen, setImportOpen] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const live = useRef<HTMLParagraphElement>(null);
-  const owner = canOverrideKit(role); // owner/admin: change, release, bulk, import
+  const owner = canOverrideKit(role);
+  const canOpen = hasRole(KIT_ROLES, role); // kit lookup and history are owner/admin/ops only: timing gets no drawer // owner/admin: change, release, bulk, import
   const canAssign = !readOnly && (role === 'owner' || role === 'admin' || role === 'ops');
   useEffect(() => { const h = setTimeout(() => setQ(search.trim()), 350); return () => clearTimeout(h); }, [search]);
 
@@ -69,7 +70,7 @@ export function BibsView({ doc, role, readOnly, onOpenRegistration }: { doc: Eve
       </span>
     ) },
     { key: 'kit', header: t('events.bibs.col.kit'), cell: r => t(`events.kit.state.${r.kit?.state ?? 'not_ready'}` as MessageKey) },
-    { key: 'assignedAt', header: t('events.bibs.col.assignedAt'), cell: r => (r.assignedAt ? new Date(r.assignedAt).toLocaleDateString() : '—') },
+    { key: 'assignedAt', header: t('events.bibs.col.assignedAt'), cell: r => (r.assignedAt ? eventDay(r.assignedAt, doc.timezone, locale) : '—') },
   ];
   const filters = (
     <>
@@ -123,10 +124,11 @@ export function BibsView({ doc, role, readOnly, onOpenRegistration }: { doc: Eve
                     {canAssign && (!r.bibNumber || owner) && (
                       <Button variant="ghost" size="sm" onClick={() => setBibFor(r)} data-testid={`bib-${r.bibNumber ? 'change' : 'assign'}-${r.registrationId}`}>{r.bibNumber ? t('events.bibs.change') : t('events.bibs.assign')}</Button>
                     )}
-                    {canAssign && owner && r.bibNumber && r.assignmentId && (
-                      <Button variant="ghost" size="sm" onClick={() => setReleaseFor(r)} data-testid={`bib-release-${r.registrationId}`}>{t('events.bibs.release')}</Button>
+                    {canAssign && owner && r.bibNumber && (
+                      // Release needs the assignment id; until the list carries it the button stays visibly off, with the reason.
+                      <Button variant="ghost" size="sm" disabled={!r.assignmentId} title={r.assignmentId ? undefined : t('events.bibs.release.unavailable')} aria-label={r.assignmentId ? undefined : `${t('events.bibs.release')}: ${t('events.bibs.release.unavailable')}`} onClick={() => setReleaseFor(r)} data-testid={`bib-release-${r.registrationId}`}>{t('events.bibs.release')}</Button>
                     )}
-                    <Button variant="ghost" size="sm" onClick={() => onOpenRegistration(r.registrationId)}>{t('events.reg.open')}</Button>
+                    {canOpen && <Button variant="ghost" size="sm" onClick={() => onOpenRegistration(r.registrationId)}>{t('events.reg.open')}</Button>}
                   </>
                 )} />
               {next && <div className="mt-3 flex justify-center"><Button variant="secondary" loading={loadingMore} onClick={() => void more()} data-testid="bibs-more">{t('events.bibs.loadMore')}</Button></div>}
@@ -163,7 +165,7 @@ function BulkDialog({ open, onClose, doc, eventId, onDone }: { open: boolean; on
   const edit = <T,>(set: (v: T) => void) => (v: T) => { set(v); setPreview(null); setError(null); };
   const startN = Number(start);
   const valid = /^\d+$/.test(start) && startN >= 0 && (!end || (/^\d+$/.test(end) && Number(end) >= startN)) && (!pad || /^\d+$/.test(pad)) && prefix.length <= 8 && /^[A-Za-z0-9-]*$/.test(prefix);
-  const body = () => ({ ...(categoryId ? { categoryId } : {}), start: startN, ...(end ? { end: Number(end) } : {}), ...(prefix ? { prefix: prefix.toUpperCase() } : {}), ...(pad ? { padTo: Number(pad) } : {}), order, onlyUnassigned: true as const });
+  const body = () => ({ ...(categoryId ? { categoryId } : {}), start: startN, ...(end ? { end: Number(end) } : {}), ...(prefix ? { prefix: prefix.toUpperCase() } : {}), ...(pad ? { padTo: Number(pad) } : {}), order });
   async function doPreview() {
     if (!token) return;
     setBusy(true); setError(null);
@@ -240,7 +242,7 @@ function ImportDialog({ open, onClose, eventId, onDone }: { open: boolean; onClo
   }
   const bad = preview ? (preview.bad ?? preview.rows.filter(r => r.status === 'error').length) : 0;
   const ok = preview ? (preview.ok ?? preview.rows.filter(r => r.status === 'ok').length) : 0;
-  const problemText = (code?: string) => (code && `events.bibs.error.${code}` in KNOWN ? t(`events.bibs.error.${code}` as MessageKey) : code ?? '');
+  const problemText = (code?: string | null) => (code && `events.bibs.error.${code}` in KNOWN ? t(`events.bibs.error.${code}` as MessageKey) : code ?? '');
   async function apply() {
     if (!token || csv == null || !preview?.previewHash) return;
     setBusy(true); setError(null);
@@ -283,4 +285,5 @@ function ImportDialog({ open, onClose, eventId, onDone }: { open: boolean; onClo
 const KNOWN: Record<string, true> = {
   'events.bibs.error.bib_taken': true, 'events.bibs.error.bib_invalid': true, 'events.bibs.error.bib_duplicate_in_file': true, 'events.bibs.error.registration_not_found': true,
   'events.bibs.error.registration_not_confirmed': true, 'events.bibs.error.already_assigned': true,
+  'events.bibs.error.registration_duplicate_in_file': true, 'events.bibs.error.ticket_code_ambiguous': true,
 };

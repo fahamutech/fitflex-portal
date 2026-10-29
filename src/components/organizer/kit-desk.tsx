@@ -192,9 +192,9 @@ export function KitDesk({ doc, role, readOnly, onOpenRegistration }: {
       const out = await api.collectEventKit(token, eventId, { method: 'scan', payload, ...(pointId ? { collectionPointId: pointId } : {}) }, keyRef.current);
       afterRecorded(out.card?.displayName ?? shown.card?.displayName ?? '');
     } catch (err) {
-      const body = errorBody<{ collectedAt?: string; collectionPointName?: string | null; byFirstName?: string | null; canOverride?: boolean; reason?: KitVerifyResult['revokedReason'] }>(err);
+      const body = errorBody<{ collectionId?: string; collectedAt?: string; collectionPointName?: string | null; byFirstName?: string | null; canOverride?: boolean; reason?: KitVerifyResult['revokedReason'] }>(err);
       const code = errorCode(err);
-      if (code === 'already_collected') { show({ ...shown, result: 'already_collected', collectedAt: body?.collectedAt, collectionPointName: body?.collectionPointName, byFirstName: body?.byFirstName, canCollect: false, canOverride: !!body?.canOverride && canOverrideKit(role) }); return; }
+      if (code === 'already_collected') { show({ ...shown, result: 'already_collected', collectionId: body?.collectionId ?? shown.collectionId, collectedAt: body?.collectedAt, collectionPointName: body?.collectionPointName, byFirstName: body?.byFirstName, canCollect: false, canOverride: !!body?.canOverride && canOverrideKit(role) }); return; }
       if (code === 'ticket_revoked') { show({ ...shown, result: 'revoked', revokedReason: body?.reason, canCollect: false, canOverride: false }); return; }
       if (code === 'registration_unpaid') { show({ ...shown, result: 'unpaid', canCollect: false, canOverride: false }); return; }
       if (isRateLimited(err)) { setWait(retryAfterSeconds(err) ?? 30); setPhase('result'); return; }
@@ -224,6 +224,8 @@ export function KitDesk({ doc, role, readOnly, onOpenRegistration }: {
   async function startOverride() {
     if (!shown?.registrationId) return;
     try {
+      // The backend names the handover to correct (collectionId); the history paging is only the fallback while it does not.
+      if (shown.collectionId) { overrideRow.current = { id: shown.collectionId, registrationId: shown.registrationId, displayName: shown.card?.displayName ?? '' } as KitCollectionRow; setOverrideOpen(true); return; }
       const row = await findCollection(shown.registrationId);
       if (!row) { setOverrideMissing(true); return; }
       overrideRow.current = row; setOverrideOpen(true);

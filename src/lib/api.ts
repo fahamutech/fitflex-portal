@@ -1478,7 +1478,7 @@ export const api = {
     request<unknown>(`/admin/events/${encodeURIComponent(eventId)}/payout-schedule`, { method: 'POST', body: JSON.stringify(body) }, token),
 
   // §5.1 API clients (owner/admin). The list/detail envelopes are not spelled out in the spec; see the PR.
-  apiClients: (token: string) => request<{ items: ApiClientRow[] }>('/organizer/api-clients', {}, token),
+  apiClients: (token: string) => request<{ items: ApiClientRow[]; max?: number; accessEnabled?: boolean }>('/organizer/api-clients', {}, token),
   apiClient: (token: string, id: string) => request<ApiClientDetail>(`/organizer/api-clients/${encodeURIComponent(id)}`, {}, token),
   createApiClient: (token: string, body: { name: string; environment: 'live' | 'sandbox'; scopes: string[]; eventIds?: string[]; expiresInDays?: number }) =>
     request<{ client: ApiClientRow; clientSecret: string }>('/organizer/api-clients', { method: 'POST', body: JSON.stringify(body) }, token),
@@ -1488,18 +1488,22 @@ export const api = {
     request<unknown>(`/organizer/api-clients/${encodeURIComponent(id)}/revoke`, { method: 'POST', body: JSON.stringify(reason ? { reason } : {}) }, token),
 
   // §7.2 webhook endpoints (owner/admin) and §7.5 delivery log.
-  webhookEndpoints: (token: string) => request<{ items: WebhookEndpointRow[] }>('/organizer/webhook-endpoints', {}, token),
-  webhookEndpoint: (token: string, id: string) => request<WebhookEndpointRow>(`/organizer/webhook-endpoints/${encodeURIComponent(id)}`, {}, token),
+  webhookEndpoints: (token: string) => request<{ items: WebhookEndpointRow[]; max?: number; types?: string[]; available?: boolean }>('/organizer/webhook-endpoints', {}, token),
+  /** `{ endpoint, attempts }`: the endpoint with its last 10 attempts (verification and test sends included). */
+  webhookEndpoint: (token: string, id: string) => request<{ endpoint: WebhookEndpointRow; attempts: WebhookAttempt[] }>(`/organizer/webhook-endpoints/${encodeURIComponent(id)}`, {}, token),
+  /** Runs the handshake now: `{ ok, host, reason? }`. */
+  verifyWebhookEndpoint: (token: string, id: string) => request<{ ok: boolean; host: string; reason?: string }>(`/organizer/webhook-endpoints/${encodeURIComponent(id)}/verify`, { method: 'POST', body: JSON.stringify({}) }, token),
   createWebhookEndpoint: (token: string, body: { url: string; events: string[]; eventIds?: string[]; description?: string }) =>
-    request<{ endpoint: WebhookEndpointRow; secret: string }>('/organizer/webhook-endpoints', { method: 'POST', body: JSON.stringify(body) }, token),
+    request<{ endpoint: WebhookEndpointRow; signingSecret: string }>('/organizer/webhook-endpoints', { method: 'POST', body: JSON.stringify(body) }, token),
   rotateWebhookSecret: (token: string, id: string, graceHours: 0 | 24 | 72) =>
-    request<{ endpoint?: WebhookEndpointRow; secret: string }>(`/organizer/webhook-endpoints/${encodeURIComponent(id)}/rotate-secret`, { method: 'POST', body: JSON.stringify({ graceHours }) }, token),
+    request<{ endpoint?: WebhookEndpointRow; signingSecret: string }>(`/organizer/webhook-endpoints/${encodeURIComponent(id)}/rotate-secret`, { method: 'POST', body: JSON.stringify({ graceHours }) }, token),
   testWebhookEndpoint: (token: string, id: string) =>
     request<WebhookTestResult>(`/organizer/webhook-endpoints/${encodeURIComponent(id)}/test`, { method: 'POST', body: JSON.stringify({}) }, token),
   setWebhookEndpointState: (token: string, id: string, action: 'disable' | 'enable') =>
     request<unknown>(`/organizer/webhook-endpoints/${encodeURIComponent(id)}/${action}`, { method: 'POST', body: JSON.stringify({}) }, token),
   webhookDeliveries: (token: string, query: { endpointId?: string; status?: string; eventId?: string; cursor?: string | null } = {}) =>
     request<{ items: WebhookDeliveryRow[]; nextCursor: string | null }>(`/organizer/webhook-deliveries${qs(query)}`, {}, token),
+  /** `{ delivery, attempts, payload, manualRetriesLeft }`. */
   webhookDelivery: (token: string, id: string) => request<WebhookDeliveryDetail>(`/organizer/webhook-deliveries/${encodeURIComponent(id)}`, {}, token),
   retryWebhookDelivery: (token: string, id: string) =>
     request<{ alreadyQueued?: boolean }>(`/organizer/webhook-deliveries/${encodeURIComponent(id)}/retry`, { method: 'POST', body: JSON.stringify({}) }, token),
@@ -4482,6 +4486,8 @@ export interface KitVerifyResult {
   result: KitResult; registrationId?: string; card?: KitCard; warnings: KitWarning[];
   revokedReason?: 'cancelled' | 'refunded' | 'event_cancelled' | 'admin' | 'replaced'; otherEvent?: { title: string };
   canCollect: boolean; canOverride: boolean;
+  /** Backend is adding it on `already_collected` (verify and the 409): the handover an override corrects. */
+  collectionId?: string;
   /** Present on `already_collected` (§4.1 step 6). */
   collectedAt?: string; collectionPointName?: string | null; byFirstName?: string | null;
 }
@@ -4499,41 +4505,42 @@ export interface KitSummary {
   byCategory?: Array<{ categoryId?: string; name?: string; collected?: number; confirmed?: number }>; byCollectionPoint?: Array<{ collectionPointId?: string; name?: string; collected?: number }>;
 }
 /** A lookup hit is "the masked card of §4.1": the card fields may sit at the top level or under `card`. */
-export type KitLookupItem = Partial<KitCard> & { registrationId?: string; card?: KitCard; result?: KitResult };
+export type KitLookupItem = Partial<KitCard> & { registrationId?: string; card?: KitCard; result?: KitResult; warnings?: KitWarning[]; canCollect?: boolean };
 export interface BibRow {
   registrationId: string; displayName: string; categoryName: string; bibNumber: string | null; assignedAt: string | null; kit: { state: KitState };
   /** Not in the spec's list item; the release route needs it (see the PR). */
   assignmentId?: string | null; warnings?: KitWarning[];
 }
 export interface BibList { items: BibRow[]; nextCursor: string | null; counts: { assigned: number; unassigned: number } }
-export interface BibBulkBody { categoryId?: string; start: number; end?: number; prefix?: string; padTo?: number; order: 'registered_at' | 'last_name'; onlyUnassigned: true }
+export interface BibBulkBody { categoryId?: string; start: number; end?: number; prefix?: string; padTo?: number; order: 'registered_at' | 'last_name' }
 export interface BibBulkPreview { previewHash: string; count: number; first: string | null; last: string | null; conflicts: Array<Record<string, unknown>>; shortfall: number }
 export interface BibImportPreview {
-  previewHash?: string; ok?: number; bad?: number;
-  rows: Array<{ line: number; status: 'ok' | 'error'; code?: string; bibNumber?: string }>;
+  previewHash?: string; total?: number; ok?: number; bad?: number;
+  rows: Array<{ line: number; status: 'ok' | 'error'; code?: string | null; bibNumber?: string }>;
 }
 
 export type ApiScope = 'registrations:read' | 'registrations:demographics' | 'kit:write' | 'bibs:write' | 'webhooks:manage' | 'results:write';
 export interface ApiClientRow {
   id: string; clientId: string; name: string; environment: 'live' | 'sandbox'; scopes: ApiScope[]; eventIds: string[] | null;
   status: 'active' | 'revoked' | 'expired'; expiresAt: string | null; lastUsedAt: string | null; createdAt: string; createdBy?: { name: string | null } | null;
-  rotation?: { inGrace: boolean; graceEndsAt: string | null } | null;
+  rotation?: { inGrace: boolean; graceEndsAt: string | null } | null; rateLimitPerMinute?: number;
 }
 /** `GET /organizer/api-clients/:id`: "detail + usage" (the envelope is not spelled out; both `{client, usage}` and a flat row are read). */
-export type ApiClientDetail = (ApiClientRow & { usage?: ApiClientUsage }) | { client: ApiClientRow; usage?: ApiClientUsage };
+export type ApiClientDetail = { client: ApiClientRow; usage?: ApiClientUsage; history?: Array<{ at: string; action: string }> };
 export interface ApiClientUsage { days: Array<{ day: string; requests: number; errors: number; rateLimited: number }> }
 
 export type WebhookHealth = 'healthy' | 'degraded' | 'failing' | 'disabled' | 'unverified';
 export interface WebhookEndpointRow {
-  id: string; url: string; events: string[]; eventIds?: string[] | null; description?: string | null;
+  id: string; url: string; host?: string; events: string[]; eventIds?: string[] | null; description?: string | null;
   status: 'active' | 'disabled'; verifiedAt: string | null; lastSuccessAt: string | null;
   last24h: { delivered: number; failed: number; dead: number }; pending: number; oldestPendingAgeSeconds?: number | null; consecutiveFailures: number;
-  health: WebhookHealth; disabledReason?: string | null; disabledAt?: string | null; secretLast4?: string | null;
-  previousSecretExpiresAt?: string | null; createdAt?: string;
+  health: WebhookHealth; disabledReason?: string | null; disabledAt?: string | null; secretHint?: string | null;
+  rotation?: { inGrace: boolean; graceEndsAt: string | null }; createdAt?: string;
 }
 export type WebhookDeliveryStatus = 'pending' | 'delivered' | 'failed' | 'dead';
 export interface WebhookDeliveryRow {
-  id: string; endpointId: string; eventType: string; eventId: string; status: WebhookDeliveryStatus; attemptCount: number;
+  /** `eventId` is the OUTBOX id (the backend renames it to `outboxEventId`; both are read). */
+  id: string; endpointId: string; eventType: string; eventId?: string; outboxEventId?: string; status: WebhookDeliveryStatus; attemptCount: number;
   createdAt: string; lastAttemptAt: string | null; nextAttemptAt: string | null; responseCode: number | null; lastError: string | null;
 }
 export interface WebhookAttempt {
@@ -4541,10 +4548,10 @@ export interface WebhookAttempt {
   outcome: 'success' | 'http_error' | 'timeout' | 'network_error' | 'tls_error' | 'blocked_address' | 'redirect_not_followed' | 'organizer_mismatch';
   responseCode: number | null; responseSnippet: string | null; errorCode: string | null; nextAttemptAt: string | null;
 }
-export interface WebhookDeliveryDetail extends WebhookDeliveryRow { attempts: WebhookAttempt[]; payload?: unknown; manualRetryCount?: number }
+export interface WebhookDeliveryDetail { delivery: WebhookDeliveryRow; attempts: WebhookAttempt[]; payload?: unknown; manualRetriesLeft?: number }
 /** The test-send answer is shown inline; the spec does not fix its shape (see the PR). */
-export interface WebhookTestResult { ok?: boolean; outcome?: WebhookAttempt['outcome']; responseCode?: number | null; durationMs?: number | null; errorCode?: string | null }
+export interface WebhookTestResult { ok?: boolean; outcome?: WebhookAttempt['outcome']; responseCode?: number | null; durationMs?: number | null; errorCode?: string | null; snippet?: string | null }
 export interface IntegrationsHealth {
-  endpoints: number; healthy: number; degraded: number; failing: number; disabled: number; deadLast24h: number;
-  apiClients: { active: number; expiringSoon: number };
+  webhooks: { endpoints: number; healthy: number; degraded: number; failing: number; disabled: number; unverified?: number; deadLast24h: number } | null;
+  apiClients: { active: number; expiringSoon: number } | null;
 }

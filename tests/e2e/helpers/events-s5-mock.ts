@@ -18,6 +18,10 @@ export type S5Opts = {
   noCollectionPoints?: boolean;
   /** Trap: the server leaks a phone number in a card; the portal must never render it. */
   leak?: boolean;
+  /** The bib list carries `assignmentId` (the backend is adding it). Default true; false shows the disabled Release state. */
+  assignmentIds?: boolean;
+  /** Verify and the 409 carry `collectionId` (the backend is adding it). Default true; false exercises the history fallback. */
+  collectionIds?: boolean;
 };
 type Reply = Json | { status: number; json: Json } | { status: 200 | 201; body: string; headers?: Record<string, string> } | { status: 204 };
 type Call = { method: string; path: string; query: Record<string, string>; body: Json | null; headers?: Record<string, string> };
@@ -90,7 +94,7 @@ export function makeS5(user: Json, me: Json | null, o: S5Opts) {
   };
   state.collections.push({ id: 'col_0', registrationId: 'reg_2', status: 'collected', collectedAt: '2027-03-12T08:00:00.000Z', pointId: 'cp_1', by: 'Asha', method: 'scan' });
   state.deliveries.push({
-    id: 'dlv_dead', endpointId: 'whk_seed', eventType: 'kit.collected', eventId: 'obx_0123456789abcdef', status: 'dead', attemptCount: 3, createdAt: '2027-03-12T08:00:00.000Z', lastAttemptAt: '2027-03-12T09:00:00.000Z', nextAttemptAt: null,
+    id: 'dlv_dead', endpointId: 'whk_seed', eventType: 'kit.collected', outboxEventId: 'obx_0123456789abcdef', forEventId: 'evt_pub', status: 'dead', attemptCount: 3, createdAt: '2027-03-12T08:00:00.000Z', lastAttemptAt: '2027-03-12T09:00:00.000Z', nextAttemptAt: null,
     responseCode: 500, lastError: 'http_500', manualRetryCount: 0, payload: { type: 'kit.collected', data: { registrationId: 'reg_2' } },
     attempts: [
       { attemptNo: 1, trigger: 'auto', startedAt: '2027-03-12T08:00:00.000Z', durationMs: 120, outcome: 'http_error', responseCode: 500, responseSnippet: 'Internal Server Error [redacted]', errorCode: 'http_500', nextAttemptAt: '2027-03-12T08:01:00.000Z' },
@@ -98,8 +102,8 @@ export function makeS5(user: Json, me: Json | null, o: S5Opts) {
     ],
   });
   state.endpoints.push({
-    id: 'whk_seed', url: 'https://hooks.timing.test/fitflex', events: ['kit.collected', 'bib.assigned'], eventIds: null, description: null, status: 'active', verifiedAt: '2027-03-10T08:00:00.000Z', lastSuccessAt: null,
-    last24h: { delivered: 0, failed: 3, dead: 1 }, pending: 0, oldestPendingAgeSeconds: null, consecutiveFailures: 3, health: 'failing', secretLast4: 'abcd', createdAt: '2027-03-10T08:00:00.000Z',
+    id: 'whk_seed', url: 'https://hooks.timing.test/fitflex', host: 'hooks.timing.test', rotation: { inGrace: false, graceEndsAt: null }, events: ['kit.collected', 'bib.assigned'], eventIds: null, description: null, status: 'active', verifiedAt: '2027-03-10T08:00:00.000Z', lastSuccessAt: null,
+    last24h: { delivered: 0, failed: 3, dead: 1 }, pending: 0, oldestPendingAgeSeconds: null, consecutiveFailures: 3, health: 'failing', secretHint: 'whsec_…abcd', createdAt: '2027-03-10T08:00:00.000Z',
   });
 
   const forbiddenRole = () => ({ status: 403, json: { error: 'forbidden_role' } });
@@ -160,7 +164,7 @@ export function makeS5(user: Json, me: Json | null, o: S5Opts) {
       const warnings = [...(r.bib ? [] : ['bib_missing']), ...(r.size ? [] : ['kit_size_missing'])];
       if (r.kit === 'collected') {
         const col = state.collections.find(x => x.registrationId === r.id && x.status === 'collected');
-        return { result: 'already_collected', registrationId: r.id, card: card(r), warnings, collectedAt: col?.collectedAt ?? '2027-03-12T08:00:00.000Z', collectionPointName: pointName(col?.pointId) ?? 'Expo Hall', byFirstName: col?.by ?? 'Asha', canCollect: false, canOverride: ownerAdmin() };
+        return { result: 'already_collected', registrationId: r.id, card: card(r), warnings, collectedAt: col?.collectedAt ?? '2027-03-12T08:00:00.000Z', collectionPointName: pointName(col?.pointId) ?? 'Expo Hall', byFirstName: col?.by ?? 'Asha', canCollect: false, canOverride: ownerAdmin(), ...(o.collectionIds === false ? {} : { collectionId: col?.id }) };
       }
       return { result: 'valid', registrationId: r.id, card: card(r), warnings, canCollect: !suspended && inRoles('owner', 'admin', 'ops'), canOverride: false };
     }],
@@ -174,7 +178,7 @@ export function makeS5(user: Json, me: Json | null, o: S5Opts) {
         const b = c.body ?? {};
         if (!['scan', 'manual'].includes(b.method)) return { status: 422, json: { error: 'validation_failed', fields: [{ path: 'method', code: 'invalid' }] } };
         if (points.length && !b.collectionPointId) return { status: 422, json: { error: 'collection_point_required' } };
-        if (b.collectionPointId && !points.some(p => p.id === b.collectionPointId)) return { status: 422, json: { error: 'collection_point_required' } };
+        if (b.collectionPointId && !points.some(p => p.id === b.collectionPointId)) return { status: 422, json: { error: 'collection_point_invalid' } };
         let r: Json | undefined;
         if (b.method === 'scan') { if (!b.payload) return { status: 422, json: { error: 'validation_failed', fields: [{ path: 'payload', code: 'required' }] } }; r = byPayload(b.payload); }
         else {
@@ -187,7 +191,7 @@ export function makeS5(user: Json, me: Json | null, o: S5Opts) {
         if (r.pay !== 'paid') return { status: 409, json: { error: 'registration_unpaid' } };
         if (r.kit === 'collected') {
           const col = state.collections.find(x => x.registrationId === r.id && x.status === 'collected');
-          return { status: 409, json: { error: 'already_collected', collectedAt: col?.collectedAt, collectionPointName: pointName(col?.pointId), byFirstName: col?.by ?? 'Asha', canOverride: ownerAdmin() } };
+          return { status: 409, json: { error: 'already_collected', collectedAt: col?.collectedAt, collectionPointName: pointName(col?.pointId), byFirstName: col?.by ?? 'Asha', canOverride: ownerAdmin(), ...(o.collectionIds === false ? {} : { collectionId: col?.id }) } };
         }
         const col = { id: `col_${state.collections.length}`, registrationId: r.id, status: 'collected', collectedAt: '2027-03-12T09:30:00.000Z', pointId: b.collectionPointId, by: (user.displayName ?? 'Asha').split(' ')[0], method: b.method, manualReason: b.manualReason };
         state.collections.push(col); r.kit = 'collected';
@@ -201,15 +205,16 @@ export function makeS5(user: Json, me: Json | null, o: S5Opts) {
         const b = c.body ?? {};
         if (!['void', 'recollect'].includes(b.action)) return { status: 422, json: { error: 'validation_failed', fields: [{ path: 'action', code: 'invalid' }] } };
         const reason = String(b.reason ?? '').trim();
-        if (reason.length < 10 || reason.length > 300) return { status: 422, json: { error: 'validation_failed', fields: [{ path: 'reason', code: 'invalid' }] } };
+        if (reason.length < 10 || reason.length > 300) return { status: 422, json: { error: 'reason_required' } };
         const col = state.collections.find(x => x.id === m[2]);
         if (!col) return { status: 404, json: { error: 'collection_not_found' } };
         if (col.status !== 'collected') return { status: 409, json: { error: 'already_corrected' } };
         col.status = 'corrected'; col.correctionReason = reason;
         const r = reg(col.registrationId)!;
         r.kit = 'ready';
-        if (b.action === 'recollect') { state.collections.push({ id: `col_${state.collections.length}`, registrationId: r.id, status: 'collected', collectedAt: '2027-03-12T10:00:00.000Z', pointId: col.pointId, by: 'Owner', method: 'scan' }); r.kit = 'collected'; }
-        return { status: 201, json: { ok: true } };
+        let newCollectionId: string | undefined;
+        if (b.action === 'recollect') { newCollectionId = `col_${state.collections.length}`; state.collections.push({ id: newCollectionId, registrationId: r.id, status: 'collected', collectedAt: '2027-03-12T10:00:00.000Z', pointId: col.pointId, by: 'Owner', method: 'scan' }); r.kit = 'collected'; }
+        return { status: 200, json: { corrected: { collectionId: col.id, action: b.action, ...(newCollectionId ? { newCollectionId } : {}) } } };
       });
     }],
     ['GET', /^\/organizer\/events\/([^/]+)\/kit-collections$/, (c, m) => {
@@ -232,11 +237,11 @@ export function makeS5(user: Json, me: Json | null, o: S5Opts) {
       if (!inRoles('owner', 'admin', 'ops')) return forbiddenRole();
       if (m[1] !== 'evt_pub') return noEvent();
       const q = String(c.query.q ?? '').trim();
-      if (q.length < 3) return { status: 400, json: { error: 'invalid_query' } };
+      if (q.length < 3) return { status: 400, json: { error: 'query_too_short' } };
       const lc = q.toLowerCase();
       const exact = state.regs.find(r => r.id === q);
       const hits = exact ? [exact] : state.regs.filter(r => r.status === 'confirmed' && (r.bib === q || r.code.toLowerCase() === lc || r.first.toLowerCase().startsWith(lc) || r.last.toLowerCase().startsWith(lc))).slice(0, 10);
-      return { items: hits.map(r => ({ registrationId: r.id, ...card(r) })) };
+      return { items: hits.map(r => ({ registrationId: r.id, card: card(r), warnings: [], canCollect: r.pay === 'paid' && r.kit !== 'collected' })) };
     }],
     // ── bibs (§4.3) ──
     ['GET', /^\/organizer\/events\/([^/]+)\/bib-assignments$/, (c, m) => {
@@ -248,7 +253,7 @@ export function makeS5(user: Json, me: Json | null, o: S5Opts) {
         && (!q || `${r.first} ${r.last}`.toLowerCase().includes(q) || (r.bib ?? '').toLowerCase() === q || r.code.toLowerCase() === q));
       rows = rows.slice(0, Number(c.query.limit ?? 50));
       return {
-        items: rows.map(r => ({ registrationId: r.id, displayName: `${r.first} ${r.last}`, categoryName: CAT[r.cat].name, bibNumber: r.bib, assignedAt: r.bib ? '2027-03-01T08:00:00.000Z' : null, kit: { state: r.kit }, assignmentId: r.bib ? `asg_${r.id}` : null, warnings: r.bib && r.kit === 'collected' && r.bibChanged ? ['bib_changed_after_collection'] : [] })),
+        items: rows.map(r => ({ registrationId: r.id, displayName: `${r.first} ${r.last}`, categoryName: CAT[r.cat].name, bibNumber: r.bib, assignedAt: r.bib ? '2027-03-01T08:00:00.000Z' : null, kit: { state: r.kit }, assignmentId: o.assignmentIds === false ? undefined : r.bib ? `asg_${r.id}` : null, warnings: r.bib && r.kit === 'collected' && r.bibChanged ? ['bib_changed_after_collection'] : [] })),
         nextCursor: null, counts: { assigned: confirmed.filter(r => r.bib).length, unassigned: confirmed.filter(r => !r.bib).length },
       };
     }],
@@ -261,17 +266,18 @@ export function makeS5(user: Json, me: Json | null, o: S5Opts) {
         if (!r) return { status: 404, json: { error: 'registration_not_found' } };
         if (r.status !== 'confirmed') return { status: 409, json: { error: 'registration_unpaid' } };
         const bib = String(b.bibNumber ?? '').trim().toUpperCase();
-        if (!/^[A-Z0-9-]{1,12}$/.test(bib)) return { status: 422, json: { error: 'bib_invalid' } };
+        if (!/^[A-Z0-9][A-Z0-9-]{0,11}$/.test(bib)) return { status: 422, json: { error: 'bib_invalid' } };
         if (r.bib && !b.replace) return { status: 409, json: { error: 'bib_already_assigned', current: r.bib } };
         if (b.replace) {
           if (!ownerAdmin()) return forbiddenRole();
           const reason = String(b.reason ?? '').trim();
-          if (reason.length < 10 || reason.length > 300) return { status: 422, json: { error: 'validation_failed', fields: [{ path: 'reason', code: 'invalid' }] } };
+          if (reason.length < 10 || reason.length > 300) return { status: 422, json: { error: 'reason_required' } };
         }
         if (state.regs.some(x => x.id !== r.id && x.bib === bib)) return { status: 409, json: { error: 'bib_taken' } };
+        const previousBibNumber = r.bib ?? null;
         if (r.bib && r.kit === 'collected') r.bibChanged = true;
         r.bib = bib; state.bibVersion += 1;
-        return { status: 201, json: { registrationId: r.id, bibNumber: bib } };
+        return { status: 201, json: { assignment: { id: `asg_${r.id}`, registrationId: r.id, bibNumber: bib, assignedAt: '2027-03-12T09:00:00.000Z' }, previousBibNumber, warnings: r.bibChanged ? ['bib_changed_after_collection'] : [] } };
       });
     }],
     ['POST', /^\/organizer\/events\/([^/]+)\/bib-assignments\/([^/]+)\/release$/, (c, m) => {
@@ -279,17 +285,19 @@ export function makeS5(user: Json, me: Json | null, o: S5Opts) {
       if (m[1] !== 'evt_pub') return noEvent();
       return idempotent(c, 'release', () => {
         const r = reg(String(m[2]).replace('asg_', ''));
-        if (!r || !r.bib) return { status: 404, json: { error: 'registration_not_found' } };
-        if (String(c.body?.reason ?? '').trim().length < 10) return { status: 422, json: { error: 'validation_failed', fields: [{ path: 'reason', code: 'invalid' }] } };
+        if (!r) return { status: 404, json: { error: 'assignment_not_found' } };
+        if (!r.bib) return { status: 409, json: { error: 'already_released' } };
+        if (String(c.body?.reason ?? '').trim().length < 10) return { status: 422, json: { error: 'reason_required' } };
+        const released = { id: `asg_${r.id}`, registrationId: r.id, bibNumber: r.bib };
         r.bib = null; state.bibVersion += 1;
-        return { status: 200, json: { ok: true } };
+        return { status: 200, json: { released, warnings: [] } };
       });
     }],
     ['POST', /^\/organizer\/events\/([^/]+)\/bib-assignments\/bulk\/preview$/, (c, m) => {
       if (!ownerAdmin()) return forbiddenRole();
       if (m[1] !== 'evt_pub') return noEvent();
       const b = c.body ?? {};
-      if (!Number.isInteger(b.start) || b.onlyUnassigned !== true || !['registered_at', 'last_name'].includes(b.order)) return { status: 422, json: { error: 'validation_failed', fields: [{ path: 'start', code: 'invalid' }] } };
+      if (!Number.isInteger(b.start) || b.start < 0 || 'onlyUnassigned' in b || ('order' in b && !['registered_at', 'last_name'].includes(b.order))) return { status: 422, json: { error: 'validation_failed', fields: [{ path: 'start', code: 'invalid' }] } };
       const todo = state.regs.filter(r => r.status === 'confirmed' && !r.bib && (!b.categoryId || r.cat === b.categoryId));
       const label = (n: number) => `${b.prefix ?? ''}${String(n).padStart(b.padTo ?? 0, '0')}`;
       const count = todo.length; const last = count ? b.start + count - 1 : b.start;
@@ -306,7 +314,7 @@ export function makeS5(user: Json, me: Json | null, o: S5Opts) {
         const todo = state.regs.filter(r => r.status === 'confirmed' && !r.bib && (!b.categoryId || r.cat === b.categoryId));
         todo.forEach((r, i) => { r.bib = `${b.prefix ?? ''}${String(b.start + i).padStart(b.padTo ?? 0, '0')}`; });
         state.bibVersion += 1;
-        return { status: 201, json: { assigned: todo.length } };
+        return { status: 200, json: { assigned: todo.length, first: todo[0]?.bib ?? null, last: todo[todo.length - 1]?.bib ?? null } };
       });
     }],
     ['POST', /^\/organizer\/events\/([^/]+)\/bib-assignments\/import\/preview$/, (c, m) => {
@@ -315,7 +323,7 @@ export function makeS5(user: Json, me: Json | null, o: S5Opts) {
       const csv = String(c.body?.csv ?? '');
       if (csv.length > 512 * 1024) return { status: 413, json: { error: 'payload_too_large' } };
       const lines = csv.split(/\r?\n/).filter(Boolean);
-      if (!/registrationId|ticketCode/.test(lines[0] ?? '') || !/bibNumber/.test(lines[0] ?? '')) return { status: 422, json: { error: 'validation_failed', fields: [{ path: 'csv', code: 'header_required' }] } };
+      if (!/registrationId|ticketCode/.test(lines[0] ?? '') || !/bibNumber/.test(lines[0] ?? '')) return { status: 422, json: { error: 'csv_header_invalid' } };
       const seen = new Set<string>();
       const rows = lines.slice(1).map((ln, i) => {
         const [id, bib] = ln.split(/[,;]/).map(x => x.trim());
@@ -323,12 +331,12 @@ export function makeS5(user: Json, me: Json | null, o: S5Opts) {
         const r = reg(id) ?? state.regs.find(x => x.code === id);
         let code: string | undefined;
         if (!r) code = 'registration_not_found'; else if (r.status !== 'confirmed') code = 'registration_not_confirmed';
-        else if (r.bib) code = 'already_assigned'; else if (!/^[A-Z0-9-]{1,12}$/.test(up)) code = 'bib_invalid';
+        else if (r.bib) code = 'already_assigned'; else if (!/^[A-Z0-9][A-Z0-9-]{0,11}$/.test(up)) code = 'bib_invalid';
         else if (seen.has(up)) code = 'bib_duplicate_in_file'; else if (state.regs.some(x => x.bib === up)) code = 'bib_taken';
         seen.add(up);
         return code ? { line, status: 'error', code, bibNumber: up } : { line, status: 'ok', bibNumber: up };
       });
-      return { previewHash: `ih_${state.bibVersion}_${csv.length}`, ok: rows.filter(r => r.status === 'ok').length, bad: rows.filter(r => r.status === 'error').length, rows };
+      return { previewHash: `ih_${state.bibVersion}_${csv.length}`, total: rows.length, ok: rows.filter(r => r.status === 'ok').length, bad: rows.filter(r => r.status === 'error').length, rows };
     }],
     ['POST', /^\/organizer\/events\/([^/]+)\/bib-assignments\/import$/, (c, m) => {
       if (!ownerAdmin()) return forbiddenRole();
@@ -338,10 +346,10 @@ export function makeS5(user: Json, me: Json | null, o: S5Opts) {
         if (c.body?.previewHash !== `ih_${state.bibVersion}_${csv.length}`) return { status: 409, json: { error: 'preview_stale' } };
         const lines = csv.split(/\r?\n/).filter(Boolean).slice(1);
         const bad = lines.some(ln => { const [id, bib] = ln.split(/[,;]/).map(x => x.trim()); const r = reg(id) ?? state.regs.find(x => x.code === id); return !r || r.status !== 'confirmed' || r.bib || state.regs.some(x => x.bib === (bib ?? '').toUpperCase()); });
-        if (bad) return { status: 422, json: { error: 'validation_failed', fields: [{ path: 'csv', code: 'invalid' }] } };
+        if (bad) return { status: 409, json: { error: 'import_has_errors', bad: 1, rows: [] } };
         lines.forEach(ln => { const [id, bib] = ln.split(/[,;]/).map(x => x.trim()); const r = (reg(id) ?? state.regs.find(x => x.code === id))!; r.bib = bib.toUpperCase(); });
         state.bibVersion += 1;
-        return { status: 201, json: { imported: lines.length } };
+        return { status: 200, json: { imported: lines.length } };
       });
     }],
     // ── registrations summary and export (§4.5) ──
@@ -371,24 +379,26 @@ export function makeS5(user: Json, me: Json | null, o: S5Opts) {
     ['POST', /^\/admin\/events\/([^/]+)\/payout-schedule$/, (c, m) => {
       if (!hasScope('events')) return { status: 403, json: { error: 'acl_forbidden' } };
       if (m[1] !== 'evt_pub') return { status: 404, json: { error: 'event_not_found' } };
+      if (!['published', 'registration_closed', 'in_progress', 'completed'].includes(status)) return { status: 409, json: { error: 'invalid_transition' } };
       const b = c.body ?? {};
       if (!['biweekly', 'monthly'].includes(b.payoutSchedule)) return { status: 422, json: { error: 'event_invalid', fields: [{ path: 'payoutSchedule', code: 'invalid' }] } };
       const reason = String(b.reason ?? '').trim();
-      if (reason.length < 10 || reason.length > 300) return { status: 422, json: { error: 'validation_failed', fields: [{ path: 'reason', code: 'invalid' }] } };
+      if (reason.length < 10 || reason.length > 300) return { status: 422, json: { error: 'reason_required' } };
+      const changed = state.payout.evt_pub !== b.payoutSchedule;
       state.payout.evt_pub = b.payoutSchedule;
-      return { status: 200, json: { payoutSchedule: b.payoutSchedule } };
+      return { status: 200, json: { payoutSchedule: b.payoutSchedule, changed } };
     }],
     // ── API clients (§5.1) ──
     ['GET', /^\/organizer\/api-clients$/, () => {
       if (!options.ops.api) return { status: 404, json: { error: 'feature_disabled' } };
       if (!ownerAdmin()) return forbiddenRole();
-      return { items: state.clients.map(c => ({ ...c })) };
+      return { items: state.clients.map(c => ({ ...c })), max: 10, accessEnabled: o.apiAllowed !== false };
     }],
     ['POST', /^\/organizer\/api-clients$/, c => {
       if (!options.ops.api) return { status: 404, json: { error: 'feature_disabled' } };
       if (!ownerAdmin()) return forbiddenRole();
       if (suspended) return { status: 403, json: { error: 'organizer_suspended' } };
-      if (o.apiAllowed === false) return { status: 403, json: { error: 'api_not_enabled' } };
+      if (o.apiAllowed === false) return { status: 403, json: { error: 'api_access_not_enabled' } };
       const b = c.body ?? {};
       const name = String(b.name ?? '').trim();
       if (!name || name.length > 60) return { status: 422, json: { error: 'validation_failed', fields: [{ path: 'name', code: 'invalid' }] } };
@@ -399,12 +409,14 @@ export function makeS5(user: Json, me: Json | null, o: S5Opts) {
       if (given.includes('results:write')) return { status: 422, json: { error: 'scope_not_available' } };
       if (given.some(s => !SCOPES.includes(s))) return { status: 422, json: { error: 'invalid_scope' } };
       if (given.includes('webhooks:manage') && role !== 'owner') return { status: 403, json: { error: 'forbidden_role' } };
+      if (given.includes('webhooks:manage') && b.environment === 'sandbox') return { status: 422, json: { error: 'invalid_scope' } }; // never on sandbox
+      if (state.clients.filter(x => x.status === 'active').length >= 10) return { status: 409, json: { error: 'client_limit_reached' } };
       if (b.expiresInDays != null && (!Number.isInteger(b.expiresInDays) || b.expiresInDays < 1 || b.expiresInDays > 730)) return { status: 422, json: { error: 'validation_failed', fields: [{ path: 'expiresInDays', code: 'invalid' }] } };
       if (b.environment === 'sandbox' && b.eventIds) return { status: 422, json: { error: 'validation_failed', fields: [{ path: 'eventIds', code: 'invalid' }] } };
       const secret = `ffs_${b.environment === 'live' ? 'live' : 'test'}_${rand(43)}`;
       state.secrets.push(secret);
-      const client = { id: `apc_${state.clients.length + 1}`, clientId: `ffc_${rand(16).toLowerCase().replace(/[^0-9a-f]/g, 'a')}`, name, environment: b.environment, scopes: given, eventIds: b.eventIds ?? null,
-        status: 'active', expiresAt: new Date(Date.now() + (b.expiresInDays ?? 365) * 86_400_000).toISOString(), lastUsedAt: null, createdAt: '2027-03-12T08:00:00.000Z', createdBy: { name: user.displayName ?? 'Owner' }, rotation: { inGrace: false, graceEndsAt: null }, secretVersion: 1 };
+      const client = { id: `apc_${state.clients.length + 1}`, clientId: `ffc_${rand(16).toLowerCase().replace(/[^0-9a-f]/g, 'a')}`, name, environment: b.environment, scopes: given, eventIds: b.environment === 'sandbox' ? ['evt_sandbox'] : (b.eventIds ?? null),
+        status: 'active', expiresAt: new Date(Date.now() + (b.expiresInDays ?? 365) * 86_400_000).toISOString(), lastUsedAt: null, createdAt: '2027-03-12T08:00:00.000Z', createdBy: { name: user.displayName ?? 'Owner' }, rateLimitPerMinute: 120, rotation: { inGrace: false, graceEndsAt: null }, secretVersion: 1 };
       state.clients.push(client);
       return { status: 201, json: { client, clientSecret: secret } };
     }],
@@ -412,13 +424,13 @@ export function makeS5(user: Json, me: Json | null, o: S5Opts) {
       if (!ownerAdmin()) return forbiddenRole();
       const cl = state.clients.find(x => x.id === m[1]);
       if (!cl) return { status: 404, json: { error: 'client_not_found' } };
-      return { client: cl, usage: { days: [{ day: '2027-03-10', requests: 40, errors: 2, rateLimited: 0 }, { day: '2027-03-11', requests: 80, errors: 0, rateLimited: 1 }] } };
+      return { client: cl, usage: { days: [{ day: '2027-03-10', requests: 40, errors: 2, rateLimited: 0 }, { day: '2027-03-11', requests: 80, errors: 0, rateLimited: 1 }] }, history: [{ at: '2027-03-10T08:00:00.000Z', action: 'created' }] };
     }],
     ['POST', /^\/organizer\/api-clients\/([^/]+)\/rotate$/, (c, m) => {
       if (!ownerAdmin()) return forbiddenRole();
       const cl = state.clients.find(x => x.id === m[1]);
       if (!cl) return { status: 404, json: { error: 'client_not_found' } };
-      if (cl.status !== 'active') return { status: 409, json: { error: 'invalid_transition' } };
+      if (cl.status !== 'active') return { status: 409, json: { error: 'client_not_active' } };
       if (![0, 24, 72].includes(c.body?.graceHours)) return { status: 422, json: { error: 'validation_failed', fields: [{ path: 'graceHours', code: 'invalid' }] } };
       const secret = `ffs_${cl.environment === 'live' ? 'live' : 'test'}_${rand(43)}x`;
       state.secrets.push(secret);
@@ -430,20 +442,24 @@ export function makeS5(user: Json, me: Json | null, o: S5Opts) {
       if (!ownerAdmin()) return forbiddenRole();
       const cl = state.clients.find(x => x.id === m[1]);
       if (!cl) return { status: 404, json: { error: 'client_not_found' } };
+      const changed = cl.status !== 'revoked';
       cl.status = 'revoked';
-      return { status: 200, json: { ok: true } };
+      return { status: 200, json: { client: cl, changed } };
     }],
     // ── webhooks (§7) ──
     ['GET', /^\/organizer\/integrations\/health$/, () => {
       if (!ownerAdmin()) return forbiddenRole();
+      if (!options.ops.api && !options.ops.webhooks) return { status: 404, json: { error: 'feature_disabled' } };
       const e = state.endpoints;
-      return { endpoints: e.length, healthy: e.filter(x => x.health === 'healthy').length, degraded: e.filter(x => x.health === 'degraded').length, failing: e.filter(x => x.health === 'failing').length, disabled: e.filter(x => x.health === 'disabled').length,
-        deadLast24h: state.deliveries.filter(d => d.status === 'dead').length, apiClients: { active: state.clients.filter(x => x.status === 'active').length, expiringSoon: 0 } };
+      return {
+        webhooks: options.ops.webhooks ? { endpoints: e.length, healthy: e.filter(x => x.health === 'healthy').length, degraded: e.filter(x => x.health === 'degraded').length, failing: e.filter(x => x.health === 'failing').length, disabled: e.filter(x => x.health === 'disabled').length, unverified: e.filter(x => x.health === 'unverified').length, deadLast24h: state.deliveries.filter(d => d.status === 'dead').length } : null,
+        apiClients: options.ops.api ? { active: state.clients.filter(x => x.status === 'active').length, expiringSoon: 0 } : null,
+      };
     }],
     ['GET', /^\/organizer\/webhook-endpoints$/, () => {
       if (!options.ops.webhooks) return { status: 404, json: { error: 'feature_disabled' } };
       if (!ownerAdmin()) return forbiddenRole();
-      return { items: state.endpoints };
+      return { items: state.endpoints, max: 5, types: [], available: true };
     }],
     ['POST', /^\/organizer\/webhook-endpoints$/, c => {
       if (!options.ops.webhooks) return { status: 404, json: { error: 'feature_disabled' } };
@@ -453,55 +469,70 @@ export function makeS5(user: Json, me: Json | null, o: S5Opts) {
       if (reason) return { status: 400, json: { error: 'invalid_url', reason } };
       const TYPES = ['registration.created', 'registration.paid', 'registration.cancelled', 'registration.updated', 'kit.collected', 'bib.assigned', 'event.updated', 'event.cancelled', 'refund.updated'];
       const events: string[] = b.events ?? [];
-      if (!events.length || events.some(e => !TYPES.includes(e))) return { status: 422, json: { error: 'validation_failed', fields: [{ path: 'events', code: 'invalid' }] } };
+      if (events.some(e => !TYPES.includes(e))) return { status: 422, json: { error: 'invalid_event_type' } };
+      if (!events.length) return { status: 422, json: { error: 'validation_failed', fields: [{ path: 'events', code: 'required' }] } };
+      if (state.endpoints.filter(x => x.status === 'active').length >= 5) return { status: 409, json: { error: 'endpoint_limit_reached' } };
       const host = new URL(b.url).hostname;
       const secret = `whsec_${rand(43)}`;
       state.secrets.push(secret);
-      const verified = !/^unverifiable\./.test(host);
-      const ep = { id: `whk_${state.endpoints.length + 1}`, url: b.url, events, eventIds: null, description: b.description ?? null, status: 'active', verifiedAt: verified ? '2027-03-12T08:00:00.000Z' : null, lastSuccessAt: null,
-        last24h: { delivered: 0, failed: 0, dead: 0 }, pending: 0, consecutiveFailures: 0, health: verified ? 'healthy' : 'unverified', secretLast4: secret.slice(-4) };
+      // §7.2: the endpoint starts UNVERIFIED and receives only the challenge until POST …/verify succeeds.
+      const ep = { id: `whk_${state.endpoints.length + 1}`, url: b.url, host, events, eventIds: null, description: b.description ?? null, status: 'active', verifiedAt: null, lastSuccessAt: null, secretHint: `whsec_…${secret.slice(-4)}`,
+        rotation: { inGrace: false, graceEndsAt: null }, last24h: { delivered: 0, failed: 0, dead: 0 }, pending: 0, consecutiveFailures: 0, health: 'unverified', disabledReason: null, disabledAt: null };
       state.endpoints.push(ep);
-      return { status: 201, json: { endpoint: ep, secret } };
+      return { status: 201, json: { endpoint: ep, signingSecret: secret } };
     }],
     ['GET', /^\/organizer\/webhook-endpoints\/([^/]+)$/, (_c, m) => {
       if (!ownerAdmin()) return forbiddenRole();
-      return state.endpoints.find(x => x.id === m[1]) ?? { status: 404, json: { error: 'endpoint_not_found' } };
+      const ep = state.endpoints.find(x => x.id === m[1]);
+      if (!ep) return { status: 404, json: { error: 'endpoint_not_found' } };
+      return { endpoint: ep, attempts: [{ attemptNo: 1, trigger: 'verify', startedAt: '2027-03-12T08:00:00.000Z', durationMs: 90, outcome: ep.verifiedAt ? 'success' : 'timeout', responseCode: ep.verifiedAt ? 200 : null, errorCode: null, responseSnippet: null, nextAttemptAt: null }] };
     }],
-    ['POST', /^\/organizer\/webhook-endpoints\/([^/]+)\/(test|disable|enable|rotate-secret)$/, (c, m) => {
+    ['POST', /^\/organizer\/webhook-endpoints\/([^/]+)\/(verify|test|disable|enable|rotate-secret)$/, (c, m) => {
       if (!ownerAdmin()) return forbiddenRole();
       const ep = state.endpoints.find(x => x.id === m[1]);
       if (!ep) return { status: 404, json: { error: 'endpoint_not_found' } };
       const host = new URL(ep.url).hostname;
-      if (m[2] === 'test') {
-        if (ep.status !== 'active' || !ep.verifiedAt) return { status: 409, json: { error: 'endpoint_not_verified' } };
-        return /^slow\./.test(host) ? { status: 200, json: { ok: false, outcome: 'timeout', responseCode: null } } : { status: 200, json: { ok: true, outcome: 'success', responseCode: 200 } };
+      const good = !/^unverifiable\./.test(host);
+      if (m[2] === 'verify') {
+        if (!good) return { status: 200, json: { ok: false, host, reason: 'timeout' } };
+        ep.verifiedAt = '2027-03-12T08:30:00.000Z'; if (ep.status === 'active') ep.health = 'healthy';
+        return { status: 200, json: { ok: true, host } };
       }
-      if (m[2] === 'disable') { ep.status = 'disabled'; ep.health = 'disabled'; return { status: 200, json: ep }; }
+      if (m[2] === 'test') {
+        if (ep.status !== 'active' || !ep.verifiedAt) return { status: 409, json: { error: 'verification_failed' } };
+        return /^slow\./.test(host) ? { status: 200, json: { ok: false, outcome: 'timeout', responseCode: null, durationMs: 10000, errorCode: 'timeout', snippet: null } } : { status: 200, json: { ok: true, outcome: 'success', responseCode: 200, durationMs: 80, errorCode: null, snippet: null } };
+      }
+      if (m[2] === 'disable') { const changed = ep.status !== 'disabled'; ep.status = 'disabled'; ep.health = 'disabled'; return { status: 200, json: { endpoint: ep, changed } }; }
       if (m[2] === 'enable') {
-        // §7.4: enabling runs the handshake again; only a verifiable host passes.
-        ep.status = 'active'; ep.disabledReason = null; ep.disabledAt = null;
-        if (/^unverifiable\./.test(host)) { ep.verifiedAt = null; ep.health = 'unverified'; } else { ep.verifiedAt = '2027-03-12T08:30:00.000Z'; ep.health = 'healthy'; }
-        return { status: 200, json: ep };
+        // §7.4: enabling needs the handshake to succeed first.
+        if (!good) return { status: 409, json: { error: 'verification_failed', reason: 'timeout' } };
+        ep.status = 'active'; ep.disabledReason = null; ep.disabledAt = null; ep.verifiedAt = '2027-03-12T08:30:00.000Z'; ep.health = 'healthy';
+        return { status: 200, json: { endpoint: ep, changed: true, requeued: 0 } };
       }
       if (![0, 24, 72].includes(c.body?.graceHours)) return { status: 422, json: { error: 'validation_failed', fields: [{ path: 'graceHours', code: 'invalid' }] } };
       const secret = `whsec_${rand(43)}y`;
       state.secrets.push(secret);
-      return { status: 200, json: { endpoint: ep, secret } };
+      ep.rotation = c.body.graceHours ? { inGrace: true, graceEndsAt: new Date(Date.now() + c.body.graceHours * 3_600_000).toISOString() } : { inGrace: false, graceEndsAt: null };
+      return { status: 200, json: { endpoint: ep, signingSecret: secret } };
     }],
     ['GET', /^\/organizer\/webhook-deliveries$/, c => {
       if (!ownerAdmin()) return forbiddenRole();
-      const items = state.deliveries.filter(d => (!c.query.endpointId || d.endpointId === c.query.endpointId) && (!c.query.status || d.status === c.query.status) && (!c.query.eventId || d.eventId === c.query.eventId));
-      return { items: items.map(({ attempts: _a, payload: _p, ...row }) => row), nextCursor: null };
+      // `eventId` filters by the organizer's EVENT; the row's own message id is `outboxEventId`.
+      const items = state.deliveries.filter(d => (!c.query.endpointId || d.endpointId === c.query.endpointId) && (!c.query.status || d.status === c.query.status) && (!c.query.eventId || d.forEventId === c.query.eventId));
+      return { items: items.map(({ attempts: _a, payload: _p, forEventId: _f, manualRetryCount: _m, ...row }) => row), nextCursor: null };
     }],
     ['GET', /^\/organizer\/webhook-deliveries\/([^/]+)$/, (_c, m) => {
       if (!ownerAdmin()) return forbiddenRole();
-      return state.deliveries.find(d => d.id === m[1]) ?? { status: 404, json: { error: 'delivery_not_found' } };
+      const d = state.deliveries.find(x => x.id === m[1]);
+      if (!d) return { status: 404, json: { error: 'delivery_not_found' } };
+      const { attempts, payload, forEventId: _f, manualRetryCount, ...delivery } = d;
+      return { delivery, attempts, payload, manualRetriesLeft: Math.max(0, 5 - manualRetryCount) };
     }],
     ['POST', /^\/organizer\/webhook-deliveries\/([^/]+)\/retry$/, (_c, m) => {
       if (!ownerAdmin()) return forbiddenRole();
       const d = state.deliveries.find(x => x.id === m[1]);
       if (!d) return { status: 404, json: { error: 'delivery_not_found' } };
-      if (d.status === 'delivered') return { status: 409, json: { error: 'invalid_transition' } };
+      if (d.status === 'delivered') return { status: 409, json: { error: 'already_delivered' } };
       if (d.manualRetryCount >= 5) return { status: 429, json: { error: 'rate_limited', retryAfterSeconds: 3600 } };
       if (d.status === 'pending') return { status: 200, json: { alreadyQueued: true } };
       d.status = 'pending'; d.manualRetryCount += 1; d.nextAttemptAt = '2027-03-12T09:01:00.000Z';

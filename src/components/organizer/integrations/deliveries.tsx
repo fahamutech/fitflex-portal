@@ -12,6 +12,8 @@ import { Dialog, DialogFooter } from '@/components/dialog';
 import { useApp } from '../../../../app/providers';
 
 const STATUSES = ['pending', 'failed', 'dead', 'delivered'] as const;
+/** The delivery's own message id (the outbox id): `outboxEventId`, or `eventId` while the backend still sends that name. */
+const outboxId = (r: Pick<WebhookDeliveryRow, 'eventId' | 'outboxEventId'>) => r.outboxEventId ?? r.eventId ?? '';
 const statusKey = (d: Pick<WebhookDeliveryRow, 'status' | 'nextAttemptAt'>): MessageKey =>
   d.status === 'delivered' ? 'integrations.deliveries.status.delivered'
   : d.status === 'dead' ? 'integrations.deliveries.status.dead'
@@ -49,7 +51,7 @@ export function DeliveriesTab({ endpoints, initialEndpoint, onUnavailable }: { e
   const columns: ColumnDef<WebhookDeliveryRow>[] = [
     { key: 'time', header: t('integrations.col.time'), cell: r => eventDateTime(r.lastAttemptAt ?? r.createdAt, tz, locale) },
     { key: 'eventType', header: t('integrations.col.eventType'), cell: r => <span className="font-mono text-xs">{r.eventType}</span> },
-    { key: 'eventId', header: t('integrations.col.eventId'), cell: r => <code className="break-all text-xs">{r.eventId}</code> },
+    { key: 'outboxEventId', header: t('integrations.col.eventId'), cell: r => <code className="break-all text-xs">{outboxId(r)}</code> },
     { key: 'endpointId', header: t('integrations.col.endpoint'), cell: r => host(r.endpointId) },
     { key: 'status', header: t('integrations.col.status'), cell: r => <span data-testid="delivery-status"><Badge tone={statusTone(r.status)} dot>{t(statusKey(r))}</Badge></span> },
     { key: 'attemptCount', header: t('integrations.col.attempts'), align: 'right', cell: r => r.attemptCount },
@@ -89,15 +91,15 @@ export function DeliveriesTab({ endpoints, initialEndpoint, onUnavailable }: { e
 function DeliveryDrawer({ id, host, onClose, onChanged }: { id: string | null; host: (id: string) => string; onClose: () => void; onChanged: () => void }) {
   const { t, token, locale } = useApp();
   const toast = useToast();
-  const [d, setD] = useState<WebhookDeliveryDetail | null>(null);
+  const [data, setData] = useState<WebhookDeliveryDetail | null>(null);
   const [failed, setFailed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const load = useCallback(async () => {
     if (!id || !token) return;
-    try { setD(await api.webhookDelivery(token, id)); } catch { setFailed(true); }
+    try { setData(await api.webhookDelivery(token, id)); } catch { setFailed(true); }
   }, [id, token]);
-  useEffect(() => { setD(null); setFailed(false); setMsg(null); void load(); }, [load]);
+  useEffect(() => { setData(null); setFailed(false); setMsg(null); void load(); }, [load]);
   async function retry() {
     if (!token || !id) return;
     setBusy(true); setMsg(null);
@@ -109,9 +111,11 @@ function DeliveryDrawer({ id, host, onClose, onChanged }: { id: string | null; h
     } catch (err) { setMsg(isRateLimited(err) ? t('errors.events.rate_limited') : t(errorKey(err))); } finally { setBusy(false); }
   }
   const tz = 'Africa/Dar_es_Salaam';
-  const left = d?.manualRetryCount != null ? Math.max(0, 5 - d.manualRetryCount) : null;
+  const d = data?.delivery ?? null;
+  const attempts = data?.attempts ?? [];
+  const left = data?.manualRetriesLeft;
   return (
-    <Dialog open={!!id} onClose={onClose} title={d ? d.eventType : ''} description={d ? `${host(d.endpointId)} · ${d.eventId}` : undefined} size="xl">
+    <Dialog open={!!id} onClose={onClose} title={d ? d.eventType : ''} description={d ? `${host(d.endpointId)} · ${outboxId(d)}` : undefined} size="xl">
       <div className="space-y-4" data-testid="delivery-drawer">
         {failed && <Alert tone="error">{t('common.somethingWrong')}</Alert>}
         {!d && !failed && <SkeletonTable rows={3} />}
@@ -128,7 +132,7 @@ function DeliveryDrawer({ id, host, onClose, onChanged }: { id: string | null; h
                 <table className="ui-table w-full text-sm" data-testid="attempts-table">
                   <thead><tr><th scope="col" className="text-left">#</th><th scope="col" className="text-left">{t('integrations.col.time')}</th><th scope="col" className="text-left">{t('integrations.col.status')}</th><th scope="col" className="text-left">{t('integrations.col.code')}</th><th scope="col" className="text-left">{t('integrations.col.duration')}</th></tr></thead>
                   <tbody>
-                    {(d.attempts ?? []).map(a => (
+                    {attempts.map(a => (
                       <tr key={a.attemptNo + a.startedAt}>
                         <td>{a.attemptNo}</td><td>{eventDateTime(a.startedAt, tz, locale)}</td>
                         <td><span data-testid="attempt-outcome">{t(`integrations.deliveries.outcome.${a.outcome}` as MessageKey)}</span>{a.responseSnippet && <code className="mt-1 block break-all text-xs text-[var(--color-fg-quaternary)]" data-testid="attempt-snippet">{a.responseSnippet}</code>}</td>
@@ -139,20 +143,20 @@ function DeliveryDrawer({ id, host, onClose, onChanged }: { id: string | null; h
                 </table>
               </div>
             </section>
-            {d.payload !== undefined && (
+            {data?.payload !== undefined && data?.payload !== null && (
               <section aria-labelledby="pay-h" className="space-y-2">
                 <h3 id="pay-h" className="text-sm font-semibold text-[var(--color-fg-primary)]">{t('integrations.deliveries.payload')}</h3>
-                <pre className="max-h-64 overflow-auto rounded-[var(--radius-md)] bg-[var(--color-bg-secondary)] p-3 text-xs" data-testid="delivery-payload">{JSON.stringify(d.payload, null, 2)}</pre>
+                <pre className="max-h-64 overflow-auto rounded-[var(--radius-md)] bg-[var(--color-bg-secondary)] p-3 text-xs" data-testid="delivery-payload">{JSON.stringify(data.payload, null, 2)}</pre>
               </section>
             )}
             {msg && <div role="status" data-testid="delivery-msg"><Alert tone="info">{msg}</Alert></div>}
-            {left != null && d.status !== 'delivered' && <p className="text-xs text-[var(--color-fg-quaternary)]">{fmt(t('integrations.deliveries.retry.left'), { n: left })}</p>}
+            {left != null && d.status !== 'delivered' && <p className="text-xs text-[var(--color-fg-quaternary)]" data-testid="delivery-left">{fmt(t('integrations.deliveries.retry.left'), { n: left })}</p>}
           </>
         )}
       </div>
       <DialogFooter>
         <Button variant="secondary" onClick={onClose}>{t('integrations.action.close')}</Button>
-        <Button loading={busy} disabled={!d || d.status === 'delivered'} onClick={() => void retry()} data-testid="delivery-retry">{t('integrations.deliveries.retry')}</Button>
+        <Button loading={busy} disabled={!d || d.status === 'delivered' || left === 0} onClick={() => void retry()} data-testid="delivery-retry">{t('integrations.deliveries.retry')}</Button>
       </DialogFooter>
     </Dialog>
   );

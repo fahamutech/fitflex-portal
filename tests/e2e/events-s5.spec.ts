@@ -138,6 +138,27 @@ test.describe('kit desk (§8.3, AC-B1..B9)', () => {
     expect(mock.s5!.collections.map(c => c.status)).toEqual(['corrected', 'collected']);
   });
 
+  test('override works from the history when the backend sends no collectionId (fallback)', async ({ page }) => {
+    const mock = await desk(page, 'owner', { collectionIds: false });
+    await pickPoint(page);
+    await paste(page, TICKET.collected);
+    await page.getByTestId('kit-override').click();
+    await page.getByTestId('kit-override-dialog-reason').fill('Kit was lost on the way home');
+    await page.getByTestId('kit-override-dialog-confirm').click();
+    await expect(page.getByTestId('kit-recorded')).toBeVisible();
+    expect(mock.reads(/kit-collections$/).some(c => c.query.status === 'collected')).toBe(true);
+    expect(mock.writes(/corrections$/)[0].path).toBe('/organizer/events/evt_pub/kit-collections/col_0/corrections');
+  });
+  test('with collectionId on verify, the override does not page through the history', async ({ page }) => {
+    const mock = await desk(page, 'owner');
+    await pickPoint(page);
+    await paste(page, TICKET.collected);
+    const before = mock.reads(/kit-collections$/).filter(c => c.query.status === 'collected').length;
+    await page.getByTestId('kit-override').click();
+    await expect(page.getByTestId('kit-override-dialog-confirm')).toBeVisible();
+    expect(mock.reads(/kit-collections$/).filter(c => c.query.status === 'collected').length).toBe(before);
+  });
+
   test('revoked, wrong event, unknown and a ticket of another organizer: each has its own heading; the foreign one is just "not recognised"', async ({ page }) => {
     const mock = await desk(page, 'ops');
     await pickPoint(page);
@@ -330,7 +351,7 @@ test.describe('kit desk (§8.3, AC-B1..B9)', () => {
     await paste(page, TICKET.collected);
     await expect(page.getByTestId('kit-result-heading')).toHaveText('Vifaa vimeshachukuliwa');
     await expect(page.getByTestId('kit-already-body')).toContainText('Vilichukuliwa');
-    await expect(page.getByTestId('kit-override-ask')).toHaveText('Mwombe mmiliki au msimamizi aruhusu.');
+    await expect(page.getByTestId('kit-override-ask')).toHaveText('Mwombe mmiliki au Admin aruhusu.');
     await expect(page.getByTestId('kit-progress')).toContainText('wamechukua');
     await expectNoRawKeys(page);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
@@ -429,6 +450,30 @@ test.describe('bib numbers (§8.4, AC-B10)', () => {
     expect(mock.s5!.regs.find(r => r.id === 'reg_2')!.bib).toBeNull();
   });
 
+  test('a bib may not start with a dash (the server answers bib_invalid, so Save stays off)', async ({ page }) => {
+    await open(page, 'ops', 'bibs');
+    await page.getByTestId('bib-assign-reg_1').click();
+    await page.getByTestId('bib-input').fill('-5');
+    await expect(page.getByTestId('bib-save')).toBeDisabled();
+    await page.getByTestId('bib-input').fill('5-');
+    await expect(page.getByTestId('bib-save')).toBeEnabled();
+  });
+
+  test('Release stays visibly off, with the reason, until the list carries the assignment id', async ({ page }) => {
+    await open(page, 'owner', 'bibs', { assignmentIds: false });
+    await expect(page.getByTestId('bib-release-reg_2')).toBeDisabled();
+    await expect(page.getByTestId('bib-release-reg_2')).toHaveAttribute('title', "Release isn't available for this row yet.");
+  });
+
+  test('timing gets no registration drawer: no Details button on the bibs rows and the URL does not open one', async ({ page }) => {
+    const mock = await open(page, 'timing', 'bibs');
+    await expect(page.getByTestId('bibs-view')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Details' })).toHaveCount(0);
+    await page.goto(`${EV}&view=bibs&registration=reg_2`);
+    await expect(page.getByTestId('registration-drawer')).toHaveCount(0);
+    expect(mock.reads(/kit\/lookup|kit-collections/)).toHaveLength(0);
+  });
+
   test('bulk by rule: Apply is disabled until a preview; a stale preview is refused and asks to preview again', async ({ page }) => {
     const mock = await open(page, 'owner', 'bibs');
     await page.getByTestId('bibs-bulk').click();
@@ -438,7 +483,7 @@ test.describe('bib numbers (§8.4, AC-B10)', () => {
     await page.getByTestId('bulk-pad').fill('4');
     await page.getByTestId('bulk-preview-btn').click();
     await expect(page.getByTestId('bulk-preview')).toContainText('3 people get 5K-3000 to 5K-3002.');
-    expect(mock.writes(/bulk\/preview$/)[0].body).toEqual({ start: 3000, prefix: '5K-', padTo: 4, order: 'registered_at', onlyUnassigned: true });
+    expect(mock.writes(/bulk\/preview$/)[0].body).toEqual({ start: 3000, prefix: '5K-', padTo: 4, order: 'registered_at' });
     await expect(page.getByTestId('bulk-apply')).toBeEnabled();
     mock.s5!.bibVersion += 1; // the roster changed behind the owner's back
     await page.getByTestId('bulk-apply').click();
@@ -688,6 +733,10 @@ test.describe('integrations (§5.1, §7, §8.7)', () => {
     await page.getByTestId('clients-new').click();
     await expect(page.getByTestId('client-create')).toBeDisabled();
     await page.getByTestId('client-name').fill('Race timing');
+    // webhooks:manage is the owner's, and never on a test (sandbox) client: it only appears for a live one.
+    await expect(page.getByTestId('scope-row-webhooks:manage')).toHaveCount(0);
+    await page.getByTestId('client-env-live').check();
+    await page.getByTestId('client-live-ack').check();
     await expect(page.getByTestId('scope-row-webhooks:manage')).toContainText('High risk');
     await expect(page.getByTestId('scope-row-registrations:read')).toContainText('Read');
     await expect(page.getByTestId('scope-row-kit:write')).toContainText('Write');
@@ -699,11 +748,11 @@ test.describe('integrations (§5.1, §7, §8.7)', () => {
     const secret = page.getByTestId('secret-value');
     await expect(secret).toBeVisible();
     const value = await secret.innerText();
-    expect(value).toMatch(/^ffs_test_.{43}$/);
+    expect(value).toMatch(/^ffs_live_.{43}$/);
     await expect(page.getByTestId('secret-client-id')).toHaveText(/^ffc_[0-9a-f]{16}$/);
     await expect(page.getByTestId('secret-dialog')).toContainText("Copy your secret now. You won't be able to see it again.");
     const body = mock.writes(/api-clients$/)[0].body!;
-    expect(body).toEqual({ name: 'Race timing', environment: 'sandbox', scopes: ['registrations:read', 'webhooks:manage'], expiresInDays: 90 });
+    expect(body).toEqual({ name: 'Race timing', environment: 'live', scopes: ['registrations:read', 'webhooks:manage'], expiresInDays: 90 });
     // Locked until the box is ticked: Done is disabled and Esc does nothing.
     await expect(page.getByTestId('secret-done')).toBeDisabled();
     await page.keyboard.press('Escape');
@@ -721,16 +770,18 @@ test.describe('integrations (§5.1, §7, §8.7)', () => {
     expect(await page.evaluate(() => JSON.stringify({ ...localStorage }) + JSON.stringify({ ...sessionStorage }) + location.href)).not.toContain('ffs_');
   });
 
-  test('an admin cannot grant webhooks:manage (disabled, "Only the owner can grant this."); results:write is never sent', async ({ page }) => {
+  test('an admin cannot even see webhooks:manage (D38), live or not; results:write is never sent', async ({ page }) => {
     const mock = await go(page, 'admin');
     await page.getByTestId('clients-new').click();
     await page.getByTestId('client-name').fill('Timing');
-    await expect(page.getByTestId('scope-webhooks:manage')).toBeDisabled();
-    await expect(page.getByTestId('scope-row-webhooks:manage')).toContainText('Only the owner can grant this.');
+    await page.getByTestId('client-env-live').check();
+    await expect(page.getByTestId('scope-row-webhooks:manage')).toHaveCount(0);
+    await page.getByTestId('client-live-ack').check();
     await page.getByTestId('scope-kit:write').check();
     await page.getByTestId('client-create').click();
     await expect(page.getByTestId('secret-dialog')).toBeVisible();
     expect(mock.writes(/api-clients$/)[0].body!.scopes).toEqual(['kit:write']);
+    expect(JSON.stringify(mock.writes(/api-clients$/)[0].body)).not.toMatch(/webhooks:manage|results:write/);
   });
 
   test('live clients need the extra confirmation and can be restricted to selected events', async ({ page }) => {
@@ -750,13 +801,12 @@ test.describe('integrations (§5.1, §7, §8.7)', () => {
     expect(mock.writes(/api-clients$/)[0].body).toEqual({ name: 'Live timing', environment: 'live', scopes: ['registrations:read'], expiresInDays: 30, eventIds: ['evt_1'] });
   });
 
-  test('a pilot-gated organisation gets "not enabled for your organisation" (D39)', async ({ page }) => {
-    await go(page, 'owner', '', { apiAllowed: false });
+  test('a pilot-gated organisation sees "not enabled for your organisation" up front, and cannot open the create dialog (D39)', async ({ page }) => {
+    const mock = await go(page, 'owner', '', { apiAllowed: false });
+    await expect(page.getByTestId('clients-not-enabled')).toContainText("API access isn't enabled for your organisation yet.");
     await page.getByTestId('clients-new').click();
-    await page.getByTestId('client-name').fill('Timing');
-    await page.getByTestId('scope-registrations:read').check();
-    await page.getByTestId('client-create').click();
-    await expect(page.getByTestId('client-error')).toContainText("API access isn't enabled for your organisation yet.");
+    await expect(page.getByTestId('client-dialog')).toHaveCount(0);
+    expect(mock.writes(/api-clients$/)).toHaveLength(0);
   });
 
   test('rotate with a 24 hour overlap shows a new secret once; revoke needs the typed name and is final', async ({ page }) => {
@@ -827,8 +877,13 @@ test.describe('integrations (§5.1, §7, §8.7)', () => {
     expect(body.events).toHaveLength(9);
     await page.getByTestId('secret-saved').check();
     await page.getByTestId('secret-done').click();
+    // A new endpoint starts unverified (it gets only the challenge); Verify now runs the handshake.
+    await expect(page.getByTestId('webhook-notice')).toContainText('Endpoint added. Verify it to start receiving events.');
+    await expect(page.getByTestId('webhooks-tab')).toContainText('Not verified');
+    await page.getByTestId('endpoint-verify-whk_2').click();
+    expect(mock.writes(/whk_2\/verify$/)).toHaveLength(1);
     await expect(page.getByTestId('webhook-notice')).toContainText('good.example.com answered correctly.');
-    await expect(page.getByTestId('webhooks-tab')).toContainText('good.example.com');
+    await expect(page.getByTestId('webhooks-tab')).toContainText('Healthy');
     expect(await page.locator('body').innerText()).not.toMatch(/whsec_/);
   });
 
@@ -843,7 +898,7 @@ test.describe('integrations (§5.1, §7, §8.7)', () => {
     await expect(page.getByTestId('webhooks-tab')).toContainText('Not verified');
     await expect(page.getByTestId('webhook-notice')).toContainText('Endpoint added. Verify it to start receiving events.');
     await page.getByTestId('endpoint-verify-whk_2').click();
-    await expect(page.getByTestId('webhook-notice')).toContainText('unverifiable.example.com did not answer correctly.');
+    await expect(page.getByTestId('webhook-notice')).toContainText('unverifiable.example.com did not answer correctly: Timed out.');
     await expect(page.getByTestId('endpoint-test-whk_2')).toHaveCount(0); // no test send before it is verified
     expect(mock.s5!.endpoints.find(e => e.id === 'whk_2')!.verifiedAt).toBeNull();
   });
@@ -861,6 +916,16 @@ test.describe('integrations (§5.1, §7, §8.7)', () => {
     await page.getByTestId('rotate-confirm').click();
     await expect(page.getByTestId('secret-value')).toHaveText(/^whsec_/);
     expect(mock.writes(/rotate-secret$/)[0].body).toEqual({ graceHours: 72 });
+  });
+
+  test('endpoint details come from GET /:id { endpoint, attempts }: secret hint, grace window and the last attempts', async ({ page }) => {
+    const mock = await go(page, 'owner', '?tab=webhooks');
+    mock.s5!.endpoints[0].rotation = { inGrace: true, graceEndsAt: new Date(Date.now() + 3_600_000).toISOString() };
+    await page.reload();
+    await page.getByTestId('endpoint-details-whk_seed').click();
+    await expect(page.getByTestId('endpoint-secret-hint')).toHaveText('whsec_…abcd');
+    await expect(page.getByTestId('endpoint-in-grace')).toContainText('Old secret works until');
+    await expect(page.getByTestId('endpoint-attempts')).toContainText('Your server returned an error'.slice(0, 0) + 'Delivered');
   });
 
   test('an auto-disabled endpoint shows why and when, and "Enable again"', async ({ page }) => {
@@ -897,12 +962,17 @@ test.describe('integrations (§5.1, §7, §8.7)', () => {
     const mock = await go(page, 'owner', '?tab=deliveries');
     mock.s5!.deliveries[0].manualRetryCount = 5;
     await page.getByTestId('delivery-open-dlv_dead').click();
-    await page.getByTestId('delivery-retry').click();
-    await expect(page.getByTestId('delivery-msg')).toContainText('Too many requests. Wait a moment and try again.');
+    await expect(page.getByTestId('delivery-left')).toHaveText('0 manual retries left today');
+    await expect(page.getByTestId('delivery-retry')).toBeDisabled();
   });
 
   test('delivery log filters go to the server (endpoint, status, event id)', async ({ page }) => {
     const mock = await go(page, 'owner', '?tab=deliveries');
+    await page.getByTestId('deliveries-filter-event').fill('obx_0123456789abcdef'); // the message id is not an event: no match
+    await expect(page.getByTestId('deliveries-tab')).not.toContainText('kit.collected');
+    await page.getByTestId('deliveries-filter-event').fill('evt_pub');
+    await expect(page.getByTestId('deliveries-tab')).toContainText('kit.collected');
+    expect(mock.reads(/webhook-deliveries$/).some(c => c.query.eventId === 'evt_pub')).toBe(true);
     await page.getByTestId('deliveries-filter-status').selectOption('delivered');
     await expect(page.getByTestId('deliveries-empty').or(page.getByTestId('deliveries-tab'))).toBeVisible();
     expect(mock.reads(/webhook-deliveries$/).some(c => c.query.status === 'delivered')).toBe(true);

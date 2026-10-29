@@ -82,7 +82,7 @@ export function OrganizerEventView({ doc, view, role, onView, onBack }: { doc: E
         : view === 'registrations'
         ? <EventRegistrationsTable eventId={doc.id} timezone={doc.timezone} timezoneAbbr={doc.timezoneAbbr} fieldPolicy="organizer" published={published} onOpen={hasRole(KIT_ROLES, role) ? openReg : undefined} />
         : <EventOrdersTable eventId={doc.id} timezone={doc.timezone} timezoneAbbr={doc.timezoneAbbr} fieldPolicy="organizer" published={published} />}
-      {regId && hasRole(BIB_VIEW_ROLES, role) && <RegistrationDrawer doc={doc} registrationId={regId} role={role} readOnly={readOnly} onClose={() => openReg(null)} />}
+      {regId && hasRole(KIT_ROLES, role) && <RegistrationDrawer doc={doc} registrationId={regId} role={role} readOnly={readOnly} onClose={() => openReg(null)} />}
     </div>
   );
 }

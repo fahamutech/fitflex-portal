@@ -18,7 +18,7 @@ export function AdminPayoutCard({ doc, onChanged }: { doc: AdminEventDetail; onC
   const [reason, setReason] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<MessageKey | null>(null);
-  const canEdit = hasPermission('events') && isPublishedLike(doc.status);
+  const canEdit = hasPermission('events') && (isPublishedLike(doc.status) || doc.status === 'completed');
   const current = doc.payoutSchedule ?? null;
   const valid = !!choice && choice !== current && reason.trim().length >= 10 && reason.trim().length <= 300;
 

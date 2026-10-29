@@ -143,6 +143,8 @@ export function EventWizard({ eventId, initialStep, view, onBack, onView }: {
     if (!steps.length) return true;
     dirtyRef.current.clear();
     const payload = Object.assign({}, ...steps.map(s => stepPayload(formRef.current, s))) as Omit<EventPatch, 'version'>;
+    // S5 §3.1: the payout schedule travels only while the event is a draft (published and later answer 409 payout_schedule_locked).
+    if (docRef.current && docRef.current.status !== 'draft') delete payload.payoutSchedule;
     setSaveState('saving');
     try {
       const res = await api.patchOrganizerEvent(token, idRef.current, { version: versionRef.current, ...payload });

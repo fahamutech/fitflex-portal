@@ -4,8 +4,8 @@
 // `webhooks:manage`; an admin may not (D38).
 import { useCallback, useEffect, useState } from 'react';
 import { Copy } from 'lucide-react';
-import { api, ApiError, type ApiClientDetail, type ApiClientRow, type ApiClientUsage, type ApiScope, type OrganizerEventRow } from '@/lib/api';
-import { errorCode, errorKey, eventDateTime, fmt, isFeatureOff, relativeTime } from '@/lib/events';
+import { api, type ApiClientDetail, type ApiClientRow, type ApiClientUsage, type ApiScope, type OrganizerEventRow } from '@/lib/api';
+import { errorKey, eventDateTime, fmt, isFeatureOff, relativeTime } from '@/lib/events';
 import { API_SCOPES, EXPIRING_SOON_DAYS, EXPIRY_DAYS, riskKey, scopeKey } from '@/lib/events-ops';
 import type { MessageKey } from '@/lib/i18n';
 import { Alert, Badge, Button, Card, CardContent, Checkbox, EmptyState, Field, Input, Radio, Select, SkeletonTable, useToast } from '@/components/shared';
@@ -16,13 +16,14 @@ import { RotateDialog } from '@/components/organizer/integrations/rotate-dialog'
 import { useApp } from '../../../../app/providers';
 
 const daysLeft = (iso: string | null) => (iso ? Math.ceil((Date.parse(iso) - Date.now()) / 86_400_000) : null);
-const asRow = (d: ApiClientDetail): ApiClientRow & { usage?: ApiClientUsage } => ('client' in d && d.client ? { ...d.client, usage: d.usage } : (d as ApiClientRow & { usage?: ApiClientUsage }));
-const NOT_ALLOWED = new Set(['forbidden_role', 'organizer_suspended', 'organizer_not_active', 'not_your_organizer']);
+const asRow = (d: ApiClientDetail): ApiClientRow & { usage?: ApiClientUsage } => ({ ...d.client, usage: d.usage });
 
 export function ApiClientsTab({ role, readOnly, createRequest, onUnavailable }: { role: string | null; readOnly: boolean; createRequest: number; onUnavailable: () => void }) {
   const { t, token, locale } = useApp();
   const toast = useToast();
   const [rows, setRows] = useState<ApiClientRow[] | null>(null);
+  // D39: the server says whether this organisation may use the API at all; shown up front, not after a failed create.
+  const [accessEnabled, setAccessEnabled] = useState(true);
   const [error, setError] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const [secret, setSecret] = useState<{ client: ApiClientRow; value: string } | null>(null);
@@ -33,11 +34,11 @@ export function ApiClientsTab({ role, readOnly, createRequest, onUnavailable }: 
   const load = useCallback(async () => {
     if (!token) return;
     setError(false);
-    try { setRows((await api.apiClients(token)).items ?? []); }
+    try { const out = await api.apiClients(token); setRows(out.items ?? []); setAccessEnabled(out.accessEnabled !== false); }
     catch (err) { if (isFeatureOff(err)) onUnavailable(); else setError(true); }
   }, [token, onUnavailable]);
   useEffect(() => { void load(); }, [load]);
-  useEffect(() => { if (createRequest > 0 && !readOnly) setCreateOpen(true); }, [createRequest, readOnly]);
+  useEffect(() => { if (createRequest > 0 && !readOnly && accessEnabled) setCreateOpen(true); }, [createRequest, readOnly, accessEnabled]);
 
   if (error) return <Alert tone="error"><span className="flex flex-wrap items-center gap-3">{t('common.somethingWrong')}<Button size="sm" variant="secondary" onClick={() => void load()}>{t('common.tryAgain')}</Button></span></Alert>;
   if (!rows) return <div aria-busy="true"><SkeletonTable /></div>;
@@ -75,8 +76,9 @@ export function ApiClientsTab({ role, readOnly, createRequest, onUnavailable }: 
 
   return (
     <div className="space-y-4" data-testid="clients-tab">
+      {!accessEnabled && <div data-testid="clients-not-enabled"><Alert tone="info">{t('integrations.clients.notEnabled')}</Alert></div>}
       {rows.length === 0 ? (
-        <div data-testid="clients-empty"><EmptyState title={t('integrations.clients.empty')} action={!readOnly ? <Button onClick={() => setCreateOpen(true)}>{t('integrations.clients.new')}</Button> : undefined} /></div>
+        <div data-testid="clients-empty"><EmptyState title={t('integrations.clients.empty')} action={!readOnly && accessEnabled ? <Button onClick={() => setCreateOpen(true)}>{t('integrations.clients.new')}</Button> : undefined} /></div>
       ) : (
         <Card><CardContent>
           <DataTable columns={columns} data={rows} keyFn={r => r.id} label={t('integrations.tab.clients')} dense pageSize={25} emptyState={t('integrations.clients.empty')}
@@ -124,6 +126,7 @@ function CreateClientDialog({ open, onClose, owner, onCreated }: { open: boolean
     if (!open || !token || allEvents || events.length) return;
     api.organizerEvents(token, { limit: 50 }).then(p => setEvents(p.items ?? [])).catch(() => setEvents([]));
   }, [open, token, allEvents, events.length]);
+  const pickEnv = (e: 'sandbox' | 'live') => { setEnv(e); if (e === 'sandbox') setScopes(cur => cur.filter(x => x !== 'webhooks:manage')); };
   const toggle = (s: ApiScope) => setScopes(cur => (cur.includes(s) ? cur.filter(x => x !== s) : [...cur, s]));
   const valid = name.trim().length >= 1 && name.trim().length <= 60 && scopes.length > 0 && (env === 'sandbox' || liveOk) && (allEvents || picked.length > 0);
   async function create() {
@@ -133,10 +136,7 @@ function CreateClientDialog({ open, onClose, owner, onCreated }: { open: boolean
       const out = await api.createApiClient(token, { name: name.trim(), environment: env, scopes, expiresInDays: expiry, ...(allEvents || env === 'sandbox' ? {} : { eventIds: picked }) });
       onCreated(out.client, out.clientSecret);
     } catch (err) {
-      const code = errorCode(err);
-      // D39: the pilot allowlist. The server's exact code is not in the spec, so any 403 that is not a role/status refusal reads as "not enabled".
-      if (err instanceof ApiError && err.status === 403 && !NOT_ALLOWED.has(code ?? '')) setError('integrations.clients.notEnabled');
-      else setError(errorKey(err));
+      setError(errorKey(err));
     } finally { setBusy(false); }
   }
   return (
@@ -146,17 +146,17 @@ function CreateClientDialog({ open, onClose, owner, onCreated }: { open: boolean
         <Field label={t('integrations.clients.name')} required><Input value={name} maxLength={60} onChange={e => setName(e.target.value)} data-testid="client-name" /></Field>
         <fieldset className="space-y-1">
           <legend className="mb-1 text-sm font-semibold text-[var(--color-fg-primary)]">{t('integrations.clients.environment')}</legend>
-          <div className="min-h-11"><Radio name="clientEnv" label={t('integrations.clients.test')} checked={env === 'sandbox'} onChange={() => setEnv('sandbox')} data-testid="client-env-sandbox" /></div>
-          <div className="min-h-11"><Radio name="clientEnv" label={t('integrations.clients.live')} checked={env === 'live'} onChange={() => setEnv('live')} data-testid="client-env-live" /></div>
+          <div className="min-h-11"><Radio name="clientEnv" label={t('integrations.clients.test')} checked={env === 'sandbox'} onChange={() => pickEnv('sandbox')} data-testid="client-env-sandbox" /></div>
+          <div className="min-h-11"><Radio name="clientEnv" label={t('integrations.clients.live')} checked={env === 'live'} onChange={() => pickEnv('live')} data-testid="client-env-live" /></div>
           {env === 'live' && <Checkbox label={t('integrations.clients.live.warn')} checked={liveOk} onChange={e => setLiveOk(e.target.checked)} data-testid="client-live-ack" />}
         </fieldset>
         <fieldset className="space-y-1">
           <legend className="mb-1 text-sm font-semibold text-[var(--color-fg-primary)]">{t('integrations.clients.scopes')}</legend>
-          {API_SCOPES.map(({ scope, risk, ownerOnly, comingSoon }) => {
-            const disabled = !!comingSoon || (!!ownerOnly && !owner);
+          {API_SCOPES.filter(({ scope }) => scope !== 'webhooks:manage' || (owner && env === 'live')).map(({ scope, risk, ownerOnly, comingSoon }) => {
+            const disabled = !!comingSoon;
             return (
               <div key={scope} className="flex flex-wrap items-start justify-between gap-2" data-testid={`scope-row-${scope}`}>
-                <Checkbox label={t(scopeKey(scope))} description={ownerOnly && !owner ? t('integrations.scope.ownerOnly') : undefined} checked={scopes.includes(scope)} disabled={disabled} onChange={() => toggle(scope)} data-testid={`scope-${scope}`} />
+                <Checkbox label={t(scopeKey(scope))} description={undefined} checked={scopes.includes(scope)} disabled={disabled} onChange={() => toggle(scope)} data-testid={`scope-${scope}`} />
                 <Badge tone={risk === 'high' ? 'danger' : risk === 'write' ? 'warning' : 'gray'}>{t(riskKey(risk))}</Badge>
               </div>
             );

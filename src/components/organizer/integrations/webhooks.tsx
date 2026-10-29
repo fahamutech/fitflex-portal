@@ -3,10 +3,10 @@
 // (the server refuses private addresses), an explicit event list (no wildcard), secret shown once, handshake before any event,
 // test send, health, auto-disable notice.
 import { useCallback, useEffect, useState } from 'react';
-import { api, type WebhookDeliveryRow, type WebhookEndpointRow, type WebhookTestResult } from '@/lib/api';
+import { api, type WebhookAttempt, type WebhookEndpointRow, type WebhookTestResult } from '@/lib/api';
 import { errorKey, eventDateTime, fmt, isFeatureOff, relativeTime } from '@/lib/events';
 import { HEALTH_TONE, WEBHOOK_EVENT_GROUPS, WEBHOOK_EVENT_TYPES, healthKey, hostOf, urlErrorKey } from '@/lib/events-ops';
-import type { MessageKey } from '@/lib/i18n';
+import { messages, type MessageKey } from '@/lib/i18n';
 import { Alert, Badge, Button, Card, CardContent, Checkbox, EmptyState, Field, Input, SkeletonTable, useToast } from '@/components/shared';
 import { DataTable, type ColumnDef } from '@/components/data-table';
 import { Dialog, DialogFooter } from '@/components/dialog';
@@ -40,17 +40,16 @@ export function WebhooksTab({ readOnly, createRequest, onUnavailable, focusId }:
     if (!token) return;
     setBusyId(row.id); setNotice(null);
     try {
-      // Re-enabling is the documented way to run the handshake again (§7.4); the result is read back from `verifiedAt`.
-      await api.setWebhookEndpointState(token, row.id, 'enable');
+      const r = await api.verifyWebhookEndpoint(token, row.id);
+      const host = r.host || hostOf(row.url);
+      setNotice(r.ok
+        ? { tone: 'success', text: fmt(t('integrations.webhooks.verify.ok'), { host }) }
+        : { tone: 'warning', text: r.reason ? fmt(t('integrations.webhooks.verify.fail'), { host, reason: reasonText(r.reason) }) : fmt(t('integrations.webhooks.verify.failShort'), { host }) });
     } catch (err) { setNotice({ tone: 'error', text: t(errorKey(err)) }); }
-    try {
-      const fresh = await api.webhookEndpoint(token, row.id);
-      setNotice(fresh.verifiedAt
-        ? { tone: 'success', text: fmt(t('integrations.webhooks.verify.ok'), { host: hostOf(fresh.url) }) }
-        : { tone: 'warning', text: fmt(t('integrations.webhooks.verify.failShort'), { host: hostOf(fresh.url) }) });
-    } catch { /* the list reload below shows the state */ }
     setBusyId(null); await load();
   }
+  /** The handshake's failure `reason` is a code (timeout, http_503, …): words when we have them, the code otherwise. */
+  const reasonText = (reason: string) => (`integrations.deliveries.outcome.${reason}` in messages.en ? t(`integrations.deliveries.outcome.${reason}` as MessageKey) : reason);
   async function sendTest(row: WebhookEndpointRow) {
     if (!token) return;
     setBusyId(row.id); setNotice(null);
@@ -75,7 +74,7 @@ export function WebhooksTab({ readOnly, createRequest, onUnavailable, focusId }:
   if (!rows) return <div aria-busy="true"><SkeletonTable /></div>;
 
   const columns: ColumnDef<WebhookEndpointRow>[] = [
-    { key: 'url', header: t('integrations.col.url'), cell: r => <span title={r.url} className="font-medium text-[var(--color-fg-primary)] [overflow-wrap:anywhere]" data-testid="endpoint-host">{hostOf(r.url)}</span> },
+    { key: 'url', header: t('integrations.col.url'), cell: r => <span title={r.url} className="font-medium text-[var(--color-fg-primary)] [overflow-wrap:anywhere]" data-testid="endpoint-host">{r.host ?? hostOf(r.url)}</span> },
     { key: 'events', header: t('integrations.col.events'), cell: r => <span title={r.events.join('\n')}>{r.events.length}</span> },
     { key: 'health', header: t('integrations.col.health'), cell: r => <Badge tone={HEALTH_TONE[r.health] ?? 'gray'} dot>{t(healthKey(r.health))}</Badge> },
     { key: 'lastSuccessAt', header: t('integrations.col.lastSuccess'), cell: r => (r.lastSuccessAt ? relativeTime(r.lastSuccessAt, locale) : '—') },
@@ -124,7 +123,7 @@ export function WebhooksTab({ readOnly, createRequest, onUnavailable, focusId }:
       <RotateDialog name={rotateFor ? hostOf(rotateFor.url) : null} onClose={() => setRotateFor(null)} rotate={async grace => {
         if (!token || !rotateFor) return;
         const out = await api.rotateWebhookSecret(token, rotateFor.id, grace);
-        setSecret(out.secret); setRotateFor(null); void load();
+        setSecret(out.signingSecret); setRotateFor(null); void load();
       }} />
       <EndpointDetails row={detailFor} onClose={() => setDetailFor(null)} />
     </div>
@@ -147,7 +146,7 @@ function CreateEndpointDialog({ open, onClose, onCreated }: { open: boolean; onC
     setBusy(true); setUrlError(null); setError(null);
     try {
       const out = await api.createWebhookEndpoint(token, { url: url.trim(), events, ...(description.trim() ? { description: description.trim() } : {}) });
-      onCreated(out.endpoint, out.secret);
+      onCreated(out.endpoint, out.signingSecret);
     } catch (err) {
       const k = urlErrorKey(err);
       if (k) setUrlError(k); else setError(errorKey(err));
@@ -185,12 +184,12 @@ function CreateEndpointDialog({ open, onClose, onCreated }: { open: boolean; onC
 
 function EndpointDetails({ row, onClose }: { row: WebhookEndpointRow | null; onClose: () => void }) {
   const { t, token, locale } = useApp();
-  const [recent, setRecent] = useState<WebhookDeliveryRow[] | null>(null);
+  const [attempts, setAttempts] = useState<WebhookAttempt[] | null>(null);
   useEffect(() => {
-    setRecent(null);
+    setAttempts(null);
     if (!row || !token) return;
     let live = true;
-    api.webhookDeliveries(token, { endpointId: row.id }).then(p => { if (live) setRecent((p.items ?? []).slice(0, 10)); }).catch(() => { if (live) setRecent([]); });
+    api.webhookEndpoint(token, row.id).then(p => { if (live) setAttempts((p.attempts ?? []).slice(0, 10)); }).catch(() => { if (live) setAttempts([]); });
     return () => { live = false; };
   }, [row, token]);
   return (
@@ -202,14 +201,15 @@ function EndpointDetails({ row, onClose }: { row: WebhookEndpointRow | null; onC
               <Badge tone={HEALTH_TONE[row.health] ?? 'gray'} dot>{t(healthKey(row.health))}</Badge>
               <span>{t('integrations.col.pending')}: {row.pending}</span>
               <span>{t('integrations.col.failed24')}: {row.last24h?.failed ?? 0}</span>
-              {row.previousSecretExpiresAt && <span>{fmt(t('integrations.clients.inGrace'), { time: eventDateTime(row.previousSecretExpiresAt, 'Africa/Dar_es_Salaam', locale) })}</span>}
+              {row.secretHint && <code className="text-xs" data-testid="endpoint-secret-hint">{row.secretHint}</code>}
+              {row.rotation?.inGrace && row.rotation.graceEndsAt && <span data-testid="endpoint-in-grace">{fmt(t('integrations.clients.inGrace'), { time: eventDateTime(row.rotation.graceEndsAt, 'Africa/Dar_es_Salaam', locale) })}</span>}
             </p>
             <ul className="flex flex-wrap gap-2">{row.events.map(e => <li key={e}><Badge tone="gray"><span className="font-mono text-[11px]">{e}</span></Badge></li>)}</ul>
             <section aria-labelledby="ep-recent" className="space-y-2">
               <h3 id="ep-recent" className="text-sm font-semibold text-[var(--color-fg-primary)]">{t('integrations.webhooks.recent')}</h3>
-              {!recent ? <SkeletonTable rows={2} /> : recent.length === 0 ? <p className="text-sm text-[var(--color-fg-quaternary)]">{t('integrations.deliveries.empty')}</p> : (
-                <ul className="divide-y divide-[var(--color-border-secondary)] text-sm">
-                  {recent.map(d => <li key={d.id} className="flex flex-wrap items-center justify-between gap-2 py-2"><span className="font-mono text-xs">{d.eventType}</span><span>{d.responseCode ?? '—'} · {t(`integrations.deliveries.status.${d.status === 'pending' ? 'retrying' : d.status}` as MessageKey)}</span></li>)}
+              {!attempts ? <SkeletonTable rows={2} /> : attempts.length === 0 ? <p className="text-sm text-[var(--color-fg-quaternary)]">{t('integrations.deliveries.empty')}</p> : (
+                <ul className="divide-y divide-[var(--color-border-secondary)] text-sm" data-testid="endpoint-attempts">
+                  {attempts.map(a => <li key={a.attemptNo + a.startedAt} className="flex flex-wrap items-center justify-between gap-2 py-2"><span>{eventDateTime(a.startedAt, 'Africa/Dar_es_Salaam', locale)}</span><span>{a.responseCode ?? '—'} · {t(`integrations.deliveries.outcome.${a.outcome}` as MessageKey)}</span></li>)}
                 </ul>
               )}
             </section>

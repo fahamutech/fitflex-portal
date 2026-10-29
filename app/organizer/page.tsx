@@ -53,9 +53,9 @@ function OverviewInner() {
         <MetricCard wrapLabel label={t('organizer.overview.confirmed')} value={summary.confirmedTotal ?? 0} sub={t('organizer.overview.comingSoon')} />
       </div>
 
-      {integrationsOn && health && (
+      {integrationsOn && health && (health.webhooks || health.apiClients) && (
         <Link href="/organizer/integrations" className="block" data-testid="overview-integrations">
-          <MetricCard wrapLabel label={t('integrations.health.card')} value={fmt(t('integrations.health.summary'), { healthy: health.healthy, failing: health.failing })} sub={health.deadLast24h > 0 ? t('integrations.health.failingBadge') : undefined} />
+          <MetricCard wrapLabel label={t('integrations.health.card')} value={health.webhooks ? fmt(t('integrations.health.summary'), { healthy: health.webhooks.healthy, failing: health.webhooks.failing }) : t('integrations.tab.clients') + ': ' + (health.apiClients?.active ?? 0)} sub={health.webhooks && health.webhooks.deadLast24h > 0 ? t('integrations.health.failingBadge') : undefined} />
         </Link>
       )}
 
