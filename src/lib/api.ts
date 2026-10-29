@@ -2201,6 +2201,10 @@ export interface VendorTools {
   vat?: boolean;
   /** S5: VAT applies to this vendor's new sales now (registered, verified, certificate standing). */
   vatInForce?: boolean;
+  /** S6 (VENDOR_REPORTS): the Reports area. Missing = off. */
+  reports?: boolean;
+  /** S6: this caller may see commission and payouts (the report App sales after commission). Missing = no. */
+  canSeeOrderMoney?: boolean;
   [tool: string]: unknown;
 }
 
