@@ -28,3 +28,10 @@ export const EVENTS_MODULE = process.env.NEXT_PUBLIC_EVENTS_MODULE === 'true';
  * The server has its own PARTNER_MEDIA flag. Default off.
  */
 export const PARTNER_MEDIA_ADMIN = process.env.NEXT_PUBLIC_PARTNER_MEDIA_ADMIN === 'true';
+
+/**
+ * Public gym page opened from a gym's QR code (/g/?q=...; backend POST /public/gyms/resolve, functions#281):
+ * read-only profile, no sign-in. Off, the page shows the not-found state and makes no request. The server has its
+ * own WEB_GYM_PROFILE flag. Default off.
+ */
+export const WEB_GYM_PROFILE = process.env.NEXT_PUBLIC_WEB_GYM_PROFILE === 'true';
