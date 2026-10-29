@@ -204,7 +204,7 @@ function ChangeAdminPasswordGate() {
       // next sign-in starts fresh with the new password. Failing here must not undo the change.
       await signOutFirebase().catch(() => undefined);
       // Keep what sign-in learned about organisations; the response carries the user as sign-in does.
-      const org = user?.organizationUser ? { organizationUser: true, organizationRoles: user.organizationRoles } : {};
+      const org = user?.organizationUser ? { organizationUser: true, organizationRoles: user.organizationRoles, organizationIds: user.organizationIds } : {};
       signIn(res.token, { ...org, ...res.user });
       toast.success(t('pwc.done'));
     } catch (err) {

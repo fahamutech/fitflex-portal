@@ -23,6 +23,10 @@ export interface PortalAppUser {
   organizationRoles?: string[];
   /** Sign-in says this session must replace a start credential first (admins: password; gym staff: PIN). */
   passwordChangeRequired?: boolean;
+  /** The account's display name as the sign-in answer gave it (vendor reports name exported files with it). */
+  displayName?: string | null;
+  /** The organisations those roles are in (B5a: a company HR login's sign-in says so while ORG_ONLY_SPONSORS is on). */
+  organizationIds?: string[];
 }
 
 interface AppCtx {

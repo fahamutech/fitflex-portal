@@ -1,6 +1,6 @@
 'use client';
 import { ReactNode, useEffect, useRef, useState } from 'react';
-import type { EventsOptions } from '@/lib/api';
+import type { EventRefundPolicy, EventsOptions } from '@/lib/api';
 import { eventTime, fieldId, fmt, formatShillings, parseShillings, tzAbbr, type EventForm, type Errors, type FieldError } from '@/lib/events';
 import { Button, Field, Input, Textarea } from '@/components/shared';
 import { DateTimeInput } from '@/components/datetime-input';
@@ -14,8 +14,12 @@ export type StepProps = {
   readOnly: boolean;
   token: string;
   options: EventsOptions | null;
+  /** The saved refund policy with the server-built sentence (S4 review item 15). */
+  savedPolicy?: EventRefundPolicy | null;
   /** Explicit save hooks (the title creates the draft on blur, §6.2). */
   onTitleBlur?: () => void;
+  /** S5 §3.1: the payout schedule is editable only while the event is a draft the person may edit. */
+  payoutLocked?: boolean;
 };
 
 export function useErrorText() {
