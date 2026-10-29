@@ -5,7 +5,7 @@ import {
 } from '../../src/lib/partner-media';
 import { ApiError } from '../../src/lib/api';
 import {
-  API, GYM, mockPartnerMediaApi, png, seed, signInAs, staff, SUPER_ADMIN, TRAINER, VENDOR, type PmState,
+  API, GYM, media, mockPartnerMediaApi, png, seed, signInAs, staff, SUPER_ADMIN, TRAINER, VENDOR, type PmState,
 } from './helpers/partner-media-mock';
 
 // Partner photos admin (design spec photo-hero-screens §43, AC-P31..P42; backend functions#277). The API is mocked;
@@ -22,7 +22,11 @@ async function openQueue(page: Page, s: PmState, opts: { user?: Record<string, u
   await page.setViewportSize({ width: opts.width ?? 1280, height: 900 });
   await page.goto('/admin/partner-media/');
 }
-const listCalls = (s: PmState) => s.calls.filter(c => c.method === 'GET' && c.path === '/admin/partner-media');
+const allListCalls = (s: PmState) => s.calls.filter(c => c.method === 'GET' && c.path === '/admin/partner-media');
+/** A card's look-up of the partner's other live item (limit 1, one partner, one kind). */
+const isCompanionCall = (c: PmState['calls'][number]) => c.query.limit === '1' && !!c.query.subjectId && !!c.query.kind;
+/** The page's own list requests, without the cards' companion look-ups. */
+const listCalls = (s: PmState) => allListCalls(s).filter(c => !isCompanionCall(c));
 
 // ── Pure rules (no browser) ─────────────────────────────────────────────────
 test.describe('rules', () => {
@@ -191,6 +195,41 @@ test.describe('Partner photos queue (flag on)', () => {
     await page.getByTestId('partner-search').fill('kinon');
     await expect.poll(() => listCalls(s).at(-1)?.query.q).toBe('kinon');
     await expect(page.getByTestId('partner-cards').locator('> li')).toHaveCount(1);
+  });
+
+  test('cards draw the partner\'s live logo plate on the photo, and the logo\'s plate on the partner\'s live photo (§43.2)', async ({ page }) => {
+    const s = seed();
+    // A FitFlex-set live logo for the gym (never in To review) and a live photo for the vendor.
+    s.items.push(
+      media('pm_gym_logo', { kind: 'logo', plate: 'dark', origin: 'fitflex', review: { state: 'reviewed', at: '2026-10-28T09:00:00.000Z', by: 'admin-2', byName: 'Neema O.' }, createdAt: '2026-10-26T09:00:00.000Z' }),
+      media('pm_vendor_photo', { subject: { type: 'vendor', id: VENDOR.id, name: VENDOR.vendorProfile.businessName }, origin: 'fitflex', review: { state: 'reviewed', at: '2026-10-28T09:00:00.000Z', by: 'admin-2', byName: 'Neema O.' }, createdAt: '2026-10-26T09:00:00.000Z' }),
+    );
+    await openQueue(page, s);
+    const photoCard = page.getByTestId('partner-card-pm_old');
+    const plate = photoCard.getByTestId('partner-band-band-plate');
+    await expect(plate).toHaveAttribute('data-tone', 'dark');
+    await expect(plate.locator('img')).toHaveAttribute('src', /^blob:/);
+    await expect(photoCard.getByTestId('partner-band-band-img')).toHaveAttribute('src', /^blob:/);
+    const logoCard = page.getByTestId('partner-card-pm_logo');
+    await expect(logoCard.getByTestId('partner-band-band-img')).toHaveAttribute('src', /^blob:/);
+    await expect(logoCard.getByTestId('partner-band-band-plate')).toBeVisible();
+    // One look-up per partner and kind, live items of that partner only.
+    const companions = allListCalls(s).filter(isCompanionCall);
+    expect(companions.map(c => `${c.query.tab}:${c.query.subjectType}:${c.query.subjectId}:${c.query.kind}`).sort())
+      .toEqual([`live:gym:${GYM.id}:logo`, `live:vendor:${VENDOR.id}:hero`]);
+    // A partner with no live logo: the photo card has no plate.
+    await page.getByRole('button', { name: 'Live' }).click();
+    await expect(page.getByTestId('partner-card-pm_fitflex').getByTestId('partner-band-band-img')).toHaveAttribute('src', /^blob:/);
+    await expect(page.getByTestId('partner-card-pm_fitflex').getByTestId('partner-band-band-plate')).toHaveCount(0);
+  });
+
+  test('Take down on cards is a ghost button in the error colour; the dialog\'s confirm stays solid', async ({ page }) => {
+    await openQueue(page, seed());
+    const inline = page.getByTestId('partner-take-down-pm_old');
+    await expect(inline).toHaveClass(/color-error-700/);
+    await expect(inline).not.toHaveClass(/bg-\[var\(--color-error-600\)\]/);
+    await inline.click();
+    await expect(page.getByTestId('partner-takedown-submit')).toHaveClass(/bg-\[var\(--color-error-600\)\]/);
   });
 
   test('moderation only: actions disabled with the hint', async ({ page }) => {
@@ -429,7 +468,7 @@ test.describe('Home photo and logo dialog (flag on)', () => {
     const dialog = page.getByRole('dialog', { name: 'Home photo and logo: Neema Supplements' });
     await expect(dialog.getByTestId('partner-set-vendor-hint')).toHaveText('This is not the shop logo or banner members see.');
     await expect(dialog.getByTestId('partner-set-current-logo')).toBeVisible();
-    await expect(dialog.getByTestId('partner-set-take-down-logo')).toBeVisible(); // super-admin has moderation_decide
+    await expect(dialog.getByTestId('partner-set-take-down-logo')).toHaveClass(/color-error-700/); // super-admin has moderation_decide; inline danger ghost
     await dialog.getByTestId('partner-set-open-logo').click();
     const form = dialog.getByTestId('partner-set-form-logo');
     const before = s.calls.length;
