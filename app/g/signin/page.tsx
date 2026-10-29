@@ -35,7 +35,8 @@ function SignIn() {
     if (resumed) setError(resumed);
     if (!has) return;
     let live = true;
-    void pinLoginAvailable().then(ok => { if (live) setAvail(ok ? 'yes' : 'no'); });
+    // Only a definite "PIN sign-in is off" hides the form; a failed or slow check leaves it usable.
+    void pinLoginAvailable().then(a => { if (live) setAvail(a === 'off' ? 'no' : 'yes'); });
     return () => { live = false; };
   }, [router]);
 
@@ -54,7 +55,8 @@ function SignIn() {
     setBusy(false);
     // 404 on sign-in means PIN sign-in is switched off on the server: say so rather than "wrong PIN".
     if (r.code === 'unavailable') setAvail('no');
-    setError(r.code);
+    // Locked and switched-off look the same to the person: do not reveal which.
+    setError(r.code === 'pin_reset_required' ? 'locked' : r.code);
     if (r.code === 'wrong_pin') pinRef.current?.focus();
   }
 
@@ -74,7 +76,7 @@ function SignIn() {
       <Field label={t('web.checkin.signin.identifier')} required>
         <input
           type="text" inputMode="email" className="ui-input" value={identifier} required
-          onChange={e => setIdentifier(e.target.value)} autoComplete="username" autoCapitalize="none" spellCheck={false}
+          onChange={e => setIdentifier(e.target.value)} autoComplete="off" name="ff-checkin-contact" autoCapitalize="none" spellCheck={false}
           data-testid="web-checkin-identifier"
         />
       </Field>
@@ -82,7 +84,7 @@ function SignIn() {
         <input
           ref={pinRef} type="password" inputMode="numeric" pattern="[0-9]{4}" maxLength={4} className="ui-input" value={pin} required
           onChange={e => { setPin(e.target.value.replace(/\D/g, '').slice(0, 4)); setPinError(false); }}
-          autoComplete="off" data-testid="web-checkin-pin"
+          autoComplete="one-time-code" name="ff-checkin-code" data-testid="web-checkin-pin"
         />
       </Field>
       <Button type="submit" size="lg" className="w-full" disabled={busy || !identifier.trim()} data-testid="web-checkin-signin-submit">

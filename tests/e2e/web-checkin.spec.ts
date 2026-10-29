@@ -1,4 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
+import { readFileSync } from 'node:fs';
+import vm from 'node:vm';
 import { messages } from '../../src/lib/i18n';
 import { ERROR_KEYS, formatEat, newIdempotencyKey, normaliseError, type CheckinCode } from '../../src/lib/web-checkin';
 
@@ -122,10 +124,32 @@ test.describe('pure helpers', () => {
     const a = newIdempotencyKey(); const b = newIdempotencyKey();
     expect(a).toMatch(/^[A-Za-z0-9_-]{8,100}$/);
     expect(a).not.toBe(b);
-    expect(formatEat('2026-10-29T11:05:00.000Z', 'en')).toContain('14:05');
-    expect(formatEat('2026-10-29T11:05:00.000Z', 'en')).toContain('EAT');
+    expect(formatEat('2026-10-29T11:05:00.000Z', 'en')).toBe('29 Oct, 14:05');
+    // Swahili month names come from our own table, not the browser's ICU data; midnight is 00:xx (h23), not 24:xx.
+    expect(formatEat('2026-03-04T21:07:00.000Z', 'sw')).toBe('5 Mac, 00:07');
+    expect(formatEat('2026-12-31T11:00:00.000Z', 'sw')).toBe('31 Des, 14:00');
+    expect(en['web.checkin.tz.eat']).toBe('EAT');
     expect(formatEat('nonsense', 'en')).toBeNull();
   });
+});
+
+test.describe('service worker', () => {
+  // Runs public/sw.js in a sandbox and fires fetch events: /g pages and any query string must never touch Cache Storage.
+  function run(url: string, mode = 'navigate') {
+    const src = readFileSync('public/sw.js', 'utf8');
+    const listeners: Record<string, (e: any) => void> = {};
+    const opened: string[] = [];
+    const self = { location: { origin: 'https://portal.example' }, addEventListener: (t: string, f: (e: any) => void) => { listeners[t] = f; }, skipWaiting() {}, clients: { claim() {} } };
+    const ctx = { self, URL, caches: { open: async (n: string) => { opened.push(n); return { put: async () => {}, addAll: async () => {} }; }, match: async () => undefined, keys: async () => [] }, fetch: async () => ({ ok: true, clone: () => ({}) }) };
+    vm.runInNewContext(src, ctx);
+    let responded = false;
+    listeners.fetch({ request: { url, method: 'GET', mode }, respondWith: () => { responded = true; } });
+    return { responded, opened };
+  }
+  for (const u of ['https://portal.example/g/?q=fitflex%3Agym%3Ax%3Asig', 'https://portal.example/g/', 'https://portal.example/g', 'https://portal.example/g/signin/', 'https://portal.example/g/confirm/', 'https://portal.example/g/done/', 'https://portal.example/dashboard/?x=1']) {
+    test(`never handled or cached: ${u}`, () => { const r = run(u); expect(r.responded).toBe(false); expect(r.opened).toEqual([]); });
+  }
+  test('control: other pages are still handled', () => { expect(run('https://portal.example/dashboard/').responded).toBe(true); });
 });
 
 test.describe('flag off', () => {
@@ -152,7 +176,7 @@ test.describe('flag on', () => {
     // The button is enabled with the new hint, and the code is kept under its own key only.
     expect(await page.evaluate(() => sessionStorage.getItem('ff_webcheckin_intent'))).toBe(Q);
     await expect(page.getByTestId('web-checkin-pin')).toHaveAttribute('inputmode', 'numeric');
-    await expect(page.getByTestId('web-checkin-pin')).toHaveAttribute('autocomplete', 'off');
+    await expect(page.getByTestId('web-checkin-pin')).toHaveAttribute('autocomplete', 'one-time-code');
     await expect(page.getByTestId('web-checkin-pin')).toHaveAttribute('type', 'password');
     await signIn(page);
     await expect(page).toHaveURL(/\/g\/confirm\/$/);
@@ -244,6 +268,47 @@ test.describe('flag on', () => {
     await expect(page.getByTestId('web-checkin-pin')).toBeVisible();
     await signIn(page);
     await expect(page.getByTestId('web-checkin-signin-error')).toHaveText(en['web.checkin.err.locked']);
+  });
+
+  test('pin_reset_required shows the same generic locked message (does not reveal which)', async ({ page }) => {
+    await setup(page, { login: ok({ error: 'pin_reset_required' }, 403) });
+    await startVisit(page);
+    await expect(page.getByTestId('web-checkin-pin')).toBeVisible();
+    await signIn(page);
+    await expect(page.getByTestId('web-checkin-signin-error')).toHaveText(en['web.checkin.err.locked']);
+    await expect(page.getByTestId('web-checkin-signin-error')).toHaveAttribute('data-code', 'locked');
+  });
+
+  for (const status of [500, 503]) {
+    test(`a transient ${status} on /auth/options does not hide the sign-in form`, async ({ page }) => {
+      await setup(page, { options: ok({ error: 'server_error' }, status) });
+      await startVisit(page);
+      await expect(page.getByTestId('web-checkin-signin-form')).toBeVisible();
+      await expect(page.getByTestId('web-checkin-pin-off')).toHaveCount(0);
+    });
+  }
+
+  test('PIN field hints: numeric, one-time-code, no username autofill', async ({ page }) => {
+    await setup(page);
+    await startVisit(page);
+    await expect(page.getByTestId('web-checkin-pin')).toHaveAttribute('autocomplete', 'one-time-code');
+    await expect(page.getByTestId('web-checkin-pin')).toHaveAttribute('name', 'ff-checkin-code');
+    await expect(page.getByTestId('web-checkin-identifier')).toHaveAttribute('autocomplete', 'off');
+  });
+
+  test('320 px: a very long unbroken gym name wraps on confirm and done', async ({ page }) => {
+    await page.setViewportSize({ width: 320, height: 640 });
+    const long = 'IronTemple'.repeat(12);
+    await setup(page, {
+      preview: ok({ eligible: true, visitsLeft: 5, alreadyCheckedIn: false, gym: { name: long } }),
+      confirm: ok({ ok: true, idempotent: false, checkin: { id: 'c1', timestamp: '2026-10-29T11:05:00.000Z', gym: { name: long } } }),
+    });
+    const fits = async () => expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+    await toConfirm(page);
+    await fits();
+    await page.getByTestId('web-checkin-confirm-button').click();
+    await expect(page.getByTestId('web-checkin-done')).toBeVisible();
+    await fits();
   });
 
   test('admin is refused and no check-in session is requested', async ({ page }) => {

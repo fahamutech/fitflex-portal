@@ -110,8 +110,8 @@ function Confirm() {
   if (p.alreadyCheckedIn) {
     return (
       <section className="space-y-4 pt-4" data-testid="web-checkin-already">
-        <h1 className="text-2xl font-semibold tracking-tight text-[var(--color-fg-primary)]">{t('web.checkin.confirm.already')}</h1>
-        <p className="text-sm text-[var(--color-fg-secondary)]">{fmt(t('web.checkin.confirm.alreadyBody'), { name })}</p>
+        <h1 className="break-words text-2xl font-semibold tracking-tight text-[var(--color-fg-primary)] [overflow-wrap:anywhere]">{t('web.checkin.confirm.already')}</h1>
+        <p className="break-words [overflow-wrap:anywhere] text-sm text-[var(--color-fg-secondary)]">{fmt(t('web.checkin.confirm.alreadyBody'), { name })}</p>
         <Button type="button" size="lg" className="w-full" onClick={signOut} data-testid="web-checkin-already-done">{t('web.checkin.done.button')}</Button>
       </section>
     );
@@ -119,7 +119,7 @@ function Confirm() {
 
   return (
     <section className="space-y-4 pt-4" data-testid="web-checkin-confirm">
-      <h1 className="text-2xl font-semibold tracking-tight text-[var(--color-fg-primary)]" data-testid="web-checkin-confirm-title">
+      <h1 className="break-words text-2xl font-semibold tracking-tight text-[var(--color-fg-primary)] [overflow-wrap:anywhere]" data-testid="web-checkin-confirm-title">
         {fmt(t('web.checkin.confirm.title'), { name })}
       </h1>
       {renewed && <Alert tone="info"><span data-testid="web-checkin-renewed">{t('web.checkin.confirm.renewed')}</span></Alert>}
@@ -131,7 +131,7 @@ function Confirm() {
       ) : (
         <div className="space-y-2" data-testid="web-checkin-ineligible">
           <Alert tone="warning"><span data-testid="web-checkin-reason" data-code={p.reason ?? 'unknown'}>{t(ERROR_KEYS[p.reason ?? 'unknown'])}</span></Alert>
-          <p className="text-sm text-[var(--color-fg-tertiary)]">{t('web.checkin.confirm.cannot')} {t('web.checkin.confirm.buyHint')}</p>
+          <p className="break-words text-sm text-[var(--color-fg-tertiary)] [overflow-wrap:anywhere]">{p.reason === null || p.reason === 'unknown' ? `${t('web.checkin.confirm.cannot')} ` : ''}{t('web.checkin.confirm.buyHint')}</p>
         </div>
       )}
       <Button

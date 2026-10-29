@@ -54,7 +54,7 @@ export function normaliseError(status: number, body: unknown): CheckinCode {
 
 /** i18n key for each code (EN and SW live in src/lib/i18n.ts under web.checkin.err.*). */
 export const ERROR_KEYS: Record<CheckinCode, MessageKey> = {
-  wrong_pin: 'web.checkin.err.wrong_pin', locked: 'web.checkin.err.locked', pin_reset_required: 'web.checkin.err.pin_reset_required',
+  wrong_pin: 'web.checkin.err.wrong_pin', locked: 'web.checkin.err.locked', pin_reset_required: 'web.checkin.err.locked',
   unauthorized: 'web.checkin.err.unauthorized', role_refused: 'web.checkin.err.role_refused', setup_required: 'web.checkin.err.setup_required',
   account_unavailable: 'web.checkin.err.account_unavailable', unavailable: 'web.checkin.err.unavailable', rate_limited: 'web.checkin.err.rate_limited',
   server_error: 'web.checkin.err.server_error', network: 'web.checkin.err.network', unknown: 'web.checkin.err.unknown',
@@ -131,10 +131,15 @@ const fail = (r: Reply): Fail => {
   return { ok: false, code: normaliseError(r.status, r.body), retryAfterSeconds: Number.isFinite(n) && n > 0 ? Math.ceil(n) : null };
 };
 
-/** GET /auth/options: is PIN sign-in offered. Any failure means "not available". */
-export async function pinLoginAvailable(): Promise<boolean> {
+/**
+ * GET /auth/options. 'off' only when the server says so (pinLogin false) or the route is not found; a 5xx, a timeout or
+ * a network failure is 'unknown' and must not hide the sign-in form.
+ */
+export async function pinLoginAvailable(): Promise<'on' | 'off' | 'unknown'> {
   const r = await call('GET', '/auth/options');
-  return r.status === 200 && r.body?.pinLogin === true;
+  if (r.status === 200 && r.body) return r.body.pinLogin === true ? 'on' : 'off';
+  if (r.status === 404) return 'off';
+  return 'unknown';
 }
 
 /**
@@ -245,15 +250,23 @@ export async function confirmCheckin(idempotencyKey: string): Promise<{ ok: true
   return f;
 }
 
-/** "29 Oct, 14:05 EAT" in Dar es Salaam time whatever the phone's own zone is. */
+const SW_MONTHS = ['Jan', 'Feb', 'Mac', 'Apr', 'Mei', 'Jun', 'Jul', 'Ago', 'Sep', 'Okt', 'Nov', 'Des'];
+const EN_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+/**
+ * "29 Oct, 14:05" in Dar es Salaam time whatever the phone's own zone is. The caller adds the zone label (web.checkin.tz.eat).
+ * Month names are our own tables, so the result does not depend on the browser's ICU data. East Africa Time is UTC+3, no DST.
+ */
 export function formatEat(iso: string | null, locale: 'en' | 'sw'): string | null {
   if (!iso) return null;
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return null;
-  const s = new Intl.DateTimeFormat(locale === 'sw' ? 'sw-TZ' : 'en-GB', {
-    timeZone: 'Africa/Dar_es_Salaam', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false,
-  }).format(d);
-  return `${s} EAT`;
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Africa/Dar_es_Salaam', day: 'numeric', month: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+  }).formatToParts(d);
+  const get = (t: string) => parts.find(p => p.type === t)?.value ?? '';
+  const month = (locale === 'sw' ? SW_MONTHS : EN_MONTHS)[Number(get('month')) - 1] ?? get('month');
+  return `${Number(get('day'))} ${month}, ${get('hour')}:${get('minute')}`;
 }
 
 // A note for the sign-in screen when a screen sent the person back to it (for example "your sign-in ended").
