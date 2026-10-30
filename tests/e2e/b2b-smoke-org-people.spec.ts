@@ -23,12 +23,18 @@ test.describe('organisation user', () => {
     await form.getByLabel('Type', { exact: true }).selectOption('employee');
     await form.getByLabel('Group (optional)', { exact: true }).fill('Head office');
     await form.getByLabel('Your reference (optional)', { exact: true }).fill('STAFF-9');
+    // An organisation user only asks (functions#283): 202 whoever is behind the email.
+    mock.on('POST', /^\/b2b\/organizations\/org-1\/beneficiaries$/, () => ({ status: 202, json: { outcome: 'pending_member_acceptance', memberRequest: {
+      id: 'mr-c1', kind: 'beneficiary', source: 'contact', contactType: 'email', contact: 'zuhura@example.co.tz', status: 'pending_member_acceptance', organizationId: 'org-1', corporateId: null, employeeId: null,
+      userId: null, displayName: null, role: null, permissions: null, beneficiaryType: 'employee', groupName: 'Head office', externalReference: 'STAFF-9', beneficiaryStatus: 'active',
+      expiresAt: '2026-11-12T08:00:00Z', createdAt: '2026-10-29T08:00:00Z', decidedAt: null, reason: null,
+    } } }));
     await page.getByTestId('org-people-add-button').click();
     await expect.poll(() => mock.writes(/\/org-1\/beneficiaries$/).length).toBe(1);
     expect(mock.writes(/\/org-1\/beneficiaries$/)[0].body).toEqual({
       email: 'zuhura@example.co.tz', beneficiaryType: 'employee', status: 'active', groupName: 'Head office', externalReference: 'STAFF-9',
     });
-    await expect(page.getByText('New Person can now use your programmes.')).toBeVisible();
+    await expect(page.getByText('Request sent. They\'ll be added once they accept in the FitFlex app.')).toBeVisible();
   });
 
   test('people: search and status buttons', async ({ page }) => {
@@ -102,13 +108,19 @@ test.describe('company HR', () => {
     await form.getByLabel('Employee’s name', { exact: true }).fill('Rehema Ally');
     await form.getByLabel('Email or mobile number (optional)', { exact: true }).fill('rehema@mwenge.test');
     await form.getByLabel('Department (optional)', { exact: true }).fill('Finance');
+    // HR only asks (functions#283): 202 whoever is behind the email; the request is shown as sent.
+    mock.on('POST', /^\/corporate\/staff\/emp-new\/link$/, () => ({ status: 202, json: { outcome: 'pending_member_acceptance', memberRequest: {
+      id: 'mr-c2', kind: 'employee_link', source: 'contact', contactType: 'email', contact: 'rehema@mwenge.test', status: 'pending_member_acceptance', organizationId: null, corporateId: 'corp-1', employeeId: 'emp-new',
+      userId: null, displayName: null, role: null, permissions: null, beneficiaryType: null, groupName: null, externalReference: null, beneficiaryStatus: null,
+      expiresAt: '2026-11-12T08:00:00Z', createdAt: '2026-10-29T08:00:00Z', decidedAt: null, reason: null,
+    } } }));
     await page.getByTestId('company-staff-add-button').click();
     await expect.poll(() => mock.writes().length).toBe(3);
     const [provision, activate, link] = mock.writes();
     expect(provision).toMatchObject({ method: 'POST', path: '/corporate/staff', body: { displayName: 'Rehema Ally', department: 'Finance', email: 'rehema@mwenge.test' } });
     expect(activate).toMatchObject({ method: 'POST', path: '/corporate/staff/emp-new/status', body: { status: 'active' } });
     expect(link).toMatchObject({ method: 'POST', path: '/corporate/staff/emp-new/link', body: { email: 'rehema@mwenge.test' } });
-    await expect(page.getByText('Rehema Ally added and linked to their FitFlex account.')).toBeVisible();
+    await expect(page.getByText('Rehema Ally added. Request sent. They\'ll be linked once they accept in the FitFlex app.')).toBeVisible();
 
     // Link an existing, unlinked employee by mobile number, then unlink the linked one.
     await page.getByTestId('company-staff-link-emp-2').fill('0712345678');

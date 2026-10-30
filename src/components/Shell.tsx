@@ -55,15 +55,15 @@ import { useAdminEventsSummary, useOrganizer } from './organizer-context';
 import { useCorporateEventsAvailable, useEventsOptions } from './events-options';
 import { resultsOf } from '@/lib/events-results';
 import { opsOf } from '@/lib/events-ops';
-import { useShopBannersAvailable } from './shop-banners-gate';
+import { useShopBannersAvailable, useShopFlashSalesAvailable } from './shop-banners-gate';
 import { useTaxRatesAvailable } from './tax-rates-gate';
 import { useHrToOrgRefresh } from './hr-to-org-refresh';
 import { isHrInOrg, orgHome, orgPathForHr } from '@/lib/hr-to-org';
 
-/** SHOP_BANNERS as /vendor/me reports it (tools.merch.banners); undefined when the server doesn't say. */
-const vendorBannersTool = (tools: VendorTools | null | undefined) => {
-  const merch = tools?.merch as { banners?: unknown } | undefined;
-  return typeof merch?.banners === 'boolean' ? merch.banners : undefined;
+/** SHOP_BANNERS / SHOP_FLASH_SALES as /vendor/me reports them (tools.merch.banners / flashSales); undefined when the server doesn't say. */
+const vendorMerchTool = (tools: VendorTools | null | undefined, kind: 'banners' | 'flashSales') => {
+  const merch = tools?.merch as Record<string, unknown> | undefined;
+  return typeof merch?.[kind] === 'boolean' ? (merch[kind] as boolean) : undefined;
 };
 
 /* ── Nav definitions ─────────────────────────────────────── */
@@ -223,8 +223,8 @@ const ADMIN_NAV: NavItem[] = [
   { href: '/admin/promotion-overview', labelKey: 'admin.nav.promotionOverview', icon: LineChart, groupKey: 'nav.group.promotion', aclScope: 'promotions', aclAny: ['promotions_approve', 'campaigns'] },
   { href: '/admin/moderation',    labelKey: 'admin.nav.moderation',     icon: ShieldAlert,     groupKey: 'nav.group.promotion', aclScope: 'moderation', aclAny: ['moderation_decide'] },
   // Partner photos (spec photo-hero-screens §43.1): only in builds with NEXT_PUBLIC_PARTNER_MEDIA_ADMIN=true. The queue needs
-  // moderation or moderation_decide; brand_media alone reaches only the per-partner dialog on the gyms/trainers/vendors pages.
-  ...(PARTNER_MEDIA_ADMIN ? [{ href: '/admin/partner-media', labelKey: 'admin.nav.partnerMedia', icon: ImageUp, groupKey: 'nav.group.promotion', aclScope: 'moderation', aclAny: ['moderation_decide'] }] : []),
+  // moderation or moderation_decide; brand_media alone opens the page with only "Set photo for a partner" (no queue).
+  ...(PARTNER_MEDIA_ADMIN ? [{ href: '/admin/partner-media', labelKey: 'admin.nav.partnerMedia', icon: ImageUp, groupKey: 'nav.group.promotion', aclScope: 'moderation', aclAny: ['moderation_decide', 'brand_media'] }] : []),
   { href: '/admin/promotions',    labelKey: 'admin.nav.promotions',     icon: Megaphone,       groupKey: 'nav.group.promotion', aclScope: 'promotions', aclAny: ['promotions_approve', 'campaigns'] },
   // Shop banners (Phase 2 S1): shown only while the server has SHOP_BANNERS on (see visibleNav).
   { href: '/admin/shop-merch',    labelKey: 'admin.nav.shopMerch',      icon: Images,          groupKey: 'nav.group.promotion', aclScope: 'promotions', aclAny: ['promotions_approve'] },
@@ -497,11 +497,11 @@ export function Shell({ children }: { children: ReactNode }) {
   const eventRewardsOn = resultsOf(adminEventOptions).rewards;
   const integrationsOn = opsOf(organizerOptions).api || opsOf(organizerOptions).webhooks;
   const corporateEvents = useCorporateEventsAvailable(!!token && (!!isOrgUser || !!isHr));
-  const bannersOn = useShopBannersAvailable(
-    isVendor ? 'vendor' : 'admin', token,
-    isVendor ? vendor.status === 'ready' && !!vendor.me?.permissions?.includes('products') : !!isAdminUser && (hasPermission('promotions') || hasPermission('promotions_approve')),
-    isVendor ? vendorBannersTool(vendor.me?.tools) : undefined,
-  );
+  const merchAllowed = isVendor ? vendor.status === 'ready' && !!vendor.me?.permissions?.includes('products') : !!isAdminUser && (hasPermission('promotions') || hasPermission('promotions_approve'));
+  const bannersOnly = useShopBannersAvailable(isVendor ? 'vendor' : 'admin', token, merchAllowed, isVendor ? vendorMerchTool(vendor.me?.tools, 'banners') : undefined);
+  const salesOn = useShopFlashSalesAvailable(isVendor ? 'vendor' : 'admin', token, merchAllowed, isVendor ? vendorMerchTool(vendor.me?.tools, 'flashSales') : undefined);
+  // The merch page (banners and flash sales) shows while either is switched on.
+  const bannersOn = bannersOnly || salesOn;
 
   const taxRatesOn = useTaxRatesAvailable(token, !!isAdminUser && hasPermission('payments'));
   // B5b: an HR session stored before ORG_ONLY_SPONSORS went on picks up the organisation marks.

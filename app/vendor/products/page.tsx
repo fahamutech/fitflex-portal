@@ -6,7 +6,8 @@ import { ChevronDown, ChevronRight, History, PackageOpen, RefreshCw, SlidersHori
 import { api, type LowStockRow, type ProductStock, type VendorProduct } from '@/lib/api';
 import { money } from '@/lib/admin-utils';
 import type { MessageKey } from '@/lib/i18n';
-import { categoryLabel, fmt, lowKey, PRODUCTS_QS_KEY, tracksVariantStock, variantsOf, type Category } from '@/lib/vendor';
+import { categoryLabel, eatWhen, fmt, lowKey, PRODUCTS_QS_KEY, tracksVariantStock, variantsOf, type Category } from '@/lib/vendor';
+import { useShopFlashSalesAvailable } from '@/components/shop-banners-gate';
 import { Badge, Button, Card, EmptyState, ErrorState, Input, PageHeader, Segmented, Select, SkeletonCard, SkeletonTable, Table, TBody, Td, Th, THead, Tr } from '@/components/shared';
 import { AdjustStockDialog } from '@/components/vendor/adjust-stock-dialog';
 import { useVendor } from '@/components/vendor-context';
@@ -32,6 +33,9 @@ function ProductsInner() {
   const params = useSearchParams();
   const ledger = vendor.me?.tools.stockLedger === true;
   const canSeeCost = vendor.me?.tools.canSeeCost === true;
+  // Flash sales (SHOP_FLASH_SALES): the price lock line and "Start a flash sale" (spec §8.3, S4-AC-08).
+  const salesHint = (vendor.me?.tools.merch as { flashSales?: unknown } | undefined)?.flashSales;
+  const salesOn = useShopFlashSalesAvailable('vendor', token, vendor.status === 'ready' && !!vendor.me?.permissions?.includes('products'), typeof salesHint === 'boolean' ? salesHint : undefined);
 
   const [rows, setRows] = useState<VendorProduct[] | null>(null);
   const [failed, setFailed] = useState(false);
@@ -112,12 +116,30 @@ function ProductsInner() {
     if (token && ledger) api.vendorLowStock(token).then(r => setLow(Array.isArray(r) ? r : [])).catch(() => {});
   }
 
-  const price = (p: VendorProduct) => {
+  const basePrice = (p: VendorProduct) => {
     const discounted = p.discountPriceTzs != null && p.discountPriceTzs > 0 && p.discountPriceTzs < p.priceTzs;
     if (!discounted) return <span className="tabular-nums">{money(p.priceTzs)}</span>;
     return (
       <span className="tabular-nums" aria-label={fmt(t('vendor.products.wasNow'), { old: money(p.priceTzs), new: money(p.discountPriceTzs) })}>
         <span aria-hidden="true">{money(p.discountPriceTzs)} <s className="text-xs text-[var(--color-fg-quaternary)]">{money(p.priceTzs)}</s></span>
+      </span>
+    );
+  };
+  const saleLink = 'text-xs font-semibold text-[var(--color-brand-700)] underline-offset-4 hover:underline';
+  const price = (p: VendorProduct) => {
+    if (!salesOn) return basePrice(p);
+    const lock = p.priceLock;
+    return (
+      <span className="inline-flex flex-col items-end gap-0.5 whitespace-normal">
+        {basePrice(p)}
+        {lock
+          ? <span className="max-w-[16rem] text-right text-xs text-[var(--color-fg-tertiary)]" data-testid={`price-lock-${p.id}`}>
+              {fmt(t('vendor.priceLocked'), { start: eatWhen(lock.startsAt, locale), end: eatWhen(lock.endsAt, locale) })}{' '}
+              <Link href={`/vendor/promotions/?tab=sales&item=${encodeURIComponent(lock.saleId)}`} className={saleLink}>{t('vendor.viewSale')}</Link>
+            </span>
+          : p.status === 'active' && (p.approvalStatus ?? 'approved') === 'approved' && (
+            <Link href={`/vendor/promotions/?tab=sales&new=sale&product=${encodeURIComponent(p.id)}`} className={saleLink} data-testid={`start-sale-${p.id}`}>{t('merch.sale.start')}</Link>
+          )}
       </span>
     );
   };

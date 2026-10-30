@@ -3,11 +3,15 @@ import { useCallback, useEffect, useState } from 'react';
 import { ArrowLeft, ImageIcon, Megaphone, Plus, RefreshCw, Search } from 'lucide-react';
 import { useApp } from '../../providers';
 import { api, type ShopProduct, type VendorSummary } from '@/lib/api';
-import { eatDateTime, fmt, type Category } from '@/lib/vendor';
+import { eatDateTime, eatWhen, fmt, type Category } from '@/lib/vendor';
 import {
-  MERCH_EMPTY_KEY, MERCH_KINDS, MERCH_TABS, MERCH_TAB_KEY, PHASE_KEY, PHASE_TONE, bannersApi, errorCodeOf, errorKeyOf, headlineOf, phaseOf, tabOfBanner,
-  type BannerConfirmation, type MerchTab, type ShopBanner,
+  MERCH_EMPTY_KEY, MERCH_TABS, MERCH_TAB_KEY, PHASE_KEY, PHASE_TONE, bannersApi, errorCodeOf, errorKeyOf, headlineOf, phaseOf, tabOfBanner,
+  type BannerConfirmation, type MerchKind, type MerchTab, type ShopBanner,
 } from '@/lib/shop-banners';
+import { SALE_PHASE_KEY, discountPctOf, salesApi, saleErrorCode, type FlashSale, type PickerProduct } from '@/lib/flash-sales';
+import { money } from '@/lib/admin-utils';
+import { FlashSaleDetail } from '@/components/flash-sale-detail';
+import { FlashSaleForm, SaleThumb } from '@/components/flash-sale-form';
 import { Alert, Badge, Button, Card, CardContent, Input, PageHeader, Segmented, Spinner, Table, TBody, Td, Th, THead, Tr } from '@/components/shared';
 import { ShopMerchDetail } from '@/components/shop-merch-detail';
 import { BannerForm } from '@/components/shop-banner-form';
@@ -22,11 +26,17 @@ function Thumb({ banner }: { banner: ShopBanner }) {
     : <span className="flex h-10 w-16 shrink-0 items-center justify-center rounded-[var(--radius-md)] bg-[var(--color-bg-tertiary)]"><ImageIcon aria-hidden="true" className="h-4 w-4 text-[var(--color-fg-quaternary)]" /></span>;
 }
 
-type View = { item: string | null; edit: string | null; creating: boolean };
+/** ?item=, ?edit= and ?new= name a banner, or a flash sale with kind=flash_sale (new=sale). */
+type View = { item: string | null; edit: string | null; creating: MerchKind | null; kind: MerchKind };
 const viewOf = (search: string): View => {
   const sp = new URLSearchParams(search);
-  return { item: sp.get('item'), edit: sp.get('edit'), creating: sp.get('new') === 'banner' };
+  const nw = sp.get('new');
+  return { item: sp.get('item'), edit: sp.get('edit'), creating: nw === 'banner' ? 'banner' : nw === 'sale' ? 'flash_sale' : null, kind: sp.get('kind') === 'flash_sale' ? 'flash_sale' : 'banner' };
 };
+/** One row in the queue: a banner or a flash sale. */
+type Row = { kind: 'banner'; id: string; b: ShopBanner } | { kind: 'flash_sale'; id: string; s: FlashSale };
+const itemOf = (r: Row) => (r.kind === 'banner' ? r.b : r.s);
+const qItem = (r: { kind: MerchKind; id: string }) => `item=${encodeURIComponent(r.id)}${r.kind === 'flash_sale' ? '&kind=flash_sale' : ''}`;
 const TAB_SET = new Set<string>(MERCH_TABS);
 const HOUR = 3_600_000;
 /** "2 hours ago" / "saa 2 zilizopita" in the reader's language. */
@@ -42,21 +52,24 @@ function relative(iso: string | null | undefined, now: number, locale: string): 
 }
 
 /**
- * Shop banners & flash sales (spec shop-home-phase2 §5.3): what sellers propose for the shop home and what
- * FitFlex staff create, by what it is now. One at a time in detail (?item=), create (?new=banner), edit (?edit=).
- * Banners only in slice 1; flash sales join the same queue in slice 4.
+ * Shop banners & flash sales (spec shop-home-phase2 §5.3, §8.5): what sellers propose for the shop home and what
+ * FitFlex staff create, by what it is now. One at a time in detail (?item=[&kind=flash_sale]), create
+ * (?new=banner|sale), edit (?edit=). Each kind shows only while the server has it on (SHOP_BANNERS, SHOP_FLASH_SALES).
  */
 export default function ShopMerchPage() {
   const { token, user, t, locale, hasPermission } = useApp();
   const [rows, setRows] = useState<ShopBanner[] | null>(null);
+  const [sales, setSales] = useState<FlashSale[] | null>(null);
   const [serverCounts, setServerCounts] = useState<Partial<Record<MerchTab, number>> | null>(null);
+  const [saleCounts, setSaleCounts] = useState<Partial<Record<MerchTab, number>> | null>(null);
+  const [kindsOn, setKindsOn] = useState<{ banner: boolean; flash_sale: boolean }>({ banner: true, flash_sale: true });
   const [confirmation, setConfirmation] = useState<BannerConfirmation | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [disabled, setDisabled] = useState(false);
   const [tab, setTab] = useState<MerchTab>('requests');
   const [kind, setKind] = useState<string>('all');
   const [query, setQuery] = useState('');
-  const [view, setView] = useState<View>({ item: null, edit: null, creating: false });
+  const [view, setView] = useState<View>({ item: null, edit: null, creating: null, kind: 'banner' });
   const [products, setProducts] = useState<ShopProduct[]>([]);
   const [vendors, setVendors] = useState<VendorSummary[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
@@ -74,23 +87,27 @@ export default function ShopMerchPage() {
   const go = (q: string) => { history.pushState(null, '', q ? `?${q}` : `?tab=${tab}`); setView(viewOf(q ? `?${q}` : '')); };
   const pickTab = (next: MerchTab) => { setTab(next); history.replaceState(null, '', `?tab=${next}`); };
 
+  // Both kinds at once; a kind switched off on the server (404 feature_disabled) is simply left out.
   const load = useCallback(async () => {
     if (!token) return;
     setError(null);
-    try {
-      const list = await bannersApi.adminList(token);
-      setRows(list.items); setServerCounts(list.counts ?? null); setConfirmation(list.confirmation ?? null); setDisabled(false);
-    }
-    catch (err) {
-      if (errorCodeOf(err) === 'feature_disabled') setDisabled(true);
-      else setError(t(errorKeyOf(err, 'merchAdmin.loadFailed')));
-      setRows([]);
-    }
+    const [b, s] = await Promise.allSettled([bannersApi.adminList(token), salesApi.adminList(token)]);
+    const bannerOff = b.status === 'rejected' && errorCodeOf(b.reason) === 'feature_disabled';
+    const saleOff = s.status === 'rejected' && saleErrorCode(s.reason) === 'feature_disabled';
+    setKindsOn({ banner: !bannerOff, flash_sale: !saleOff });
+    setDisabled(bannerOff && saleOff);
+    if (b.status === 'fulfilled') { setRows(b.value.items); setServerCounts(b.value.counts ?? null); setConfirmation(b.value.confirmation ?? null); }
+    else setRows([]);
+    if (s.status === 'fulfilled') { setSales(s.value.items); setSaleCounts(s.value.counts ?? null); }
+    else setSales([]);
+    const failed = [b.status === 'rejected' && !bannerOff ? b.reason : null, s.status === 'rejected' && !saleOff ? s.reason : null].find(Boolean);
+    if (failed) setError(t(errorKeyOf(failed, 'merchAdmin.loadFailed')));
   }, [token, t]);
   useEffect(() => { void load(); }, [load]);
 
-  // Pickers for the staff form. Each is optional: a failure leaves the list empty.
-  const needsCatalogue = !!view.edit || view.creating;
+  // Pickers for the staff banner form. Each is optional: a failure leaves the list empty.
+  const saleForm = view.creating === 'flash_sale' || (!!view.edit && view.kind === 'flash_sale');
+  const needsCatalogue = !saleForm && (!!view.edit || !!view.creating);
   useEffect(() => {
     if (!token || !needsCatalogue) return;
     if (hasPermission('shop') || hasPermission('promotions')) {
@@ -100,6 +117,24 @@ export default function ShopMerchPage() {
     api.shopCategories().then(r => setCategories(r.categories ?? [])).catch(() => setCategories([]));
   }, [token, needsCatalogue, hasPermission]);
 
+  // Staff sale form: its own picker, GET /admin/flash-sale-products (contract rev 2; `promotions` or
+  // `promotions_approve`, no `shop` needed): only products buyers can find, of sellers allowed to run a sale.
+  const [pickerQ, setPickerQ] = useState('');
+  const [picker, setPicker] = useState<PickerProduct[]>([]);
+  useEffect(() => {
+    if (!token || !saleForm) return;
+    let live = true;
+    salesApi.adminPickerProducts(token, { q: pickerQ || undefined }).then(items => { if (live) setPicker(items); }).catch(() => { if (live) setPicker([]); });
+    return () => { live = false; };
+  }, [token, saleForm, pickerQ]);
+  const pickerProducts: ShopProduct[] = picker.map(p => ({
+    id: p.id, vendorId: p.vendorId, name: p.name, priceTzs: p.priceTzs, discountPriceTzs: p.discountPriceTzs ?? null,
+    stock: p.stock ?? 1, images: p.image ? [p.image] : [], status: 'active', approvalStatus: 'approved',
+  }));
+  const pickerVendors = Array.from(new Map(picker.map(p => [p.vendorId, { id: p.vendorId, displayName: p.vendorName || p.vendorId } as VendorSummary])).values());
+
+  // Creating needs `promotions` (contract: create/edit/submit/withdraw FitFlex-created sales).
+  const canCreateSale = hasPermission('promotions');
   if (!token || user?.userType !== 'admin') return null;
 
   if (disabled) {
@@ -107,6 +142,28 @@ export default function ShopMerchPage() {
       <div className="space-y-6">
         <PageHeader title={t('merchAdmin.title')} />
         <Alert tone="info" className="max-w-xl" >{t('merch.unavailable')}</Alert>
+      </div>
+    );
+  }
+
+  // Flash sale: create (?new=sale) or edit a FitFlex-created one (?edit=&kind=flash_sale).
+  if (saleForm && !canCreateSale) {
+    return <div className="space-y-4"><Alert tone="warning"><span data-testid="merch-sale-no-create">{t('merch.noPermission')}</span></Alert><Button variant="secondary" onClick={() => go('')}>{t('merchAdmin.back')}</Button></div>;
+  }
+  if (view.creating === 'flash_sale' || (view.edit && view.kind === 'flash_sale')) {
+    const editing = view.edit ? sales?.find(r => r.id === view.edit) ?? null : null;
+    if (view.edit && !editing) return sales == null ? <Spinner className="h-6 w-6" /> : <Alert tone="warning">{t('merch.notYours')}</Alert>;
+    if (editing && editing.origin !== 'staff') return <Alert tone="warning">{t('merch.sale.notEditable')}</Alert>;
+    const back = () => go(view.edit ? qItem({ kind: 'flash_sale', id: view.edit }) : '');
+    return (
+      <div className="space-y-6">
+        <Button variant="link" onClick={back} className="-ml-2 h-auto min-h-10 gap-1.5 px-2 text-sm font-normal text-[var(--color-fg-tertiary)] hover:no-underline">
+          <ArrowLeft className="h-4 w-4" />{t('merchAdmin.back')}
+        </Button>
+        <PageHeader title={t(editing ? 'merchAdmin.editSale' : 'merchAdmin.createSale')} description={t('merchAdmin.saleCreateNote')} />
+        {/* Any seller's product a buyer can find (the picker endpoint); the server checks eligibility again. */}
+        <FlashSaleForm mode="staff" sale={editing} vendors={pickerVendors} products={pickerProducts} onProductSearch={setPickerQ}
+          onCancel={back} onDone={s => { void load(); go(qItem({ kind: 'flash_sale', id: s.id })); }} />
       </div>
     );
   }
@@ -128,6 +185,12 @@ export default function ShopMerchPage() {
     );
   }
 
+  if (view.item && view.kind === 'flash_sale') {
+    return (
+      <FlashSaleDetail key={view.item} id={view.item} fallback={sales?.find(r => r.id === view.item) ?? null} onBack={() => go('')}
+        onEdit={id => go(`edit=${encodeURIComponent(id)}&kind=flash_sale`)} onChanged={() => void load()} />
+    );
+  }
   if (view.item) {
     return (
       <ShopMerchDetail key={view.item} id={view.item} fallback={rows?.find(r => r.id === view.item) ?? null} onBack={() => go('')}
@@ -136,39 +199,76 @@ export default function ShopMerchPage() {
   }
 
   const now = Date.now();
-  const counts = (s: MerchTab) => serverCounts?.[s] ?? (rows ?? []).filter(r => tabOfBanner(r, now) === s).length;
+  const both = kindsOn.banner && kindsOn.flash_sale;
+  const wants = (k: MerchKind) => kindsOn[k] && (kind === 'all' || kind === k);
+  const all: Row[] = [
+    ...(rows ?? []).map(b => ({ kind: 'banner' as const, id: b.id, b })),
+    ...(sales ?? []).map(s => ({ kind: 'flash_sale' as const, id: s.id, s })),
+  ];
+  const loaded = rows != null && sales != null;
+  const counts = (s: MerchTab) =>
+    (wants('banner') ? serverCounts?.[s] ?? (rows ?? []).filter(r => tabOfBanner(r, now) === s).length : 0)
+    + (wants('flash_sale') ? saleCounts?.[s] ?? (sales ?? []).filter(r => tabOfBanner(r, now) === s).length : 0);
   const needle = query.trim().toLowerCase();
-  const shown = (rows ?? []).filter(r => tabOfBanner(r, now) === tab)
-    .filter(r => kind === 'all' || kind === 'banner')
-    .filter(r => !needle || [r.vendorName, r.targetName, r.headlineLead?.en, r.headlineLead?.sw, r.headlineAccent?.en, r.headlineAccent?.sw]
-      .some(v => String(v ?? '').toLowerCase().includes(needle)))
-    // Requests: soonest to expire first (as the server sorts them); the rest by position, then start.
-    .sort((a, b) => (tab === 'requests' ? (Date.parse(a.expiresAt ?? a.startsAt) - Date.parse(b.expiresAt ?? b.startsAt)) || a.id.localeCompare(b.id)
-      : (a.position ?? 999) - (b.position ?? 999) || Date.parse(a.startsAt) - Date.parse(b.startsAt)));
+  const words = (r: Row) => (r.kind === 'banner'
+    ? [r.b.vendorName, r.b.targetName, r.b.headlineLead?.en, r.b.headlineLead?.sw, r.b.headlineAccent?.en, r.b.headlineAccent?.sw]
+    : [r.s.vendorName, r.s.productName]);
+  const shown = all.filter(r => tabOfBanner(itemOf(r), now) === tab)
+    .filter(r => wants(r.kind))
+    .filter(r => !needle || words(r).some(v => String(v ?? '').toLowerCase().includes(needle)))
+    // Requests: soonest to expire first (as the server sorts them); the rest by position (banners), then start.
+    .sort((x, y) => {
+      const a = itemOf(x); const b = itemOf(y);
+      if (tab === 'requests') return (Date.parse(a.expiresAt ?? a.startsAt) - Date.parse(b.expiresAt ?? b.startsAt)) || a.id.localeCompare(b.id);
+      const pa = x.kind === 'banner' ? x.b.position ?? 999 : 999; const pb = y.kind === 'banner' ? y.b.position ?? 999 : 999;
+      return pa - pb || Date.parse(a.startsAt) - Date.parse(b.startsAt);
+    });
   // Under 72 hours to expiry: warn; under a day, in hours (spec §5.3.1, QA1 #5).
-  const expiryText = (b: ShopBanner): string | null => {
+  // Flash sale rows use their own keys: Swahili agrees with "ofa" (I-), not "bango" (Li-) (slice 4 QA1 #3).
+  const EXP_KEYS = {
+    banner: { soon: 'merchAdmin.expiresSoon', oneHour: 'merchAdmin.expiresInOneHour', hours: 'merchAdmin.expiresInHours', oneDay: 'merchAdmin.expiresInOne', days: 'merchAdmin.expiresIn', sent: 'merchAdmin.sentAgo' },
+    flash_sale: { soon: 'merchAdmin.sale.expiresSoon', oneHour: 'merchAdmin.sale.expiresInOneHour', hours: 'merchAdmin.sale.expiresInHours', oneDay: 'merchAdmin.sale.expiresInOne', days: 'merchAdmin.sale.expiresIn', sent: 'merchAdmin.sale.sentAgo' },
+  } as const;
+  const expiryText = (b: ShopBanner | FlashSale, kindOf: MerchKind): string | null => {
     if (phaseOf(b, now) !== 'pending') return null;
     const left = Date.parse(b.expiresAt ?? b.startsAt) - now;
     if (!Number.isFinite(left) || left <= 0 || left >= 72 * HOUR) return null;
-    if (left < HOUR) return t('merchAdmin.expiresSoon');
+    const k = EXP_KEYS[kindOf];
+    if (left < HOUR) return t(k.soon);
     // Rounded to the nearest hour or day (QA2 #2): ~5 h reads "5 hours", ~2 days "2 days".
     const h = Math.round(left / HOUR);
-    if (h < 24) return h === 1 ? t('merchAdmin.expiresInOneHour') : fmt(t('merchAdmin.expiresInHours'), { n: h });
+    if (h < 24) return h === 1 ? t(k.oneHour) : fmt(t(k.hours), { n: h });
     const d = Math.max(1, Math.round(left / (24 * HOUR)));
-    return d === 1 ? t('merchAdmin.expiresInOne') : fmt(t('merchAdmin.expiresIn'), { n: d });
+    return d === 1 ? t(k.oneDay) : fmt(t(k.days), { n: d });
   };
-  const sentText = (b: ShopBanner) => relative(b.submittedAt ?? b.createdAt, now, locale);
-  const seller = (b: ShopBanner) => (b.origin === 'staff' ? t('merchAdmin.sellerFitflex') : b.vendorName || b.vendorId || '');
+  // Sale rows: Swahili times on a 12-hour clock with the part of the day (glossary; slice 4 QA1 #7). Banner rows unchanged.
+  const when = (r: Row, iso: string) => (r.kind === 'flash_sale' ? eatWhen(iso, locale) : eatDateTime(iso, locale));
+  const sentText = (b: ShopBanner | FlashSale) => relative(b.submittedAt ?? b.createdAt, now, locale);
+  // A staff banner has no seller ("FitFlex"); a staff flash sale is still on a seller's product.
+  const seller = (r: Row) => (r.kind === 'banner'
+    ? (r.b.origin === 'staff' ? t('merchAdmin.sellerFitflex') : r.b.vendorName || r.b.vendorId || '')
+    : `${r.s.vendorName || r.s.vendorId}${r.s.origin === 'staff' ? ` · ${t('merchAdmin.setByFitflex')}` : ''}`);
+  const titleOf = (r: Row) => (r.kind === 'banner' ? headlineOf(r.b, locale) : r.s.productName || r.s.productId) || '—';
+  const typeOf = (r: Row) => t(r.kind === 'banner' ? 'merchAdmin.type.banner' : 'merchAdmin.type.sale');
+  // "−24% · TSh 69,000" (spec §5.3.1).
+  const discountOf = (r: Row) => {
+    if (r.kind !== 'flash_sale') return '—';
+    const pct = r.s.discountPct ?? discountPctOf(r.s.wasPriceTzs ?? r.s.regularPriceTzs, r.s.salePriceTzs);
+    return fmt(t('merchAdmin.discountShort'), { pct: pct ?? '—', price: money(r.s.salePriceTzs) });
+  };
+  const thumb = (r: Row) => (r.kind === 'banner' ? <Thumb banner={r.b} /> : <SaleThumb src={r.s.productImage} className="h-10 w-16" />);
+  const suspended = (r: Row) => !!itemOf(r).sellerSuspended;
 
   return (
     <div className="space-y-6">
       <PageHeader
         title={t('merchAdmin.title')}
-        description={t('merchAdmin.description')}
+        description={t(kindsOn.banner && kindsOn.flash_sale ? 'merchAdmin.descriptionAny' : kindsOn.flash_sale ? 'merchAdmin.descriptionSale' : 'merchAdmin.description')}
         actions={(
           <div className="flex flex-wrap gap-2">
             <Button variant="secondary" size="sm" className="min-h-11" onClick={() => void load()} data-testid="merch-refresh"><RefreshCw className="h-4 w-4" />{t('mod.refresh')}</Button>
-            {hasPermission('promotions') && <Button size="sm" className="min-h-11" onClick={() => go('new=banner')} data-testid="merch-create-banner"><Plus className="h-4 w-4" />{t('merchAdmin.createBanner')}</Button>}
+            {hasPermission('promotions') && kindsOn.banner && <Button size="sm" className="min-h-11" onClick={() => go('new=banner')} data-testid="merch-create-banner"><Plus className="h-4 w-4" />{t('merchAdmin.createBanner')}</Button>}
+            {canCreateSale && kindsOn.flash_sale && <Button size="sm" className="min-h-11" onClick={() => go('new=sale')} data-testid="merch-create-sale"><Plus className="h-4 w-4" />{t('merchAdmin.createSale')}</Button>}
           </div>
         )}
       />
@@ -178,13 +278,15 @@ export default function ShopMerchPage() {
           {MERCH_TABS.map(s => (
             <button key={s} role="tab" aria-selected={tab === s} onClick={() => pickTab(s)} data-testid={`merch-tab-${s}`}
               className={`flex min-h-11 items-center gap-2 rounded-md px-3 py-1.5 text-sm ${tab === s ? 'bg-[var(--color-bg-primary)] font-semibold shadow-sm' : 'text-[var(--color-fg-tertiary)]'}`}>
-              {t(MERCH_TAB_KEY[s])}<span className="rounded-full bg-[var(--color-bg-tertiary)] px-1.5 text-xs tabular-nums" data-testid={`merch-count-${s}`}>{rows ? counts(s) : '·'}</span>
+              {t(MERCH_TAB_KEY[s])}<span className="rounded-full bg-[var(--color-bg-tertiary)] px-1.5 text-xs tabular-nums" data-testid={`merch-count-${s}`}>{loaded ? counts(s) : '·'}</span>
             </button>
           ))}
         </div>
-        {/* Type filter (spec §5.3.1). Flash sales join it in slice 4. */}
+        {/* Type filter (spec §5.3.1): All · Banners · Flash sales, while both are switched on. */}
         <div role="group" aria-label={t('merchAdmin.col.type')} data-testid="merch-type-filter">
-          <Segmented value={kind} onChange={setKind} options={[['all', t('merchAdmin.type.all')], ...MERCH_KINDS.map(k => [k, t('merchAdmin.type.banners')] as [string, string])]} />
+          <Segmented value={kind} onChange={setKind} options={both
+            ? [['all', t('merchAdmin.type.all')], ['banner', t('merchAdmin.type.banners')], ['flash_sale', t('merchAdmin.type.sales')]]
+            : [['all', t('merchAdmin.type.all')], kindsOn.flash_sale ? ['flash_sale', t('merchAdmin.type.sales')] : ['banner', t('merchAdmin.type.banners')]]} />
         </div>
         <div className="relative w-full sm:w-72">
           <Search aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--color-fg-quaternary)]" />
@@ -193,27 +295,29 @@ export default function ShopMerchPage() {
       </div>
       <Card>
         <CardContent className="p-0">
-          {rows == null ? <div className="p-6"><Spinner className="h-6 w-6" /></div> : shown.length === 0 ? (error ? null : (
+          {!loaded ? <div className="p-6"><Spinner className="h-6 w-6" /></div> : shown.length === 0 ? (error ? null : (
             <div className="flex flex-col items-center gap-2 p-10 text-center text-sm text-[var(--color-fg-quaternary)]" data-testid="merch-empty">
-              <Megaphone aria-hidden="true" className="h-6 w-6" />{t(needle ? 'merchAdmin.noMatches' : MERCH_EMPTY_KEY[tab])}
+              <Megaphone aria-hidden="true" className="h-6 w-6" />{t(needle ? (both && kind === 'all' ? 'merchAdmin.noMatchesAny' : wants('flash_sale') && !wants('banner') ? 'merchAdmin.noMatchesSales' : 'merchAdmin.noMatches') : MERCH_EMPTY_KEY[tab])}
             </div>
           )) : (
             <>
             {/* Phones: stacked cards (spec §5.3.1, QA1 #6). */}
             <ul className="divide-y divide-[var(--color-border-secondary)] sm:hidden" aria-label={t(MERCH_TAB_KEY[tab])} data-testid="merch-cards">
-              {shown.map(b => {
+              {shown.map(r => {
+                const b = itemOf(r);
                 const phase = phaseOf(b, now);
-                const exp = expiryText(b);
+                const exp = expiryText(b, r.kind);
                 return (
-                  <li key={b.id}>
-                    <button type="button" onClick={() => go(`item=${encodeURIComponent(b.id)}`)} className="flex w-full min-h-11 items-start gap-3 p-4 text-left hover:bg-[var(--color-bg-secondary)]" data-testid={`merch-card-${b.id}`}>
-                      <Thumb banner={b} />
-                      <span className="min-w-0 flex-1 space-y-1 [overflow-wrap:anywhere]">
-                        <span className="block font-medium">{headlineOf(b, locale) || '—'}</span>
-                        <span className="block text-xs text-[var(--color-fg-tertiary)]">{t('merchAdmin.type.banner')} · {seller(b)}</span>
-                        <span className="block text-xs text-[var(--color-fg-tertiary)]">{eatDateTime(b.startsAt, locale)} → {eatDateTime(b.endsAt, locale)}</span>
-                        <span className="flex flex-wrap items-center gap-2"><Badge tone={PHASE_TONE[phase]} dot>{t(PHASE_KEY[phase])}</Badge>
-                          {sentText(b) && <span className="text-xs text-[var(--color-fg-quaternary)]">{fmt(t('merchAdmin.sentAgo'), { when: sentText(b)! })}</span>}</span>
+                  <li key={`${r.kind}-${r.id}`}>
+                    <button type="button" onClick={() => go(qItem(r))} className="flex w-full min-h-11 items-start gap-3 p-4 text-left hover:bg-[var(--color-bg-secondary)]" data-testid={`merch-card-${b.id}`}>
+                      {thumb(r)}
+                      <span className="min-w-0 flex-1 space-y-1 [overflow-wrap:break-word]">
+                        <span className="block font-medium">{titleOf(r)}</span>
+                        <span className="block text-xs text-[var(--color-fg-tertiary)]">{typeOf(r)} · {seller(r)}</span>
+                        {r.kind === 'flash_sale' && <span className="block text-xs font-semibold text-[var(--color-fuel)]">{discountOf(r)}</span>}
+                        <span className="block text-xs text-[var(--color-fg-tertiary)]">{when(r, b.startsAt)} → {when(r, b.endsAt)}</span>
+                        <span className="flex flex-wrap items-center gap-2"><Badge tone={PHASE_TONE[phase]} dot>{t((r.kind === 'flash_sale' ? SALE_PHASE_KEY : PHASE_KEY)[phase])}</Badge>
+                          {sentText(b) && <span className="text-xs text-[var(--color-fg-quaternary)]">{fmt(t(EXP_KEYS[r.kind].sent), { when: sentText(b)! })}</span>}</span>
                         {exp && <span className="block text-xs text-[var(--color-warning-700)]">{exp}</span>}
                       </span>
                     </button>
@@ -229,30 +333,34 @@ export default function ShopMerchPage() {
                   <Th>{t('merchAdmin.col.type')}</Th>
                   <Th>{t('merchAdmin.col.seller')}</Th>
                   <Th>{t('merchAdmin.col.dates')}</Th>
-                  <Th>{t('merchAdmin.col.position')}</Th>
+                  {wants('flash_sale') && <Th>{t('merchAdmin.col.discount')}</Th>}
+                  {wants('banner') && <Th>{t('merchAdmin.col.position')}</Th>}
                   <Th>{t('merchAdmin.col.status')}</Th>
-                  <Th>{t('merchAdmin.col.sent')}</Th>
+                  <Th>{t(kindsOn.banner && kindsOn.flash_sale ? 'merchAdmin.col.sentAny' : kindsOn.flash_sale ? 'merchAdmin.sale.colSent' : 'merchAdmin.col.sent')}</Th>
                 </Tr>
               </THead>
               <TBody>
-                {shown.map(b => {
+                {shown.map(r => {
+                  const b = itemOf(r);
                   const phase = phaseOf(b, now);
-                  const exp = expiryText(b);
-                  const open = () => go(`item=${encodeURIComponent(b.id)}`);
+                  const exp = expiryText(b, r.kind);
+                  const open = () => go(qItem(r));
                   return (
-                    <Tr key={b.id} tabIndex={0} onKeyDown={e => { if (e.key === 'Enter') open(); }} onClick={open} className="cursor-pointer hover:bg-[var(--color-bg-secondary)]" data-testid={`merch-row-${b.id}`}>
-                      <Td className="max-w-[20rem]">
+                    <Tr key={`${r.kind}-${r.id}`} tabIndex={0} onKeyDown={e => { if (e.key === 'Enter') open(); }} onClick={open} className="cursor-pointer hover:bg-[var(--color-bg-secondary)]" data-testid={`merch-row-${b.id}`}>
+                      <Td className="min-w-[14rem] max-w-[20rem]">
                         <span className="flex items-center gap-3">
-                          <Thumb banner={b} />
-                          <span className="min-w-0 font-medium [overflow-wrap:anywhere]">{headlineOf(b, locale) || '—'}</span>
+                          {thumb(r)}
+                          {/* One line with an ellipsis; the full name in the tooltip (QA1 #1: never broken mid-word). */}
+                          <span className="block min-w-0 truncate font-medium" title={titleOf(r)} data-testid={`merch-title-${b.id}`}>{titleOf(r)}</span>
                         </span>
                       </Td>
-                      <Td>{t('merchAdmin.type.banner')}</Td>
-                      <Td className="[overflow-wrap:anywhere]">{seller(b)}{b.sellerSuspended && <p className="text-xs text-[var(--color-warning-700)]">{t('merchAdmin.sellerSuspendedShort')}</p>}</Td>
-                      <Td className="whitespace-nowrap text-xs">{eatDateTime(b.startsAt, locale)}<br />→ {eatDateTime(b.endsAt, locale)}</Td>
-                      <Td className="tabular-nums">{b.position ?? '—'}</Td>
+                      <Td>{typeOf(r)}</Td>
+                      <Td className="min-w-[10rem] [overflow-wrap:break-word]" data-testid={`merch-seller-${b.id}`}>{seller(r)}{suspended(r) && <p className="text-xs text-[var(--color-warning-700)]">{t('merchAdmin.sellerSuspendedShort')}</p>}</Td>
+                      <Td className="whitespace-nowrap text-xs">{when(r, b.startsAt)}<br />→ {when(r, b.endsAt)}</Td>
+                      {wants('flash_sale') && <Td className="whitespace-nowrap tabular-nums" data-testid={`merch-discount-${b.id}`}>{discountOf(r)}</Td>}
+                      {wants('banner') && <Td className="tabular-nums">{r.kind === 'banner' ? r.b.position ?? '—' : '—'}</Td>}
                       <Td>
-                        <Badge tone={PHASE_TONE[phase]} dot>{t(PHASE_KEY[phase])}</Badge>
+                        <Badge tone={PHASE_TONE[phase]} dot>{t((r.kind === 'flash_sale' ? SALE_PHASE_KEY : PHASE_KEY)[phase])}</Badge>
                       </Td>
                       <Td className="text-xs">
                         <span className="whitespace-nowrap">{sentText(b) ?? '—'}</span>

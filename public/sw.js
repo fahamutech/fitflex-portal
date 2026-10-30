@@ -1,4 +1,4 @@
-const CACHE_NAME = 'fitflex-portal-v2';
+const CACHE_NAME = 'fitflex-portal-v3';
 const APP_SHELL = [
   '/',
   '/login/',
@@ -31,6 +31,12 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('fetch', (event) => {
   const { request } = event;
   const url = new URL(request.url);
+
+  // The public gym page and the browser check-in screens (/g, /g/*) carry a signed gym code and sign-in state: they are
+  // never read from or written to Cache Storage, and neither is any address with a query string. The browser handles them.
+  if (url.pathname === '/g' || url.pathname.startsWith('/g/') || url.search) {
+    return;
+  }
 
   if (
     request.method !== 'GET' ||

@@ -781,7 +781,11 @@ export const api = {
     request<{ employee: CorporateEmployee }>('/corporate/staff', { method: 'POST', body: JSON.stringify(body) }, token),
   setCorporateStaffStatus: (token: string, employeeId: string, status: string) =>
     request<{ employee: CorporateEmployee }>(`/corporate/staff/${encodeURIComponent(employeeId)}/status`, { method: 'POST', body: JSON.stringify({ status }) }, token),
-  /** Link an employee to their FitFlex member account (by email, mobile number or user id); `null` unlinks. */
+  /**
+   * Link an employee to their FitFlex member account (by email, mobile number or user id); `null` unlinks (and
+   * withdraws an open link request). HR only asks: 202 pending_member_acceptance, by contact the same reply
+   * whoever is behind it (functions#283); a FitFlex admin links directly.
+   */
   linkCorporateStaff: (token: string, employeeId: string, contact: UserContact | null) =>
     request<{ employee: CorporateEmployee; unchanged?: boolean } | PendingMemberAcceptance>(`/corporate/staff/${encodeURIComponent(employeeId)}/link`, { method: 'POST', body: JSON.stringify(contact ?? { userId: null }) }, token),
   /** HR sign-in: email + password (not Firebase). */
@@ -814,7 +818,7 @@ export const api = {
     request<{ organization: B2BOrganization }>(`/admin/b2b/organizations/${encodeURIComponent(id)}/status`, { method: 'POST', body: JSON.stringify({ status, reason }) }, token),
   syncCorporateOrganizations: (token: string) =>
     request<{ created: number; existing: number }>('/admin/b2b/corporate-sync', { method: 'POST' }, token),
-  /** pendingMemberAcceptance: adds by user id the member has not accepted yet (absent on an older API). */
+  /** pendingMemberAcceptance: adds by user id, email or number the member has not accepted yet (absent on an older API). */
   b2bOrganizationUsers: (token: string, id: string, params: { status?: string; limit?: number } = {}) =>
     request<Paged<B2BOrganizationUser> & { pendingMemberAcceptance?: B2BMemberRequest[] }>(`/b2b/organizations/${encodeURIComponent(id)}/users${qs(params)}`, {}, token),
   addB2BOrganizationUser: (token: string, id: string, body: UserContact & { role: string; permissions?: string[] }) =>
@@ -823,7 +827,10 @@ export const api = {
     request<{ organizationUser: B2BOrganizationUser }>(`/b2b/organizations/${encodeURIComponent(id)}/users/${encodeURIComponent(orgUserId)}`, { method: 'PUT', body: JSON.stringify(body) }, token),
   b2bBeneficiaries: (token: string, id: string, params: { status?: string; search?: string; limit?: number } = {}) =>
     request<Paged<B2BBeneficiary> & { pendingMemberAcceptance?: B2BMemberRequest[] }>(`/b2b/organizations/${encodeURIComponent(id)}/beneficiaries${qs(params)}`, {}, token),
-  /** Withdraw an add by user id the member has not answered (beneficiaries.manage / users.manage, by kind). */
+  /**
+   * Withdraw an add by user id, email or number shown as waiting (beneficiaries.manage / users.manage, by kind).
+   * Not for staff links (employee_link: 404); those are withdrawn by unlinking the staff record.
+   */
   cancelB2BMemberRequest: (token: string, id: string, requestId: string) =>
     request<{ memberRequest: B2BMemberRequest }>(`/b2b/organizations/${encodeURIComponent(id)}/member-requests/${encodeURIComponent(requestId)}`, { method: 'DELETE' }, token),
   // Programme lifecycle: how long each has left, and its renewal.
@@ -832,7 +839,8 @@ export const api = {
   prepareB2BProgramRenewal: (token: string, id: string, programId: string) =>
     request<{ program: B2BProgram; existing?: boolean; benefits: B2BBenefit[]; skipped: Array<{ name: string; reason: string }>; discountNotCarriedOver?: boolean }>(
       `/b2b/organizations/${encodeURIComponent(id)}/programs/${encodeURIComponent(programId)}/renewal`, { method: 'POST', body: '{}' }, token),
-  // Many people at once; those who have not joined FitFlex yet are invited.
+  // Many people at once (functions#283): nobody is enrolled by an import (`enrolled` is always 0 for a non-company
+  // organisation); everyone new is invited, and anyone already on FitFlex is asked in the app.
   importB2BBeneficiaries: (token: string, id: string, body: { rawText: string; dryRun?: boolean }) =>
     request<B2BImportResult>(`/b2b/organizations/${encodeURIComponent(id)}/beneficiaries/import`, { method: 'POST', body: JSON.stringify(body) }, token),
   b2bBeneficiaryInvites: (token: string, id: string) =>
@@ -841,7 +849,8 @@ export const api = {
     request<{ invite: B2BBeneficiaryInvite }>(`/b2b/organizations/${encodeURIComponent(id)}/beneficiary-invites/${encodeURIComponent(inviteId)}/cancel`, { method: 'POST', body: '{}' }, token),
   resendB2BBeneficiaryInvite: (token: string, id: string, inviteId: string) =>
     request<{ invite: B2BBeneficiaryInvite; sent: { email: boolean; sms: boolean }; emailConfigured: boolean; smsConfigured: boolean }>(`/b2b/organizations/${encodeURIComponent(id)}/beneficiary-invites/${encodeURIComponent(inviteId)}/resend`, { method: 'POST', body: '{}' }, token),
-  // Organisations: by userId (org users) the member is asked first: 202 pending_member_acceptance (fitflex-functions#241).
+  // Organisations: by userId, email or number (org users) the member is asked first: 202 pending_member_acceptance
+  // (fitflex-functions#241, #283). By email/number the reply is the same whoever is behind the contact.
   // A company's organisation with ORG_ONLY_SPONSORS on (B5a, functions#252): org roles hr/admin; displayName required;
   // written through to its staff list with an activation PIN (shown once). Name only → 201 { beneficiary, pin };
   // also named by userId/email/phone → 202 pending_member_acceptance with the unlinked beneficiary and the PIN.
@@ -2345,8 +2354,9 @@ export interface VendorTools {
   stockLedger?: boolean;
   buyerContact?: boolean;
   canSeeCost?: boolean;
-  /** Shop banners (SHOP_BANNERS): merch.banners. When absent the portal asks GET /vendor/shop-banners once. */
-  merch?: { banners?: boolean };
+  /** Shop banners (SHOP_BANNERS): merch.banners; flash sales (SHOP_FLASH_SALES): merch.flashSales. When absent the
+   *  portal asks GET /vendor/shop-banners or GET /vendor/flash-sales once. */
+  merch?: { banners?: boolean; flashSales?: boolean };
   /** S5 (VENDOR_DOCUMENTS): share links, PDF, the document view and order invoices. Missing = off. */
   documents?: boolean;
   /** S5 (VENDOR_VAT): tax details, VAT codes and VAT on documents. Missing = off. */
@@ -2362,6 +2372,8 @@ export interface VendorTools {
 
 export interface VendorProduct extends ShopProduct {
   variants?: ProductVariant[];
+  /** SHOP_FLASH_SALES: present while an approved sale of this product is scheduled or live (price and discount locked). */
+  priceLock?: { saleId: string; startsAt: string; endsAt: string; effectiveStatus?: string } | null;
 }
 
 export interface LowStockRow { productId: string; name: string; variant: string | null; stock: number; reorderLevel: number }
@@ -3042,22 +3054,34 @@ export interface CorporateEmployee {
   /** Their FitFlex member account, once linked; benefits only work for a linked employee. */
   userId?: string | null;
   status: string;
-  /** A link by user id the member has not accepted yet (fitflex-functions#241); null or absent when none. */
+  /**
+   * A link the member has not accepted yet (fitflex-functions#241); null or absent when none. By email or
+   * number (functions#283) it has userId null and carries the contact HR typed instead.
+   */
   pendingLink?: B2BMemberRequest | null;
 }
 /**
- * An add by user id waiting for the member to accept in the app (fitflex-functions#241). The organisation's
- * view: never the member's contact details.
+ * An add waiting for the member to accept in the app: by user id (fitflex-functions#241) or by email or
+ * mobile number (consent slice (a), functions#283). The organisation's view: never who is behind it.
  */
 export interface B2BMemberRequest {
-  /** null when nothing was stored (unknown id or not a member): the answer looks the same on purpose. */
+  /**
+   * null when nothing was stored (an unknown user id or not a member): the answer looks the same on purpose.
+   * Always set for a request by email or number (stored whoever is behind the contact).
+   */
   id: string | null;
   kind: 'beneficiary' | 'org_user' | 'employee_link';
+  /** How the person was named (absent on an older API: by user id). 'invite' requests are never listed to the organisation. */
+  source?: 'user_id' | 'contact' | 'invite';
   status: 'pending_member_acceptance' | 'accepted' | 'declined' | 'expired' | 'cancelled';
   organizationId: string | null;
   corporateId: string | null;
   employeeId: string | null;
-  userId: string;
+  /** The user ID the organisation typed; null for a request by email or number until the member accepts. */
+  userId: string | null;
+  /** By email or number: which, and the value the organisation typed (null otherwise). */
+  contactType?: 'email' | 'phone' | null;
+  contact?: string | null;
   /** null until the member accepts: the organisation never learns who the id belongs to before that. */
   displayName: string | null;
   role: string | null;
@@ -3073,7 +3097,7 @@ export interface B2BMemberRequest {
 }
 /** B5a: what a company staff write-through adds to a reply (functions#252): the activation PIN, shown once. */
 export type CompanyStaffWrite = { pin?: string | null; writtenThrough?: 'corporate_staff' };
-/** 202 answer to an add by user id: nobody is added until the member accepts. */
+/** 202 answer to an add by user id, email or number: nobody is added until the member accepts. */
 export type PendingMemberAcceptance = { outcome: 'pending_member_acceptance'; memberRequest: B2BMemberRequest };
 /** True when an add answered "request sent" rather than "added" (older backends never do). */
 export function isPendingMemberAcceptance(r: unknown): r is PendingMemberAcceptance {
