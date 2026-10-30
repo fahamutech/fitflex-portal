@@ -1,9 +1,10 @@
 // Events S6 API client (spec events-s6-runs-results-medals-rewards §6, §7.7, §8.1, §8.2). Kept out of api.ts so the slice does not
 // overlap other open api.ts changes. Every write carries an `Idempotency-Key` (8 to 100 chars, §8.1) and never a user id.
 import { API_BASE, ApiError, IDENTITY_V2_CLIENT, notifyUnauthorized, qs, request } from '@/lib/api';
+import { flattenDetail } from '@/lib/events-results';
 import type {
   AdminMedalArt, ArtTakedownReason, AwardTask, BulkPreview, DisputeRow, ImportPreview, ImportRecord, LedgerRow, MedalTemplate, RedemptionHit, ReleasePreview,
-  ResultDetail, ResultsPage, ResultsSettings, ResultsSummary, RewardDefinition, RewardSummaryRow, SourceType, TimeBasis,
+  ArtConfirmation, ResultDetail, ResultDetailWire, ResultsPage, ResultsSettings, ResultsSummary, RewardDefinition, RewardSummaryRow, SourceType, TimeBasis,
 } from '@/lib/events-results';
 
 const ev = (eventId: string) => `/organizer/events/${encodeURIComponent(eventId)}`;
@@ -20,10 +21,12 @@ export const resultsApi = {
   summary: (token: string, eventId: string) => request<ResultsSummary>(`${ev(eventId)}/results/summary`, {}, token),
   results: (token: string, eventId: string, q: { categoryId?: string; status?: string; q?: string; flag?: string; cursor?: string | null; limit?: number } = {}) =>
     request<ResultsPage>(`${ev(eventId)}/results${qs(q)}`, {}, token),
-  detail: (token: string, eventId: string, registrationId: string) => request<ResultDetail>(`${ev(eventId)}/results/${encodeURIComponent(registrationId)}`, {}, token),
+  /** The server answers `{ result, revisions, linkedRun, disputes }`; the page works with the flattened view. */
+  detail: async (token: string, eventId: string, registrationId: string): Promise<ResultDetail> =>
+    flattenDetail(await request<ResultDetailWire>(`${ev(eventId)}/results/${encodeURIComponent(registrationId)}`, {}, token)),
   previewImport: (token: string, eventId: string, body: { csv: string; sourceType: SourceType; sourceLabel?: string; timeBasis?: TimeBasis }) =>
     request<ImportPreview>(`${ev(eventId)}/results/imports/preview`, { method: 'POST', body: JSON.stringify(body) }, token),
-  applyImport: (token: string, eventId: string, body: { csv: string; previewHash: string; sourceType: SourceType; sourceLabel?: string; timeBasis?: TimeBasis }, key: string) =>
+  applyImport: (token: string, eventId: string, body: { csv: string; previewHash: string; sourceType: SourceType; sourceLabel?: string; timeBasis?: TimeBasis; fileName?: string }, key: string) =>
     post<Record<string, unknown>>(token, `${ev(eventId)}/results/imports`, body, key),
   imports: (token: string, eventId: string, cursor?: string | null) => request<Page<ImportRecord>>(`${ev(eventId)}/results/imports${qs({ cursor })}`, {}, token),
   enterResult: (token: string, eventId: string, registrationId: string, body: { finishStatus: string; netTime?: string; gunTime?: string; sourceLabel?: string; reason?: string }, key: string) =>
@@ -34,7 +37,7 @@ export const resultsApi = {
     post<Record<string, unknown>>(token, `${ev(eventId)}/results/${encodeURIComponent(resultId)}/reject`, body, key),
   correct: (token: string, eventId: string, resultId: string, body: { expectedRevision: number; netTime?: string; gunTime?: string; finishStatus?: string; reasonCode: string; note: string }, key: string) =>
     post<Record<string, unknown>>(token, `${ev(eventId)}/results/${encodeURIComponent(resultId)}/correct`, body, key),
-  disqualify: (token: string, eventId: string, resultId: string, body: { expectedRevision: number; reasonCode: string; note: string }, key: string) =>
+  disqualify: (token: string, eventId: string, resultId: string, body: { expectedRevision: number; reasonCode: string; note?: string }, key: string) =>
     post<Record<string, unknown>>(token, `${ev(eventId)}/results/${encodeURIComponent(resultId)}/disqualify`, body, key),
   previewBulk: (token: string, eventId: string, body: { categoryId?: string; filter: 'pending_clean' }) =>
     request<BulkPreview>(`${ev(eventId)}/results/verify-bulk/preview`, { method: 'POST', body: JSON.stringify(body) }, token),
@@ -53,7 +56,7 @@ export const resultsApi = {
     request<unknown>(`${ev(eventId)}/results-settings`, { method: 'PATCH', body: JSON.stringify(body), headers: idem(key) }, token),
 
   // ── Medal templates (§7.1) ──
-  medalTemplates: (token: string, eventId: string) => request<Page<MedalTemplate> | MedalTemplate[]>(`${ev(eventId)}/medal-templates`, {}, token),
+  medalTemplates: (token: string, eventId: string) => request<Page<MedalTemplate> & { artConfirmation?: ArtConfirmation; builtInArt?: string[] }>(`${ev(eventId)}/medal-templates`, {}, token),
   createMedalTemplate: (token: string, eventId: string, body: Record<string, unknown>, key: string) =>
     post<MedalTemplate>(token, `${ev(eventId)}/medal-templates`, body, key),
   updateMedalTemplate: (token: string, eventId: string, templateId: string, body: Record<string, unknown>, key: string) =>
@@ -62,8 +65,8 @@ export const resultsApi = {
     request<{ wouldReceive?: number; count?: number }>(`${ev(eventId)}/medal-templates/${encodeURIComponent(templateId)}/preview`, {}, token),
 
   // ── Medal art (§7.7). The body is the raw image; the rights confirmation travels as a query parameter ──
-  uploadArt: async (token: string, eventId: string, templateId: string, file: Blob, opts: { key: string; confirmationVersion: string; signal?: AbortSignal }): Promise<{ art: AdminMedalArt }> => {
-    const res = await fetch(`${API_BASE}${ev(eventId)}/medal-templates/${encodeURIComponent(templateId)}/art${qs({ confirmationVersion: opts.confirmationVersion })}`, {
+  uploadArt: async (token: string, eventId: string, templateId: string, file: Blob, opts: { key: string; confirmationVersion: string; altEn?: string; altSw?: string; signal?: AbortSignal }): Promise<{ art: AdminMedalArt }> => {
+    const res = await fetch(`${API_BASE}${ev(eventId)}/medal-templates/${encodeURIComponent(templateId)}/art${qs({ confirmationVersion: opts.confirmationVersion, altEn: opts.altEn, altSw: opts.altSw })}`, {
       method: 'POST', body: file, signal: opts.signal, cache: 'no-store',
       headers: { authorization: `Bearer ${token}`, 'x-fitflex-client': IDENTITY_V2_CLIENT, 'content-type': file.type || 'application/octet-stream', ...idem(opts.key) },
     });
@@ -92,7 +95,7 @@ export const resultsApi = {
   adminDisqualify: (token: string, eventId: string, resultId: string, body: { expectedRevision: number; reasonCode: string; note: string }, key: string) =>
     post<Record<string, unknown>>(token, `/admin/events/${encodeURIComponent(eventId)}/results/${encodeURIComponent(resultId)}/disqualify`, body, key),
   medalArtQueue: (token: string, q: { reviewState?: string; status?: string; cursor?: string | null } = {}) =>
-    request<Page<AdminMedalArt>>(`/admin/medal-art${qs(q)}`, {}, token),
+    request<Page<AdminMedalArt> & { toReview?: number }>(`/admin/medal-art${qs(q)}`, {}, token),
   medalArtPreviewPath: (id: string, w: 240 | 480) => `/admin/medal-art/${encodeURIComponent(id)}/preview?w=${w}`,
   medalArtReviewed: (token: string, id: string, key: string) => post<unknown>(token, `/admin/medal-art/${encodeURIComponent(id)}/reviewed`, {}, key),
   medalArtTakeDown: (token: string, id: string, body: { reason: ArtTakedownReason; note?: string }, key: string) =>
@@ -101,10 +104,10 @@ export const resultsApi = {
   createRewardDefinition: (token: string, body: Record<string, unknown>, key: string) => post<RewardDefinition>(token, '/admin/reward-definitions', body, key),
   updateRewardDefinition: (token: string, id: string, body: Record<string, unknown>, key: string) =>
     request<RewardDefinition>(`/admin/reward-definitions/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(body), headers: idem(key) }, token),
-  rewardAction: (token: string, id: string, action: 'pause' | 'end', key: string) => post<unknown>(token, `/admin/reward-definitions/${encodeURIComponent(id)}/${action}`, {}, key),
+  rewardAction: (token: string, id: string, action: 'activate' | 'pause' | 'end', key: string) => post<unknown>(token, `/admin/reward-definitions/${encodeURIComponent(id)}/${action}`, {}, key),
   rewardLedger: (token: string, q: { userId?: string; definitionId?: string; entryType?: string; cursor?: string | null } = {}) => request<Page<LedgerRow>>(`/admin/reward-ledger${qs(q)}`, {}, token),
-  rewardSummary: (token: string) => request<{ items?: RewardSummaryRow[]; mostEarned?: Array<{ userId: string; count: number }> } | RewardSummaryRow[]>('/admin/reward-summary', {}, token),
-  lookupRedemption: (token: string, code: string) => post<{ redemption?: RedemptionHit } & Partial<RedemptionHit>>(token, '/admin/reward-redemptions/lookup', { code }, `lookup-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`),
+  rewardSummary: (token: string) => request<{ items?: RewardSummaryRow[]; mostEarnedThisWeek?: Array<{ userId: string; count: number }> }>('/admin/reward-summary', {}, token),
+  lookupRedemption: (token: string, code: string) => post<{ redemption: RedemptionHit }>(token, '/admin/reward-redemptions/lookup', { code }, `lookup-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`),
   redeem: (token: string, id: string, note: string | undefined, key: string) => post<unknown>(token, `/admin/reward-redemptions/${encodeURIComponent(id)}/redeem`, note ? { note } : {}, key),
   cancelRedemption: (token: string, id: string, key: string) => post<unknown>(token, `/admin/reward-redemptions/${encodeURIComponent(id)}/cancel`, {}, key),
   awardTasks: (token: string, state = 'failed') => request<Page<AwardTask>>(`/admin/event-award-tasks${qs({ state })}`, {}, token),

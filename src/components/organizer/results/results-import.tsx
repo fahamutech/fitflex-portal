@@ -68,7 +68,7 @@ export function ResultsImport({ doc, role, readOnly, summary, onApplied, go }: P
     if (!token || !file || !preview) return;
     setApplying(true); err.clear();
     try {
-      await resultsApi.applyImport(token, doc.id, { ...body(), previewHash: preview.previewHash }, key.current);
+      await resultsApi.applyImport(token, doc.id, { ...body(), previewHash: preview.previewHash, fileName: file.name }, key.current);
       const text = fmt(t('organizer.results.import.done'), { n: willAdd });
       setDone(text); toast.success(text);
       if (live.current) live.current.textContent = text;
@@ -98,7 +98,7 @@ export function ResultsImport({ doc, role, readOnly, summary, onApplied, go }: P
       {done && (
         <div className="flex flex-wrap items-center gap-3 rounded-[var(--radius-lg)] bg-[var(--color-success-50)] p-4 text-sm text-[var(--color-success-800)]" data-testid="import-done">
           <p ref={summaryRef} tabIndex={-1} className="font-medium outline-none">{done}</p>
-          <Button variant="secondary" size="sm" onClick={() => go('results', { status: 'pending_verification' })} data-testid="import-review">{t('organizer.results.import.review')}</Button>
+          <Button variant="secondary" size="sm" onClick={() => go('results', { status: 'needs_review' })} data-testid="import-review">{t('organizer.results.import.review')}</Button>
         </div>
       )}
       {writable && (

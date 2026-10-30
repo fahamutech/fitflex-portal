@@ -53,14 +53,21 @@ export interface ResultRow {
   overallRank?: number | null; categoryRank?: number | null; withinCutoff?: boolean | null; flags?: string[]; disputeOpen?: boolean; updatedAt?: string | null;
 }
 export interface ResultsPage { items: ResultRow[]; nextCursor?: string | null; counts?: Record<string, number> }
-export interface ResultRevision { revision: number; finishStatus?: FinishStatus | null; verificationStatus?: VerificationStatus | null; netElapsedMs?: number | null; gunElapsedMs?: number | null; sourceType?: SourceType | null; reasonCode?: string | null; by?: { name?: string | null } | null; at?: string | null }
+export interface ResultRevision { note?: string | null; revision: number; finishStatus?: FinishStatus | null; verificationStatus?: VerificationStatus | null; netElapsedMs?: number | null; gunElapsedMs?: number | null; sourceType?: SourceType | null; reasonCode?: string | null; by?: { name?: string | null } | null; at?: string | null }
 export interface DisputeRow {
   id: string; registrationId?: string; resultId?: string; bibNumber?: string | null; displayName?: string | null; reasonCode: string; note?: string | null;
   status: 'open' | 'upheld' | 'rejected' | 'withdrawn'; createdAt?: string | null; windowEndsAt?: string | null; resolutionNote?: string | null; resolvedAt?: string | null;
 }
+/** The page's flat view of `GET …/results/:registrationId`, which the server answers NESTED: `{ result: Row, revisions, linkedRun, disputes }`. */
 export interface ResultDetail extends ResultRow {
-  revisions?: ResultRevision[]; linkedRun?: { distanceMeters?: number | null; elapsedMs?: number | null; checks?: Record<string, number | string | null>; flags?: string[] } | null;
-  disputes?: DisputeRow[]; note?: string | null; correctionNote?: string | null;
+  revisions?: ResultRevision[]; linkedRun?: { distanceMeters?: number | null; elapsedMs?: number | null; movingSeconds?: number | null; checks?: Record<string, number | string | null>; flags?: string[] } | null;
+  disputes?: DisputeRow[];
+}
+export interface ResultDetailWire { result?: ResultRow; revisions?: ResultRevision[]; linkedRun?: ResultDetail['linkedRun']; disputes?: DisputeRow[] }
+/** Unwrap the nested answer (a flat row is still read, so a shape drift degrades instead of breaking). */
+export function flattenDetail(w: ResultDetailWire & Partial<ResultRow>): ResultDetail {
+  const { result, revisions, linkedRun, disputes, ...flat } = w;
+  return { ...(result ?? (flat as ResultRow)), revisions: revisions ?? [], linkedRun: linkedRun ?? null, disputes: disputes ?? [] } as ResultDetail;
 }
 export interface ImportProblem { line: number; bib?: string | null; code: string; message?: string }
 export interface ImportPreview {
@@ -84,7 +91,9 @@ export function defaultArtKey(tier: string | null | undefined, virtual = false):
   return tier === 'finisher' ? 'finisher_green' : tier === 'gold' ? 'podium_gold' : tier === 'silver' ? 'podium_silver' : tier === 'bronze' ? 'podium_bronze' : tier === 'time' ? 'time_blue' : 'finisher_gold';
 }
 export type MedalRule = { type: 'finish' } | { type: 'placing'; scope: 'category' | 'overall'; top: number } | { type: 'time_under'; maxElapsedMs: number };
-export interface MedalArtInfo { source?: 'custom' | 'builtin'; artId?: string | null; revision?: number | null; artKey?: string | null; altText?: { en?: string; sw?: string } | null; status?: string | null; takedownReason?: string | null }
+export interface MedalArtInfo { source?: 'custom' | 'builtin'; artId?: string | null; revision?: number | null; artKey?: string | null; altText?: { en?: string; sw?: string } | null }
+/** `artConfirmation` of GET medal-templates: the CURRENT rights text and its version. */
+export interface ArtConfirmation { version: string; status?: string; en?: string; sw?: string }
 export interface MedalTemplate {
   id: string; name: { en?: string; sw?: string }; description?: { en?: string; sw?: string } | null; tier: MedalTier; categoryId?: string | null; rule: MedalRule;
   status?: 'active' | 'inactive'; locked?: boolean; sortOrder?: number; awardedCount?: number; art?: MedalArtInfo | null;
@@ -94,7 +103,7 @@ export type ArtTakedownReason = (typeof ART_TAKEDOWN_REASONS)[number];
 export interface AdminMedalArt {
   id: string; templateId?: string; eventId?: string; eventTitle?: string | null; organizerId?: string; organizerName?: string | null; categoryName?: string | null; tier?: MedalTier | null;
   status: 'live' | 'replaced' | 'removed' | 'taken_down'; reviewState: 'to_review' | 'reviewed'; altText?: { en?: string; sw?: string } | null; confirmedAt?: string | null;
-  confirmedByName?: string | null; takedownReason?: string | null; takedownsLast30Days?: number | null; createdAt?: string | null; revision?: number | null;
+  confirmationVersion?: string | null; organizerTakedowns30d?: number | null; highlightOrganizer?: boolean; takedownReason?: string | null; createdAt?: string | null; revision?: number | null;
 }
 export const ART_MAX_BYTES = 2 * 1024 * 1024;
 export const ART_MIN_SIDE = 512;
@@ -107,18 +116,23 @@ export type RewardStatus = 'draft' | 'active' | 'paused' | 'ended';
 export interface RewardDefinition {
   id: string; title: { en?: string; sw?: string }; terms?: { en?: string; sw?: string }; triggerType: RewardTrigger; triggerEventId?: string | null; triggerRef?: string | null;
   redeemMode: 'certificate' | 'perk'; reversalPolicy?: 'revoke_unredeemed' | 'revoke_all'; capTotal?: number | null; capPerUser?: number | null; capUsed?: number | null;
-  startsAt?: string | null; endsAt?: string | null; expiryDays?: number | null; fundingNote?: string | null; valueTzs?: number | null; status: RewardStatus; issuer?: string;
+  startsAt?: string | null; endsAt?: string | null; expiryDays?: number | null; fundingNote?: string | null; valueTzs?: number | null; status: RewardStatus; issuerType?: string;
 }
 export interface RewardSummaryRow { definitionId: string; title?: { en?: string; sw?: string }; earned?: number; redeemed?: number; expired?: number; reversed?: number; capUsed?: number; needsReview?: number }
-export interface LedgerRow { id: string; entryType: string; rewardDefinitionId?: string; titleOf?: { en?: string; sw?: string } | string | null; units?: number; sourceType?: string | null; displayName?: string | null; userId?: string | null; occurredAt?: string | null; reversesEntryId?: string | null }
-export interface RedemptionHit { id: string; rewardTitle?: { en?: string; sw?: string }; displayName?: string | null; status: string; expiresAt?: string | null; redeemedAt?: string | null; needsReview?: boolean }
+export interface LedgerRow { id: string; entryType: string; definitionId?: string; titleOf?: { en?: string; sw?: string } | string | null; units?: number; sourceType?: string | null; member?: string | null; anonymised?: boolean; userId?: string | null; occurredAt?: string | null; reverses?: string | { id?: string } | null }
+export interface RedemptionHit { id: string; definitionId?: string; title?: { en?: string; sw?: string }; member?: string | null; status: string; expiresAt?: string | null; redeemedAt?: string | null; needsReview?: boolean }
 export interface AwardTask { id: string; eventId?: string; reason?: string; state: string; attempts?: number; lastError?: string | null; createdAt?: string | null }
 export const REWARD_TRIGGERS: RewardTrigger[] = ['event_finish', 'medal', 'achievement'];
 export const ACHIEVEMENT_KEYS = ['first_event_finish', 'first_10k_finish', 'half_marathon_finish', 'marathon_finish', 'three_events_year'] as const;
 
 // ── Reason codes (§6.3, §6.6, §6.7) ──
 export const REJECT_REASONS = ['not_a_valid_run', 'data_error', 'duplicate', 'other'] as const;
-export const CORRECT_REASONS = ['timing_error', 'wrong_bib', 'late_data', 'other'] as const;
+export const CORRECT_REASONS = ['timing_error', 'wrong_bib', 'late_finish_data', 'other'] as const;
+/** events-results-rules.mjs: the closed disqualification list (the organizer picks one). */
+export const DQ_REASONS = ['rule_violation', 'course_cut', 'wrong_category', 'equipment', 'identity', 'virtual_evidence', 'other'] as const;
+/** Every reason code the server can return on a revision (adds the system one). */
+export const ALL_REASONS = Array.from(new Set<string>([...REJECT_REASONS, ...CORRECT_REASONS, ...DQ_REASONS, 'replaced_by_participant']));
+export const reasonKey = (code: string | null | undefined): MessageKey => knownKey(`organizer.results.reason.${code}`, 'organizer.results.reason.other');
 export const DISPUTE_REASONS = ['time_wrong', 'not_my_result', 'wrong_category', 'missing_split', 'dq_challenge', 'other'] as const;
 export const RESULT_FLAGS = ['implausible_pace', 'many_dropped_points', 'long_gap', 'duplicate_route'] as const;
 export const flagKey = (f: string): MessageKey => ((RESULT_FLAGS as readonly string[]).includes(f) ? `organizer.results.flag.${f}` : 'organizer.results.flag.other') as MessageKey;
@@ -181,6 +195,8 @@ const ERROR_CODES = [
   'scope_not_available', 'insufficient_scope', 'confirmation_outdated', 'file_not_allowed', 'svg_not_allowed', 'unsupported_file_type', 'animated_not_allowed', 'corrupt_image',
   'image_too_small', 'not_square', 'busy', 'acl_forbidden', 'invalid_transition', 'art_not_found', 'template_not_found', 'definition_not_found', 'redemption_not_found', 'code_not_found',
   'already_redeemed', 'already_taken_down', 'task_not_found',
+  'unsettled_results', 'import_has_errors', 'no_results', 'no_change', 'nothing_to_withdraw', 'definition_locked', 'definition_ended', 'organizer_can_resolve', 'query_too_short',
+  'correction_required', 'dispute_closed', 'raw_body_required', 'no_file_provided', 'image_too_large', 'category_not_found', 'issuer_not_allowed', 'event_cancelled',
 ] as const;
 export const RESULTS_ERRORS: Record<string, MessageKey> = Object.fromEntries(ERROR_CODES.map(c => [c, E(c)]));
 /** The sentence for a refusal: the S6 map first, then the shared events map, else the generic one. */
@@ -189,13 +205,13 @@ export function resultsErrorKey(err: unknown): MessageKey {
   return (code && RESULTS_ERRORS[code]) || errorKey(err);
 }
 /** Import problem code to key (§6.2); unknown codes get a generic sentence, never a raw code. */
-export const PROBLEM_CODES = ['bib_not_found', 'bib_duplicate_in_file', 'registration_not_confirmed', 'category_mismatch', 'time_missing_for_finisher', 'time_invalid', 'time_out_of_range', 'status_invalid', 'already_official', 'event_not_open_for_results'] as const;
+export const PROBLEM_CODES = ['bib_invalid', 'not_submitted', 'bib_not_found', 'bib_duplicate_in_file', 'registration_not_confirmed', 'category_mismatch', 'time_missing_for_finisher', 'time_invalid', 'time_out_of_range', 'status_invalid', 'already_official', 'event_not_open_for_results'] as const;
 export const WARNING_CODES = ['rank_ignored', 'kit_not_collected', 'over_cutoff', 'time_basis_missing'] as const;
 export const problemKey = (code: string): MessageKey => ((PROBLEM_CODES as readonly string[]).includes(code) ? `organizer.results.problem.${code}` : 'organizer.results.problem.other') as MessageKey;
 export const warningKey = (code: string): MessageKey => ((WARNING_CODES as readonly string[]).includes(code) ? `organizer.results.warn.${code}` : 'organizer.results.warn.other') as MessageKey;
 export const artErrorKey = (err: unknown): MessageKey => {
   const code = errorCode(err);
-  return (code && ['svg_not_allowed', 'unsupported_file_type', 'animated_not_allowed', 'corrupt_image', 'payload_too_large', 'image_too_small', 'not_square', 'file_not_allowed', 'rate_limited', 'busy'].includes(code)
+  return (code && ['svg_not_allowed', 'unsupported_file_type', 'animated_not_allowed', 'corrupt_image', 'payload_too_large', 'image_too_large', 'image_too_small', 'not_square', 'file_not_allowed', 'rate_limited', 'busy', 'confirmation_outdated', 'no_file_provided', 'raw_body_required'].includes(code)
     ? `organizer.results.art.error.${code}` : resultsErrorKey(err)) as MessageKey;
 };
 export const retryAfterOf = (err: unknown): number | null => {

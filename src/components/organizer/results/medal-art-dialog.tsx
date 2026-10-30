@@ -6,7 +6,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { errorCode } from '@/lib/events';
 import { newIdempotencyKey } from '@/lib/events-ops';
 import { MEDAL_ART_CONFIRMATION_VERSION, resultsApi } from '@/lib/events-results-api';
-import { ART_MAX_BYTES, ART_MIN_SIDE, ART_OUTPUT_SIDE, ART_TYPES, artErrorKey, retryAfterOf, type MedalTemplate } from '@/lib/events-results';
+import { ART_MAX_BYTES, ART_MIN_SIDE, ART_OUTPUT_SIDE, ART_TYPES, artErrorKey, retryAfterOf, type ArtConfirmation, type MedalTemplate } from '@/lib/events-results';
 import { fmt } from '@/lib/events';
 import type { MessageKey } from '@/lib/i18n';
 import { Alert, Button, Checkbox, Field, Input, useToast } from '@/components/shared';
@@ -34,10 +34,10 @@ async function encodeCrop(img: HTMLImageElement, crop: { sx: number; sy: number;
   return null;
 }
 
-export function MedalArtDialog({ open, onClose, eventId, template, medalName, onDone }: {
-  open: boolean; onClose: () => void; eventId: string; template: MedalTemplate | null; medalName: string; onDone: () => void;
+export function MedalArtDialog({ open, onClose, eventId, template, medalName, onDone, confirmation }: {
+  confirmation?: ArtConfirmation | null; open: boolean; onClose: () => void; eventId: string; template: MedalTemplate | null; medalName: string; onDone: () => void;
 }) {
-  const { t, token } = useApp();
+  const { t, token, locale } = useApp();
   const toast = useToast();
   const [src, setSrc] = useState<string | null>(null);
   const [error, setError] = useState<{ key: MessageKey; wait?: number | null } | null>(null);
@@ -113,11 +113,9 @@ export function MedalArtDialog({ open, onClose, eventId, template, medalName, on
         prepared.current = { sig, blob, key: newIdempotencyKey() };
       }
       abort.current = new AbortController();
-      await resultsApi.uploadArt(token, eventId, template.id, prepared.current.blob, { key: prepared.current.key, confirmationVersion: MEDAL_ART_CONFIRMATION_VERSION, signal: abort.current.signal });
-      if (altEn.trim() || altSw.trim()) {
-        try { await resultsApi.setArtAlt(token, eventId, template.id, { ...(altEn.trim() ? { en: altEn.trim() } : {}), ...(altSw.trim() ? { sw: altSw.trim() } : {}) }, newIdempotencyKey()); }
-        catch { toast.error(t('organizer.results.art.altFailed')); }
-      }
+      await resultsApi.uploadArt(token, eventId, template.id, prepared.current.blob, {
+        key: prepared.current.key, confirmationVersion: confirmation?.version ?? MEDAL_ART_CONFIRMATION_VERSION, altEn: altEn.trim() || undefined, altSw: altSw.trim() || undefined, signal: abort.current.signal,
+      });
       toast.success(t('organizer.results.art.liveNow'));
       onDone();
     } catch (err) {
@@ -162,7 +160,7 @@ export function MedalArtDialog({ open, onClose, eventId, template, medalName, on
           <Field label={`${t('organizer.results.art.alt')} (SW)`} hint="≤ 120"><Input maxLength={120} value={altSw} onChange={e => setAltSw(e.target.value)} data-testid="art-alt-sw" /></Field>
         </div>
         <p className="text-sm text-[var(--color-fg-secondary)]" data-testid="art-notice">{t('organizer.results.art.notice')}</p>
-        <Checkbox label={t('organizer.results.art.confirm')} checked={rights} onChange={e => setRights(e.target.checked)} data-testid="art-rights" />
+        <Checkbox label={(locale === 'sw' ? confirmation?.sw : confirmation?.en) || t('organizer.results.art.confirm')} checked={rights} onChange={e => setRights(e.target.checked)} data-testid="art-rights" />
         <p className="text-xs text-[var(--color-fg-quaternary)]">{t('organizer.results.art.confirmDraft')}</p>
       </div>
       <DialogFooter>

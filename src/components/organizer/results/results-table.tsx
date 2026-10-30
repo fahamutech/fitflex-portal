@@ -8,7 +8,7 @@ import { eventDateTime, fmt } from '@/lib/events';
 import { newIdempotencyKey } from '@/lib/events-ops';
 import { resultsApi } from '@/lib/events-results-api';
 import {
-  RESULT_FLAGS, canEnterResults, canVerifyResults, flagKey, formatElapsed, parseTime, resultsErrorKey, rowStatus, rowTime, sourceKey,
+  RESULT_FLAGS, reasonKey, canEnterResults, canVerifyResults, flagKey, formatElapsed, parseTime, resultsErrorKey, rowStatus, rowTime, sourceKey,
   type ResultDetail, type ResultRow, type ResultsSummary,
 } from '@/lib/events-results';
 import type { MessageKey } from '@/lib/i18n';
@@ -19,9 +19,9 @@ import { FlagChip, StageBadge, StatusBadge } from '@/components/organizer/result
 import { BulkApproveDialog, CorrectDialog, DecisionDialog, useWriteError } from '@/components/organizer/results/result-dialogs';
 import { useApp } from '../../../../app/providers';
 
-const STATUS_FILTERS = ['pending_verification', 'verified', 'rejected', 'dnf', 'dns', 'dq', 'no_result'] as const;
+const STATUS_FILTERS = ['needs_review', 'verified', 'rejected', 'dnf', 'dns', 'dq', 'no_result'] as const;
 const STATUS_LABEL: Record<(typeof STATUS_FILTERS)[number], MessageKey> = {
-  pending_verification: 'organizer.results.status.pending', verified: 'organizer.results.filter.verified', rejected: 'organizer.results.status.rejected',
+  needs_review: 'organizer.results.status.pending', verified: 'organizer.results.filter.verified', rejected: 'organizer.results.status.rejected',
   dnf: 'organizer.results.status.dnf', dns: 'organizer.results.status.dns', dq: 'organizer.results.status.dq', no_result: 'organizer.results.status.noResult',
 };
 
@@ -86,7 +86,7 @@ export function ResultsTable({ doc, role, readOnly, summary, category, status, r
   return (
     <div className="space-y-3" data-testid="results-table-view">
       <p ref={live} role="status" aria-live="polite" className="sr-only" />
-      {owner && status === 'pending_verification' && (
+      {owner && status === 'needs_review' && (
         <div className="flex flex-wrap items-center gap-3 rounded-[var(--radius-lg)] bg-[var(--color-bg-secondary)] p-3" data-testid="results-bulk-bar">
           <Button className="min-h-11" onClick={() => setBulk(true)} data-testid="results-approve-clean">{t('organizer.results.action.approveCleanAll')}</Button>
           <span className="text-sm text-[var(--color-fg-secondary)]">{t('organizer.results.bulk.hint')}</span>
@@ -119,7 +119,7 @@ function ResultDrawer({ doc, registrationId, role, readOnly, onClose, onChanged 
   const toast = useToast();
   const [d, setD] = useState<ResultDetail | null>(null);
   const [state, setState] = useState<'loading' | 'ok' | 'notfound' | 'error'>('loading');
-  const [dialog, setDialog] = useState<'correct' | 'reject' | 'disqualify' | 'enter' | null>(null);
+  const [dialog, setDialog] = useState<'correct' | 'reject' | 'disqualify' | 'verifyDq' | 'enter' | null>(null);
   const [busy, setBusy] = useState(false);
   const err = useWriteError();
   const live = useRef<HTMLParagraphElement>(null);
@@ -144,7 +144,7 @@ function ResultDrawer({ doc, registrationId, role, readOnly, onClose, onChanged 
   async function verify() {
     if (!token || !d?.resultId) return;
     setBusy(true); err.clear();
-    try { await resultsApi.verify(token, doc.id, d.resultId, { expectedRevision: rev, ...(d.finishStatus === 'dq' ? { reasonCode: 'other' } : {}) }, verifyKey.current); await done('organizer.results.verified'); }
+    try { await resultsApi.verify(token, doc.id, d.resultId, { expectedRevision: rev }, verifyKey.current); await done('organizer.results.verified'); }
     catch (e) { err.fail(e); } finally { setBusy(false); }
   }
   const canDecide = owner && !!d?.resultId && s === 'pending';
@@ -184,7 +184,7 @@ function ResultDrawer({ doc, registrationId, role, readOnly, onClose, onChanged 
                       <p className="flex flex-wrap items-center gap-2"><Badge tone="gray">{fmt(t('organizer.results.drawer.revision'), { n: r.revision })}</Badge>
                         <span className="font-mono">{formatElapsed(r.netElapsedMs ?? r.gunElapsedMs)}</span>
                         {r.verificationStatus && <span>{t(`organizer.results.vstatus.${r.verificationStatus}` as MessageKey)}</span>}</p>
-                      <p className="text-[var(--color-fg-quaternary)]">{r.by?.name ?? '—'} · {eventDateTime(r.at, doc.timezone, locale, doc.timezoneAbbr)}{r.reasonCode ? ` · ${t(`organizer.results.reason.${['timing_error', 'wrong_bib', 'late_data'].includes(r.reasonCode) ? r.reasonCode : r.reasonCode === 'replaced_by_participant' ? 'replaced' : 'other'}` as MessageKey)}` : ''}</p>
+                      <p className="text-[var(--color-fg-quaternary)]">{r.by?.name ?? '—'} · {eventDateTime(r.at, doc.timezone, locale, doc.timezoneAbbr)}{r.reasonCode ? ` · ${t(reasonKey(r.reasonCode))}` : ''}{r.note ? ` · ${r.note}` : ''}</p>
                     </li>
                   ))}
                 </ul>
@@ -214,7 +214,7 @@ function ResultDrawer({ doc, registrationId, role, readOnly, onClose, onChanged 
               <section className="space-y-2" aria-labelledby="rd-act-h">
                 <h3 id="rd-act-h" className="text-sm font-semibold text-[var(--color-fg-primary)]">{t('organizer.results.drawer.actions')}</h3>
                 <div className="flex flex-wrap gap-2">
-                  {canDecide && <Button className="min-h-11" loading={busy} onClick={() => void verify()} data-testid="act-verify">{t('organizer.results.action.verify')}</Button>}
+                  {canDecide && <Button className="min-h-11" loading={busy} onClick={() => (d?.finishStatus === 'dq' ? setDialog('verifyDq') : void verify())} data-testid="act-verify">{t('organizer.results.action.verify')}</Button>}
                   {canDecide && <Button className="min-h-11" variant="secondary" onClick={() => setDialog('reject')} data-testid="act-reject">{t('organizer.results.action.reject')}</Button>}
                   {canCorrect && <Button className="min-h-11" variant="secondary" onClick={() => setDialog('correct')} data-testid="act-correct">{t('organizer.results.action.correct')}</Button>}
                   {canDq && <Button className="min-h-11" variant="destructive" onClick={() => setDialog('disqualify')} data-testid="act-dq">{t('organizer.results.action.disqualify')}</Button>}
@@ -230,8 +230,10 @@ function ResultDrawer({ doc, registrationId, role, readOnly, onClose, onChanged 
 
       <DecisionDialog open={dialog === 'reject'} onClose={() => setDialog(null)} mode="reject" name={d?.displayName ?? ''}
         onSubmit={async (body, key) => { if (!token || !d?.resultId) return; await resultsApi.reject(token, doc.id, d.resultId, { expectedRevision: rev, reasonCode: body.reasonCode, ...(body.note ? { note: body.note } : {}) }, key); await done('organizer.results.rejected'); }} />
+      <DecisionDialog open={dialog === 'verifyDq'} onClose={() => setDialog(null)} mode="verifyDq" name={d?.displayName ?? ''}
+        onSubmit={async (body, key) => { if (!token || !d?.resultId) return; await resultsApi.verify(token, doc.id, d.resultId, { expectedRevision: rev, reasonCode: body.reasonCode }, key); await done('organizer.results.verified'); }} />
       <DecisionDialog open={dialog === 'disqualify'} onClose={() => setDialog(null)} mode="disqualify" name={d?.displayName ?? ''}
-        onSubmit={async (body, key) => { if (!token || !d?.resultId) return; await resultsApi.disqualify(token, doc.id, d.resultId, { expectedRevision: rev, reasonCode: body.reasonCode, note: body.note ?? '' }, key); await done('organizer.results.disqualified'); }} />
+        onSubmit={async (body, key) => { if (!token || !d?.resultId) return; await resultsApi.disqualify(token, doc.id, d.resultId, { expectedRevision: rev, reasonCode: body.reasonCode, ...(body.note ? { note: body.note } : {}) }, key); await done('organizer.results.disqualified'); }} />
       <CorrectDialog open={dialog === 'correct'} onClose={() => setDialog(null)} row={d}
         onSubmit={async (body, key) => { if (!token || !d?.resultId) return; await resultsApi.correct(token, doc.id, d.resultId, { expectedRevision: rev, ...body }, key); await done('organizer.results.corrected'); }} />
       <EntryDialog open={dialog === 'enter'} onClose={() => setDialog(null)} row={d} role={role}

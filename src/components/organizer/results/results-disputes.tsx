@@ -15,7 +15,7 @@ import { StatusBadge } from '@/components/organizer/results/parts';
 import { CorrectDialog, useWriteError } from '@/components/organizer/results/result-dialogs';
 import { useApp } from '../../../../app/providers';
 
-const NOTE_MIN = 10; const NOTE_MAX = 500;
+const NOTE_MIN = 5; const NOTE_MAX = 500;
 
 export function ResultsDisputes({ doc, role, readOnly, onChanged, onOpenResult }: {
   doc: EventDocument; role: OrganizerRole | null; readOnly: boolean; onChanged: () => void; onOpenResult: (registrationId: string) => void;
@@ -107,7 +107,7 @@ function DisputePanel({ doc, dispute, resolvable, onClose, onResolved, onOpenRes
       <CorrectDialog open={mode === 'correct'} onClose={() => setMode(null)} row={detail} title={t('organizer.results.disputes.outcome.upheld')}
         onSubmit={async (body, key) => {
           if (!token || !detail) return;
-          await resultsApi.resolveDispute(token, doc.id, dispute.id, { outcome: 'upheld', note: body.note, correction: { expectedRevision: detail.revision ?? 0, ...body } }, key);
+          await resultsApi.resolveDispute(token, doc.id, dispute.id, { outcome: 'upheld', note: body.note, correction: { action: 'correct', expectedRevision: detail.revision ?? 0, ...body } }, key);
           setMode(null); finish('organizer.results.dispute.resolved');
         }} />
       <NoteDialog open={mode === 'nochange' || mode === 'dqstands'} onClose={() => setMode(null)} title={t(mode === 'dqstands' ? 'organizer.results.disputes.outcome.dq' : 'organizer.results.disputes.outcome.rejected')}

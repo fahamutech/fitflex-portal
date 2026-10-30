@@ -67,7 +67,7 @@ function Definitions() {
     try { setRows(pageItems(await resultsApi.rewardDefinitions(token))); } catch (e) { setError(resultsErrorKey(e)); }
     try {
       const s = await resultsApi.rewardSummary(token);
-      setSummary({ rows: Array.isArray(s) ? s : s.items ?? [], most: Array.isArray(s) ? [] : s.mostEarned ?? [] });
+      setSummary({ rows: s.items ?? [], most: s.mostEarnedThisWeek ?? [] });
     } catch { setSummary(null); }
   }, [token]);
   useEffect(() => { void load(); }, [load]);
@@ -77,6 +77,10 @@ function Definitions() {
     setBusy(true); cErr.clear();
     try { await resultsApi.rewardAction(token, confirm.row.id, confirm.action, newIdempotencyKey()); setConfirm(null); toast.success(t('admin.rewards.updated')); await load(); }
     catch (e) { cErr.fail(e); } finally { setBusy(false); }
+  }
+  async function activate(r: RewardDefinition) {
+    if (!token) return;
+    try { await resultsApi.rewardAction(token, r.id, 'activate', newIdempotencyKey()); toast.success(t('admin.rewards.updated')); await load(); } catch (e) { toast.error(t(resultsErrorKey(e))); }
   }
   const cols: ColumnDef<RewardDefinition>[] = [
     { key: 'title', header: t('admin.rewards.col.title'), cell: r => <span className="font-medium [overflow-wrap:anywhere]">{bi(r.title, locale)}</span> },
@@ -103,6 +107,7 @@ function Definitions() {
             actions={r => (
               <>
                 {r.status !== 'ended' && <Button variant="ghost" size="sm" onClick={() => setEdit(r)} data-testid={`reward-edit-${r.id}`}>{t('admin.rewards.edit')}</Button>}
+                {(r.status === 'draft' || r.status === 'paused') && <Button variant="ghost" size="sm" onClick={() => void activate(r)} data-testid={`reward-activate-${r.id}`}>{t('admin.rewards.activate')}</Button>}
                 {r.status === 'active' && <Button variant="ghost" size="sm" onClick={() => setConfirm({ row: r, action: 'pause' })} data-testid={`reward-pause-${r.id}`}>{t('admin.rewards.pause')}</Button>}
                 {r.status !== 'ended' && <Button variant="ghost" size="sm" onClick={() => setConfirm({ row: r, action: 'end' })} data-testid={`reward-end-${r.id}`}>{t('admin.rewards.end')}</Button>}
               </>
@@ -150,21 +155,31 @@ function DefinitionDialog({ row, onClose, onSaved }: { row: RewardDefinition | n
     resultsApi.medalTemplates(token, eventId).then(r => setTemplates(pageItems(r))).catch(() => setTemplates([]));
   }, [token, trigger, eventId]);
   const num = (v: string) => (v.trim() ? Number(v) : null);
-  const valid = titleEn.trim() && termsEn.trim() && termsSw.trim() && funding.trim()
+  const valid = titleEn.trim() && titleSw.trim() && termsEn.trim() && termsSw.trim() && funding.trim()
     && (trigger !== 'medal' || (eventId && ref)) && (trigger !== 'achievement' || ref) && Number(capUser) >= 1
     && (!capTotal || Number(capTotal) >= 1) && (!expiry || Number(expiry) >= 1);
   async function save() {
     if (!token) return;
     setBusy(true); err.clear();
-    // `valueTzs` is never sent: the server refuses a value while rewards are FitFlex-funded and digital only (422 value_not_allowed_yet).
-    const body = {
-      issuer: 'fitflex', title: { en: titleEn.trim(), sw: titleSw.trim() }, terms: { en: termsEn.trim(), sw: termsSw.trim() },
+    // `valueTzs` is never sent (422 value_not_allowed_yet). A PATCH carries ONLY what changed: touching a trigger field of a reward that already
+    // has ledger entries is 409 definition_locked, so unchanged trigger fields must not ride along.
+    const full: Record<string, unknown> = {
+      issuerType: 'fitflex', title: { en: titleEn.trim(), sw: titleSw.trim() }, terms: { en: termsEn.trim(), sw: termsSw.trim() },
       triggerType: trigger, triggerEventId: trigger === 'achievement' ? null : eventId || null, triggerRef: trigger === 'event_finish' ? null : ref || null,
       redeemMode: mode, reversalPolicy: reversal, capTotal: num(capTotal), capPerUser: Number(capUser), startsAt: startsAt || null, endsAt: endsAt || null,
-      expiryDays: num(expiry), fundingNote: funding.trim(), status,
+      expiryDays: num(expiry), fundingNote: funding.trim(),
     };
-    try { if (row) await resultsApi.updateRewardDefinition(token, row.id, body, key.current); else await resultsApi.createRewardDefinition(token, body, key.current); onSaved(); }
-    catch (e) { err.fail(e); } finally { setBusy(false); }
+    const before: Record<string, unknown> | null = row ? {
+      title: { en: row.title.en ?? '', sw: row.title.sw ?? '' }, terms: { en: row.terms?.en ?? '', sw: row.terms?.sw ?? '' }, triggerType: row.triggerType, triggerEventId: row.triggerEventId ?? null, triggerRef: row.triggerRef ?? null,
+      redeemMode: row.redeemMode, reversalPolicy: row.reversalPolicy ?? 'revoke_unredeemed', capTotal: row.capTotal ?? null, capPerUser: row.capPerUser ?? 1, startsAt: row.startsAt?.slice(0, 10) || null, endsAt: row.endsAt?.slice(0, 10) || null,
+      expiryDays: row.expiryDays ?? null, fundingNote: row.fundingNote ?? '',
+    } : null;
+    const body = before ? Object.fromEntries(Object.entries(full).filter(([k, v]) => k !== 'issuerType' && JSON.stringify(v) !== JSON.stringify(before[k]))) : { ...full, status };
+    try {
+      if (row) { if (Object.keys(body).length === 0) { onClose(); return; } await resultsApi.updateRewardDefinition(token, row.id, body, key.current); }
+      else await resultsApi.createRewardDefinition(token, body, key.current);
+      onSaved();
+    } catch (e) { err.fail(e); } finally { setBusy(false); }
   }
   return (
     <Dialog open onClose={() => { if (!busy) onClose(); }} title={t(editing ? 'admin.rewards.edit' : 'admin.rewards.new')} size="lg">
@@ -172,7 +187,7 @@ function DefinitionDialog({ row, onClose, onSaved }: { row: RewardDefinition | n
         {err.view && <div data-testid="reward-error">{err.view}</div>}
         <div className="grid gap-4 sm:grid-cols-2">
           <Field label={`${t('admin.rewards.col.title')} (EN)`} required><Input value={titleEn} maxLength={80} onChange={e => setTitleEn(e.target.value)} data-testid="reward-title-en" /></Field>
-          <Field label={`${t('admin.rewards.col.title')} (SW)`} hint={titleSw.trim() ? undefined : t('admin.rewards.swFallback')}><Input value={titleSw} maxLength={80} onChange={e => setTitleSw(e.target.value)} data-testid="reward-title-sw" /></Field>
+          <Field label={`${t('admin.rewards.col.title')} (SW)`} required><Input value={titleSw} maxLength={80} onChange={e => setTitleSw(e.target.value)} data-testid="reward-title-sw" /></Field>
           <Field label={`${t('admin.rewards.terms')} (EN)`} required><Textarea rows={3} value={termsEn} maxLength={500} onChange={e => setTermsEn(e.target.value)} data-testid="reward-terms-en" /></Field>
           <Field label={`${t('admin.rewards.terms')} (SW)`} required><Textarea rows={3} value={termsSw} maxLength={500} onChange={e => setTermsSw(e.target.value)} data-testid="reward-terms-sw" /></Field>
           <Field label={t('admin.rewards.col.trigger')}>
@@ -219,11 +234,13 @@ function DefinitionDialog({ row, onClose, onSaved }: { row: RewardDefinition | n
           <Field label={t('admin.rewards.expiry')}><Input inputMode="numeric" value={expiry} onChange={e => setExpiry(e.target.value.replace(/\D/g, ''))} data-testid="reward-expiry" /></Field>
           <Field label={t('admin.rewards.funding')} hint={t('admin.rewards.fundingHint')} required><Input value={funding} maxLength={120} onChange={e => setFunding(e.target.value)} data-testid="reward-funding" /></Field>
           <Field label={t('admin.rewards.value')} hint={t('admin.rewards.valueLocked')}><Input disabled value="" placeholder="—" data-testid="reward-value" /></Field>
-          <Field label={t('admin.rewards.col.status')}>
-            <Select value={status} onChange={e => setStatus(e.target.value as 'draft' | 'active')} data-testid="reward-status">
-              <option value="draft">{t('admin.rewards.status.draft')}</option><option value="active">{t('admin.rewards.status.active')}</option>
-            </Select>
-          </Field>
+          {!editing && (
+            <Field label={t('admin.rewards.col.status')}>
+              <Select value={status} onChange={e => setStatus(e.target.value as 'draft' | 'active')} data-testid="reward-status">
+                <option value="draft">{t('admin.rewards.status.draft')}</option><option value="active">{t('admin.rewards.status.active')}</option>
+              </Select>
+            </Field>
+          )}
         </div>
       </div>
       <DialogFooter>
@@ -272,8 +289,8 @@ function Redemptions() {
       {hit && (
         <Card><CardContent>
           <div className="space-y-3" data-testid="redeem-card">
-            <p className="text-base font-semibold text-[var(--color-fg-primary)]">{bi(hit.rewardTitle, locale)}</p>
-            <p className="text-sm text-[var(--color-fg-secondary)]">{hit.displayName ?? '—'} · <Badge tone={hit.status === 'reserved' ? 'warning' : 'gray'}>{t(knownKey(`admin.rewards.redemption.${hit.status}`, 'admin.rewards.needsReview'))}</Badge>{hit.expiresAt ? ` · ${eventDateTime(hit.expiresAt, 'Africa/Dar_es_Salaam', locale)}` : ''}</p>
+            <p className="text-base font-semibold text-[var(--color-fg-primary)]">{bi(hit.title, locale)}</p>
+            <p className="text-sm text-[var(--color-fg-secondary)]">{hit.member ?? '—'} · <Badge tone={hit.status === 'reserved' ? 'warning' : 'gray'}>{t(knownKey(`admin.rewards.redemption.${hit.status}`, 'admin.rewards.needsReview'))}</Badge>{hit.expiresAt ? ` · ${eventDateTime(hit.expiresAt, 'Africa/Dar_es_Salaam', locale)}` : ''}</p>
             {hit.needsReview && <Badge tone="warning">{t('admin.rewards.needsReview')}</Badge>}
             {hit.status === 'reserved' && (
               <>
@@ -313,9 +330,9 @@ function Ledger() {
     { key: 'when', header: t('admin.rewards.col.when'), cell: r => eventDateTime(r.occurredAt, 'Africa/Dar_es_Salaam', locale) },
     { key: 'type', header: t('admin.rewards.col.entry'), cell: r => t(`admin.rewards.ledger.${['earn', 'redeem', 'expire', 'reverse'].includes(r.entryType) ? r.entryType : 'other'}` as MessageKey) },
     { key: 'reward', header: t('admin.rewards.col.reward'), cell: r => bi(r.titleOf as { en?: string; sw?: string } | string | null, locale) },
-    { key: 'member', header: t('admin.rewards.col.member'), cell: r => r.displayName ?? '—' },
+    { key: 'member', header: t('admin.rewards.col.member'), cell: r => r.member ?? '—' },
     { key: 'units', header: t('admin.rewards.col.units'), cell: r => (r.units != null && r.units > 0 ? `+${r.units}` : String(r.units ?? '')) },
-    { key: 'why', header: t('admin.rewards.col.why'), cell: r => (r.reversesEntryId ? fmt(t('admin.rewards.reverses'), { id: r.reversesEntryId }) : r.sourceType ? t(knownKey(`admin.rewards.source.${r.sourceType}`, 'admin.rewards.source.other')) : '—') },
+    { key: 'why', header: t('admin.rewards.col.why'), cell: r => (r.reverses ? fmt(t('admin.rewards.reverses'), { id: typeof r.reverses === 'string' ? r.reverses : r.reverses.id ?? '' }) : r.sourceType ? t(knownKey(`admin.rewards.source.${r.sourceType}`, 'admin.rewards.source.other')) : '—') },
   ];
   return (
     <div className="space-y-3" data-testid="rewards-ledger">
@@ -424,11 +441,12 @@ function MedalArtQueue() {
                 </div>
                 <p className="text-sm font-medium text-[var(--color-fg-primary)]">{a.eventTitle ?? '—'} · {a.organizerName ?? '—'}</p>
                 <p className="text-sm text-[var(--color-fg-secondary)]">{a.categoryName ?? t('organizer.results.medals.allCategories')} · {t(`organizer.results.medals.tier.${a.tier ?? 'other'}` as MessageKey)}</p>
-                {a.confirmedAt && <p className="text-xs text-[var(--color-fg-quaternary)]">{fmt(t('admin.medalArt.confirmedAt'), { name: a.confirmedByName ?? '—', when: eventDateTime(a.confirmedAt, 'Africa/Dar_es_Salaam', locale) })}</p>}
+                {a.confirmedAt && <p className="text-xs text-[var(--color-fg-quaternary)]">{fmt(t('admin.medalArt.confirmedAt'), { when: eventDateTime(a.confirmedAt, 'Africa/Dar_es_Salaam', locale) })}</p>}
                 <p className="flex flex-wrap gap-1.5">
                   <Badge tone={a.reviewState === 'reviewed' ? 'success' : 'warning'}>{t(a.reviewState === 'reviewed' ? 'admin.medalArt.reviewed' : 'admin.medalArt.toReview')}</Badge>
                   {a.status === 'taken_down' && <Badge tone="danger">{t('admin.medalArt.takenDown')}</Badge>}
-                  {(a.takedownsLast30Days ?? 0) > 0 && <Badge tone={(a.takedownsLast30Days ?? 0) >= 3 ? 'danger' : 'gray'}>{fmt(t('admin.medalArt.takedownCount'), { n: a.takedownsLast30Days ?? 0 })}</Badge>}
+                  {(a.organizerTakedowns30d ?? 0) > 0 && <Badge tone={a.highlightOrganizer ? 'danger' : 'gray'}>{fmt(t('admin.medalArt.takedownCount'), { n: a.organizerTakedowns30d ?? 0 })}</Badge>}
+                  {a.highlightOrganizer && <Badge tone="danger">{t('admin.medalArt.highlight')}</Badge>}
                 </p>
                 {a.status === 'live' && (
                   <div className="flex flex-wrap gap-2">

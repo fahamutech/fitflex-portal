@@ -9,7 +9,7 @@ import { newIdempotencyKey } from '@/lib/events-ops';
 import { resultsApi } from '@/lib/events-results-api';
 import {
   BUILTIN_ART, MEDAL_TIERS, bi, knownKey, canVerifyResults, defaultArtKey, formatElapsed, parseTime, resultsErrorKey,
-  type BuiltinArt, type MedalRule, type MedalTemplate, type MedalTier, type ResultsSummary,
+  type ArtConfirmation, type BuiltinArt, type MedalRule, type MedalTemplate, type MedalTier, type ResultsSummary,
 } from '@/lib/events-results';
 import { messages, type MessageKey } from '@/lib/i18n';
 import { Alert, Badge, Button, Card, CardContent, EmptyState, Field, Input, Select, SkeletonCard, useToast } from '@/components/shared';
@@ -31,6 +31,7 @@ export function MedalsPanel({ doc, role, readOnly, summary, artOn }: { doc: Even
   const { t, token, locale } = useApp();
   const toast = useToast();
   const [items, setItems] = useState<MedalTemplate[] | null>(null);
+  const [confirmation, setConfirmation] = useState<ArtConfirmation | null>(null);
   const [error, setError] = useState<MessageKey | null>(null);
   const [edit, setEdit] = useState<MedalTemplate | 'new' | null>(null);
   const [artFor, setArtFor] = useState<MedalTemplate | null>(null);
@@ -45,7 +46,7 @@ export function MedalsPanel({ doc, role, readOnly, summary, artOn }: { doc: Even
   const load = useCallback(async () => {
     if (!token) return;
     setError(null);
-    try { setItems(listOf(await resultsApi.medalTemplates(token, doc.id))); } catch (e) { setError(resultsErrorKey(e)); }
+    try { const r = await resultsApi.medalTemplates(token, doc.id); setItems(listOf(r)); setConfirmation(r.artConfirmation ?? null); } catch (e) { setError(resultsErrorKey(e)); }
   }, [token, doc.id]);
   useEffect(() => { void load(); }, [load]);
   // "About N people would get this medal" on a released scope (§7.1 late template).
@@ -88,7 +89,6 @@ export function MedalsPanel({ doc, role, readOnly, summary, artOn }: { doc: Even
             const generated = fmt(t('organizer.results.art.generatedAlt'), { name, tier: t(`organizer.results.medals.tier.${m.tier}` as MessageKey) });
             const custom = artOn && m.art?.source === 'custom' && !!m.art.artId;
             const alt = (locale === 'sw' ? m.art?.altText?.sw : m.art?.altText?.en) || generated;
-            const takenDown = artOn && m.art?.status === 'taken_down';
             return (
               <Card key={m.id}><CardContent>
                 <article className="space-y-3" aria-label={name} data-testid={`medal-${m.id}`}>
@@ -108,13 +108,10 @@ export function MedalsPanel({ doc, role, readOnly, summary, artOn }: { doc: Even
                       {m.locked && <p className="flex items-center gap-1 text-xs text-[var(--color-fg-quaternary)]"><Lock aria-hidden="true" className="h-3.5 w-3.5" />{t('organizer.results.medals.locked')}</p>}
                     </div>
                   </div>
-                  {takenDown && (
-                    <div data-testid={`medal-takendown-${m.id}`}><Alert tone="error">{fmt(t('organizer.results.art.takenDown'), { reason: t(knownKey(`organizer.results.art.reason.${m.art?.takedownReason ?? 'other'}`, 'organizer.results.art.reason.other')) })}</Alert></div>
-                  )}
                   {writable && (
                     <div className="flex flex-wrap gap-2">
                       <Button className="min-h-11" variant="secondary" onClick={() => setEdit(m)} data-testid={`medal-edit-${m.id}`}>{t('organizer.results.medals.edit')}</Button>
-                      {artOn && <Button className="min-h-11" variant="secondary" onClick={() => setArtFor(m)} data-testid={`medal-upload-${m.id}`}>{t(takenDown ? 'organizer.results.art.uploadAnother' : custom ? 'organizer.results.art.replace' : 'organizer.results.art.upload')}</Button>}
+                      {artOn && <Button className="min-h-11" variant="secondary" onClick={() => setArtFor(m)} data-testid={`medal-upload-${m.id}`}>{t(custom ? 'organizer.results.art.replace' : 'organizer.results.art.upload')}</Button>}
                       {artOn && custom && <Button className="min-h-11" variant="ghost" onClick={() => void useBuiltin(m)} data-testid={`medal-builtin-${m.id}`}>{t('organizer.results.art.useBuiltin')}</Button>}
                       {artOn && custom && <Button className="min-h-11" variant="ghost" onClick={() => setRemoveFor(m)} data-testid={`medal-remove-${m.id}`}>{t('organizer.results.art.remove')}</Button>}
                     </div>
@@ -127,7 +124,7 @@ export function MedalsPanel({ doc, role, readOnly, summary, artOn }: { doc: Even
       )}
       {edit && <MedalDialog doc={doc} summary={summary} virtual={virtual} template={edit === 'new' ? null : edit} released={anyOfficial} suggestFinisher={edit === 'new' && items.length === 0}
         onClose={() => setEdit(null)} onSaved={() => { setEdit(null); toast.success(t('organizer.results.medals.saved')); void load(); }} />}
-      <MedalArtDialog open={!!artFor} onClose={() => setArtFor(null)} eventId={doc.id} template={artFor} medalName={artFor ? bi(artFor.name, locale) : ''} onDone={() => { setArtFor(null); void load(); }} />
+      <MedalArtDialog confirmation={confirmation} open={!!artFor} onClose={() => setArtFor(null)} eventId={doc.id} template={artFor} medalName={artFor ? bi(artFor.name, locale) : ''} onDone={() => { setArtFor(null); void load(); }} />
       <ConfirmDialog open={!!removeFor} onClose={() => setRemoveFor(null)} onConfirm={() => void removeArt()} busy={busy} tone="danger"
         title={t('organizer.results.art.remove')} description={rErr.error ? t(rErr.error.key) : t('organizer.results.art.removeBody')} confirmLabel={t('organizer.results.art.remove')} cancelLabel={t('common.cancel')} />
     </div>

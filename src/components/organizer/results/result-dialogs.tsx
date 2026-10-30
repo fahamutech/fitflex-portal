@@ -2,11 +2,11 @@
 // Events S6 (spec §6.3, §6.4, §6.6, §9.2): the dialogs of the Results tab. Each attempt owns one Idempotency-Key and reuses it on Retry
 // (§9.3 "offline or 5xx on a write stays on screen"); a stale revision says so and asks for a reload (AC-S4).
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
-import { errorCode, fmt } from '@/lib/events';
+import { errorBody, errorCode, fmt } from '@/lib/events';
 import { newIdempotencyKey } from '@/lib/events-ops';
 import { resultsApi } from '@/lib/events-results-api';
 import {
-  CORRECT_REASONS, REJECT_REASONS, countOf, formatElapsed, parseTime, resultsErrorKey, retryAfterOf,
+  CORRECT_REASONS, DQ_REASONS, REJECT_REASONS, countOf, formatElapsed, parseTime, resultsErrorKey, retryAfterOf,
   type BulkPreview, type ReleasePreview, type ResultRow,
 } from '@/lib/events-results';
 import type { MessageKey } from '@/lib/i18n';
@@ -19,9 +19,9 @@ const NOTE_MIN = 10; const NOTE_MAX = 300;
 /** Error line for a failed write: the refusal's sentence, with the wait time for a 429. */
 export function useWriteError() {
   const { t } = useApp();
-  const [error, setError] = useState<{ key: MessageKey; wait: number | null; stale: boolean } | null>(null);
-  const fail = (err: unknown) => setError({ key: resultsErrorKey(err), wait: errorCode(err) === 'rate_limited' ? retryAfterOf(err) : null, stale: errorCode(err) === 'result_changed' || errorCode(err) === 'preview_stale' });
-  const view = error && <Alert tone="error">{error.wait ? fmt(t('organizer.results.error.rate_limited_wait'), { seconds: error.wait }) : t(error.key)}</Alert>;
+  const [error, setError] = useState<{ key: MessageKey; wait: number | null; stale: boolean; extra: Record<string, string | number> } | null>(null);
+  const fail = (err: unknown) => setError({ extra: Object.fromEntries(Object.entries(errorBody(err) ?? {}).filter(([, v]) => typeof v === 'string' || typeof v === 'number')) as Record<string, string | number>, key: resultsErrorKey(err), wait: errorCode(err) === 'rate_limited' ? retryAfterOf(err) : null, stale: errorCode(err) === 'result_changed' || errorCode(err) === 'preview_stale' });
+  const view = error && <Alert tone="error">{error.wait ? fmt(t('organizer.results.error.rate_limited_wait'), { seconds: error.wait }) : fmt(t(error.key), error.extra)}</Alert>;
   return { error, fail, clear: () => setError(null), view };
 }
 
@@ -48,10 +48,11 @@ export function ReleaseDialog({ open, onClose, eventId, categoryId, categoryName
   }, [open, token, eventId, categoryId, stage]);
   const unsettled = countOf(preview?.unsettled);
   const willMark = markDns ? (preview?.willMarkDns ?? preview?.noResult ?? 0) : 0;
-  // A provisional release also shows the results still waiting for review (labelled Provisional), so they count as published.
-  const published = (preview?.finished ?? 0) + (preview?.dnf ?? 0) + (preview?.dns ?? 0) + (preview?.dq ?? 0) + willMark + (stage === 'provisional' ? unsettled : 0);
+  // The server's resultCount = finished + DNF + DNS + DQ (+ runners marked DNS). Results still waiting for review are NOT in it, so the typed number matches it.
+  const published = (preview?.finished ?? 0) + (preview?.dnf ?? 0) + (preview?.dns ?? 0) + (preview?.dq ?? 0) + willMark;
+  const anything = published + (stage === 'provisional' ? unsettled : 0);
   const blocked = stage === 'official' && unsettled > 0 && !leaveOut;
-  const ready = !!preview && !blocked && published > 0 && typed.trim() === String(published);
+  const ready = !!preview && !blocked && anything > 0 && typed.trim() === String(published);
   async function go() {
     if (!token || !preview) return;
     setBusy(true); err.clear();
@@ -83,7 +84,7 @@ export function ReleaseDialog({ open, onClose, eventId, categoryId, categoryName
         )}
         {stage === 'official' && <p id={warnId} className="text-sm text-[var(--color-fg-secondary)]" data-testid="release-warn">{t('organizer.results.release.warn')}</p>}
         {preview && (
-          <Field label={fmt(t('organizer.results.release.type'), { n: published })} required>
+          <Field label={fmt(t('organizer.results.release.type'), { n: published })} hint={t('organizer.results.release.typeHint')} required>
             <Input inputMode="numeric" autoComplete="off" value={typed} aria-describedby={warnId} onChange={e => setTyped(e.target.value.replace(/\D/g, ''))} data-testid="release-type" />
           </Field>
         )}
@@ -139,8 +140,9 @@ export function BulkApproveDialog({ open, onClose, eventId, categoryId, onDone }
 }
 
 // ── Reject / disqualify (reason + note) ──
-export function DecisionDialog({ open, onClose, mode, name, onSubmit }: {
-  open: boolean; onClose: () => void; mode: 'reject' | 'disqualify'; name: string;
+/** `verifyDq`: verifying a disqualification that came in with a file needs its reason too. Admin exceptions always carry a note of 10 to 300. */
+export function DecisionDialog({ open, onClose, mode, name, noteRequired = false, onSubmit }: {
+  open: boolean; onClose: () => void; mode: 'reject' | 'disqualify' | 'verifyDq'; name: string; noteRequired?: boolean;
   onSubmit: (body: { reasonCode: string; note?: string }, key: string) => Promise<void>;
 }) {
   const { t } = useApp();
@@ -149,31 +151,33 @@ export function DecisionDialog({ open, onClose, mode, name, onSubmit }: {
   const [busy, setBusy] = useState(false);
   const err = useWriteError();
   const key = useRef(newIdempotencyKey());
-  useEffect(() => { if (open) { setReason(mode === 'disqualify' ? 'other' : ''); setNote(''); setBusy(false); err.clear(); key.current = newIdempotencyKey(); } // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { if (open) { setReason(''); setNote(''); setBusy(false); err.clear(); key.current = newIdempotencyKey(); } // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, mode]);
+  const reasons: readonly string[] = mode === 'reject' ? REJECT_REASONS : DQ_REASONS;
   const noteLen = note.trim().length;
-  // A disqualification always carries a note of 10 to 300 characters; a rejection's note is optional (up to 120).
-  const valid = mode === 'disqualify' ? noteLen >= NOTE_MIN && noteLen <= NOTE_MAX : !!reason && noteLen <= 120;
+  const noteMax = mode === 'reject' ? 120 : NOTE_MAX;
+  const noteOk = mode === 'verifyDq' ? true : noteRequired ? noteLen >= NOTE_MIN && noteLen <= NOTE_MAX : noteLen <= noteMax && (mode === 'reject' || noteLen === 0 || noteLen >= NOTE_MIN);
+  const valid = !!reason && noteOk;
   async function go() {
     setBusy(true); err.clear();
-    try { await onSubmit({ reasonCode: reason, ...(note.trim() ? { note: note.trim() } : {}) }, key.current); } catch (e) { err.fail(e); } finally { setBusy(false); }
+    try { await onSubmit({ reasonCode: reason, ...(note.trim() && mode !== 'verifyDq' ? { note: note.trim() } : {}) }, key.current); } catch (e) { err.fail(e); } finally { setBusy(false); }
   }
   return (
     <Dialog open={open} onClose={() => { if (!busy) onClose(); }} title={t(mode === 'reject' ? 'organizer.results.reject.title' : 'organizer.results.disqualify.title')} description={name} size="md">
       <div className="space-y-4" data-testid={`${mode}-dialog`}>
         {err.view}
-        {mode === 'reject' && (
-          <Field label={t('organizer.results.correct.reason')} required>
-            <Select value={reason} onChange={e => setReason(e.target.value)} data-testid="decision-reason">
-              <option value="">—</option>
-              {REJECT_REASONS.map(r => <option key={r} value={r}>{t(`organizer.results.rejectReason.${r}` as MessageKey)}</option>)}
-            </Select>
+        {mode !== 'reject' && <p className="text-sm text-[var(--color-fg-secondary)]">{t('organizer.results.disqualify.warn')}</p>}
+        <Field label={t('organizer.results.correct.reason')} required>
+          <Select value={reason} onChange={e => setReason(e.target.value)} data-testid="decision-reason">
+            <option value="">—</option>
+            {reasons.map(r => <option key={r} value={r}>{t(`organizer.results.reason.${r}` as MessageKey)}</option>)}
+          </Select>
+        </Field>
+        {mode !== 'verifyDq' && (
+          <Field label={t(mode === 'reject' ? 'organizer.results.reject.note' : 'organizer.results.disqualify.note')} hint={`${noteLen}/${noteMax}`} required={noteRequired}>
+            <Textarea rows={3} maxLength={noteMax} value={note} onChange={e => setNote(e.target.value)} data-testid="decision-note" />
           </Field>
         )}
-        {mode === 'disqualify' && <p className="text-sm text-[var(--color-fg-secondary)]">{t('organizer.results.disqualify.warn')}</p>}
-        <Field label={t(mode === 'reject' ? 'organizer.results.reject.note' : 'organizer.results.correct.note')} hint={`${noteLen}/${mode === 'reject' ? 120 : NOTE_MAX}`} required={mode === 'disqualify'}>
-          <Textarea rows={3} maxLength={mode === 'reject' ? 120 : NOTE_MAX} value={note} onChange={e => setNote(e.target.value)} data-testid="decision-note" />
-        </Field>
       </div>
       <DialogFooter>
         <Button variant="secondary" onClick={onClose} disabled={busy}>{t('common.cancel')}</Button>

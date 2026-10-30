@@ -75,7 +75,7 @@ export function AdminEventResults({ eventId, timezone, timezoneAbbr }: { eventId
       </CardContent></Card>
       <CorrectDialog open={dialog?.kind === 'correct'} onClose={() => setDialog(null)} row={dialog?.row ?? null}
         onSubmit={async (body, key) => { if (!token || !dialog?.row.resultId) return; await resultsApi.adminCorrect(token, eventId, dialog.row.resultId, { expectedRevision: dialog.row.revision ?? 0, ...body }, key); setDialog(null); toast.success(t('organizer.results.corrected')); void load(null); }} />
-      <DecisionDialog open={dialog?.kind === 'disqualify'} onClose={() => setDialog(null)} mode="disqualify" name={dialog?.row.displayName ?? ''}
+      <DecisionDialog open={dialog?.kind === 'disqualify'} onClose={() => setDialog(null)} mode="disqualify" noteRequired name={dialog?.row.displayName ?? ''}
         onSubmit={async (body, key) => { if (!token || !dialog?.row.resultId) return; await resultsApi.adminDisqualify(token, eventId, dialog.row.resultId, { expectedRevision: dialog.row.revision ?? 0, reasonCode: body.reasonCode, note: body.note ?? '' }, key); setDialog(null); toast.success(t('organizer.results.disqualified')); void load(null); }} />
     </div>
   );

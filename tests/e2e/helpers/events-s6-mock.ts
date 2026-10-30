@@ -25,6 +25,8 @@ type Call = { method: string; path: string; query: Record<string, string>; body:
 type Handler = (c: Call, m: RegExpMatchArray) => Reply | undefined;
 
 export const ART_CONFIRMATION_VERSION = '2026-10-29.s6draft1';
+const ART_CONFIRMATION = { version: ART_CONFIRMATION_VERSION, status: 'draft_pending_counsel', en: 'I made this design or have the right to use it. It does not use another brand\'s logo or an identifiable person\'s picture without permission. FitFlex may show it to participants in the app.', sw: 'Nimetengeneza muundo huu au nina haki ya kuutumia. Hauna nembo ya chapa nyingine wala picha ya mtu anayetambulika bila ruhusa. FitFlex inaweza kuuonyesha kwa washiriki kwenye app.' };
+const DQ_REASONS = ['rule_violation', 'course_cut', 'wrong_category', 'equipment', 'identity', 'virtual_evidence', 'other'];
 export const BUILTIN = ['finisher_green', 'finisher_gold', 'podium_gold', 'podium_silver', 'podium_bronze', 'time_blue', 'charity_red', 'virtual_teal'];
 const CATS: Record<string, { name: string; distanceMeters: number }> = { cat_1: { name: '21K Half Marathon', distanceMeters: 21100 }, cat_2: { name: '10K', distanceMeters: 10000 } };
 /** A tiny SVG served for preview/file routes: enough for an <img> of a blob. */
@@ -103,10 +105,10 @@ export function makeS6(user: Json, me: Json | null, o: S6Opts) {
     );
   }
   state.defs.push({ id: 'rwd_1', title: { en: 'Finisher certificate', sw: 'Cheti cha aliyemaliza' }, terms: { en: 'Shown in the app.', sw: 'Linaonyeshwa kwenye app.' }, triggerType: 'event_finish', triggerEventId: 'evt_pub', triggerRef: null, redeemMode: 'certificate', reversalPolicy: 'revoke_unredeemed', capTotal: 100, capPerUser: 1, capUsed: 3, status: 'active', issuer: 'fitflex', fundingNote: 'FitFlex', valueTzs: null, startsAt: null, endsAt: null, expiryDays: null });
-  state.ledger.push({ id: 'led_1', entryType: 'earn', rewardDefinitionId: 'rwd_1', titleOf: { en: 'Finisher certificate', sw: 'Cheti cha aliyemaliza' }, units: 1, sourceType: 'event_result', displayName: 'Amina M.', occurredAt: stamp }, { id: 'led_2', entryType: 'reverse', rewardDefinitionId: 'rwd_1', titleOf: { en: 'Finisher certificate', sw: 'Cheti cha aliyemaliza' }, units: -1, sourceType: 'event_medal', displayName: 'Amina M.', occurredAt: stamp, reversesEntryId: 'led_1' });
-  state.redemptions.push({ id: 'red_1', code: 'FFR-AB12CD34', rewardTitle: { en: 'Finisher perk', sw: 'Faida ya aliyemaliza' }, displayName: 'Baraka M.', status: 'reserved', expiresAt: '2027-03-27T09:00:00.000Z' });
+  state.ledger.push({ id: 'led_1', entryType: 'earn', definitionId: 'rwd_1', titleOf: { en: 'Finisher certificate', sw: 'Cheti cha aliyemaliza' }, units: 1, sourceType: 'event_result', member: 'Amina M.', anonymised: false, userId: 'usr_a', occurredAt: stamp }, { id: 'led_2', entryType: 'reverse', definitionId: 'rwd_1', titleOf: { en: 'Finisher certificate', sw: 'Cheti cha aliyemaliza' }, units: -1, sourceType: 'event_medal', member: 'Amina M.', anonymised: false, userId: 'usr_a', occurredAt: stamp, reverses: 'led_1' });
+  state.redemptions.push({ id: 'red_1', code: 'FFR-AB12CD34', definitionId: 'rwd_1', title: { en: 'Finisher perk', sw: 'Faida ya aliyemaliza' }, member: 'Baraka M.', needsReview: false, status: 'reserved', expiresAt: '2027-03-27T09:00:00.000Z' });
   state.tasks.push({ id: 'tsk_1', eventId: 'evt_pub', reason: 'release', state: 'failed', attempts: 5, lastError: 'timeout', createdAt: stamp });
-  state.arts.push({ id: 'art_q1', templateId: 'tpl_x', eventId: 'evt_pub', eventTitle: 'Arusha Trail 10K', organizerId: 'org_1', organizerName: 'Dar Runners', categoryName: '10K', tier: 'finisher', status: 'live', reviewState: 'to_review', altText: { en: 'A green runner', sw: '' }, confirmedAt: '2027-03-12T08:00:00.000Z', confirmedByName: 'Neema Organizer', takedownsLast30Days: 3, revision: 1 });
+  state.arts.push({ id: 'art_q1', templateId: 'tpl_x', eventId: 'evt_pub', eventTitle: 'Arusha Trail 10K', organizerId: 'org_1', organizerName: 'Dar Runners', categoryName: '10K', tier: 'finisher', status: 'live', reviewState: 'to_review', altText: { en: 'A green runner', sw: '' }, confirmedAt: '2027-03-12T08:00:00.000Z', confirmationVersion: ART_CONFIRMATION_VERSION, organizerTakedowns30d: 3, highlightOrganizer: true, revision: 1 });
 
   function rankOf(catId: string) {
     const list = Object.values(state.results).filter(r => state.regs.find(x => x.id === r.registrationId)?.cat === catId && r.finishStatus === 'finished' && ['verified', 'corrected'].includes(r.verificationStatus) && r.netMs != null);
@@ -250,8 +252,9 @@ export function makeS6(user: Json, me: Json | null, o: S6Opts) {
       if (c.query.flag) rows = rows.filter(r => (r.flags as string[]).includes(c.query.flag));
       if (c.query.q) rows = rows.filter(r => `${r.displayName} ${r.bibNumber}`.toLowerCase().includes(q));
       const s = c.query.status;
-      if (s) rows = rows.filter(r => (s === 'no_result' ? !r.resultId : s === 'dq' ? r.verificationStatus === 'disqualified' : ['dnf', 'dns'].includes(s) ? r.finishStatus === s : r.verificationStatus === s));
-      return { ...pageOf(rows, c), counts: { total: rows.length } };
+      if (s && !['needs_review', 'verified', 'rejected', 'dnf', 'dns', 'dq', 'no_result'].includes(s)) return { status: 400, json: { error: 'invalid_request' } };
+      if (s) rows = rows.filter(r => (s === 'needs_review' ? r.verificationStatus === 'pending_verification' : s === 'no_result' ? !r.resultId : s === 'dq' ? r.verificationStatus === 'disqualified' : ['dnf', 'dns'].includes(s) ? r.finishStatus === s : r.verificationStatus === s));
+      return { ...pageOf(rows, c), total: rows.length };
     }],
     // ── import ──
     ['POST', /^\/organizer\/events\/([^/]+)\/results\/imports\/preview$/, (c, m) => {
@@ -277,7 +280,7 @@ export function makeS6(user: Json, me: Json | null, o: S6Opts) {
       if (state.importHashes[csv]) return { status: 200, json: state.importHashes[csv] };
       if (c.body?.previewHash !== hashOf(csv + JSON.stringify(c.body?.timeBasis ?? ''))) return { status: 409, json: { error: 'preview_stale' } };
       const a = analyse(csv);
-      if (a.problems.length) return { status: 422, json: { error: 'validation_failed', fields: [{ path: 'csv', code: 'has_problems' }] } };
+      if (a.problems.length) return { status: 409, json: { error: 'import_has_errors', problems: a.problems.length, rows: a.problems.slice(0, 50) } };
       let created = 0; let revised = 0; let unchanged = 0;
       for (const op of a.ops) {
         if (op.same) { unchanged += 1; continue; }
@@ -286,9 +289,9 @@ export function makeS6(user: Json, me: Json | null, o: S6Opts) {
         const over = { finishStatus: op.st, verificationStatus: settled ? op.st : 'pending_verification', netMs: op.net, gunMs: op.gun, sourceType: c.body.sourceType, sourceLabel: c.body.sourceLabel ?? null, flags: [] as string[] };
         if (cur) { bump(cur, over as Partial<S6Result>); revised += 1; } else { seed(op.regId, over as Partial<S6Result>); created += 1; }
       }
-      const rec = { id: `imp_${state.imports.length + 1}`, fileName: 'results.csv', sourceType: c.body.sourceType, sourceLabel: c.body.sourceLabel ?? null, rowCount: a.total, createdCount: created, revisedCount: revised, unchangedCount: unchanged, createdBy: { name: user.displayName ?? 'Neema Organizer' }, createdAt: stamp };
+      const rec = { id: `imp_${state.imports.length + 1}`, fileName: c.body.fileName ?? 'results.csv', sourceType: c.body.sourceType, sourceLabel: c.body.sourceLabel ?? null, rowCount: a.total, createdCount: created, revisedCount: revised, unchangedCount: unchanged, createdBy: { name: user.displayName ?? 'Neema Organizer' }, createdAt: stamp };
       state.imports.unshift(rec); state.version += 1; audit('events.results_imported');
-      const reply = { import: rec, created, revised, unchanged };
+      const reply = { import: rec };
       state.importHashes[csv] = reply;
       return { status: 201, json: reply };
     })],
@@ -325,7 +328,7 @@ export function makeS6(user: Json, me: Json | null, o: S6Opts) {
         previewHash: hashOf(`rel${c.body?.categoryId ?? ''}${c.body.stage}${state.version}`),
         finished: rs.filter(r => r.finishStatus === 'finished' && !['pending_verification', 'rejected', 'disqualified'].includes(r.verificationStatus)).length,
         dnf: rs.filter(r => r.finishStatus === 'dnf').length, dns: rs.filter(r => r.finishStatus === 'dns').length, dq: rs.filter(r => r.verificationStatus === 'disqualified').length,
-        noResult: noRes, unsettled: unsettledOf(c.body?.categoryId ?? null), willMarkDns: noRes,
+        noResult: noRes, unsettled: unsettledOf(c.body?.categoryId ?? null), rejected: Object.values(state.results).filter(r => cats.includes(reg(r.registrationId)?.cat) && r.verificationStatus === 'rejected').length, willMarkDns: noRes,
       };
     }],
     ['POST', /^\/organizer\/events\/([^/]+)\/results\/release\/withdraw$/, (c, m) => write(c, `withdraw|${m[1]}`, ['owner', 'admin'], () => {
@@ -334,7 +337,7 @@ export function makeS6(user: Json, me: Json | null, o: S6Opts) {
       if (!cur) return { status: 404, json: { error: 'not_found' } };
       if (cur.stage === 'official') return { status: 409, json: { error: 'already_released' } };
       delete state.releases[cat]; state.version += 1; audit('events.results_withdrawn');
-      return { status: 200, json: { withdrawn: true } };
+      return { status: 200, json: { withdrawn: { id: `rel_${state.version}`, categoryId: cat } } };
     })],
     ['POST', /^\/organizer\/events\/([^/]+)\/results\/release$/, (c, m) => write(c, `release|${m[1]}`, ['owner', 'admin'], () => {
       const b = c.body ?? {};
@@ -342,11 +345,14 @@ export function makeS6(user: Json, me: Json | null, o: S6Opts) {
       if (b.previewHash !== hashOf(`rel${b.categoryId ?? ''}${b.stage}${state.version}`)) return { status: 409, json: { error: 'preview_stale' } };
       const cats = scopeCats(b.categoryId ?? null);
       if (cats.some(cid => state.releases[cid]?.stage === 'official')) return { status: 409, json: { error: 'already_released' } };
-      if (b.stage === 'official' && unsettledOf(b.categoryId ?? null) > 0 && !b.leaveUnsettledOut) return { status: 422, json: { error: 'validation_failed', fields: [{ path: 'leaveUnsettledOut', code: 'required' }] } };
+      if (b.stage === 'official' && unsettledOf(b.categoryId ?? null) > 0 && !b.leaveUnsettledOut) return { status: 409, json: { error: 'unsettled_results', unsettled: unsettledOf(b.categoryId ?? null) } };
+      if (b.stage === 'provisional' && !Object.values(state.results).some(r => cats.includes(reg(r.registrationId)?.cat))) return { status: 422, json: { error: 'no_results' } };
+      const marked = b.stage === 'official' && b.markRemainingDns ? state.regs.filter(r => r.status === 'confirmed' && cats.includes(r.cat) && !state.results[r.id]).length : 0;
+      const resultCount = Object.values(state.results).filter(r => cats.includes(reg(r.registrationId)?.cat) && r.verificationStatus !== 'pending_verification' && r.verificationStatus !== 'rejected').length + marked;
       if (b.stage === 'official' && b.markRemainingDns) state.regs.filter(r => r.status === 'confirmed' && cats.includes(r.cat) && !state.results[r.id]).forEach(r => seed(r.id, { finishStatus: 'dns', verificationStatus: 'dns', netMs: null, sourceType: 'organizer_verified', sourceLabel: null }));
       cats.forEach(cid => { state.releases[cid] = { stage: b.stage, releasedAt: stamp }; if (b.stage === 'official') rank(cid); });
       state.version += 1; audit('events.results_released', { stage: b.stage });
-      return { status: 200, json: { released: true, stage: b.stage } };
+      return { status: 200, json: { release: { id: `rel_${state.version}`, stage: b.stage, categoryId: b.categoryId ?? null, resultCount, unsettledCount: unsettledOf(b.categoryId ?? null), releasedAt: stamp, markedDns: marked } } };
     })],
     // ── disputes and settings ──
     ['GET', /^\/organizer\/events\/([^/]+)\/results\/disputes$/, (c, m) => {
@@ -361,10 +367,11 @@ export function makeS6(user: Json, me: Json | null, o: S6Opts) {
       if (!d) return { status: 404, json: { error: 'dispute_not_found' } };
       if (d.status !== 'open') return { status: 409, json: { error: 'invalid_transition' } };
       const b = c.body ?? {};
-      if (!['upheld', 'rejected'].includes(b.outcome) || String(b.note ?? '').trim().length < 1) return { status: 400, json: { error: 'invalid_request' } };
+      if (!['upheld', 'rejected'].includes(b.outcome) || String(b.note ?? '').trim().length < 5 || String(b.note).length > 500) return { status: 400, json: { error: 'invalid_request' } };
       if (b.outcome === 'upheld') {
         const res = state.results[d.registrationId]; const cor = b.correction;
-        if (!cor) return { status: 400, json: { error: 'invalid_request' } };
+        if (!cor) return { status: 422, json: { error: 'correction_required' } };
+        if (cor.action !== 'correct' && cor.action !== 'disqualify') return { status: 400, json: { error: 'invalid_request' } };
         if (cor.expectedRevision !== res.revision) return { status: 409, json: { error: 'result_changed' } };
         const net = cor.netTime ? parseMs(cor.netTime) : null;
         bump(res, { verificationStatus: 'corrected', ...(typeof net === 'number' ? { netMs: net } : {}) }, cor.reasonCode);
@@ -372,7 +379,7 @@ export function makeS6(user: Json, me: Json | null, o: S6Opts) {
       }
       Object.assign(d, { status: b.outcome, resolutionNote: b.note, resolvedAt: stamp });
       audit('events.dispute_resolved');
-      return { status: 200, json: { dispute: d } };
+      return { status: 200, json: { dispute: { id: d.id, status: d.status, resolvedAt: stamp, resultIdAfter: d.resultId } } };
     })],
     ['PATCH', /^\/organizer\/events\/([^/]+)\/results-settings$/, (c, m) => write(c, `settings|${m[1]}`, ['owner', 'admin'], () => {
       const b = c.body ?? {};
@@ -391,7 +398,7 @@ export function makeS6(user: Json, me: Json | null, o: S6Opts) {
       const r = reg(m[2]);
       if (!r) return { status: 404, json: { error: 'registration_not_found' } };
       const res = state.results[r.id];
-      return { ...rowOf(r, res), revisions: res ? [...res.history, { revision: res.revision, finishStatus: res.finishStatus, verificationStatus: res.verificationStatus, netElapsedMs: res.netMs, gunElapsedMs: res.gunMs, sourceType: res.sourceType, by: { name: 'Neema Organizer' }, at: stamp }] : [], linkedRun: res?.linkedRun ?? null, disputes: state.disputes.filter(d => d.registrationId === r.id) };
+      return { result: rowOf(r, res), revisions: res ? [...res.history, { revision: res.revision, finishStatus: res.finishStatus, verificationStatus: res.verificationStatus, netElapsedMs: res.netMs, gunElapsedMs: res.gunMs, sourceType: res.sourceType, reasonCode: null, note: null, by: { name: 'Neema Organizer' }, at: stamp }] : [], linkedRun: res?.linkedRun ?? null, disputes: state.disputes.filter(d => d.registrationId === r.id) };
     }],
     ['PUT', /^\/organizer\/events\/([^/]+)\/results\/([^/]+)$/, (c, m) => write(c, `put|${m[2]}`, ['owner', 'admin', 'timing'], () => {
       const r = reg(m[2]);
@@ -408,12 +415,12 @@ export function makeS6(user: Json, me: Json | null, o: S6Opts) {
       const over = { finishStatus: b.finishStatus, verificationStatus: settled ? b.finishStatus : 'pending_verification', netMs: net, gunMs: gun, sourceType: 'organizer_verified', sourceLabel: b.sourceLabel ?? null, flags: [] as string[] };
       if (cur) bump(cur, over as Partial<S6Result>); else seed(r.id, over as Partial<S6Result>);
       state.version += 1; audit('events.result_entered');
-      return { status: 200, json: rowOf(r, state.results[r.id]) };
+      { const x = state.results[r.id]; return { status: 200, json: { result: { id: x.id, revision: x.revision, finishStatus: x.finishStatus, verificationStatus: x.verificationStatus, elapsedMs: x.netMs } } }; }
     })],
     ['POST', /^\/organizer\/events\/([^/]+)\/results\/([^/]+)\/verify$/, (c, m) => write(c, `verify|${m[2]}`, ['owner', 'admin'], () => {
       const res = resByResultId(m[2]); const bad = needRevision(c, res); if (bad) return bad;
       if (res!.verificationStatus !== 'pending_verification') return { status: 409, json: { error: 'invalid_transition' } };
-      if (res!.finishStatus === 'dq' && !c.body?.reasonCode) return { status: 422, json: { error: 'validation_failed', fields: [{ path: 'reasonCode', code: 'required' }] } };
+      if (res!.finishStatus === 'dq' && !DQ_REASONS.includes(c.body?.reasonCode)) return { status: 422, json: { error: 'validation_failed', fields: [{ path: 'reasonCode', code: 'required' }] } };
       bump(res!, { verificationStatus: 'verified' }); audit('events.result_verified');
       return { status: 200, json: { result: { id: res!.id, revision: res!.revision } } };
     })],
@@ -425,7 +432,7 @@ export function makeS6(user: Json, me: Json | null, o: S6Opts) {
     })],
     ['POST', /^\/organizer\/events\/([^/]+)\/results\/([^/]+)\/correct$/, (c, m) => write(c, `correct|${m[2]}`, ['owner', 'admin'], () => {
       const res = resByResultId(m[2]); const bad = needRevision(c, res); if (bad) return bad;
-      if (!['timing_error', 'wrong_bib', 'late_data', 'other'].includes(c.body?.reasonCode) || !note(c, 10, 300)) return { status: 422, json: { error: 'validation_failed', fields: [{ path: 'note', code: 'invalid' }] } };
+      if (!['timing_error', 'wrong_bib', 'late_finish_data', 'other'].includes(c.body?.reasonCode) || !note(c, 10, 300)) return { status: 422, json: { error: 'validation_failed', fields: [{ path: 'note', code: 'invalid' }] } };
       const net = c.body.netTime ? parseMs(c.body.netTime) : null; const gun = c.body.gunTime ? parseMs(c.body.gunTime) : null;
       if (typeof net === 'string' || typeof gun === 'string') return { status: 422, json: { error: 'validation_failed', fields: [{ path: 'netTime', code: 'invalid' }] } };
       if (net == null && gun == null && !c.body.finishStatus) return { status: 422, json: { error: 'validation_failed', fields: [{ path: 'netTime', code: 'required' }] } };
@@ -435,7 +442,7 @@ export function makeS6(user: Json, me: Json | null, o: S6Opts) {
     })],
     ['POST', /^\/organizer\/events\/([^/]+)\/results\/([^/]+)\/disqualify$/, (c, m) => write(c, `dq|${m[2]}`, ['owner', 'admin'], () => {
       const res = resByResultId(m[2]); const bad = needRevision(c, res); if (bad) return bad;
-      if (!c.body?.reasonCode || !note(c, 10, 300)) return { status: 422, json: { error: 'validation_failed', fields: [{ path: 'note', code: 'invalid' }] } };
+      if (!DQ_REASONS.includes(c.body?.reasonCode) || (c.body?.note != null && !note(c, 10, 300))) return { status: 422, json: { error: 'validation_failed', fields: [{ path: 'reasonCode', code: 'invalid' }] } };
       bump(res!, { verificationStatus: 'disqualified', finishStatus: 'dq', overallRank: null, categoryRank: null }, c.body.reasonCode);
       rank(reg(res!.registrationId)!.cat); audit('events.result_disqualified');
       return { status: 200, json: { result: { id: res!.id, revision: res!.revision } } };
@@ -446,7 +453,7 @@ export function makeS6(user: Json, me: Json | null, o: S6Opts) {
       if (!rewardsOn()) return off();
       if (!inRoles('owner', 'admin', 'timing')) return forbidden();
       if (!eventOk(m[1])) return noEvent();
-      return { items: state.templates.map(t => ({ ...t, locked: medalScopeReleased(t) })) };
+      return { items: state.templates.map(t => ({ ...t, locked: medalScopeReleased(t) })), builtInArt: BUILTIN, ...(artOn() ? { artConfirmation: ART_CONFIRMATION } : {}) };
     }],
     ['POST', /^\/organizer\/events\/([^/]+)\/medal-templates$/, (c, m) => {
       if (!rewardsOn()) return off();
@@ -457,7 +464,7 @@ export function makeS6(user: Json, me: Json | null, o: S6Opts) {
         if (!okRule || !b.name?.en || !['finisher', 'gold', 'silver', 'bronze', 'time', 'other'].includes(b.tier) || (b.artKey && !BUILTIN.includes(b.artKey))) return { status: 422, json: { error: 'validation_failed', fields: [{ path: 'rule', code: 'invalid' }] } };
         const t = { id: `tpl_${state.templates.length + 1}`, name: b.name, description: b.description ?? { en: '', sw: '' }, tier: b.tier, categoryId: b.categoryId ?? null, rule, status: b.status ?? 'active', sortOrder: state.templates.length, awardedCount: 0, art: { source: 'builtin', artKey: b.artKey ?? 'finisher_green' } };
         state.templates.push(t); audit('events.medal_template_created');
-        return { status: 201, json: t };
+        return { status: 201, json: { template: t } };
       });
     }],
     ['PATCH', /^\/organizer\/events\/([^/]+)\/medal-templates\/([^/]+)$/, (c, m) => {
@@ -470,13 +477,13 @@ export function makeS6(user: Json, me: Json | null, o: S6Opts) {
         for (const k of ['name', 'description', 'tier', 'status', 'rule', 'categoryId']) if (k in b) t[k] = b[k];
         if (b.artKey && BUILTIN.includes(b.artKey) && t.art.source !== 'custom') t.art = { source: 'builtin', artKey: b.artKey };
         audit('events.medal_template_updated');
-        return { status: 200, json: t };
+        return { status: 200, json: { template: t } };
       });
     }],
     ['GET', /^\/organizer\/events\/([^/]+)\/medal-templates\/([^/]+)\/preview$/, (_c, m) => {
       if (!rewardsOn()) return off();
       if (!inRoles('owner', 'admin', 'timing')) return forbidden();
-      return tplOf(m[2]) ? { wouldReceive: 3 } : { status: 404, json: { error: 'template_not_found' } };
+      return tplOf(m[2]) ? { wouldReceive: 3, released: true } : { status: 404, json: { error: 'template_not_found' } };
     }],
     // ── medal art (EVENTS_MEDAL_ART): raw image body, rights confirmation as a query parameter ──
     ['POST', /^\/organizer\/events\/([^/]+)\/medal-templates\/([^/]+)\/art$/, (c, m) => {
@@ -492,12 +499,12 @@ export function makeS6(user: Json, me: Json | null, o: S6Opts) {
       if (type === 'image/svg+xml') return { status: 400, json: { error: 'svg_not_allowed' } };
       if (!['image/png', 'image/jpeg', 'image/webp'].includes(type)) return { status: 400, json: { error: 'unsupported_file_type' } };
       if ((c.bytes ?? Number(c.headers?.['content-length'] ?? 0)) > 2 * 1024 * 1024) return { status: 413, json: { error: 'payload_too_large' } };
-      if (c.query.confirmationVersion !== ART_CONFIRMATION_VERSION) return { status: 409, json: { error: 'confirmation_outdated' } };
+      if (c.query.confirmationVersion !== ART_CONFIRMATION_VERSION) return { status: 409, json: { error: 'confirmation_outdated', current: ART_CONFIRMATION } };
       const prev = state.arts.find(a => a.templateId === t.id && a.status === 'live');
       if (prev) prev.status = 'replaced';
-      const art = { id: `art_${state.seq++}`, templateId: t.id, eventId: m[1], eventTitle: 'Arusha Trail 10K', organizerId: 'org_1', organizerName: 'Dar Runners', categoryName: t.categoryId ? CATS[t.categoryId].name : null, tier: t.tier, status: 'live', reviewState: 'to_review', altText: null, confirmedAt: stamp, confirmedByName: user.displayName ?? 'Neema Organizer', takedownsLast30Days: 0, revision: (prev?.revision ?? 0) + 1 };
+      const art = { id: `art_${state.seq++}`, templateId: t.id, eventId: m[1], eventTitle: 'Arusha Trail 10K', organizerId: 'org_1', organizerName: 'Dar Runners', categoryName: t.categoryId ? CATS[t.categoryId].name : null, tier: t.tier, status: 'live', reviewState: 'to_review', altText: c.query.altEn || c.query.altSw ? { en: c.query.altEn ?? null, sw: c.query.altSw ?? null } : null, confirmedAt: stamp, confirmationVersion: ART_CONFIRMATION_VERSION, organizerTakedowns30d: 0, highlightOrganizer: false, revision: (prev?.revision ?? 0) + 1 };
       state.arts.push(art); state.uploads.push({ type, size: c.bytes ?? Number(c.headers?.['content-length'] ?? 0), key, templateId: t.id, confirmationVersion: c.query.confirmationVersion });
-      t.art = { source: 'custom', artId: art.id, revision: art.revision, artKey: t.art.artKey, altText: null };
+      t.art = { source: 'custom', artId: art.id, revision: art.revision, artKey: t.art.artKey, altText: art.altText };
       audit('events.medal_art_uploaded');
       return { status: 201, json: { art } };
     }],
@@ -521,7 +528,7 @@ export function makeS6(user: Json, me: Json | null, o: S6Opts) {
       if (live) live.status = 'removed';
       t.art = { source: 'builtin', artKey: t.art.artKey };
       audit('events.medal_art_removed');
-      return { status: 200, json: { removed: true } };
+      return { status: 200, json: { removed: { artId: live?.id ?? null } } };
     }],
     ['GET', /^\/organizer\/events\/([^/]+)\/medal-templates\/([^/]+)\/art\/preview$/, (c, m) => {
       if (!artOn()) return off();
@@ -544,7 +551,7 @@ export function makeS6(user: Json, me: Json | null, o: S6Opts) {
       const d = needEvents(); if (d) return d;
       let items = state.arts.filter(a => (c.query.status ? a.status === c.query.status : true) && (c.query.reviewState ? a.reviewState === c.query.reviewState : true));
       if (!c.query.status && !c.query.reviewState) items = [...state.arts];
-      return { items, nextCursor: null };
+      return { toReview: state.arts.filter(a => a.reviewState === 'to_review' && a.status === 'live').length, items, nextCursor: null };
     }],
     ['GET', /^\/admin\/medal-art\/([^/]+)\/preview$/, (c, m) => {
       if (!artOn()) return off();
@@ -568,7 +575,7 @@ export function makeS6(user: Json, me: Json | null, o: S6Opts) {
         const reason = c.body?.reason;
         if (!['inappropriate', 'rights', 'other_brand', 'person_request', 'quality', 'other'].includes(reason) || (reason === 'other' && !String(c.body?.note ?? '').trim()) || String(c.body?.note ?? '').length > 200) return { status: 422, json: { error: 'validation_failed', fields: [{ path: 'reason', code: 'invalid' }] } };
         a.status = 'taken_down'; a.takedownReason = reason;
-        const t = tplOf(a.templateId); if (t) t.art = { source: 'builtin', artKey: t.art.artKey, status: 'taken_down', takedownReason: reason };
+        const t = tplOf(a.templateId); if (t) t.art = { source: 'builtin', artId: null, revision: null, artKey: t.art.artKey, altText: null };
         state.notices.push(`art_takedown:${a.id}:${reason}`); audit('events.medal_art_taken_down', { reason });
         return { status: 200, json: { art: a } };
       });
@@ -580,11 +587,11 @@ export function makeS6(user: Json, me: Json | null, o: S6Opts) {
       return idempotent(c, 'defnew', () => {
         const b = c.body ?? {};
         if (b.valueTzs != null) return { status: 422, json: { error: 'value_not_allowed_yet' } };
-        if (b.issuer !== 'fitflex') return { status: 422, json: { error: 'source_not_allowed' } };
-        if (!b.title?.en || !b.terms?.en || !b.terms?.sw || !String(b.fundingNote ?? '').trim() || !['event_finish', 'medal', 'achievement'].includes(b.triggerType)) return { status: 422, json: { error: 'validation_failed', fields: [{ path: 'terms', code: 'required' }] } };
-        const def = { ...b, id: `rwd_${state.defs.length + 1}`, capUsed: 0, valueTzs: null };
+        if (b.issuerType !== undefined && b.issuerType !== 'fitflex') return { status: 422, json: { error: 'issuer_not_allowed' } };
+        if (!b.title?.en || !b.title?.sw || !b.terms?.en || !b.terms?.sw || !String(b.fundingNote ?? '').trim() || !['event_finish', 'medal', 'achievement'].includes(b.triggerType)) return { status: 422, json: { error: 'validation_failed', fields: [{ path: 'terms', code: 'required' }] } };
+        const def = { ...b, id: `rwd_${state.defs.length + 1}`, capUsed: 0, valueTzs: null, issuerType: 'fitflex', status: b.status === 'active' ? 'active' : 'draft' };
         state.defs.push(def); audit('events.reward_definition_created');
-        return { status: 201, json: def };
+        return { status: 201, json: { definition: def } };
       });
     }],
     ['PATCH', /^\/admin\/reward-definitions\/([^/]+)$/, (c, m) => {
@@ -594,23 +601,27 @@ export function makeS6(user: Json, me: Json | null, o: S6Opts) {
         const def = defOf(m[1]);
         if (!def) return { status: 404, json: { error: 'definition_not_found' } };
         if (c.body?.valueTzs != null) return { status: 422, json: { error: 'value_not_allowed_yet' } };
-        Object.assign(def, c.body); return { status: 200, json: def };
+        if (def.status === 'ended') return { status: 409, json: { error: 'definition_ended' } };
+        const hasLedger = state.ledger.some(l => l.definitionId === def.id);
+        if (hasLedger && ['triggerType', 'triggerEventId', 'triggerRef', 'redeemMode'].some(k => k in (c.body ?? {}))) return { status: 409, json: { error: 'definition_locked' } };
+        if (c.body && ((c.body.title && !(c.body.title.en && c.body.title.sw)) || (c.body.terms && !(c.body.terms.en && c.body.terms.sw)))) return { status: 422, json: { error: 'validation_failed', fields: [{ path: 'title', code: 'required' }] } };
+        Object.assign(def, c.body); return { status: 200, json: { definition: def } };
       });
     }],
-    ['POST', /^\/admin\/reward-definitions\/([^/]+)\/(pause|end)$/, (c, m) => {
+    ['POST', /^\/admin\/reward-definitions\/([^/]+)\/(activate|pause|end)$/, (c, m) => {
       if (!rewardsOn()) return off();
       const d = needEvents(); if (d) return d;
-      return idempotent(c, `defact|${m[1]}|${m[2]}`, () => { const def = defOf(m[1]); if (!def) return { status: 404, json: { error: 'definition_not_found' } }; def.status = m[2] === 'pause' ? 'paused' : 'ended'; return { status: 200, json: def }; });
+      return idempotent(c, `defact|${m[1]}|${m[2]}`, () => { const def = defOf(m[1]); if (!def) return { status: 404, json: { error: 'definition_not_found' } }; if (def.status === 'ended') return { status: 409, json: { error: 'definition_ended' } }; def.status = m[2] === 'pause' ? 'paused' : m[2] === 'end' ? 'ended' : 'active'; return { status: 200, json: { definition: def } }; });
     }],
     ['GET', /^\/admin\/reward-ledger$/, c => {
       if (!rewardsOn()) return off();
       const d = needEvents(); if (d) return d;
-      return { items: state.ledger.filter(l => (!c.query.definitionId || l.rewardDefinitionId === c.query.definitionId) && (!c.query.entryType || l.entryType === c.query.entryType)), nextCursor: null };
+      return { items: state.ledger.filter(l => (!c.query.definitionId || l.definitionId === c.query.definitionId) && (!c.query.entryType || l.entryType === c.query.entryType)), nextCursor: null };
     }],
     ['GET', /^\/admin\/reward-summary$/, () => {
       if (!rewardsOn()) return off();
       const d = needEvents(); if (d) return d;
-      return { items: [{ definitionId: 'rwd_1', earned: 5, redeemed: 2, expired: 1, reversed: 1, capUsed: 3, needsReview: 1 }], mostEarned: [{ userId: 'usr_farm1', count: 4 }] };
+      return { items: [{ definitionId: 'rwd_1', earned: 5, redeemed: 2, expired: 1, reversed: 1, capUsed: 3, needsReview: 1 }], mostEarnedThisWeek: [{ userId: 'usr_farm1', count: 4 }] };
     }],
     ['POST', /^\/admin\/reward-redemptions\/lookup$/, c => {
       if (!rewardsOn()) return off();
@@ -653,7 +664,7 @@ export function makeS6(user: Json, me: Json | null, o: S6Opts) {
       const d = needEvents(); if (d) return d;
       return idempotent(c, `admin|${m[2]}|${m[3]}`, () => {
         const res = resByResultId(m[2]); const bad = needRevision(c, res); if (bad) return bad;
-        if (!c.body?.reasonCode || !note(c, 10, 300)) return { status: 422, json: { error: 'validation_failed', fields: [{ path: 'note', code: 'invalid' }] } };
+        if (!(m[3] === 'correct' ? ['timing_error', 'wrong_bib', 'late_finish_data', 'other'] : DQ_REASONS).includes(c.body?.reasonCode) || !note(c, 10, 300)) return { status: 422, json: { error: 'validation_failed', fields: [{ path: 'note', code: 'invalid' }] } };
         if (m[3] === 'correct') { const net = c.body.netTime ? parseMs(c.body.netTime) : null; bump(res!, { verificationStatus: 'corrected', ...(typeof net === 'number' ? { netMs: net } : {}) }, c.body.reasonCode, 'FitFlex admin'); }
         else bump(res!, { verificationStatus: 'disqualified', finishStatus: 'dq' }, c.body.reasonCode, 'FitFlex admin');
         audit('events.admin_result_exception', { actorType: 'admin' });

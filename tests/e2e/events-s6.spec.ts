@@ -5,7 +5,7 @@ import {
 } from './helpers/events-mock';
 import { ART_CONFIRMATION_VERSION, type S6Opts } from './helpers/events-s6-mock';
 import { eventsS6Messages } from '../../src/lib/i18n-events-s6';
-import { RESULTS_ERRORS } from '../../src/lib/events-results';
+import { ALL_REASONS, RESULTS_ERRORS } from '../../src/lib/events-results';
 
 // Events S6 (spec docs/design/events-s6-runs-results-medals-rewards.md §6 to §9, §12, §14): the organizer Results tab (overview, import,
 // results table and drawer, release, corrections, disputes, settings), medals and artwork, the integrations scope picker and result
@@ -180,10 +180,10 @@ test.describe('import (§6.2, AC-S2, AC-S3)', () => {
     await expect(page.getByTestId('import-unmatched')).toContainText('registered people have no row in this file');
     await page.getByTestId('import-apply').click();
     await page.getByTestId('import-review').click();
-    await expect(page.getByTestId('results-filter-status')).toHaveValue('pending_verification');
+    await expect(page.getByTestId('results-filter-status')).toHaveValue('needs_review');
     await expect(page.getByTestId('results-table-view')).toContainText('101');
     expect(page.url()).toContain('section=results');
-    expect(page.url()).toContain('status=pending_verification');
+    expect(page.url()).toContain('status=needs_review');
   });
   test('timing may import; a stale preview says so; a file over 1 MB or not CSV is refused before any request', async ({ page }) => {
     const mock = await open(page, 'timing', 'import');
@@ -237,7 +237,7 @@ test.describe('results table and drawer (§6.3, §6.6, §9.2)', () => {
   });
   test('filters: category, status, flag and a search of at least two characters go to the server', async ({ page }) => {
     const mock = await open(page, 'owner', 'results');
-    await page.getByTestId('results-filter-status').selectOption('pending_verification');
+    await page.getByTestId('results-filter-status').selectOption('needs_review');
     await expect(page.getByTestId('results-table-view')).not.toContainText('Chausiku');
     await page.getByTestId('results-filter-flag').selectOption('implausible_pace');
     await expect(page.getByTestId('results-table-view').locator('tbody tr')).toHaveCount(1);
@@ -307,6 +307,7 @@ test.describe('results table and drawer (§6.3, §6.6, §9.2)', () => {
     await page.getByTestId('correct-net').fill('1:5');
     await expect(c).toContainText('Time isn\'t in a format we read (H:MM:SS)');
     await page.getByTestId('correct-net').fill('1:52:00');
+    await expect(page.getByTestId('correct-reason').locator('option[value="late_finish_data"]')).toHaveCount(1);
     await page.getByTestId('correct-reason').selectOption('timing_error');
     await page.getByTestId('correct-note').fill('short');
     await expect(page.getByTestId('correct-confirm')).toBeDisabled();
@@ -324,11 +325,13 @@ test.describe('results table and drawer (§6.3, §6.6, §9.2)', () => {
     await openDrawer(page, 'reg_3');
     await page.getByTestId('act-dq').click();
     await expect(page.getByTestId('disqualify-dialog')).toContainText('loses their rank and any medals');
-    await expect(page.getByTestId('decision-confirm')).toBeDisabled();
+    await expect(page.getByTestId('decision-confirm')).toBeDisabled(); // a reason from the server's list is required
+    await expect(page.getByTestId('decision-reason').locator('option')).toHaveCount(8);
+    await page.getByTestId('decision-reason').selectOption('course_cut');
     await page.getByTestId('decision-note').fill('Cut the course at 8 km');
     await page.getByTestId('decision-confirm').click();
     await expect(page.getByTestId('drawer-live')).toHaveText('Result disqualified');
-    expect(mock.writes(/disqualify$/)[0].body).toEqual({ expectedRevision: 1, reasonCode: 'other', note: 'Cut the course at 8 km' });
+    expect(mock.writes(/disqualify$/)[0].body).toEqual({ expectedRevision: 1, reasonCode: 'course_cut', note: 'Cut the course at 8 km' });
     await expect(page.getByTestId('result-drawer')).toContainText('Disqualified');
   });
   test('timing may enter a provisional result but has no verify, reject, correct or disqualify', async ({ page }) => {
@@ -384,7 +387,7 @@ test.describe('bulk approve and release (§6.3, §6.4, AC-S5, AC-S6, AC-S7)', ()
   });
   test('the bulk bar on the filtered table works too, and a stale preview asks to check again', async ({ page }) => {
     const mock = await open(page, 'owner', 'results');
-    await page.getByTestId('results-filter-status').selectOption('pending_verification');
+    await page.getByTestId('results-filter-status').selectOption('needs_review');
     await page.getByTestId('results-approve-clean').click();
     await expect(page.getByTestId('bulk-approve-count')).toBeVisible();
     mock.s6!.results.reg_4.revision += 1; mock.s6!.version += 1;
@@ -427,7 +430,8 @@ test.describe('bulk approve and release (§6.3, §6.4, AC-S5, AC-S6, AC-S7)', ()
   test('provisional release can be withdrawn; ranks are the server\'s and appear after an official release', async ({ page }) => {
     const mock = await open(page, 'owner', 'overview');
     await page.getByTestId('release-prov-cat_2').click();
-    await page.getByTestId('release-type').fill('2');
+    await expect(page.getByTestId('release-dialog')).toContainText('Results still waiting for review are not counted.');
+    await page.getByTestId('release-type').fill('0'); // the server's resultCount leaves out results still to review
     await page.getByTestId('release-confirm').click();
     await expect(page.getByTestId('results-stage-cat_2')).toContainText('Provisional');
     await page.getByTestId('withdraw-cat_2').click();
@@ -447,6 +451,15 @@ test.describe('bulk approve and release (§6.3, §6.4, AC-S5, AC-S6, AC-S7)', ()
     await expect(rows.locator('tr', { hasText: '104' })).toContainText('1');
     await expect(rows.locator('tr', { hasText: '105' }).locator('td').nth(6)).toHaveText('2');
     expect(mock.writes(/results\/release$/).every(w => !('rank' in (w.body ?? {})))).toBe(true);
+  });
+  test('the server\'s unsettled_results refusal names the number', async ({ page }) => {
+    const mock = await open(page, 'owner', 'overview');
+    await page.getByTestId('release-off-cat_1').click();
+    await page.getByTestId('release-leave-out').check();
+    await page.getByTestId('release-type').fill('1');
+    mock.on('POST', /results\/release$/, () => ({ status: 409, json: { error: 'unsettled_results', unsettled: 2 } }));
+    await page.getByTestId('release-confirm').click();
+    await expect(page.getByTestId('release-error')).toContainText('2 results are not settled yet.');
   });
   test('a second official release is refused by the server and shown in words', async ({ page }) => {
     const mock = await open(page, 'owner', 'overview', { officialRelease: true });
@@ -477,7 +490,7 @@ test.describe('disputes and settings (§6.7, §9.2)', () => {
     await page.getByTestId('correct-confirm').click();
     const w = mock.writes(/disputes\/dsp_1\/resolve$/);
     expect(w).toHaveLength(1);
-    expect(w[0].body).toEqual({ outcome: 'upheld', note: 'Runner is right: chip read late', correction: { expectedRevision: 1, netTime: '1:52:10', reasonCode: 'timing_error', note: 'Runner is right: chip read late' } });
+    expect(w[0].body).toEqual({ outcome: 'upheld', note: 'Runner is right: chip read late', correction: { action: 'correct', expectedRevision: 1, netTime: '1:52:10', reasonCode: 'timing_error', note: 'Runner is right: chip read late' } });
     expect(mock.s6!.disputes[0].status).toBe('upheld');
     await expect(page.getByTestId('disputes-empty')).toBeVisible();
   });
@@ -638,8 +651,9 @@ test.describe('medal artwork (§7.7, D54, AC-G1 to AC-G9)', () => {
     expect(up.size).toBeLessThanOrEqual(2 * 1024 * 1024);
     expect(up.confirmationVersion).toBe(ART_CONFIRMATION_VERSION);
     expect(up.key).toMatch(/^.{8,100}$/);
-    const alt = mock.writes(/medal-templates\/tpl_1\/art$/).find(w => w.method === 'PATCH');
-    expect(alt?.body).toEqual({ altText: { en: 'A green laurel', sw: 'Taji ya kijani' } });
+    const post = mock.writes(/medal-templates\/tpl_1\/art$/).find(w => w.method === 'POST')!;
+    expect(post.query).toMatchObject({ confirmationVersion: ART_CONFIRMATION_VERSION, altEn: 'A green laurel', altSw: 'Taji ya kijani' });
+    expect(mock.writes(/medal-templates\/tpl_1\/art$/).filter(w => w.method === 'PATCH')).toHaveLength(0); // alt text rides the upload
     const card = page.getByTestId('medal-tpl_1');
     await expect(card).toContainText('Your design');
     await expect(card.getByTestId('medal-art')).toHaveAttribute('data-art-source', 'custom');
@@ -719,14 +733,6 @@ test.describe('medal artwork (§7.7, D54, AC-G1 to AC-G9)', () => {
     await expect(page.getByTestId('medals-builtin-only')).toContainText('Medals use FitFlex designs for now.');
     await expect(page.getByTestId('medal-tpl_1').getByTestId('medal-art')).toHaveAttribute('data-art-source', 'builtin');
     expect(mock.reads(/art\/preview|medal-art/)).toHaveLength(0);
-  });
-  test('a taken-down design shows the reason in words, the built-in design meanwhile, and Upload a different design', async ({ page }) => {
-    const mock = await open(page, 'owner', 'medals');
-    mock.s6!.templates[0].art = { source: 'builtin', artKey: 'finisher_green', status: 'taken_down', takedownReason: 'rights' };
-    await page.reload();
-    await expect(page.getByTestId('medal-takendown-tpl_1')).toContainText('FitFlex removed this design: it may use someone else\'s work. A FitFlex design is shown instead.');
-    await expect(page.getByTestId('medal-tpl_1').getByTestId('medal-art')).toHaveAttribute('data-art-source', 'builtin');
-    await expect(page.getByTestId('medal-upload-tpl_1')).toHaveText('Upload a different design');
   });
   test('a design that fails to load never leaves a blank medal', async ({ page }) => {
     const mock = await open(page, 'owner', 'medals');
@@ -820,6 +826,8 @@ test.describe('admin reward desk (§7.4, §7.6, §9.4)', () => {
     await expect(page.getByTestId('reward-dialog')).toContainText("Cash and shop value aren't available yet.");
     await expect(page.getByTestId('reward-save')).toBeDisabled();
     await page.getByTestId('reward-title-en').fill('Marathon perk');
+    await expect(page.getByTestId('reward-save')).toBeDisabled(); // the Swahili title and terms are required too
+    await page.getByTestId('reward-title-sw').fill('Faida ya marathoni');
     await page.getByTestId('reward-terms-en').fill('Show the code at the desk.');
     await page.getByTestId('reward-terms-sw').fill('Onyesha msimbo kwenye dawati.');
     await page.getByTestId('reward-trigger').selectOption('achievement');
@@ -831,7 +839,7 @@ test.describe('admin reward desk (§7.4, §7.6, §9.4)', () => {
     await expect(page.getByTestId('rewards-definitions')).toContainText('Marathon perk');
     const w = mock.writes(/admin\/reward-definitions$/)[0];
     expect(w.headers?.['idempotency-key']).toMatch(/^.{8,100}$/);
-    expect(w.body).toMatchObject({ issuer: 'fitflex', title: { en: 'Marathon perk', sw: '' }, triggerType: 'achievement', triggerRef: 'marathon_finish', triggerEventId: null, redeemMode: 'perk', capPerUser: 1, fundingNote: 'FitFlex', status: 'active' });
+    expect(w.body).toMatchObject({ issuerType: 'fitflex', title: { en: 'Marathon perk', sw: 'Faida ya marathoni' }, triggerType: 'achievement', triggerRef: 'marathon_finish', triggerEventId: null, redeemMode: 'perk', capPerUser: 1, fundingNote: 'FitFlex', status: 'active' });
     expect(w.body).not.toHaveProperty('valueTzs');
     expect(await page.locator('main').innerText()).not.toMatch(/\bpoints?\b|\bpointi\b/i);
     await expectNoRawKeys(page);
@@ -839,7 +847,7 @@ test.describe('admin reward desk (§7.4, §7.6, §9.4)', () => {
   test('a medal reward picks the event, then the medal; the funding note is required; a refused value reads in words', async ({ page }) => {
     const mock = await adminDesk(page);
     await page.getByTestId('reward-new').click();
-    await page.getByTestId('reward-title-en').fill('Gold perk');
+    await page.getByTestId('reward-title-en').fill('Gold perk'); await page.getByTestId('reward-title-sw').fill('Faida ya dhahabu');
     await page.getByTestId('reward-terms-en').fill('Terms'); await page.getByTestId('reward-terms-sw').fill('Masharti');
     await page.getByTestId('reward-trigger').selectOption('medal');
     await page.getByTestId('reward-event').selectOption('evt_pub');
@@ -912,7 +920,8 @@ test.describe('admin medal art queue (§7.7, AC-G5)', () => {
     const mock = await adminDesk(page, {}, '?tab=medalArt');
     const card = page.getByTestId('art-card-art_q1');
     await expect(card).toContainText('Arusha Trail 10K · Dar Runners');
-    await expect(card).toContainText('Rights confirmed by Neema Organizer');
+    await expect(card).toContainText('Rights confirmed on');
+    await expect(card).toContainText('Review this organizer');
     await expect(card).toContainText('3 take-downs in 30 days');
     await expect(card.locator('img[alt="A green runner"]')).toHaveCount(2);
     await card.getByTestId('art-fine-art_q1').click();
@@ -937,7 +946,7 @@ test.describe('admin medal art queue (§7.7, AC-G5)', () => {
     const w = mock.writes(/take-down$/)[0];
     expect(w.body).toEqual({ reason: 'rights', note: 'Looks like an official FitFlex badge' });
     expect(mock.s6!.arts[0].status).toBe('taken_down');
-    expect(mock.s6!.templates[0].art).toMatchObject({ source: 'builtin', status: 'taken_down', takedownReason: 'rights' });
+    expect(mock.s6!.templates[0].art).toMatchObject({ source: 'builtin', artId: null });
     expect(mock.s6!.notices).toContain('art_takedown:art_q1:rights');
     await page.getByRole('button', { name: 'Taken down' }).click();
     await expect(page.getByTestId('art-card-art_q1')).toContainText('Taken down');
@@ -963,9 +972,12 @@ test.describe('admin: results block and exceptions (§6.6, §9.1)', () => {
     expect(w.body).toEqual({ expectedRevision: 1, netTime: '1:50:00', reasonCode: 'wrong_bib', note: 'Bib swapped with 104 at the finish' });
     expect(mock.s6!.audit.some(a => a.action === 'events.admin_result_exception')).toBe(true);
     await page.getByTestId('admin-dq-reg_4').click();
+    await page.getByTestId('decision-reason').selectOption('equipment');
+    await expect(page.getByTestId('decision-confirm')).toBeDisabled(); // an admin exception always carries a note
     await page.getByTestId('decision-note').fill('Used a bike for part of the course');
     await page.getByTestId('decision-confirm').click();
-    expect(mock.writes(/admin\/events\/evt_pub\/results\/res_reg_4\/disqualify$/)[0].body).toEqual({ expectedRevision: 1, reasonCode: 'other', note: 'Used a bike for part of the course' });
+    await expect.poll(() => mock.writes(/admin\/events\/evt_pub\/results\/res_reg_4\/disqualify$/).length).toBe(1);
+    expect(mock.writes(/admin\/events\/evt_pub\/results\/res_reg_4\/disqualify$/)[0].body).toEqual({ expectedRevision: 1, reasonCode: 'equipment', note: 'Used a bike for part of the course' });
   });
   test('the Results tab is hidden in the admin event view when results are off', async ({ page }) => {
     await setupEvents(page, EVENTS_STAFF, { s6: { results: false } });
@@ -986,7 +998,7 @@ test.describe('Swahili, 375 px layout and string parity (AC-X3, AC-X4)', () => {
     await expect(page.getByTestId('results-steps')).toContainText('2 Kagua');
     await expectNoRawKeys(page);
     expect(await noOverflow(page)).toBe(true);
-    for (const sec of ['Pakia', 'Matokeo', 'Pingamizi', 'Medali', 'Mipangilio']) {
+    for (const sec of ['Pakia', 'Matokeo', 'Maswali', 'Medali', 'Mipangilio']) {
       await page.getByTestId('results-sections').getByRole('button', { name: sec, exact: sec === 'Matokeo' }).first().click();
       await expectNoRawKeys(page);
       expect(await noOverflow(page)).toBe(true);
@@ -1021,12 +1033,12 @@ test.describe('Swahili, 375 px layout and string parity (AC-X3, AC-X4)', () => {
     expect(Object.keys(sw).sort()).toEqual(Object.keys(en).sort());
     for (const k of Object.keys(en)) { expect(sw[k]?.trim(), k).toBeTruthy(); expect(ph(sw[k]), k).toBe(ph(en[k])); }
     const families: Array<[string, readonly string[]]> = [
-      ['organizer.results.reason.', ['timing_error', 'wrong_bib', 'late_data', 'other', 'replaced']], ['organizer.results.rejectReason.', ['not_a_valid_run', 'data_error', 'duplicate', 'other']],
+      ['organizer.results.reason.', ALL_REASONS],
       ['organizer.results.dispute.reason.', ['time_wrong', 'not_my_result', 'wrong_category', 'missing_split', 'dq_challenge', 'other']], ['organizer.results.dispute.status.', ['open', 'upheld', 'rejected', 'withdrawn']],
       ['organizer.results.flag.', ['implausible_pace', 'many_dropped_points', 'long_gap', 'duplicate_route', 'other']], ['organizer.results.medals.tier.', ['finisher', 'gold', 'silver', 'bronze', 'time', 'other']],
       ['organizer.results.art.builtin.', ['finisher_green', 'finisher_gold', 'podium_gold', 'podium_silver', 'podium_bronze', 'time_blue', 'charity_red', 'virtual_teal']],
       ['organizer.results.art.reason.', ['inappropriate', 'rights', 'other_brand', 'person_request', 'quality', 'other']], ['admin.medalArt.reason.', ['inappropriate', 'rights', 'other_brand', 'person_request', 'quality', 'other']],
-      ['organizer.results.problem.', ['bib_not_found', 'bib_duplicate_in_file', 'registration_not_confirmed', 'category_mismatch', 'time_missing_for_finisher', 'time_invalid', 'time_out_of_range', 'status_invalid', 'already_official', 'event_not_open_for_results', 'other']],
+      ['organizer.results.problem.', ['bib_invalid', 'not_submitted', 'bib_not_found', 'bib_duplicate_in_file', 'registration_not_confirmed', 'category_mismatch', 'time_missing_for_finisher', 'time_invalid', 'time_out_of_range', 'status_invalid', 'already_official', 'event_not_open_for_results', 'other']],
       ['organizer.results.warn.', ['rank_ignored', 'kit_not_collected', 'over_cutoff', 'time_basis_missing', 'other']], ['organizer.results.stage.', ['none', 'provisional', 'official', 'corrected', 'disputed', 'disqualified', 'rejected']],
       ['organizer.results.status.', ['finished', 'dnf', 'dns', 'dq', 'pending', 'rejected', 'noResult']], ['organizer.results.vstatus.', ['pending_verification', 'verified', 'rejected', 'corrected', 'disqualified']],
       ['organizer.results.source.', ['timing_provider', 'organizer_verified', 'fitflex_gps', 'manual_unverified']], ['organizer.results.section.', ['overview', 'import', 'results', 'disputes', 'medals', 'settings']],
@@ -1035,12 +1047,123 @@ test.describe('Swahili, 375 px layout and string parity (AC-X3, AC-X4)', () => {
       ['admin.rewards.redemption.', ['reserved', 'redeemed', 'cancelled', 'expired']], ['admin.rewards.ledger.', ['earn', 'redeem', 'expire', 'reverse', 'other']], ['admin.rewards.source.', ['event_medal', 'achievement', 'event_result', 'other']],
       ['admin.rewards.tab.', ['definitions', 'redemptions', 'ledger', 'tasks', 'medalArt']], ['admin.rewards.reversal.', ['revoke_unredeemed', 'revoke_all']],
       ['admin.rewards.achievement.', ['first_event_finish', 'first_10k_finish', 'half_marathon_finish', 'marathon_finish', 'three_events_year']],
-      ['organizer.results.art.error.', ['svg_not_allowed', 'unsupported_file_type', 'animated_not_allowed', 'corrupt_image', 'payload_too_large', 'image_too_small', 'not_square', 'file_not_allowed', 'rate_limited', 'busy', 'confirmation_outdated']],
+      ['organizer.results.art.error.', ['svg_not_allowed', 'unsupported_file_type', 'animated_not_allowed', 'corrupt_image', 'payload_too_large', 'image_too_large', 'image_too_small', 'not_square', 'file_not_allowed', 'rate_limited', 'busy', 'confirmation_outdated', 'no_file_provided', 'raw_body_required']],
     ];
     for (const [prefix, vals] of families) for (const v of vals) expect(en[`${prefix}${v}`], `${prefix}${v}`).toBeTruthy();
     for (const [code, key] of Object.entries(RESULTS_ERRORS)) expect(en[key], `${code} -> ${key}`).toBeTruthy();
-    for (const code of ['invalid_request', 'invalid_cursor', 'csv_invalid', 'idempotency_key_required', 'forbidden_role', 'organizer_suspended', 'event_not_found', 'registration_not_found', 'result_not_found', 'not_found', 'idempotency_key_reused', 'request_in_progress', 'preview_stale', 'result_changed', 'already_released', 'template_locked', 'dispute_open', 'dispute_window_closed', 'run_already_linked', 'activity_already_linked', 'already_claimed', 'reward_unavailable', 'not_enough_units', 'organizer_owner', 'payload_too_large', 'validation_failed', 'event_not_open_for_results', 'value_not_allowed_yet', 'source_not_allowed', 'rate_limited']) {
+    for (const code of ['invalid_request', 'invalid_cursor', 'csv_invalid', 'idempotency_key_required', 'forbidden_role', 'organizer_suspended', 'event_not_found', 'registration_not_found', 'result_not_found', 'not_found', 'idempotency_key_reused', 'request_in_progress', 'preview_stale', 'result_changed', 'already_released', 'template_locked', 'dispute_open', 'dispute_window_closed', 'run_already_linked', 'activity_already_linked', 'already_claimed', 'reward_unavailable', 'not_enough_units', 'organizer_owner', 'payload_too_large', 'validation_failed', 'event_not_open_for_results', 'value_not_allowed_yet', 'source_not_allowed', 'rate_limited', 'unsettled_results', 'import_has_errors', 'no_results', 'no_change', 'nothing_to_withdraw', 'definition_locked', 'definition_ended', 'organizer_can_resolve', 'query_too_short', 'correction_required', 'dispute_closed', 'raw_body_required', 'no_file_provided', 'image_too_large']) {
       expect(RESULTS_ERRORS[code], `spec error code ${code} is mapped`).toBeTruthy();
     }
+  });
+});
+
+// ── Round 2: the contract check against the real backend (functions#287) ──
+test.describe('real backend shapes (contract round)', () => {
+  test('the result detail is nested ({ result, revisions, linkedRun, disputes }) and the drawer reads it', async ({ page }) => {
+    const mock = await open(page, 'owner', 'results');
+    await openDrawer(page, 'reg_3');
+    const detail = mock.reads(/results\/reg_3$/)[0];
+    expect(detail).toBeTruthy();
+    await expect(page.getByTestId('drawer-net')).toHaveText('1:55:03');
+    await expect(page.getByTestId('act-correct')).toBeVisible(); // verified rows can be corrected: the status came from result.verificationStatus
+    await expect(page.getByTestId('drawer-disputes')).toContainText('My time is wrong');
+  });
+  test('verifying a disqualification that came in with a file asks for the reason', async ({ page }) => {
+    const mock = await open(page, 'owner', 'import');
+    await page.getByTestId('import-file').setInputFiles(file(csv(['107,dq,1:00:00,,21K,'])));
+    await page.getByTestId('import-check').click();
+    await page.getByTestId('import-apply').click();
+    expect(mock.writes(/results\/imports$/)[0].body?.fileName).toBe('results.csv');
+    await page.getByTestId('import-review').click();
+    await page.getByTestId('result-open-reg_7').click();
+    await page.getByTestId('act-verify').click();
+    await expect(page.getByTestId('verifyDq-dialog')).toBeVisible();
+    await expect(page.getByTestId('decision-confirm')).toBeDisabled();
+    await page.getByTestId('decision-reason').selectOption('identity');
+    await page.getByTestId('decision-confirm').click();
+    await expect(page.getByTestId('drawer-live')).toHaveText('Result verified');
+    expect(mock.writes(/\/verify$/)[0].body).toEqual({ expectedRevision: 1, reasonCode: 'identity' });
+  });
+  test('the status filter sends needs_review (the server\'s word), never pending_verification', async ({ page }) => {
+    const mock = await open(page, 'owner', 'results');
+    await page.getByTestId('results-filter-status').selectOption('needs_review');
+    await expect(page.getByTestId('results-table-view')).toContainText('Amina');
+    expect(mock.reads(/\/results$/).some(c => c.query.status === 'needs_review')).toBe(true);
+    expect(mock.calls.some(c => c.query.status === 'pending_verification')).toBe(false);
+  });
+  test('a dispute the organizer can still answer: FitFlex\'s organizer_can_resolve is shown in words', async ({ page }) => {
+    const mock = await open(page, 'owner', 'disputes');
+    await page.getByTestId('dispute-open-dsp_1').click();
+    await page.getByTestId('dispute-nochange').click();
+    mock.on('POST', /resolve$/, () => ({ status: 409, json: { error: 'organizer_can_resolve' } }));
+    await page.getByTestId('dispute-note-input').fill('Chip log confirms');
+    await page.getByTestId('dispute-note-confirm').click();
+    await expect(page.getByTestId('dispute-note-dialog')).toContainText('The organizer can still answer this question.');
+  });
+  test('a reward edit sends only what changed (a locked trigger field is never sent); Activate and Pause move the status', async ({ page }) => {
+    const mock = await adminDesk(page);
+    await page.getByTestId('reward-edit-rwd_1').click();
+    await expect(page.getByTestId('reward-status')).toHaveCount(0);
+    await page.getByTestId('reward-cap-user').fill('2');
+    await page.getByTestId('reward-save').click();
+    await expect(page.getByTestId('reward-dialog')).toHaveCount(0);
+    const w = mock.writes(/admin\/reward-definitions\/rwd_1$/)[0];
+    expect(w.method).toBe('PATCH');
+    expect(w.body).toEqual({ capPerUser: 2 });
+    await page.getByTestId('reward-pause-rwd_1').click();
+    await page.getByRole('alertdialog').getByRole('button', { name: 'Pause' }).click();
+    await expect(page.getByTestId('rewards-definitions')).toContainText('Paused');
+    await page.getByTestId('reward-activate-rwd_1').click();
+    await expect(page.getByTestId('rewards-definitions')).toContainText('Active');
+    expect(mock.writes(/rwd_1\/activate$/)).toHaveLength(1);
+    // The server's definition_locked would be shown in words if a trigger field did travel.
+    mock.on('PATCH', /reward-definitions\/rwd_1$/, () => ({ status: 409, json: { error: 'definition_locked' } }));
+    await page.getByTestId('reward-edit-rwd_1').click();
+    await page.getByTestId('reward-cap-user').fill('3');
+    await page.getByTestId('reward-save').click();
+    await expect(page.getByTestId('reward-error')).toContainText('already been earned');
+  });
+  test('a medal-art take-down shows the organizer highlight; the template art block carries no status', async ({ page }) => {
+    const mock = await adminDesk(page, {}, '?tab=medalArt');
+    await expect(page.getByTestId('art-card-art_q1')).toContainText('3 take-downs in 30 days');
+    await expect(page.getByTestId('art-card-art_q1')).toContainText('Review this organizer');
+    expect(mock.s6!.arts[0]).not.toHaveProperty('confirmedByName');
+  });
+});
+
+test.describe('Swahili at 320 px (no overflow)', () => {
+  const noOverflow = (page: Page) => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1);
+  test('results table, medals and the reward desk', async ({ page }) => {
+    await page.setViewportSize({ width: 320, height: 800 });
+    await open(page, 'owner', 'results', {}, 'sw');
+    await expect(page.getByTestId('results-table-view')).toBeVisible();
+    expect(await noOverflow(page)).toBe(true);
+    await expectNoRawKeys(page);
+    await page.getByTestId('result-open-reg_3').click();
+    await expect(page.getByTestId('result-drawer')).toBeVisible();
+    expect(await noOverflow(page)).toBe(true);
+    await page.getByTestId('drawer-close').click();
+    await page.getByTestId('results-sections').getByRole('button', { name: 'Medali' }).click();
+    await expect(page.getByTestId('results-medals')).toBeVisible();
+    expect(await noOverflow(page)).toBe(true);
+    await page.getByTestId('medal-edit-tpl_1').click();
+    expect(await noOverflow(page)).toBe(true);
+    await page.keyboard.press('Escape');
+    await page.unrouteAll({ behavior: 'ignoreErrors' });
+    await adminDesk(page, {}, '', EVENTS_STAFF, 'sw');
+    await expect(page.getByTestId('rewards-definitions')).toBeVisible();
+    await expect(page.getByTestId('rewards-definitions')).toContainText('Cheti cha aliyemaliza');
+    expect(await noOverflow(page)).toBe(true);
+    await page.getByTestId('reward-new').click();
+    expect(await noOverflow(page)).toBe(true);
+    await expectNoRawKeys(page);
+  });
+  test('the glossary fixes read as agreed', async ({ page }) => {
+    await open(page, 'timing', 'import', {}, 'sw');
+    await expect(page.getByTestId('results-sections')).toContainText('Maswali');
+    await page.unrouteAll({ behavior: 'ignoreErrors' });
+    await adminDesk(page, {}, '', EVENTS_STAFF, 'sw');
+    await page.getByTestId('reward-pause-rwd_1').click();
+    await expect(page.getByRole('alertdialog')).toContainText('Sitisha');
   });
 });
