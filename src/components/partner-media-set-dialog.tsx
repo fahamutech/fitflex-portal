@@ -23,7 +23,7 @@ import { FocalPointPicker } from './hero-image-manager';
 import { Alert, Button, Checkbox, EmptyState, ErrorState, Field, Segmented, SkeletonCard, Spinner, Textarea, useToast } from './shared';
 import { Dialog, DialogFooter } from './dialog';
 import {
-  BandFigure, BothPlates, itemAlt, PartnerPreviewProvider, subjectName, TakedownDialog, usePreview,
+  BandFigure, BothPlates, DANGER_GHOST, itemAlt, PartnerPreviewProvider, subjectName, TakedownDialog, usePreview,
 } from './partner-media-shared';
 
 /** May this admin open the dialog at all? (flag on, and any of the three scopes) */
@@ -374,7 +374,7 @@ function Body({ subject }: { subject: PartnerSubject }) {
                     </Button>
                   )}
                   {item && canDecide && (
-                    <Button variant="destructive" className="min-h-11" onClick={() => setTakingDown(item)} data-testid={`partner-set-take-down-${kind}`}>
+                    <Button variant="ghost" className={`min-h-11 ${DANGER_GHOST}`} onClick={() => setTakingDown(item)} data-testid={`partner-set-take-down-${kind}`}>
                       {t('partnerMedia.takeDown')}
                     </Button>
                   )}

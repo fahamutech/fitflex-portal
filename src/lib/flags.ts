@@ -35,3 +35,11 @@ export const PARTNER_MEDIA_ADMIN = process.env.NEXT_PUBLIC_PARTNER_MEDIA_ADMIN =
  * own WEB_GYM_PROFILE flag. Default off.
  */
 export const WEB_GYM_PROFILE = process.env.NEXT_PUBLIC_WEB_GYM_PROFILE === 'true';
+
+/**
+ * Browser gym check-in from the gym's QR code (/g/signin, /g/confirm, /g/done; backend functions#284): the "Visit this
+ * gym" button on the public gym page starts PIN sign-in, a preview and an explicit confirmation. Off, the button stays
+ * disabled, the three routes show the not-available state and no request is made. The server has its own
+ * WEB_QR_CHECKIN flag. Default off.
+ */
+export const WEB_QR_CHECKIN = process.env.NEXT_PUBLIC_WEB_QR_CHECKIN === 'true';

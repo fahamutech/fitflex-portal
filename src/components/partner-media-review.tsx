@@ -4,7 +4,7 @@
 // Post-moderation: partner uploads are live at once; admins check them here and mark them "Looks fine" or
 // take them down with a reason. `moderation` views; `moderation_decide` acts. Items FitFlex set (origin
 // fitflex) never enter To review.
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import Link from 'next/link';
 import { ImageUp } from 'lucide-react';
 import { useApp } from '../../app/providers';
@@ -19,8 +19,12 @@ import {
   Alert, Badge, Button, Card, CardContent, EmptyState, ErrorState, Input, PageHeader, Segmented, Select, SkeletonCard, useToast,
 } from './shared';
 import { Dialog, DialogFooter } from './dialog';
+import { PartnerPicker } from './partner-media-picker';
+import { PartnerMediaSetDialog } from './partner-media-set-dialog';
+import type { PartnerSubject } from '@/lib/partner-media';
 import {
-  BandFigure, BothPlates, FileDeleted, itemAlt, PartnerPreviewProvider, reportActionError, subjectName, TakedownDialog, useInView, usePreview,
+  BandFigure, BothPlates, CompanionStore, DANGER_GHOST, FileDeleted, itemAlt, PartnerCompanionProvider, PartnerPreviewProvider, reportActionError,
+  subjectName, TakedownDialog, useCompanion, useInView, usePreview,
 } from './partner-media-shared';
 
 type T = (key: MessageKey) => string;
@@ -47,8 +51,13 @@ function CardPreview({ item }: { item: PartnerMediaItem }) {
   const { t } = useApp();
   const [ref, seen] = useInView<HTMLDivElement>();
   const logo = item.kind === 'logo';
-  const p = usePreview(item.status === 'live' ? item : null, logo ? 240 : 480, seen);
-  if (item.status !== 'live' || !item.previewUrl) return <div ref={ref}><FileDeleted /></div>;
+  const isLive = item.status === 'live' && !!item.previewUrl;
+  const p = usePreview(isLive ? item : null, logo ? 240 : 480, seen);
+  // §43.2: the partner's live logo plate over the photo, or the logo's plate over the partner's live photo.
+  const companion = useCompanion(isLive ? item : null, seen);
+  const c = usePreview(companion, logo ? 480 : 240, seen);
+  if (!isLive) return <div ref={ref}><FileDeleted /></div>;
+  const plateOf = (i: PartnerMediaItem, src?: string) => ({ src, tone: (i.plate === 'dark' ? 'dark' : 'light') as 'light' | 'dark' });
   return (
     <div ref={ref} className="space-y-3" data-testid="partner-card-preview">
       {p.failed && <p className="text-sm text-[var(--color-error-700)]">{t('partnerMedia.preview.failed')}</p>}
@@ -57,10 +66,10 @@ function CardPreview({ item }: { item: PartnerMediaItem }) {
       {logo ? (
         <>
           <BothPlates src={p.url} alt={itemAlt(t, item)} />
-          <BandFigure kind="band" subject={item.subject} logo={{ src: p.url, tone: item.plate === 'dark' ? 'dark' : 'light' }} />
+          <BandFigure kind="band" subject={item.subject} photoSrc={companion ? c.url : undefined} focal={companion?.focal} logo={plateOf(item, p.url)} />
         </>
       ) : (
-        <BandFigure kind="band" subject={item.subject} photoSrc={p.url} focal={item.focal} />
+        <BandFigure kind="band" subject={item.subject} photoSrc={p.url} focal={item.focal} logo={companion ? plateOf(companion, c.url) : null} />
       )}
     </div>
   );
@@ -91,7 +100,7 @@ function Actions({ item, tab, canDecide, busy, onReviewed, onTakeDown }: {
           </Button>
         )}
         <Button
-          variant="destructive" className="min-h-11 w-full sm:w-auto"
+          variant="ghost" className={`min-h-11 w-full sm:w-auto ${DANGER_GHOST}`}
           disabled={!canDecide || busy}
           aria-describedby={!canDecide ? hintId : undefined}
           onClick={() => onTakeDown(item)}
@@ -172,17 +181,8 @@ function DetailDialog({ item, tab, canDecide, busy, onClose, onReviewed, onTakeD
   item: PartnerMediaItem | null; tab: PartnerMediaTab; canDecide: boolean; busy: boolean;
   onClose: () => void; onReviewed: (i: PartnerMediaItem) => void; onTakeDown: (i: PartnerMediaItem) => void;
 }) {
-  const { t, token, locale } = useApp();
-  const [companion, setCompanion] = useState<PartnerMediaItem | null>(null);
-  useEffect(() => {
-    setCompanion(null);
-    if (!item || !token || item.status !== 'live') return;
-    let alive = true;
-    partnerMediaApi.list(token, {
-      tab: 'live', subjectType: item.subject.type, subjectId: item.subject.id, kind: item.kind === 'hero' ? 'logo' : 'hero', limit: 1,
-    }).then(r => { if (alive) setCompanion(r.items[0] ?? null); }).catch(() => { /* the item's own preview still shows */ });
-    return () => { alive = false; };
-  }, [item, token]);
+  const { t, locale } = useApp();
+  const companion = useCompanion(item?.status === 'live' ? item : null) ?? null;
   const own = usePreview(item?.status === 'live' ? item : null, 960);
   const other = usePreview(companion, 960);
   if (!item) return null;
@@ -229,6 +229,9 @@ function Queue() {
   const { t, token, hasPermission } = useApp();
   const toast = useToast();
   const canDecide = hasPermission('moderation_decide');
+  const canBrand = hasPermission('brand_media');
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [setSubject, setSetSubject] = useState<PartnerSubject | null>(null);
   const [tab, setTab] = useState<PartnerMediaTab>('to_review');
   const [type, setType] = useState<PartnerSubjectType | ''>('');
   const [kind, setKind] = useState<PartnerMediaKind | ''>('');
@@ -244,6 +247,7 @@ function Queue() {
   const [opened, setOpened] = useState<PartnerMediaItem | null>(null);
   const [takingDown, setTakingDown] = useState<PartnerMediaItem | null>(null);
   const seq = useRef(0);
+  const companions = useMemo(() => new CompanionStore(token), [token]);
   // useApp().t is a new function on every provider render: read it through a ref so loads re-run only when the filters change.
   const tRef = useRef(t);
   tRef.current = t;
@@ -255,6 +259,7 @@ function Queue() {
     if (!token) return;
     const mine = ++seq.current;
     if (!quiet) setStatus('loading');
+    companions.clear(); // a reload may follow a takedown or replacement: look the partners up again
     const filters = { subjectType: type, kind, q };
     try {
       const [list, count] = await Promise.all([
@@ -273,7 +278,7 @@ function Queue() {
       setLoadError(isNetworkError(e) ? tt('partnerMedia.offline') : e instanceof ApiError && e.status === 403 ? tt('partnerMedia.error.forbidden') : null);
       setStatus('error');
     }
-  }, [token, tab, type, kind, q]);
+  }, [token, tab, type, kind, q, companions]);
   useEffect(() => { void load(); }, [load]);
 
   async function loadMore() {
@@ -353,8 +358,17 @@ function Queue() {
   }
 
   return (
+    <PartnerCompanionProvider store={companions}>
     <div data-testid="partner-media-page">
-      <PageHeader title={t('partnerMedia.title')} description={t('partnerMedia.subtitle')} />
+      <PageHeader
+        title={t('partnerMedia.title')}
+        description={t('partnerMedia.subtitle')}
+        actions={canBrand ? (
+          <Button variant="secondary" className="min-h-11" onClick={() => setPickerOpen(true)} data-testid="partner-picker-open">
+            <ImageUp aria-hidden="true" className="h-4 w-4" />{t('partnerMedia.picker.open')}
+          </Button>
+        ) : undefined}
+      />
       {status === 'off' ? (
         <EmptyState icon={<ImageUp />} title={t('partnerMedia.off.title')} body={t('partnerMedia.off.body')} />
       ) : (
@@ -397,10 +411,45 @@ function Queue() {
         onClose={() => setTakingDown(null)}
         onDone={(outcome) => { if (takingDown) afterTakedown(outcome, takingDown); }}
       />
+      {canBrand && (
+        <Dialog open={pickerOpen} onClose={() => setPickerOpen(false)} title={t('partnerMedia.picker.open')} description={t('partnerMedia.picker.intro')} size="lg">
+          <PartnerPicker onPick={subject => { setPickerOpen(false); setSetSubject(subject); }} />
+          <DialogFooter>
+            <Button variant="secondary" className="min-h-11" onClick={() => setPickerOpen(false)}>{t('common.close')}</Button>
+          </DialogFooter>
+        </Dialog>
+      )}
+      {/* Something set here may now be live or replace a card: reload when the dialog closes. */}
+      <PartnerMediaSetDialog subject={setSubject} onClose={() => { setSetSubject(null); void load(true); }} />
+    </div>
+    </PartnerCompanionProvider>
+  );
+}
+
+/** brand_media without moderation: only "Set photo for a partner" (no queue, no list request). */
+function SetOnly() {
+  const { t } = useApp();
+  const [subject, setSubject] = useState<PartnerSubject | null>(null);
+  return (
+    <div data-testid="partner-media-set-only">
+      <PageHeader title={t('partnerMedia.title')} description={t('partnerMedia.picker.intro')} />
+      <div className="space-y-6">
+        <Alert tone="info">{t('partnerMedia.picker.brandOnly')}</Alert>
+        <Card>
+          <CardContent className="space-y-4">
+            <h2 className="text-base font-semibold text-[var(--color-fg-primary)]">{t('partnerMedia.picker.open')}</h2>
+            <PartnerPicker onPick={setSubject} />
+          </CardContent>
+        </Card>
+      </div>
+      <PartnerMediaSetDialog subject={subject} onClose={() => setSubject(null)} />
     </div>
   );
 }
 
 export function PartnerMediaReview() {
-  return <PartnerPreviewProvider><Queue /></PartnerPreviewProvider>;
+  const { hasPermission } = useApp();
+  // The queue needs moderation or moderation_decide (functions#277 L3: brand_media alone may not list it).
+  const canQueue = hasPermission('moderation') || hasPermission('moderation_decide');
+  return <PartnerPreviewProvider>{canQueue ? <Queue /> : <SetOnly />}</PartnerPreviewProvider>;
 }

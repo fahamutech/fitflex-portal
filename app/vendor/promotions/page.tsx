@@ -1,8 +1,8 @@
 'use client';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import Link from 'next/link';
 import { ArrowLeft, ImageIcon, Megaphone, Plus } from 'lucide-react';
-import { api, type VendorProduct } from '@/lib/api';
+import { api, type VendorProduct, type VendorTools } from '@/lib/api';
 import { eatDateTime, fmt } from '@/lib/vendor';
 import {
   AUDIENCE_KEY, PHASE_KEY, PHASE_TONE, VENDOR_GROUPS, VENDOR_GROUP_KEY, bannersApi, canDo, errorCodeOf, errorKeyOf, headlineOf, isNetworkError, phaseOf,
@@ -12,7 +12,8 @@ import { Alert, Badge, Button, Card, EmptyState, ErrorState, PageHeader, Skeleto
 import { Dialog } from '@/components/dialog';
 import { BannerForm } from '@/components/shop-banner-form';
 import { useBannerPhoto } from '@/components/shop-banner-preview';
-import { forgetBannersAvailability } from '@/components/shop-banners-gate';
+import { forgetBannersAvailability, useShopFlashSalesAvailable } from '@/components/shop-banners-gate';
+import { VendorFlashSales } from '@/components/vendor-flash-sales';
 import { useToast } from '@/components/ui/toast';
 import { useVendor } from '@/components/vendor-context';
 import { useApp } from '../../providers';
@@ -33,11 +34,53 @@ function CardThumb({ banner }: { banner: ShopBanner }) {
 }
 const linkCls = 'inline-flex min-h-11 items-center text-sm font-semibold text-[var(--color-brand-700)] underline-offset-4 hover:underline';
 
+/** SHOP_FLASH_SALES as /vendor/me reports it (tools.merch.flashSales); undefined when the server doesn't say. */
+const flashSalesTool = (tools: VendorTools | null | undefined) => {
+  const merch = tools?.merch as { flashSales?: unknown } | undefined;
+  return typeof merch?.flashSales === 'boolean' ? merch.flashSales : undefined;
+};
+type Tab = 'banners' | 'sales';
+const tabOf = (search: string): Tab => (new URLSearchParams(search).get('tab') === 'sales' ? 'sales' : 'banners');
+
 /**
- * A business's own shop banners (spec shop-home-phase2 §5.2): propose one, see where each stands and why,
- * change or withdraw it before it goes live. FitFlex approves every banner. Flash sales join in slice 4.
+ * Banners & flash sales (spec shop-home-phase2 §5.2, §8.3): one page, two tabs (?tab=sales). Each tab shows while
+ * the server has its feature on (SHOP_BANNERS, SHOP_FLASH_SALES); with banners off and sales on, sales open.
  */
 export default function VendorPromotionsPage() {
+  const { token, t } = useApp();
+  const vendor = useVendor();
+  const allowed = vendor.status === 'ready' && !!vendor.me?.permissions?.includes('products');
+  const salesOn = useShopFlashSalesAvailable('vendor', token, allowed, flashSalesTool(vendor.me?.tools));
+  const [tab, setTab] = useState<Tab>('banners');
+  const [bannersOff, setBannersOff] = useState(false);
+  useEffect(() => {
+    const sync = () => setTab(tabOf(window.location.search));
+    sync();
+    window.addEventListener('popstate', sync);
+    return () => window.removeEventListener('popstate', sync);
+  }, []);
+  const pick = (next: Tab) => { history.pushState(null, '', next === 'sales' ? '?tab=sales' : window.location.pathname); setTab(next); };
+  const active: Tab = tab === 'sales' || (bannersOff && salesOn) ? 'sales' : 'banners';
+  const showSales = salesOn || tab === 'sales';
+  const tabBtn = (k: Tab, label: string) => (
+    <button key={k} type="button" role="tab" aria-selected={active === k} onClick={() => pick(k)} data-testid={`merch-vendor-tab-${k}`}
+      className={`flex min-h-11 items-center rounded-md px-3 text-sm ${active === k ? 'bg-[var(--color-bg-primary)] font-semibold shadow-sm' : 'text-[var(--color-fg-tertiary)]'}`}>{label}</button>
+  );
+  const tabs = (
+    <div role="tablist" aria-label={t('merch.entry.title')} className="flex w-fit gap-1 rounded-[var(--radius-lg)] bg-[var(--color-bg-secondary)] p-1">
+      {!bannersOff && tabBtn('banners', t('merch.tab.banners'))}
+      {showSales && tabBtn('sales', t('merch.tab.sales'))}
+    </div>
+  );
+  if (active === 'sales') return <VendorFlashSales tabs={tabs} />;
+  return <BannersTab tabs={tabs} title={showSales ? 'merch.entry.title' : 'merch.title'} onOff={() => setBannersOff(true)} />;
+}
+
+/**
+ * A business's own shop banners (spec shop-home-phase2 §5.2): propose one, see where each stands and why,
+ * change or withdraw it before it goes live. FitFlex approves every banner.
+ */
+function BannersTab({ tabs, title, onOff }: { tabs: ReactNode; title: 'merch.title' | 'merch.entry.title'; onOff: () => void }) {
   const { token, t, locale } = useApp();
   const vendor = useVendor();
   const toast = useToast();
@@ -78,7 +121,7 @@ export default function VendorPromotionsPage() {
       setRows(list.items); setStanding(list.vendor ?? null); setConfirmation(list.confirmation ?? null); setOpenProposals(list.openProposals ?? null); setState('ready');
     }
     catch (err) {
-      if (errorCodeOf(err) === 'feature_disabled') { forgetBannersAvailability(); setState('off'); return; }
+      if (errorCodeOf(err) === 'feature_disabled') { forgetBannersAvailability(); setState('off'); onOff(); return; }
       if (vendor.handleError(err)) return;
       setState(isNetworkError(err) ? 'offline' : 'failed');
     }
@@ -135,7 +178,7 @@ export default function VendorPromotionsPage() {
     finally { setBusy(false); }
   }
 
-  const header = <PageHeader title={t('merch.title')} description={t('merch.entry.subtitle')} />;
+  const header = <PageHeader title={t(title)} description={t('merch.entry.subtitle')} />;
 
   if (state === 'off') {
     return (
@@ -235,14 +278,11 @@ export default function VendorPromotionsPage() {
   return (
     <div className="mx-auto max-w-[960px] space-y-6">
       <PageHeader
-        title={t('merch.title')}
+        title={t(title)}
         description={t('merch.entry.subtitle')}
         actions={canPropose ? <Button onClick={() => go('new=banner')} disabled={state !== 'ready' || full} className="min-h-11 max-sm:w-full" data-testid="merch-propose"><Plus className="h-4 w-4" />{t('merch.banners.propose')}</Button> : undefined}
       />
-      {/* Flash sales join as a second tab in slice 4. */}
-      <div role="tablist" aria-label={t('merch.title')} className="flex w-fit gap-1 rounded-[var(--radius-lg)] bg-[var(--color-bg-secondary)] p-1">
-        <button role="tab" aria-selected="true" className="flex min-h-11 items-center rounded-md bg-[var(--color-bg-primary)] px-3 text-sm font-semibold shadow-sm">{t('merch.tab.banners')}</button>
-      </div>
+      {tabs}
       {suspended && <Alert tone="error">{t('merch.suspended')}</Alert>}
       {!approved && !suspended && pendingNotice}
       {approved && openProposals && openProposals.max > 0 && (
