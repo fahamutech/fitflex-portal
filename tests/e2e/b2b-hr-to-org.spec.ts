@@ -40,11 +40,12 @@ async function companyOrg(page: Page, user: Json = MARKED_HR, permissions = HR_A
 const byContact = ({ userId, linked, ...rest }: Json) => rest; // eslint-disable-line @typescript-eslint/no-unused-vars
 /**
  * 202 for an add or link named by email, number or user id (functions#252 8e911a4): the member is asked first.
- * By email/number memberRequest.id and userId are null, so the reply never says whether a member is behind it.
+ * By email/number userId is null, so the reply never says whether a member is behind it; since functions#283 the
+ * request is always stored, so memberRequest.id is a real id (it used to be null).
  */
 const pendingReply = (extra: Json) => ({ status: 202, json: {
   outcome: 'pending_member_acceptance',
-  memberRequest: { id: null, kind: 'employee_link', status: 'pending_member_acceptance', organizationId: 'org-3', corporateId: 'corp-1', employeeId: extra.beneficiary?.id ?? null, userId: null, displayName: null, role: null, permissions: null, beneficiaryType: null, groupName: null, externalReference: null, beneficiaryStatus: null, expiresAt: '2026-11-12T08:00:00Z', createdAt: '2026-10-29T08:00:00Z', decidedAt: null, reason: null },
+  memberRequest: { id: 'mr-c1', kind: 'employee_link', source: 'contact', status: 'pending_member_acceptance', organizationId: 'org-3', corporateId: 'corp-1', employeeId: extra.beneficiary?.id ?? null, userId: null, displayName: null, role: null, permissions: null, beneficiaryType: null, groupName: null, externalReference: null, beneficiaryStatus: null, expiresAt: '2026-11-12T08:00:00Z', createdAt: '2026-10-29T08:00:00Z', decidedAt: null, reason: null },
   writtenThrough: 'corporate_staff', ...extra,
 } });
 const storedUser = (page: Page) => page.evaluate(() => JSON.parse(localStorage.getItem('user') || 'null'));
@@ -202,7 +203,7 @@ test.describe('company people in /org (flag on)', () => {
     await expect(page.getByTestId('org-staff-pin-copy')).toHaveText('Copied');
     expect(await page.evaluate(() => navigator.clipboard.readText())).toBe('4821');
     // Named by email: added unlinked, the member is asked first (RC's consent wording, portal#141).
-    await expect(page.getByText('Neema Said added. Request sent. The member must accept in the FitFlex app before they\'re linked.')).toBeVisible();
+    await expect(page.getByText('Neema Said added. Request sent. They\'ll be linked once they accept in the FitFlex app.')).toBeVisible();
     await page.getByTestId('org-staff-pin-done').click();
     await expect(pin).toHaveCount(0);
     // Gone for good: the PIN is nowhere on the page any more.
@@ -254,6 +255,33 @@ test.describe('company people in /org (flag on)', () => {
     await expect(page.getByText('Request withdrawn.')).toBeVisible();
   });
 
+  test('add by email (functions#283): a real request id comes back; the row shows it waiting and Withdraw unlinks (never DELETE)', async ({ page }) => {
+    const mock = await companyOrg(page);
+    let asked = false;
+    const waiting = { status: 'pending_member_acceptance', createdAt: '2026-10-29T08:00:00Z', expiresAt: '2026-11-12T08:00:00Z' };
+    mock.on('GET', /^\/b2b\/organizations\/org-3\/beneficiaries$/, () => ({
+      items: asked ? [...EMPLOYEES, { ...EMPLOYEES[1], id: 'cemp_new', displayName: 'Neema Said', pendingLink: waiting }] : EMPLOYEES,
+      total: EMPLOYEES.length + (asked ? 1 : 0), nextCursor: null,
+    }));
+    mock.on('POST', /^\/b2b\/organizations\/org-3\/beneficiaries$/, c => { asked = true; return pendingReply({ beneficiary: byContact({ ...EMPLOYEES[1], id: 'cemp_new', displayName: c.body?.displayName }), pin: '9090' }); });
+    mock.on('POST', /^\/b2b\/organizations\/org-3\/beneficiaries\/cemp_new\/link$/, () => { asked = false; return { beneficiary: { ...EMPLOYEES[1], id: 'cemp_new', pendingLink: null }, writtenThrough: 'corporate_staff' }; });
+    await page.goto('/org/people');
+    await page.getByTestId('org-staff-name').fill('Neema Said');
+    await page.getByTestId('org-staff-add').getByLabel('Email (optional)', { exact: true }).fill('neema@mwenge.test');
+    await page.getByTestId('org-staff-add-button').click();
+    await page.getByTestId('org-staff-pin-done').click();
+    await expect(page.getByText('Neema Said added. Request sent. They\'ll be linked once they accept in the FitFlex app.')).toBeVisible();
+    // Nothing tells whether a FitFlex account is behind the email.
+    await expect(page.getByText(/not found|no FitFlex account|isn’t a member/i)).toHaveCount(0);
+    const pending = page.getByTestId('org-staff-pending-cemp_new');
+    await expect(pending).toContainText('Waiting for member');
+    await pending.getByRole('button', { name: 'Withdraw' }).click();
+    await expect.poll(() => mock.writes(/cemp_new\/link$/).length).toBe(1);
+    expect(mock.writes(/cemp_new\/link$/)[0].body).toEqual({});
+    await expect(page.getByText('Request withdrawn.')).toBeVisible();
+    expect(mock.calls.filter(c => c.method === 'DELETE')).toEqual([]);
+  });
+
   test('status changes: suspend, activate, left (confirmed) send active|suspended|inactive', async ({ page }) => {
     const mock = await companyOrg(page);
     mock.on('POST', /^\/b2b\/organizations\/org-3\/beneficiaries\/([^/]+)\/status$/, (c, m) => ({ beneficiary: { ...EMPLOYEES.find(e => e.id === m[1]), status: c.body?.status } }));
@@ -283,7 +311,7 @@ test.describe('company people in /org (flag on)', () => {
     await page.getByTestId('org-staff-row-cemp_2').getByRole('button', { name: 'Link', exact: true }).click();
     await expect.poll(() => mock.writes(/cemp_2\/link$/).length).toBe(1);
     expect(mock.writes(/cemp_2\/link$/)[0].body).toEqual({ phone: '0712345678' });
-    await expect(page.getByText('Request sent. Juma Kileo is linked once the member accepts in the FitFlex app.')).toBeVisible();
+    await expect(page.getByText('Request sent. Juma Kileo is linked once they accept in the FitFlex app.')).toBeVisible();
     await page.getByTestId('org-staff-row-cemp_1').getByRole('button', { name: 'Unlink' }).click();
     await expect.poll(() => mock.writes(/cemp_1\/link$/).length).toBe(1);
     expect(mock.writes(/cemp_1\/link$/)[0].body).toEqual({});

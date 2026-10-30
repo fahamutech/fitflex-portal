@@ -14,7 +14,7 @@ const request = (extra: Json = {}): Json => ({
   decidedAt: null, reason: null, ...extra,
 });
 const ASHA = { id: 'ben-1', organizationId: 'org-1', userId: 'usr-10', displayName: 'Asha Juma', externalReference: 'POL-1', beneficiaryType: 'policyholder', groupName: 'Head office', status: 'active', enrolledAt: '2026-09-01', source: 'b2b', readOnly: false };
-const SENT = 'Request sent. The member must accept in the FitFlex app before they\'re added.';
+const SENT = 'Request sent. They\'ll be added once they accept in the FitFlex app.';
 const stub = (extra: Json = {}) => ({ outcome: 'pending_member_acceptance', memberRequest: request({ id: null, ...extra }) });
 const list = (pending?: Json[]) => ({ items: [ASHA], total: 1, nextCursor: null, ...(pending ? { pendingMemberAcceptance: pending } : {}) });
 
@@ -141,7 +141,7 @@ test.describe('organisation user', () => {
     await page.goto('/org/people');
     await page.getByTestId('org-people-contact').fill('usr_zuhura');
     await page.getByTestId('org-people-add-button').click();
-    await expect(page.getByText('Ombi limetumwa. Mwanachama lazima akubali kwenye programu ya FitFlex kabla ya kuongezwa.')).toBeVisible();
+    await expect(page.getByText('Ombi limetumwa. Ataongezwa atakapokubali kwenye programu ya FitFlex.')).toBeVisible();
     const row = page.getByTestId('org-people-request-mr-1');
     await expect(row).toContainText('Kitambulisho usr_zuhura');
     await expect(row).toContainText('Inasubiri mwanachama');
@@ -243,5 +243,180 @@ test.describe('admin B2B', () => {
     await expect(page.getByText('Request withdrawn.')).toBeVisible();
     await expect(page.getByTestId('b2b-user-request-mr-2')).toHaveCount(0);
     expect(mock.writes(/member-requests/).map(c => `${c.method} ${c.path}`)).toEqual(['DELETE /b2b/organizations/org-1/member-requests/mr-2']);
+  });
+});
+
+// Consent slice (a) (fitflex-functions#283): adds by email or mobile number wait for the member too. The 202 is the
+// same whoever is behind the contact (memberRequest.id set, userId and displayName null); lists show the contact the
+// organisation typed, and the old not-found / not-a-member answers no longer come back.
+const byContact = (contactType: 'email' | 'phone', contact: string, extra: Json = {}) =>
+  request({ id: 'mr-c1', source: 'contact', contactType, contact, userId: null, ...extra });
+const NO_ACCOUNT_HINT = /not found|no FitFlex account|Nobody has confirmed|isn’t a member|already on your list/i;
+
+test.describe('adds by email or number (functions#283)', () => {
+  test('organisation user: add by email says "request sent", lists the email and withdraws with DELETE', async ({ page }) => {
+    const mock = await setupB2B(page, orgUser(['admin']));
+    let open = false;
+    mock.on('GET', BENEFICIARIES_PATH, () => list(open ? [byContact('email', 'zuhura@example.co.tz')] : []));
+    mock.on('POST', BENEFICIARIES_PATH, () => { open = true; return { status: 202, json: { outcome: 'pending_member_acceptance', memberRequest: byContact('email', 'zuhura@example.co.tz') } }; });
+    mock.on('DELETE', /^\/b2b\/organizations\/([^/]+)\/member-requests\/([^/]+)$/, () => { open = false; return { memberRequest: byContact('email', 'zuhura@example.co.tz', { status: 'cancelled' }) }; });
+    await page.goto('/org/people');
+    await expect(page.getByTestId('org-people-add')).toContainText('Only someone who has confirmed this email or number in FitFlex can be asked');
+    await page.getByTestId('org-people-contact').fill('zuhura@example.co.tz');
+    await page.getByTestId('org-people-add-button').click();
+
+    await expect(page.getByText(SENT)).toBeVisible();
+    expect(mock.writes(/\/org-1\/beneficiaries$/).at(-1)?.body).toMatchObject({ email: 'zuhura@example.co.tz' });
+    await expect(page.getByText(NO_ACCOUNT_HINT)).toHaveCount(0);
+    const row = page.getByTestId('org-people-request-mr-c1');
+    await expect(row).toContainText('Email zuhura@example.co.tz');
+    await expect(row).toContainText('Waiting for member');
+
+    page.once('dialog', d => { expect(d.message()).toBe('Withdraw the request to Email zuhura@example.co.tz? They won\'t be added.'); void d.accept(); });
+    await page.getByTestId('member-request-withdraw-mr-c1').click();
+    await expect(page.getByText('Request withdrawn.')).toBeVisible();
+    expect(mock.writes(/member-requests/).map(c => `${c.method} ${c.path}`)).toEqual(['DELETE /b2b/organizations/org-1/member-requests/mr-c1']);
+    await expect(page.getByTestId('org-people-request-mr-c1')).toHaveCount(0);
+  });
+
+  test('organisation user: a number shows as "Number …"; Swahili text and label', async ({ page }) => {
+    const mock = await setupB2B(page, orgUser(['admin']));
+    await page.addInitScript(() => { localStorage.setItem('locale', 'sw'); });
+    let open = false;
+    mock.on('GET', BENEFICIARIES_PATH, () => list(open ? [byContact('phone', '+255712345678')] : []));
+    mock.on('POST', BENEFICIARIES_PATH, () => { open = true; return { status: 202, json: { outcome: 'pending_member_acceptance', memberRequest: byContact('phone', '+255712345678') } }; });
+    await page.goto('/org/people');
+    await page.getByTestId('org-people-contact').fill('0712345678');
+    await page.getByTestId('org-people-add-button').click();
+    await expect(page.getByText('Ombi limetumwa. Ataongezwa atakapokubali kwenye programu ya FitFlex.')).toBeVisible();
+    await expect(page.getByTestId('org-people-request-mr-c1')).toContainText('Namba +255712345678');
+  });
+
+  test('company HR (/hr): link by number answers 202; pendingLink with userId null shows the number; Withdraw unlinks', async ({ page }) => {
+    const mock = await setupB2B(page, HR);
+    mock.on('GET', /^\/b2b\/me\/organizations$/, () => ({ organizations: [{ id: 'org-3', legalName: 'Mwenge Textiles', tradingName: null, role: 'hr', status: 'active' }] }));
+    const linkRequest = byContact('phone', '+255712345678', { id: 'mr-c9', kind: 'employee_link', organizationId: null, corporateId: 'corp-1', employeeId: 'emp-2', beneficiaryType: null, groupName: null });
+    let pending = false;
+    mock.on('GET', /^\/corporate\/staff$/, () => ({ employees: [
+      { id: 'emp-1', displayName: 'Fatuma Hassan', email: 'fatuma@mwenge.test', phone: null, department: 'Sales', userId: 'usr-20', status: 'active', pendingLink: null },
+      { id: 'emp-2', displayName: 'Juma Kileo', email: null, phone: null, department: null, userId: null, status: 'pending', pendingLink: pending ? linkRequest : null },
+    ] }));
+    mock.on('POST', /^\/corporate\/staff\/([^/]+)\/link$/, c => {
+      if (c.body?.userId === null) { pending = false; return { employee: { id: 'emp-2', userId: null } }; }
+      pending = true;
+      return { status: 202, json: { outcome: 'pending_member_acceptance', memberRequest: linkRequest } };
+    });
+    await page.goto('/hr/people');
+    await page.getByTestId('company-staff-link-emp-2').fill('0712345678');
+    await page.getByTestId('company-staff-list').getByRole('button', { name: 'Link', exact: true }).click();
+    await expect(page.getByText(SENT)).toBeVisible();
+    expect(mock.writes(/\/corporate\/staff\/emp-2\/link$/).at(-1)?.body).toEqual({ phone: '0712345678' });
+    await expect(page.getByText(NO_ACCOUNT_HINT)).toHaveCount(0);
+    const cell = page.getByTestId('company-staff-request-emp-2');
+    await expect(cell).toContainText('Number +255712345678');
+    await expect(cell).toContainText('Waiting for member');
+
+    page.once('dialog', d => void d.accept());
+    await page.getByTestId('member-request-withdraw-mr-c9').click();
+    await expect(page.getByText('Request withdrawn.')).toBeVisible();
+    expect(mock.writes(/\/corporate\/staff\/emp-2\/link$/).at(-1)?.body).toEqual({ userId: null });
+    expect(mock.calls.filter(c => c.method === 'DELETE')).toEqual([]);
+    await expect(page.getByTestId('company-staff-link-emp-2')).toBeVisible();
+  });
+
+  test('company HR (/hr): adding an employee with an email sends the request; a refusal says nothing about the person', async ({ page }) => {
+    const mock = await setupB2B(page, HR);
+    mock.on('GET', /^\/b2b\/me\/organizations$/, () => ({ organizations: [{ id: 'org-3', legalName: 'Mwenge Textiles', tradingName: null, role: 'hr', status: 'active' }] }));
+    let reply: Json = { status: 202, json: { outcome: 'pending_member_acceptance', memberRequest: byContact('email', 'rehema@mwenge.test', { kind: 'employee_link', employeeId: 'emp-new' }) } };
+    mock.on('POST', /^\/corporate\/staff\/([^/]+)\/link$/, () => reply);
+    await page.goto('/hr/people');
+    await expect(page.getByTestId('company-staff-add')).toContainText('they are asked to accept the link in the app');
+    const add = async (name: string) => {
+      await page.getByTestId('company-staff-name').fill(name);
+      await page.getByTestId('company-staff-contact').fill('rehema@mwenge.test');
+      await page.getByTestId('company-staff-add-button').click();
+    };
+    await add('Rehema Ally');
+    await expect(page.getByText('Rehema Ally added. Request sent. They\'ll be linked once they accept in the FitFlex app.')).toBeVisible();
+    reply = { status: 429, json: { error: 'rate_limited', retryAfterSeconds: 600 } };
+    await add('Baraka Mushi');
+    await expect(page.getByText('Baraka Mushi added, but no link request was sent: Too many requests. Try again in a few minutes.')).toBeVisible();
+  });
+
+  test('admin B2B: an org-user or beneficiary add that comes back 202 by email lists the email, not a name', async ({ page }) => {
+    const mock = await setupB2B(page, ADMIN);
+    const userReq = byContact('email', 'grace@safari.test', { id: 'mr-u1', kind: 'org_user', role: 'finance', beneficiaryType: null, groupName: null, beneficiaryStatus: null });
+    let asked = false;
+    mock.on('GET', /^\/b2b\/organizations\/([^/]+)\/users$/, () => ({ items: [], total: 0, nextCursor: null, pendingMemberAcceptance: asked ? [userReq] : [] }));
+    mock.on('POST', /^\/b2b\/organizations\/([^/]+)\/users$/, () => { asked = true; return { status: 202, json: { outcome: 'pending_member_acceptance', memberRequest: userReq } }; });
+    await page.goto('/admin/b2b');
+    await page.getByTestId('b2b-org-org-1').click();
+    await page.getByTestId('b2b-user-id').fill('grace@safari.test');
+    await page.getByTestId('b2b-user-add').click();
+    await expect(page.getByText(SENT)).toBeVisible();
+    const row = page.getByTestId('b2b-user-request-mr-u1');
+    await expect(row).toContainText('Email grace@safari.test');
+    await expect(row).toContainText('Role: finance');
+    await expect(page.getByTestId('member-request-withdraw-mr-u1')).toBeVisible();
+  });
+});
+
+// functions#283 after its security review: the per-organisation hourly cap, a repeat withdraw, and "Send again".
+test.describe('consent slice (a) security-review follow-ups', () => {
+  for (const [locale, text] of [
+    ['en', 'Your organisation has sent a lot of requests in the last hour. Try again in 25 min.'],
+    ['sw', 'Shirika lako limetuma maombi mengi ndani ya saa moja iliyopita. Jaribu tena baada ya dakika 25.'],
+  ] as const) {
+    test(`429 rate_limited with scope organization is the organisation cap (${locale})`, async ({ page }) => {
+      const mock = await setupB2B(page, orgUser(['admin']));
+      if (locale === 'sw') await page.addInitScript(() => { localStorage.setItem('locale', 'sw'); });
+      mock.on('POST', BENEFICIARIES_PATH, () => ({ status: 429, json: { error: 'rate_limited', scope: 'organization', retryAfterSeconds: 1500 } }));
+      await page.goto('/org/people');
+      await page.getByTestId('org-people-contact').fill('zuhura@example.co.tz');
+      await page.getByTestId('org-people-add-button').click();
+      await expect(page.getByText(text)).toBeVisible();
+    });
+  }
+
+  for (const requestStatus of ['cancelled', 'expired']) {
+    test(`a withdraw answered 409 member_request_not_pending (${requestStatus}) counts as withdrawn`, async ({ page }) => {
+      const mock = await setupB2B(page, orgUser(['admin']));
+      let open = true;
+      mock.on('GET', BENEFICIARIES_PATH, () => list(open ? [byContact('email', 'zuhura@example.co.tz')] : []));
+      mock.on('DELETE', /^\/b2b\/organizations\/([^/]+)\/member-requests\/([^/]+)$/, () => { open = false; return { status: 409, json: { error: 'member_request_not_pending', requestStatus } }; });
+      await page.goto('/org/people');
+      page.once('dialog', d => void d.accept());
+      await page.getByTestId('member-request-withdraw-mr-c1').click();
+      await expect(page.getByText('Request withdrawn.')).toBeVisible();
+      await expect(page.getByText('That request has already been answered or has expired.')).toHaveCount(0);
+      await expect(page.getByTestId('org-people-request-mr-c1')).toHaveCount(0);
+    });
+  }
+
+  test('admin B2B: a repeat withdraw (409 cancelled) also clears the row', async ({ page }) => {
+    const mock = await setupB2B(page, ADMIN);
+    mock.on('GET', BENEFICIARIES_PATH, () => list([byContact('phone', '+255712345678')]));
+    mock.on('DELETE', /^\/b2b\/organizations\/([^/]+)\/member-requests\/([^/]+)$/, () => ({ status: 409, json: { error: 'member_request_not_pending', requestStatus: 'cancelled' } }));
+    await page.goto('/admin/b2b');
+    await page.getByTestId('b2b-org-org-1').click();
+    await expect(page.getByTestId('b2b-ben-request-mr-c1')).toContainText('Number +255712345678');
+    page.once('dialog', d => void d.accept());
+    await page.getByTestId('member-request-withdraw-mr-c1').click();
+    await expect(page.getByText('Request withdrawn.')).toBeVisible();
+    await expect(page.getByTestId('b2b-ben-request-mr-c1')).toHaveCount(0);
+  });
+
+  test('"Send again" says it only resends the invitation', async ({ page }) => {
+    const mock = await setupB2B(page, orgUser(['admin']));
+    const invite = { id: 'inv-1', displayName: 'Asha Mollel', email: 'asha@x.test', phone: null, groupName: null, beneficiaryType: 'member', status: 'invited', invitedAt: '2026-10-29T08:00:00Z',
+      emailsSent: 1, lastEmailAt: '2026-10-29T08:00:00Z', nextEmailAt: '2026-11-01T08:00:00Z', emailFailures: 0, smsSent: 0, lastSmsAt: null, nextSmsAt: null, smsFailures: 0, canResend: true };
+    mock.on('GET', /^\/b2b\/organizations\/([^/]+)\/beneficiary-invites$/, () => ({ items: [invite], invited: 1, emailConfigured: true, smsConfigured: true }));
+    mock.on('POST', /^\/b2b\/organizations\/([^/]+)\/beneficiary-invites\/([^/]+)\/resend$/, () => ({ invite, sent: { email: true, sms: false }, emailConfigured: true, smsConfigured: true }));
+    await page.goto('/org/people');
+    await expect(page.getByText('An invite stays here until the person accepts in the FitFlex app')).toBeVisible();
+    const again = page.getByRole('button', { name: 'Send again' });
+    await expect(again).toHaveAttribute('title', 'Sends the invitation email or SMS again. It doesn\'t ask anyone in the app again.');
+    await again.click();
+    await expect(page.getByText('Invitation sent again by email.')).toBeVisible();
   });
 });

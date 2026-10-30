@@ -10,7 +10,7 @@ import { Alert, Badge, Button, Card, CardContent, CardHeader, Field, Input, Page
 import { B2BPrograms } from '@/components/b2b-programs';
 import { tierErrorKey } from '@/lib/pass-tiers';
 import type { Locale, MessageKey } from '@/lib/i18n';
-import { PendingMemberStatus, WithdrawRequestButton, fill, memberRequestError, requestLabel, requestSentNotice, shownRequests } from '@/components/b2b-member-requests';
+import { PendingMemberStatus, WithdrawRequestButton, fill, memberRequestError, requestLabel, requestSentNotice, shownRequests, withdrawMemberRequest } from '@/components/b2b-member-requests';
 
 const ERRORS: Record<string, string> = {
   invalid_organization_type: 'Choose an organisation type.',
@@ -170,9 +170,10 @@ export default function AdminB2BPage() {
     return run(async () => {
       const out = await api.addB2BOrganizationUser(token, selected.id, { ...contact, role: userForm.role });
       setUserForm({ userId: '', role: userForm.role });
-      // Platform admins add directly today; should the backend ask the member first, show it as a request, not a user.
+      // Platform admins add directly (201; the person is told). Should the backend ask the member first, show it as a
+      // request, not a user: by email or number it carries the contact (userId null), by user ID an id-null stub
+      // means nothing was stored (same message, no row). functions#241, #283.
       if (isPendingMemberAcceptance(out)) {
-        // id null: nothing was stored; same message, no row.
         setPendingUsers(list => shownRequests([out.memberRequest, ...list.filter(r => r.id !== out.memberRequest.id)]));
         setNotice(requestSentNotice(t));
         return;
@@ -207,7 +208,7 @@ export default function AdminB2BPage() {
   };
 
   const withdrawRequest = (r: B2BMemberRequest) => token && selected && r.id && run(async () => {
-    await api.cancelB2BMemberRequest(token, selected.id, r.id as string);
+    await withdrawMemberRequest(token, selected.id, r.id as string);
     if (r.kind === 'org_user') setPendingUsers(list => list.filter(x => x.id !== r.id));
     else setPendingBeneficiaries(list => list.filter(x => x.id !== r.id));
     setNotice(t('b2b.memberRequest.withdrawn'));
