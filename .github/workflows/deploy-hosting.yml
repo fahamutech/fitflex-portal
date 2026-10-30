@@ -34,6 +34,8 @@ jobs:
       # repository variable is exactly 'true'. The photo manager flags
       # (NEXT_PUBLIC_HERO_IMAGES_ADMIN / _REMOTE) are deliberately not wired.
       NEXT_PUBLIC_PHOTO_HERO_UI: ${{ vars.NEXT_PUBLIC_PHOTO_HERO_UI || 'false' }}
+      # Partner photos admin (src/lib/flags.ts). Off unless the repository variable is exactly 'true'.
+      NEXT_PUBLIC_PARTNER_MEDIA_ADMIN: ${{ vars.NEXT_PUBLIC_PARTNER_MEDIA_ADMIN || 'false' }}
 
     steps:
       - name: Checkout repository
