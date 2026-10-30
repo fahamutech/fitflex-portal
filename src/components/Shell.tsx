@@ -592,11 +592,11 @@ export function Shell({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!redirectTo) { if (!vendorPermissionMissing) bouncedFrom.current = null; return; }
     if (vendorPermissionMissing && bouncedFrom.current !== path) {
-      if (!vendorBounceQuiet) toast.error(t('vendor.noAccess'));
+      if (!vendorBounceQuiet) toast.error(t(vendorArea?.noAccessKey ?? 'vendor.noAccess'));
       bouncedFrom.current = path;
     }
     router.replace(redirectTo);
-  }, [redirectTo, vendorPermissionMissing, vendorBounceQuiet, path, router, toast, t]);
+  }, [redirectTo, vendorPermissionMissing, vendorBounceQuiet, vendorArea, path, router, toast, t]);
 
   /* Close mobile drawer on route change */
   useEffect(() => { setMobileOpen(false); }, [pathname]);
