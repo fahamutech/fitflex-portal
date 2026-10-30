@@ -3,10 +3,11 @@
 // every call is recorded so a spec can assert the exact request a form sends. Same style as b2b-mock.ts.
 import { expect, Page } from '@playwright/test';
 import { makeS5, type S5Opts, type S5State } from './events-s5-mock';
+import { makeS6, type S6Opts, type S6State } from './events-s6-mock';
 
 export const API = process.env.FITFLEX_API_URL || 'http://localhost:3000';
 export type Json = Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
-export type Call = { method: string; path: string; query: Record<string, string>; body: Json | null; headers?: Record<string, string> };
+export type Call = { method: string; path: string; query: Record<string, string>; body: Json | null; headers?: Record<string, string>; /** Size of the raw request body in bytes (an image upload is not JSON). */ bytes?: number };
 type Reply = Json | { status: number; json: Json } | { status: 204 } | { status: 200 | 201; body: string; headers?: Record<string, string> };
 type Handler = (c: Call, m: RegExpMatchArray) => Reply | undefined;
 
@@ -614,6 +615,7 @@ function makeS4(user: Json, me: Json | null, orgRole: string, o: S4Opts, setup: 
 export type EventsMock = {
   /** S4 state for assertions (statuses move as the strict routes accept writes). */ s4: S4State | null;
   /** S5 state for assertions (kit, bibs, clients, endpoints, payout schedule). */ s5: S5State | null;
+  /** S6 state for assertions (results, releases, medals, art uploads, rewards). */ s6: S6State | null;
   calls: Call[]; unmatched: Call[];
   writes: (path?: RegExp) => Call[];
   reads: (path: RegExp) => Call[];
@@ -628,7 +630,8 @@ export type EventsMock = {
 export async function setupEvents(page_: Page, user: Json = OWNER, opts: { me?: Json | null; locale?: 'en' | 'sw'; kyc?: Json; extra?: Array<[string, RegExp, Handler]>;
   /** S3: the options probe says registration + corporate are on, and the S3 routes answer. */ s3?: boolean; orgPermissions?: string[]; orgStatus?: string; orders?: Record<string, Json>;
   /** S4 (spec events-s4-payments-and-tickets): payments, refunds, finance and the corporate payment routes, strict about the spec's shapes. Implies s3. */ s4?: S4Opts;
-  /** S5 (spec events-s5-venue-api-and-webhooks): kit desk, bibs, export, integrations and the payout schedule, strict about the spec's shapes. Implies s3. */ s5?: S5Opts } = {}): Promise<EventsMock> {
+  /** S5 (spec events-s5-venue-api-and-webhooks): kit desk, bibs, export, integrations and the payout schedule, strict about the spec's shapes. Implies s3. */ s5?: S5Opts;
+  /** S6 (spec events-s6-runs-results-medals-rewards): results, medals, artwork and the admin reward desk, strict about the spec. Implies s5 and s3. */ s6?: S6Opts } = {}): Promise<EventsMock> {
   const calls: Call[] = [];
   const unmatched: Call[] = [];
   const routes: Array<[string, RegExp, Handler]> = [...(opts.extra ?? [])];
@@ -645,13 +648,17 @@ export async function setupEvents(page_: Page, user: Json = OWNER, opts: { me?: 
   const orgRole = (user.organizationRoles ?? [])[0] ?? (user.userType === 'corporate_hr' ? 'hr' : 'member');
   const s4 = opts.s4 ? makeS4(user, me, orgRole, opts.s4, opts) : null;
   if (s4) opts = { ...opts, s3: true };
-  const s5 = opts.s5 ? makeS5(user, me, opts.s5) : null;
+  const s6 = opts.s6 ? makeS6(user, me, opts.s6) : null;
+  const s5 = opts.s5 || s6 ? makeS5(user, me, { ...(opts.s5 ?? {}), resultsScopes: !!s6?.flags.enabled }) : null;
   if (s5) { opts = { ...opts, s3: true }; docs.evt_pub = { ...docs.evt_pub, ...s5.doc('evt_pub'), allowedActions: ['edit', 'cancel'] }; docs.evt_1 = { ...docs.evt_1, payoutSchedule: null }; }
+  // The S5 routes answer GET /events/options first, so the S6 flags ride on that same object.
+  if (s6) { Object.assign(s5!.options, { results: s6.flags }); docs.evt_pub = { ...docs.evt_pub, status: s6.status }; }
   const orders: Record<string, Json> = opts.orders ?? { ord_1: ORDER_DETAIL() };
   const adminCancelled = new Set<string>();
   let version = 3;
 
   const defaults: Array<[string, RegExp, Handler]> = [
+    ...(s6 ? s6.routes : []),
     ...(s5 ? s5.routes : []),
     ...(s4 ? s4.routes : []),
     ['GET', /^\/me\/personas$/, () => ({ status: 404, json: { error: 'not_found' } })],
@@ -774,7 +781,7 @@ export async function setupEvents(page_: Page, user: Json = OWNER, opts: { me?: 
     url.searchParams.forEach((v, k) => { query[k] = v; });
     let body: Json | null = null;
     if (method !== 'GET') { try { body = req.postDataJSON() as Json | null; } catch { body = null; } }
-    const call: Call = { method, path: url.pathname, query, body, headers: req.headers() };
+    const call: Call = { method, path: url.pathname, query, body, headers: req.headers(), bytes: method === 'GET' ? 0 : (req.postDataBuffer()?.length ?? 0) };
     calls.push(call);
     for (const [m, re, h] of [...routes].reverse().concat(defaults)) {
       if (m !== method) continue;
@@ -794,6 +801,7 @@ export async function setupEvents(page_: Page, user: Json = OWNER, opts: { me?: 
   return {
     s4: s4 ? s4.state : null,
     s5: s5 ? s5.state : null,
+    s6: s6 ? s6.state : null,
     calls, unmatched,
     writes: path => calls.filter(c => c.method !== 'GET' && (!path || path.test(c.path))),
     reads: path => calls.filter(c => c.method === 'GET' && path.test(c.path)),

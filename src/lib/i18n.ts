@@ -3751,8 +3751,39 @@ export const messages = {
     "b2b.errors.userIdNotFound": "No FitFlex account has that ID.",
     // Adds by user ID wait for the member to accept (fitflex-functions#241).
     // The member's name is not shown until they accept (fitflex-functions#241 security review).
-    "b2b.memberRequest.sent": "Request sent. The member must accept in the FitFlex app before they're added.",
-    "b2b.memberRequest.employeeAddedSent": "{employee} added. Request sent. The member must accept in the FitFlex app before they're linked.",
+    // Consent slice (a) (functions#283): adds by email or number wait too, and the reply is the same whoever is
+    // behind the contact, so these texts never say whether the person has a FitFlex account.
+    "b2b.memberRequest.sent": "Request sent. They'll be added once they accept in the FitFlex app.",
+    "b2b.memberRequest.employeeAddedSent": "{employee} added. Request sent. They'll be linked once they accept in the FitFlex app.",
+    "b2b.memberRequest.employeeAddedNotLinked": "{employee} added, but no link request was sent: {reason}",
+    "b2b.memberRequest.email": "Email {contact}",
+    "b2b.memberRequest.phone": "Number {contact}",
+    "b2b.memberRequest.contactHint": "They're asked in the FitFlex app and added only if they accept. Only someone who has confirmed this email or number in FitFlex can be asked; to reach people who haven't joined yet, use Add many people (they're invited).",
+    "b2b.import.heading": "Add many people",
+    "b2b.import.description": "Paste or upload a list. Everyone new is invited. Anyone already on FitFlex is asked in the app within about 10 minutes and added only if they accept.",
+    "b2b.import.willInvite": "Will be invited",
+    "b2b.import.invited": "Invited",
+    "b2b.import.invitedSub": "Added once they accept",
+    "b2b.import.unchanged": "Already on your list",
+    "b2b.import.unchangedSub": "Nothing to do",
+    "b2b.import.rejected": "Can't be used",
+    "b2b.import.rejectedSub": "See below",
+    "b2b.import.confirm.one": "Invite {n} person",
+    "b2b.import.confirm.other": "Invite {n} people",
+    "b2b.import.nobodyNew": "There is nobody new to invite in this list.",
+    "b2b.import.done": "Done. {invited} invited. Anyone already on FitFlex will be asked in the app within about 10 minutes. Each invite stays as invited until the person accepts.",
+    "b2b.import.cantSend.both": "FitFlex can't send invitations by email or SMS at the moment. People can still join: tell them to sign up with the email or number you listed, then accept in the app.",
+    "b2b.import.cantSend.email": "FitFlex can't send invitations by email at the moment. People can still join: tell them to sign up with the email or number you listed, then accept in the app.",
+    "b2b.import.cantSend.sms": "FitFlex can't send invitations by SMS at the moment. People can still join: tell them to sign up with the email or number you listed, then accept in the app.",
+    "b2b.import.invitesNote": "An invite stays here until the person accepts in the FitFlex app; only then are they added to your list. FitFlex sends the invitation by email (then reminders after 3 and 10 days) and by SMS to a listed mobile number (then one reminder after 3 days). Send again only resends the invitation email or SMS.",
+    "b2b.import.resend": "Send again",
+    "b2b.import.resendHint": "Sends the invitation email or SMS again. It doesn't ask anyone in the app again.",
+    "b2b.import.resent.both": "Invitation sent again by email and SMS.",
+    "b2b.import.resent.email": "Invitation sent again by email.",
+    "b2b.import.resent.sms": "Invitation sent again by SMS.",
+    "b2b.import.resent.none": "It could not be sent just now.",
+    "b2b.errors.orgRateLimited": "Your organisation has sent a lot of requests in the last hour. Try again in {minutes} min.",
+    "b2b.errors.orgRateLimitedSoon": "Your organisation has sent a lot of requests in the last hour. Try again later.",
     "b2b.memberRequest.someone": "The member",
     "b2b.memberRequest.userId": "User ID {userId}",
     "b2b.memberRequest.waiting": "Waiting for member",
@@ -5551,6 +5582,7 @@ export const messages = {
     "vendor.reports.a11y.exportRow": "Download {section} as {format} for {period}",
     // Phase B · B5b: company HR in the organisation area (src/lib/i18n-hr-org.ts).
     ...hrOrgMessages.en,
+    ...eventsS6Messages.en,
     // ── Public gym page (/g, flag NEXT_PUBLIC_WEB_GYM_PROFILE); Swahili marked for native review ──
     // ── Browser gym check-in (/g/signin, /g/confirm, /g/done; flag NEXT_PUBLIC_WEB_QR_CHECKIN); Swahili marked for native review ──
     "web.checkin.visitHint": "Sign in with your FitFlex account to check in. Signing in does not prove you are at the gym.",
@@ -9421,8 +9453,38 @@ export const messages = {
     "b2b.errors.userNotFound": "Hakuna aliyethibitisha barua pepe au namba hiyo kwenye FitFlex. Wanahitaji kujisajili kwenye programu, au kuithibitisha katika Namba ya simu na barua pepe.",
     "b2b.errors.userIdNotFound": "Hakuna akaunti ya FitFlex yenye kitambulisho hicho.",
     // Adds by user ID wait for the member to accept (fitflex-functions#241). Swahili drafted 2026-10-22: DRAFT, needs native review.
-    "b2b.memberRequest.sent": "Ombi limetumwa. Mwanachama lazima akubali kwenye programu ya FitFlex kabla ya kuongezwa.",
-    "b2b.memberRequest.employeeAddedSent": "{employee} ameongezwa. Ombi limetumwa. Mwanachama lazima akubali kwenye programu ya FitFlex kabla ya kuunganishwa.",
+    // Consent slice (a) (functions#283). Swahili drafted 2026-10-29: DRAFT, needs native review.
+    "b2b.memberRequest.sent": "Ombi limetumwa. Ataongezwa atakapokubali kwenye programu ya FitFlex.",
+    "b2b.memberRequest.employeeAddedSent": "{employee} ameongezwa. Ombi limetumwa. Ataunganishwa atakapokubali kwenye programu ya FitFlex.",
+    "b2b.memberRequest.employeeAddedNotLinked": "{employee} ameongezwa, lakini ombi la kuunganisha halikutumwa: {reason}",
+    "b2b.memberRequest.email": "Barua pepe {contact}",
+    "b2b.memberRequest.phone": "Namba {contact}",
+    "b2b.memberRequest.contactHint": "Ataombwa kwenye programu ya FitFlex na ataongezwa tu akikubali. Anayeweza kuombwa ni yule tu aliyethibitisha barua pepe au namba hii kwenye FitFlex; kuwafikia watu ambao bado hawajajiunga, tumia Ongeza watu wengi (watapewa mwaliko).",
+    "b2b.import.heading": "Ongeza watu wengi",
+    "b2b.import.description": "Bandika au pakia orodha. Kila mtu mpya anapewa mwaliko. Yeyote ambaye tayari yupo kwenye FitFlex ataombwa kwenye programu ndani ya takriban dakika 10 na ataongezwa tu akikubali.",
+    "b2b.import.willInvite": "Watapewa mwaliko",
+    "b2b.import.invited": "Wamepewa mwaliko",
+    "b2b.import.invitedSub": "Wataongezwa wakikubali",
+    "b2b.import.unchanged": "Tayari wapo kwenye orodha yako",
+    "b2b.import.unchangedSub": "Hakuna cha kufanya",
+    "b2b.import.rejected": "Hawawezi kutumika",
+    "b2b.import.rejectedSub": "Tazama hapa chini",
+    "b2b.import.confirm.one": "Mpe mwaliko mtu {n}",
+    "b2b.import.confirm.other": "Wape mwaliko watu {n}",
+    "b2b.import.nobodyNew": "Hakuna mtu mpya wa kupewa mwaliko kwenye orodha hii.",
+    "b2b.import.done": "Imekamilika. {invited} wamepewa mwaliko. Yeyote ambaye tayari yupo kwenye FitFlex ataombwa kwenye programu ndani ya takriban dakika 10. Kila mwaliko unabaki kama mwaliko hadi mtu akubali.",
+    "b2b.import.cantSend.both": "FitFlex haiwezi kutuma mialiko kwa barua pepe wala SMS kwa sasa. Bado wanaweza kujiunga: waambie wajisajili kwa barua pepe au namba uliyoorodhesha, kisha wakubali kwenye programu.",
+    "b2b.import.cantSend.email": "FitFlex haiwezi kutuma mialiko kwa barua pepe kwa sasa. Bado wanaweza kujiunga: waambie wajisajili kwa barua pepe au namba uliyoorodhesha, kisha wakubali kwenye programu.",
+    "b2b.import.cantSend.sms": "FitFlex haiwezi kutuma mialiko kwa SMS kwa sasa. Bado wanaweza kujiunga: waambie wajisajili kwa barua pepe au namba uliyoorodhesha, kisha wakubali kwenye programu.",
+    "b2b.import.invitesNote": "Mwaliko unabaki hapa hadi mtu akubali kwenye programu ya FitFlex; hapo ndipo anaongezwa kwenye orodha yako. FitFlex inatuma mwaliko kwa barua pepe (kisha vikumbusho baada ya siku 3 na 10) na kwa SMS kwenye namba ya simu iliyoorodheshwa (kisha kikumbusho kimoja baada ya siku 3). Tuma tena inatuma tena barua pepe au SMS ya mwaliko pekee.",
+    "b2b.import.resend": "Tuma tena",
+    "b2b.import.resendHint": "Inatuma tena barua pepe au SMS ya mwaliko. Haimwombi mtu yeyote tena kwenye programu.",
+    "b2b.import.resent.both": "Mwaliko umetumwa tena kwa barua pepe na SMS.",
+    "b2b.import.resent.email": "Mwaliko umetumwa tena kwa barua pepe.",
+    "b2b.import.resent.sms": "Mwaliko umetumwa tena kwa SMS.",
+    "b2b.import.resent.none": "Haukuweza kutumwa kwa sasa.",
+    "b2b.errors.orgRateLimited": "Shirika lako limetuma maombi mengi ndani ya saa moja iliyopita. Jaribu tena baada ya dakika {minutes}.",
+    "b2b.errors.orgRateLimitedSoon": "Shirika lako limetuma maombi mengi ndani ya saa moja iliyopita. Jaribu tena baadaye.",
     "b2b.memberRequest.someone": "Mwanachama",
     "b2b.memberRequest.userId": "Kitambulisho {userId}",
     "b2b.memberRequest.waiting": "Inasubiri mwanachama",
@@ -11225,6 +11287,7 @@ export const messages = {
     "vendor.reports.pdfUnavailable": "Imeshindikana kutengeneza PDF kwa sasa. Jaribu tena baadaye, au pakua CSV.",
     "vendor.reports.a11y.exportRow": "Pakua {section} kama {format} kwa {period}",
     ...hrOrgMessages.sw,
+    ...eventsS6Messages.sw,
     // ── Ukurasa wa gym wa umma (/g); Kiswahili kinasubiri mapitio ya mzungumzaji asilia ──
     // Browser gym check-in: Swahili is a DRAFT for native review
     "web.checkin.visitHint": "Ingia kwa akaunti yako ya FitFlex ili ujiandikishe. Kuingia kwenye akaunti hakuthibitishi kuwa uko gym.",
@@ -11345,6 +11408,7 @@ export const messages = {
 // Imported here, not at the top, so it doesn't overlap other open i18n changes (portal#52).
 // ES imports are hoisted, so this is the same as importing at the top.
 import { hrOrgMessages } from './i18n-hr-org';
+import { eventsS6Messages } from './i18n-events-s6';
 
 export type MessageKey = keyof typeof messages['en'];
 

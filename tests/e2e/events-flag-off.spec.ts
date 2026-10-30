@@ -76,3 +76,17 @@ test('the organizer Finance link and the admin event cancel preview are not reac
   await expect(page.getByTestId('events-unavailable')).toBeVisible();
   expect(mock.reads(/\/finance$/)).toHaveLength(0);
 });
+
+// Events S6 (spec §9.1, §13.1): with the build flag off the Results tab, the reward desk and the admin results block make no call.
+test('S6: the Results deep link, the reward desk and the admin results view are not available and make no S6 call', async ({ page }) => {
+  const mock = await setupEvents(page, OWNER, { s6: {} });
+  await page.goto('/organizer/events/?event=evt_pub&view=results');
+  await expect(page.getByTestId('events-unavailable')).toBeVisible();
+  expect(mock.reads(/results|medal-templates|medal-art/)).toHaveLength(0);
+  await setupEvents(page, SUPER_ADMIN, { s6: {} });
+  await page.goto('/admin/event-rewards/');
+  await expect(page.getByTestId('events-unavailable')).toBeVisible();
+  await expect(page.getByRole('navigation', { name: 'Main navigation' }).getByRole('link', { name: 'Event rewards' })).toHaveCount(0);
+  await page.goto('/admin/events/?event=evt_pub&view=results');
+  await expect(page.getByTestId('events-unavailable')).toBeVisible();
+});
