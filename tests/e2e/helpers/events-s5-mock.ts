@@ -22,6 +22,8 @@ export type S5Opts = {
   assignmentIds?: boolean;
   /** Verify and the 409 carry `collectionId` (the backend is adding it). Default true; false exercises the history fallback. */
   collectionIds?: boolean;
+  /** S6: the server's results flag is on, so results:read and results:write are selectable scopes (§8.4). */
+  resultsScopes?: boolean;
 };
 type Reply = Json | { status: number; json: Json } | { status: 200 | 201; body: string; headers?: Record<string, string> } | { status: 204 };
 type Call = { method: string; path: string; query: Record<string, string>; body: Json | null; headers?: Record<string, string> };
@@ -403,10 +405,10 @@ export function makeS5(user: Json, me: Json | null, o: S5Opts) {
       const name = String(b.name ?? '').trim();
       if (!name || name.length > 60) return { status: 422, json: { error: 'validation_failed', fields: [{ path: 'name', code: 'invalid' }] } };
       if (!['live', 'sandbox'].includes(b.environment)) return { status: 422, json: { error: 'validation_failed', fields: [{ path: 'environment', code: 'invalid' }] } };
-      const SCOPES = ['registrations:read', 'registrations:demographics', 'kit:write', 'bibs:write', 'webhooks:manage'];
+      const SCOPES = ['registrations:read', 'registrations:demographics', 'kit:write', 'bibs:write', 'webhooks:manage', ...(o.resultsScopes ? ['results:read', 'results:write'] : [])];
       const given: string[] = b.scopes ?? [];
       if (!given.length) return { status: 422, json: { error: 'validation_failed', fields: [{ path: 'scopes', code: 'required' }] } };
-      if (given.includes('results:write')) return { status: 422, json: { error: 'scope_not_available' } };
+      if (given.includes('results:write') && !o.resultsScopes) return { status: 422, json: { error: 'scope_not_available' } };
       if (given.some(s => !SCOPES.includes(s))) return { status: 422, json: { error: 'invalid_scope' } };
       if (given.includes('webhooks:manage') && role !== 'owner') return { status: 403, json: { error: 'forbidden_role' } };
       if (given.includes('webhooks:manage') && b.environment === 'sandbox') return { status: 422, json: { error: 'invalid_scope' } }; // never on sandbox
@@ -467,7 +469,7 @@ export function makeS5(user: Json, me: Json | null, o: S5Opts) {
       const b = c.body ?? {};
       const reason = urlReason(String(b.url ?? ''));
       if (reason) return { status: 400, json: { error: 'invalid_url', reason } };
-      const TYPES = ['registration.created', 'registration.paid', 'registration.cancelled', 'registration.updated', 'kit.collected', 'bib.assigned', 'event.updated', 'event.cancelled', 'refund.updated'];
+      const TYPES = ['registration.created', 'registration.paid', 'registration.cancelled', 'registration.updated', 'kit.collected', 'bib.assigned', 'event.updated', 'event.cancelled', 'refund.updated', ...(o.resultsScopes ? ['result.verified', 'result.published', 'result.corrected', 'result.disputed'] : [])];
       const events: string[] = b.events ?? [];
       if (events.some(e => !TYPES.includes(e))) return { status: 422, json: { error: 'invalid_event_type' } };
       if (!events.length) return { status: 422, json: { error: 'validation_failed', fields: [{ path: 'events', code: 'required' }] } };

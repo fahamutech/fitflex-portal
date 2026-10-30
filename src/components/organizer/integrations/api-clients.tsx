@@ -7,6 +7,8 @@ import { Copy } from 'lucide-react';
 import { api, type ApiClientDetail, type ApiClientRow, type ApiClientUsage, type ApiScope, type OrganizerEventRow } from '@/lib/api';
 import { errorKey, eventDateTime, fmt, isFeatureOff, relativeTime } from '@/lib/events';
 import { API_SCOPES, EXPIRING_SOON_DAYS, EXPIRY_DAYS, riskKey, scopeKey } from '@/lib/events-ops';
+import { resultsOf } from '@/lib/events-results';
+import { useEventsOptions } from '@/components/events-options';
 import type { MessageKey } from '@/lib/i18n';
 import { Alert, Badge, Button, Card, CardContent, Checkbox, EmptyState, Field, Input, Radio, Select, SkeletonTable, useToast } from '@/components/shared';
 import { DataTable, type ColumnDef } from '@/components/data-table';
@@ -118,6 +120,7 @@ function CreateClientDialog({ open, onClose, owner, onCreated }: { open: boolean
   const [expiry, setExpiry] = useState<number>(90);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<MessageKey | null>(null);
+  const resultsOn = resultsOf(useEventsOptions()).enabled;
   useEffect(() => {
     if (!open) return;
     setName(''); setEnv('sandbox'); setLiveOk(false); setScopes([]); setAllEvents(true); setPicked([]); setExpiry(90); setError(null); setBusy(false);
@@ -152,11 +155,15 @@ function CreateClientDialog({ open, onClose, owner, onCreated }: { open: boolean
         </fieldset>
         <fieldset className="space-y-1">
           <legend className="mb-1 text-sm font-semibold text-[var(--color-fg-primary)]">{t('integrations.clients.scopes')}</legend>
-          {API_SCOPES.filter(({ scope }) => scope !== 'webhooks:manage' || (owner && env === 'live')).map(({ scope, risk, ownerOnly, comingSoon }) => {
-            const disabled = !!comingSoon;
+          {API_SCOPES.filter(({ scope }) => (scope !== 'webhooks:manage' || (owner && env === 'live')) && (scope !== 'results:read' || resultsOn)).map(({ scope, risk, ownerOnly, comingSoon }) => {
+            const disabled = !!comingSoon && !(scope === 'results:write' && resultsOn);
             return (
               <div key={scope} className="flex flex-wrap items-start justify-between gap-2" data-testid={`scope-row-${scope}`}>
-                <Checkbox label={t(scopeKey(scope))} description={undefined} checked={scopes.includes(scope)} disabled={disabled} onChange={() => toggle(scope)} data-testid={`scope-${scope}`} />
+                <div className="space-y-0.5">
+                  <Checkbox label={t(scope === 'results:write' && resultsOn ? 'integrations.scope.results:write.live' : scopeKey(scope))} description={undefined} checked={scopes.includes(scope)} disabled={disabled} onChange={() => toggle(scope)} data-testid={`scope-${scope}`} />
+                  {scope === 'results:write' && resultsOn && <p className="pl-7 text-xs text-[var(--color-fg-quaternary)]" data-testid="scope-results-help">{t('integrations.scope.results:write.help')}</p>}
+                  {(scope === 'results:write' || scope === 'results:read') && resultsOn && scopes.includes(scope) && !scopes.includes('registrations:read') && <p className="pl-7 text-xs text-[var(--color-warning-800)]" data-testid="scope-results-needs-read">{t('integrations.scope.needsRead')}</p>}
+                </div>
                 <Badge tone={risk === 'high' ? 'danger' : risk === 'write' ? 'warning' : 'gray'}>{t(riskKey(risk))}</Badge>
               </div>
             );

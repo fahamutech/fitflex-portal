@@ -4272,6 +4272,8 @@ export interface EventsOptions {
   // Events S5 (spec events-s5-venue-api-and-webhooks §11.1): the server's flags, so the portal never infers availability from the build flag alone.
   ops?: { kit: boolean; api: boolean; webhooks: boolean };
   payoutSchedules?: PayoutSchedule[];
+  // Events S6 (spec events-s6-runs-results-medals-rewards §8.3): the server's results flags. Absent or all false = S5 behaviour.
+  results?: { enabled: boolean; runs: boolean; public: boolean; rewards: boolean; medalArt: boolean };
 }
 /** D33: the two payout schedules an event may choose (S5 §3). */
 export type PayoutSchedule = 'biweekly' | 'monthly';
@@ -4593,7 +4595,7 @@ export interface BibImportPreview {
   rows: Array<{ line: number; status: 'ok' | 'error'; code?: string | null; bibNumber?: string }>;
 }
 
-export type ApiScope = 'registrations:read' | 'registrations:demographics' | 'kit:write' | 'bibs:write' | 'webhooks:manage' | 'results:write';
+export type ApiScope = 'registrations:read' | 'registrations:demographics' | 'kit:write' | 'bibs:write' | 'webhooks:manage' | 'results:write' | 'results:read';
 export interface ApiClientRow {
   id: string; clientId: string; name: string; environment: 'live' | 'sandbox'; scopes: ApiScope[]; eventIds: string[] | null;
   status: 'active' | 'revoked' | 'expired'; expiresAt: string | null; lastUsedAt: string | null; createdAt: string; createdBy?: { name: string | null } | null;

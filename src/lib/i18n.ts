@@ -5582,6 +5582,7 @@ export const messages = {
     "vendor.reports.a11y.exportRow": "Download {section} as {format} for {period}",
     // Phase B · B5b: company HR in the organisation area (src/lib/i18n-hr-org.ts).
     ...hrOrgMessages.en,
+    ...eventsS6Messages.en,
     // ── Public gym page (/g, flag NEXT_PUBLIC_WEB_GYM_PROFILE); Swahili marked for native review ──
     // ── Browser gym check-in (/g/signin, /g/confirm, /g/done; flag NEXT_PUBLIC_WEB_QR_CHECKIN); Swahili marked for native review ──
     "web.checkin.visitHint": "Sign in with your FitFlex account to check in. Signing in does not prove you are at the gym.",
@@ -11286,6 +11287,7 @@ export const messages = {
     "vendor.reports.pdfUnavailable": "Imeshindikana kutengeneza PDF kwa sasa. Jaribu tena baadaye, au pakua CSV.",
     "vendor.reports.a11y.exportRow": "Pakua {section} kama {format} kwa {period}",
     ...hrOrgMessages.sw,
+    ...eventsS6Messages.sw,
     // ── Ukurasa wa gym wa umma (/g); Kiswahili kinasubiri mapitio ya mzungumzaji asilia ──
     // Browser gym check-in: Swahili is a DRAFT for native review
     "web.checkin.visitHint": "Ingia kwa akaunti yako ya FitFlex ili ujiandikishe. Kuingia kwenye akaunti hakuthibitishi kuwa uko gym.",
@@ -11406,6 +11408,7 @@ export const messages = {
 // Imported here, not at the top, so it doesn't overlap other open i18n changes (portal#52).
 // ES imports are hoisted, so this is the same as importing at the top.
 import { hrOrgMessages } from './i18n-hr-org';
+import { eventsS6Messages } from './i18n-events-s6';
 
 export type MessageKey = keyof typeof messages['en'];
 
