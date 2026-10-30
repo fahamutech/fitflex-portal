@@ -123,8 +123,15 @@ test('an account with no portal role gets no session, and nothing asks to create
   await signIn(page, '1234');
   await expect(page.getByText('This account has no portal access.')).toBeVisible();
   await expect(page).toHaveURL(/\/login/);
-  expect(asked).toHaveLength(3);
-  expect(asked.slice(1).every(body => body.existingOnly === true)).toBe(true);
+  // Every portal role, then an existing member profile (B2B organisation users); none is created.
+  expect(asked).toEqual([
+    { requestedRole: 'admin' },
+    { requestedRole: 'gym_operator', existingOnly: true },
+    { requestedRole: 'gym_staff', existingOnly: true },
+    { requestedRole: 'vendor', existingOnly: true },
+    { requestedRole: 'vendor_staff', existingOnly: true },
+    { requestedRole: 'member', existingOnly: true },
+  ]);
   expect(await storedUser(page)).toBeNull();
 });
 

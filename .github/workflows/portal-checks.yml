@@ -1,11 +1,12 @@
 name: Portal Checks
 
-# Type-check and build on release-candidate, where agent work is merged and
-# tested before promotion. This workflow never deploys: deploy-hosting.yml is
-# the only one that deploys, and only for main.
+# Type-check, build and run the Playwright e2e suite on release-candidate, where
+# agent work is merged and tested before promotion. This workflow never deploys:
+# deploy-hosting.yml is the only one that deploys, and only for main.
 #
-# Playwright e2e is not run here: playwright.config.ts starts the backend from
-# a sibling ../fitflex-functions checkout, which this job does not have.
+# The e2e job checks out fitflex-functions (release-candidate) next to the portal
+# and runs it on a throwaway Postgres service database; playwright.config.ts
+# refuses any non-localhost API or a database not named fitflex_ci_*/fitflex_e2e_*.
 on:
   push:
     branches: [release-candidate]
@@ -56,3 +57,79 @@ jobs:
 
       - name: Build
         run: npm run build
+
+  e2e:
+    name: Playwright e2e
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: fitflex
+          POSTGRES_PASSWORD: fitflex
+          POSTGRES_DB: postgres
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      CI: 'true'
+      FITFLEX_FUNCTIONS_DIR: ${{ github.workspace }}/fitflex-functions
+      FITFLEX_E2E_DATABASE_URL: postgresql://fitflex:fitflex@localhost:5432/fitflex_e2e_portal
+      JWT_SECRET: ci-only-secret-not-used-outside-github-actions
+
+    steps:
+      - name: Checkout portal
+        uses: actions/checkout@v4
+        with:
+          path: portal
+
+      - name: Checkout fitflex-functions (release-candidate)
+        uses: actions/checkout@v4
+        with:
+          repository: fahamutech/fitflex-functions
+          ref: release-candidate
+          path: fitflex-functions
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: |
+            portal/package-lock.json
+            fitflex-functions/package-lock.json
+
+      - name: Install the bfast CLI (serves the functions)
+        run: npm install -g bfast-tools@2.0.0
+
+      # postinstall would migrate + seed DATABASE_URL; playwright.config.ts creates
+      # and migrates the e2e database itself before starting the backend.
+      - name: Install backend dependencies
+        working-directory: fitflex-functions
+        run: npm ci --ignore-scripts
+
+      - name: Install portal dependencies
+        working-directory: portal
+        run: npm ci
+
+      - name: Install Playwright browser
+        working-directory: portal
+        run: npx playwright install --with-deps chromium
+
+      - name: Run e2e
+        working-directory: portal
+        run: npx playwright test --reporter=list
+
+      - name: Upload Playwright results
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-results
+          path: portal/test-results
+          retention-days: 7
