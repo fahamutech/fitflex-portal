@@ -1,8 +1,8 @@
 // People are matched only by a confirmed (verified) email or number (unverified-contact-matching plan S1 + S4):
-// the list import warns about email-only people while FitFlex can't send email codes, and user_not_found
-// tells staff the contact has not been confirmed in FitFlex.
+// the list import warns about email-only people while FitFlex can't send email codes, and (FitFlex admins, who still
+// add directly) user_not_found tells staff the contact has not been confirmed in FitFlex.
 import { expect, test } from '@playwright/test';
-import { ADMIN, HR, orgUser, setupB2B } from './helpers/b2b-mock';
+import { ADMIN, orgUser, setupB2B } from './helpers/b2b-mock';
 
 const NOT_FOUND = 'Nobody has confirmed that email or number in FitFlex. They need to sign up in the app, or confirm it under Mobile number and email.';
 const preview = (extra: Record<string, unknown>) => ({
@@ -37,26 +37,25 @@ test.describe('organisation user', () => {
     });
   }
 
-  test('adding someone by an unconfirmed contact explains user_not_found', async ({ page }) => {
+  // Since functions#283 an organisation user's add by email or number never answers user_not_found: it is a 202
+  // whoever is behind the contact (tests in b2b-member-requests.spec.ts). The import copy no longer says anyone is
+  // added at once.
+  test('import preview: everyone new is invited, nobody "added now"', async ({ page }) => {
     const mock = await setupB2B(page, orgUser(['admin']));
-    mock.on('POST', /^\/b2b\/organizations\/([^/]+)\/beneficiaries$/, () => ({ status: 404, json: { error: 'user_not_found' } }));
+    mock.on('POST', /^\/b2b\/organizations\/([^/]+)\/beneficiaries\/import$/, c => (c.body?.dryRun
+      ? preview({ emailCodesAvailable: true })
+      : { ...preview({ emailCodesAvailable: true }), dryRun: undefined, importId: 'b2bim_1' }));
     await page.goto('/org/people');
-    const form = page.getByTestId('org-people-add');
-    await form.getByLabel('Email or mobile number', { exact: true }).fill('zuhura@example.co.tz');
-    await page.getByTestId('org-people-add-button').click();
-    await expect(page.getByText(NOT_FOUND)).toBeVisible();
-  });
-});
-
-test.describe('company HR', () => {
-  test('linking an employee by an unconfirmed contact explains user_not_found', async ({ page }) => {
-    const mock = await setupB2B(page, HR);
-    mock.on('GET', /^\/b2b\/me\/organizations$/, () => ({ organizations: [{ id: 'org-3', legalName: 'Mwenge Textiles', tradingName: null, role: 'hr', status: 'active' }] }));
-    mock.on('POST', /^\/corporate\/staff\/([^/]+)\/link$/, () => ({ status: 404, json: { error: 'user_not_found' } }));
-    await page.goto('/hr/people');
-    await page.getByTestId('company-staff-link-emp-2').fill('0712345678');
-    await page.getByTestId('company-staff-list').getByRole('button', { name: 'Link', exact: true }).click();
-    await expect(page.getByText(NOT_FOUND)).toBeVisible();
+    await expect(page.getByText('Anyone already on FitFlex is asked in the app within about 10 minutes and added only if they accept.')).toBeVisible();
+    await page.getByTestId('import-open').click();
+    await page.getByTestId('import-text').fill('name,email\nA,a@x.test');
+    await page.getByTestId('import-check').click();
+    const shown = page.getByTestId('import-preview');
+    await expect(shown).toContainText('Will be invited');
+    await expect(shown).not.toContainText(/added now|Already use FitFlex/i);
+    await page.getByTestId('import-confirm').click();
+    await expect(page.getByText('Done. 3 invited. Anyone already on FitFlex will be asked in the app within about 10 minutes. Each invite stays as invited until the person accepts.')).toBeVisible();
+    await expect(page.getByTestId('import-result')).not.toContainText(/added now/i);
   });
 });
 

@@ -1,8 +1,10 @@
 'use client';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { EventDocument, OrganizerRole } from '@/lib/api';
 import type { MessageKey } from '@/lib/i18n';
 import { FINANCE_ROLES, eventStatusOf, isPublishedLike } from '@/lib/events';
+import { resultsApi } from '@/lib/events-results-api';
+import { RESULTS_ROLES, canVerifyResults, resultsOf, resultsOpenFor } from '@/lib/events-results';
 import { BIB_VIEW_ROLES, EXPORT_ROLES, KIT_ROLES, hasRole, opsOf } from '@/lib/events-ops';
 import { Badge, Button, PageHeader, Segmented } from '@/components/shared';
 import { EventRegistrationsTable } from '@/components/event-registrations-table';
@@ -15,26 +17,44 @@ import { KitDesk } from '@/components/organizer/kit-desk';
 import { BibsView } from '@/components/organizer/bibs-view';
 import { ExportView } from '@/components/organizer/export-view';
 import { RegistrationDrawer } from '@/components/organizer/registration-drawer';
+import { ResultsView } from '@/components/organizer/results/results-view';
 import { useApp } from '../../../app/providers';
 
 /** S3 §6.1 role gating of the two event tabs. */
 export const REGISTRATION_ROLES = new Set<OrganizerRole>(['owner', 'admin', 'ops', 'timing']);
 export const ORDER_ROLES = new Set<OrganizerRole>(['owner', 'admin', 'finance']);
-export type EventView = 'registrations' | 'orders' | 'finance' | 'kit' | 'bibs' | 'export';
+export type EventView = 'registrations' | 'orders' | 'finance' | 'kit' | 'bibs' | 'export' | 'results';
 /** S4 §6.1: the Finance tab is for finance, owner and admin only. */
 export const canSeeView = (view: EventView, role: OrganizerRole | null | undefined) => !!role && (
   view === 'registrations' ? REGISTRATION_ROLES : view === 'finance' ? FINANCE_ROLES
   // Events S5 §2, §8.1: the venue tabs. Kit: owner/admin/ops; bibs: also timing (read); export: owner/admin.
-  : view === 'kit' ? KIT_ROLES : view === 'bibs' ? BIB_VIEW_ROLES : view === 'export' ? EXPORT_ROLES : ORDER_ROLES).has(role);
+  : view === 'kit' ? KIT_ROLES : view === 'bibs' ? BIB_VIEW_ROLES : view === 'export' ? EXPORT_ROLES
+  // Events S6 §2: the Results tab is for owner, admin and timing; ops and finance never see it.
+  : view === 'results' ? RESULTS_ROLES : ORDER_ROLES).has(role);
 /** Registrations exist once the event has been published (completed/cancelled keep their history). */
 export const hasRegistrationData = (doc: Pick<EventDocument, 'status' | 'publishedAt'>) => isPublishedLike(doc.status) || doc.status === 'completed' || doc.status === 'cancelled' || doc.status === 'archived' || !!doc.publishedAt;
 
 /** The tab strip shared by the wizard header and the two views (§6.1 "next to changes"). */
-export function EventViewTabs({ view, role, onView, published = true }: { view: EventView | 'details'; role: OrganizerRole | null; onView: (v: EventView | null) => void; /** The venue tabs wait for a published event (§8.1). */ published?: boolean }) {
+/** Open questions about results, for the "Results (N)" label (owner and admin only; the count is text, not just a dot: S6 §9.1). */
+function useOpenDisputes(eventId: string | undefined, on: boolean): number {
+  const { token } = useApp();
+  const [n, setN] = useState(0);
+  useEffect(() => {
+    if (!on || !eventId || !token) { setN(0); return; }
+    let live = true;
+    resultsApi.summary(token, eventId).then(s => { if (live) setN(s.disputesOpen ?? 0); }).catch(() => { if (live) setN(0); });
+    return () => { live = false; };
+  }, [on, eventId, token]);
+  return n;
+}
+
+export function EventViewTabs({ view, role, onView, published = true, eventId, status }: { view: EventView | 'details'; role: OrganizerRole | null; onView: (v: EventView | null) => void; /** The venue tabs wait for a published event (§8.1). */ published?: boolean; /** S6: the event whose Results tab this is (the tab waits for in_progress, completed or archived). */ eventId?: string; status?: string | null }) {
   const { t } = useApp();
   const eventsOptions = useEventsOptions();
   const registrationOn = !!eventsOptions?.registration;
   const kitOn = opsOf(eventsOptions).kit && published;
+  const resultsTab = resultsOf(eventsOptions).enabled && canSeeView('results', role) && resultsOpenFor(status);
+  const disputes = useOpenDisputes(eventId, resultsTab && canVerifyResults(role));
   const options: Array<[string, string]> = [['details', t('events.wizard.step.review')]];
   if (registrationOn && canSeeView('registrations', role)) options.push(['registrations', t('organizer.events.view.registrations')]);
   if (registrationOn && canSeeView('orders', role)) options.push(['orders', t('organizer.events.view.orders')]);
@@ -42,13 +62,14 @@ export function EventViewTabs({ view, role, onView, published = true }: { view: 
   if (kitOn && hasRole(KIT_ROLES, role)) options.push(['kit', t('organizer.events.view.kit')]);
   if (kitOn && hasRole(BIB_VIEW_ROLES, role)) options.push(['bibs', t('organizer.events.view.bibs')]);
   if (kitOn && hasRole(EXPORT_ROLES, role)) options.push(['export', t('organizer.events.view.export')]);
+  if (resultsTab) options.push(['results', disputes > 0 ? `${t('organizer.events.view.results')} (${disputes})` : t('organizer.events.view.results')]);
   if (options.length === 1) return null;
   return <div data-testid="event-view-tabs" className="max-w-full overflow-x-auto"><Segmented className="w-fit" value={view} options={options} onChange={v => onView(v === 'details' ? null : (v as EventView))} /></div>;
 }
 
 const VIEW_TITLE: Record<EventView, MessageKey> = {
   registrations: 'organizer.events.view.registrations', orders: 'organizer.events.view.orders', finance: 'events.finance.title',
-  kit: 'organizer.events.view.kit', bibs: 'organizer.events.view.bibs', export: 'organizer.events.view.export',
+  kit: 'organizer.events.view.kit', bibs: 'organizer.events.view.bibs', export: 'organizer.events.view.export', results: 'organizer.events.view.results',
 };
 
 /** `/organizer/events?event=<id>&view=registrations|orders|finance|kit|bibs|export[&registration=<id>]` (S3 §6.3, S5 §8.1). */
@@ -70,7 +91,7 @@ export function OrganizerEventView({ doc, view, role, onView, onBack }: { doc: E
   return (
     <div className="space-y-4" data-testid={`organizer-view-${view}`}>
       <PageHeader title={doc.title} description={<Badge tone={st.tone}>{t(st.key)}</Badge>} actions={<Button variant="ghost" size="sm" onClick={onBack}>{t('events.wizard.back')}</Button>} />
-      <EventViewTabs view={view} role={role} onView={onView} published={published} />
+      <EventViewTabs view={view} role={role} onView={onView} published={published} eventId={doc.id} status={doc.status} />
       {view === 'finance'
         ? <EventFinanceView eventId={doc.id} timezone={doc.timezone} timezoneAbbr={doc.timezoneAbbr} published={published} />
         : view === 'kit'
@@ -79,10 +100,13 @@ export function OrganizerEventView({ doc, view, role, onView, onBack }: { doc: E
         ? <BibsView doc={doc} role={role} readOnly={readOnly} onOpenRegistration={openReg} />
         : view === 'export'
         ? <ExportView doc={doc} readOnly={readOnly} />
+        : view === 'results'
+        ? <ResultsView doc={doc} role={role} readOnly={readOnly} />
         : view === 'registrations'
         ? <EventRegistrationsTable eventId={doc.id} timezone={doc.timezone} timezoneAbbr={doc.timezoneAbbr} fieldPolicy="organizer" published={published} onOpen={hasRole(KIT_ROLES, role) ? openReg : undefined} />
         : <EventOrdersTable eventId={doc.id} timezone={doc.timezone} timezoneAbbr={doc.timezoneAbbr} fieldPolicy="organizer" published={published} />}
-      {regId && hasRole(KIT_ROLES, role) && <RegistrationDrawer doc={doc} registrationId={regId} role={role} readOnly={readOnly} onClose={() => openReg(null)} />}
+      {/* S6: the Results tab owns `&registration=` for its own result drawer */}
+      {regId && view !== 'results' && hasRole(KIT_ROLES, role) && <RegistrationDrawer doc={doc} registrationId={regId} role={role} readOnly={readOnly} onClose={() => openReg(null)} />}
     </div>
   );
 }

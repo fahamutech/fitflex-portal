@@ -13,7 +13,7 @@ import { CompanyPeopleOr } from '@/components/b2b-company-people';
 import { RewardQueue } from '@/components/reward-queue';
 import { GroupManager } from '@/components/group-manager';
 import type { Locale, MessageKey } from '@/lib/i18n';
-import { PendingMemberStatus, WithdrawRequestButton, fill, memberRequestError, requestLabel, requestSentNotice, shownRequests } from '@/components/b2b-member-requests';
+import { PendingMemberStatus, WithdrawRequestButton, fill, memberRequestError, requestLabel, requestSentNotice, shownRequests, withdrawMemberRequest } from '@/components/b2b-member-requests';
 
 /**
  * The organisation's own screens for the people it covers and its
@@ -28,8 +28,8 @@ const ERRORS: Record<string, string> = {
   invalid_email: 'That email address doesn’t look right.',
   invalid_phone: 'That number doesn’t look right. Try 0712 345 678 or +255712345678.',
   user_contact_required: 'Enter their email address or mobile number.',
-  beneficiary_must_be_member: 'That account isn’t a member account. They need to use FitFlex as a member.',
-  user_must_be_member: 'That account isn’t a member account. They need to use FitFlex as a member.',
+  // By user ID only: by email or number nothing person-dependent comes back any more (functions#283), so
+  // user_not_found / beneficiary_must_be_member / user_must_be_member are not handled here.
   already_enrolled: 'They are already on your list.',
   user_already_linked: 'That account is already linked to another of your employees.',
   external_reference_in_use: 'Someone else already has that reference.',
@@ -39,16 +39,10 @@ const ERRORS: Record<string, string> = {
   forbidden: 'Your role doesn’t include this.',
   invalid_transition: 'That change isn’t possible now.',
 };
-// Codes whose text lives in i18n (English + Swahili).
-const I18N_ERRORS: Partial<Record<string, MessageKey>> = {
-  user_not_found: 'b2b.errors.userNotFound',
-};
 const said = (e: unknown, fallback: string, t: (k: MessageKey) => string, locale: Locale = 'en') => {
   const request = memberRequestError(e, t, locale);
   if (request) return request;
   const code = e instanceof ApiError ? (e.body as { error?: string } | null)?.error : undefined;
-  const i18nKey = code ? I18N_ERRORS[code] : undefined;
-  if (i18nKey) return t(i18nKey);
   return (code && ERRORS[code]) || fallback;
 };
 const TONE: Record<string, 'success' | 'warning' | 'gray' | 'danger' | 'brand'> = {
@@ -135,7 +129,7 @@ function Beneficiaries({ token, mine, readOnlyNote }: { token: string; mine: Min
   const orgId = mine.organization.id;
   const canManage = mine.permissions.includes('beneficiaries.manage') && !readOnlyNote;
   const [people, setPeople] = useState<B2BBeneficiary[] | null>(null);
-  // Adds by user ID the member has not accepted yet (absent on an older backend).
+  // Adds by user ID, email or number the member has not accepted yet (absent on an older backend).
   const [pending, setPending] = useState<B2BMemberRequest[]>([]);
   const [total, setTotal] = useState(0);
   const [search, setSearch] = useState('');
@@ -175,15 +169,16 @@ function Beneficiaries({ token, mine, readOnlyNote }: { token: string; mine: Min
         groupName: form.groupName.trim() || undefined, externalReference: form.externalReference.trim() || undefined,
       });
       setForm({ ...form, contact: '', externalReference: '' });
-      // Named by user ID: nobody is added until the member accepts in the app. Same text whether or not
-      // anything was stored (memberRequest.id null), so the screen can't reveal whether the id exists.
+      // Named by user ID, email or number: nobody is added until the member accepts in the app. Same text
+      // whatever came back (an id-null stub, or a request by contact that nobody may be behind), so the
+      // screen can't reveal whether the person has an account (functions#241, #283).
       if (isPendingMemberAcceptance(out)) return requestSentNotice(t);
       return `${out.beneficiary.displayName ?? 'They'} can now use your programmes.`;
     }, 'Could not add them.');
   };
 
   const withdraw = (r: B2BMemberRequest) => r.id && run(async () => {
-    await api.cancelB2BMemberRequest(token, orgId, r.id as string);
+    await withdrawMemberRequest(token, orgId, r.id as string);
     return t('b2b.memberRequest.withdrawn');
   }, t('b2b.memberRequest.withdrawFailed'));
 
@@ -197,7 +192,7 @@ function Beneficiaries({ token, mine, readOnlyNote }: { token: string; mine: Min
           <CardContent className="py-4">
             <form onSubmit={add} className="grid gap-3 sm:grid-cols-5" data-testid="org-people-add">
               <div className="sm:col-span-2">
-                <Field label="Email or mobile number" hint="Of the FitFlex account they use in the app.">
+                <Field label="Email or mobile number" hint={t('b2b.memberRequest.contactHint')}>
                   <Input required value={form.contact} onChange={e => setForm({ ...form, contact: e.target.value })} placeholder="asha@example.co.tz or 0712 345 678" data-testid="org-people-contact" />
                 </Field>
               </div>
@@ -312,13 +307,15 @@ function CompanyStaff({ token }: { token: string }) {
       if (!contact) return `${employee.displayName} added. Link their FitFlex account so they can use the benefits.`;
       try {
         const linked = await api.linkCorporateStaff(token, employee.id, contact);
-        // Named by user ID: the member must accept in the app before the record is linked.
+        // HR only asks (functions#283): by email or number the reply is the same whoever is behind it, and the
+        // record is linked only when the member accepts in the app. A FitFlex admin links directly.
         if (isPendingMemberAcceptance(linked)) {
           return fill(t('b2b.memberRequest.employeeAddedSent'), { employee: employee.displayName });
         }
         return `${employee.displayName} added and linked to their FitFlex account.`;
       } catch (err) {
-        return `${employee.displayName} added, but not linked yet: ${said(err, 'their FitFlex account wasn’t found.', t, locale)}`;
+        // Only refusals that say nothing about the person (invalid contact, rate limits) come back now.
+        return fill(t('b2b.memberRequest.employeeAddedNotLinked'), { employee: employee.displayName, reason: said(err, t('b2b.hrOrg.link.failed'), t, locale) });
       }
     }, 'Could not add the employee.');
   };
@@ -332,7 +329,7 @@ function CompanyStaff({ token }: { token: string }) {
           <form onSubmit={add} className="grid gap-3 sm:grid-cols-4" data-testid="company-staff-add">
             <Field label="Employee’s name"><Input required value={form.displayName} onChange={e => setForm({ ...form, displayName: e.target.value })} data-testid="company-staff-name" /></Field>
             <div className="sm:col-span-2">
-              <Field label="Email or mobile number (optional)" hint="Of the FitFlex account they use in the app. They are linked to it if it exists.">
+              <Field label="Email or mobile number (optional)" hint={t('b2b.hrOrg.add.contactHint')}>
                 <Input value={form.contact} onChange={e => setForm({ ...form, contact: e.target.value })} placeholder="asha@example.co.tz or 0712 345 678" data-testid="company-staff-contact" />
               </Field>
             </div>
@@ -365,7 +362,8 @@ function CompanyStaff({ token }: { token: string }) {
                         <span className="flex flex-wrap items-center gap-2" data-testid={`company-staff-request-${s.id}`}>
                           <span className="text-sm">{requestLabel(t, s.pendingLink)}</span>
                           <PendingMemberStatus request={s.pendingLink} />
-                          {/* HR withdraws a link request by unlinking the record (the backend closes the request). */}
+                          {/* HR withdraws a link request (by user ID, email or number) by unlinking the record: the backend closes
+                              it, a masked decline too. DELETE …/member-requests/:id does not take staff links (404). */}
                           <WithdrawRequestButton request={s.pendingLink} disabled={busy}
                             onWithdraw={() => run(async () => { await api.linkCorporateStaff(token, s.id, null); return t('b2b.memberRequest.withdrawn'); }, t('b2b.memberRequest.withdrawFailed'))} />
                         </span>

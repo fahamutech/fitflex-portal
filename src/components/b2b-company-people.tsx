@@ -138,7 +138,9 @@ export function CompanyPeople({ token, mine }: { token: string; mine: Mine }) {
       // The activation PIN comes back once: show it now, keep it nowhere else.
       if (out.pin) setPin({ name, pin: out.pin });
       // Named by email or number: the row is added unlinked and the member (if any; the answer is the same
-      // either way) is asked to accept the link in the app. RC's consent wording (portal#141).
+      // either way) is asked to accept the link in the app. RC's consent wording (portal#141). Since functions#283
+      // memberRequest.id is a real stored request; it shows on the row as pendingLink after the reload, and is
+      // withdrawn by unlinking (DELETE …/member-requests/:id does not take staff links).
       if (isPendingMemberAcceptance(out)) return fill(t('b2b.memberRequest.employeeAddedSent'), { employee: name });
       return fmt(t('b2b.hrOrg.add.done'), { name });
     }, 'b2b.hrOrg.add.failed');
@@ -226,7 +228,8 @@ export function CompanyPeople({ token, mine }: { token: string; mine: Mine }) {
                           )}
                         </span>
                       ) : p.pendingLink ? (
-                        // Waiting for the member to accept: when and until when, never who.
+                        // Waiting for the member to accept: when and until when, never who. Withdraw = unlink with an empty
+                        // body; the backend closes the open request (by user ID, email or number) and hides a masked decline.
                         <span className="flex flex-wrap items-center gap-2" data-testid={`org-staff-pending-${p.id}`}>
                           <Badge tone="warning">{t('b2b.memberRequest.waiting')}</Badge>
                           {p.pendingLink.expiresAt && <span className="text-xs text-[var(--color-fg-quaternary)]">{fmt(t('b2b.memberRequest.expires'), { date: dayText(locale, p.pendingLink.expiresAt) })}</span>}

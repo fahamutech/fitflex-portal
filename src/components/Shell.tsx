@@ -53,6 +53,7 @@ import { EVENTS_MODULE, HERO_IMAGES_ADMIN, PARTNER_MEDIA_ADMIN, PHOTO_HERO_UI } 
 import { eventsAreaOpen, staffAreaOpen } from '@/lib/events';
 import { useAdminEventsSummary, useOrganizer } from './organizer-context';
 import { useCorporateEventsAvailable, useEventsOptions } from './events-options';
+import { resultsOf } from '@/lib/events-results';
 import { opsOf } from '@/lib/events-ops';
 import { useShopBannersAvailable, useShopFlashSalesAvailable } from './shop-banners-gate';
 import { useTaxRatesAvailable } from './tax-rates-gate';
@@ -203,6 +204,8 @@ const ADMIN_NAV: NavItem[] = [
   // server answers GET /admin/events/summary (see visibleNav). The count is the number of submitted events.
   ...(EVENTS_MODULE ? [{ href: '/admin/events', labelKey: 'admin.nav.events', icon: Flag, groupKey: 'nav.group.platform', aclScope: 'events' }] : []),
   { href: '/admin/rewards',       labelKey: 'admin.nav.rewards',        icon: Gift,            groupKey: 'nav.group.platform', aclScope: 'rewards' },
+  // Events S6 (spec §9.4): event rewards and medal art; shown only while the server's EVENTS_REWARDS is on (see visibleNav).
+  ...(EVENTS_MODULE ? [{ href: '/admin/event-rewards', labelKey: 'admin.nav.eventRewards', icon: Gift, groupKey: 'nav.group.platform', aclScope: 'events' }] : []),
   { href: '/admin/exercises',     labelKey: 'admin.nav.exercises',      icon: Dumbbell,        groupKey: 'nav.group.platform', aclScope: 'exercises' },
   // App photos (spec photo-hero-screens §36): only in builds with NEXT_PUBLIC_HERO_IMAGES_ADMIN=true.
   ...(HERO_IMAGES_ADMIN ? [{ href: '/admin/hero-images', labelKey: 'admin.nav.heroImages', icon: Images, groupKey: 'nav.group.platform', aclScope: 'brand_media' }] : []),
@@ -490,6 +493,8 @@ export function Shell({ children }: { children: ReactNode }) {
   const isOrganizer   = !!token && ORGANIZER_USER_TYPES.has(user?.userType ?? '');
   const adminEvents = useAdminEventsSummary(token, !!isAdminUser && hasPermission('events'));
   const organizerOptions = useEventsOptions(isOrganizer && EVENTS_MODULE);
+  const adminEventOptions = useEventsOptions(!!isAdminUser && EVENTS_MODULE);
+  const eventRewardsOn = resultsOf(adminEventOptions).rewards;
   const integrationsOn = opsOf(organizerOptions).api || opsOf(organizerOptions).webhooks;
   const corporateEvents = useCorporateEventsAvailable(!!token && (!!isOrgUser || !!isHr));
   const merchAllowed = isVendor ? vendor.status === 'ready' && !!vendor.me?.permissions?.includes('products') : !!isAdminUser && (hasPermission('promotions') || hasPermission('promotions_approve'));
@@ -513,6 +518,7 @@ export function Shell({ children }: { children: ReactNode }) {
         if (item.href === '/admin/shop-merch' && !bannersOn) return false;
         if (item.href === '/admin/tax-rates' && !taxRatesOn) return false;
         if (item.href === '/admin/events' && !adminEvents.available) return false;
+        if (item.href === '/admin/event-rewards' && !(adminEvents.available && eventRewardsOn)) return false;
         if (!item.aclScope) return true;             // no scope = super-admin only (overview)
         if (!isPortalStaff) return true;             // super-admin sees everything
         return scopesOf(item).some(hasPermission);   // portal staff: check ACL

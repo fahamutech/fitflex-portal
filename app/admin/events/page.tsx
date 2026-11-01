@@ -15,6 +15,8 @@ import { EventRegistrationsTable } from '@/components/event-registrations-table'
 import { EventOrdersTable } from '@/components/event-orders-table';
 import { hasRegistrationData } from '@/components/organizer/event-views';
 import { useEventsOptions } from '@/components/events-options';
+import { AdminEventResults } from '@/components/admin-event-results';
+import { resultsOf, resultsOpenFor } from '@/lib/events-results';
 import { LifecycleButtons, LifecycleDialogs, type LifecycleAction } from '@/components/event-lifecycle';
 import { EventCancelWithRefundsDialog } from '@/components/event-refund-batch-dialog';
 import { AdminOrderPaymentPanel } from '@/components/event-payment-panel';
@@ -117,7 +119,7 @@ function AuditTable({ eventId }: { eventId?: string }) {
 }
 
 /** One event (spec §8.1): read-only review, decision card, organizer card, audit card. */
-const DETAIL_VIEWS = ['review', 'orders', 'registrations'] as const;
+const DETAIL_VIEWS = ['review', 'orders', 'registrations', 'results'] as const;
 type DetailView = (typeof DETAIL_VIEWS)[number];
 
 function Detail({ id, view, orderParam, onView, onBack }: { id: string; view: DetailView; orderParam: string | null; onView: (v: DetailView) => void; onBack: () => void }) {
@@ -136,7 +138,8 @@ function Detail({ id, view, orderParam, onView, onBack }: { id: string; view: De
   const [order, setOrder] = useState<EventOrderRow | null>(orderParam ? { id: orderParam, reference: '', status: 'awaiting_payment', purchaser: { type: 'member', label: '' }, placesCount: 0, totalTzs: 0, feesTzs: 0, currency: 'TZS', createdAt: '', holdExpiresAt: null, closedAt: null, closeReason: null } : null);
   const [ordersKey, setOrdersKey] = useState(0);
   // S3 §6.5: the orders and registrations tabs exist only while the server says registration is on.
-  const registrationOn = !!useEventsOptions()?.registration;
+  const evOptions = useEventsOptions();
+  const registrationOn = !!evOptions?.registration;
   useDocumentTitle(doc?.title ? `${doc.title} · ${t('admin.events.title')}` : t('admin.events.title'));
   const load = useCallback(async () => {
     if (!token) return;
@@ -169,6 +172,7 @@ function Detail({ id, view, orderParam, onView, onBack }: { id: string; view: De
   if (state === 'error') return <PageError onRetry={() => void load()} />;
   if (!doc) return <PageLoading />;
   const st = eventStatusOf(doc.status);
+  const resultsShown = resultsOf(evOptions).enabled && resultsOpenFor(doc.status);
   const canKyc = hasPermission('kyc');
   const laterActions = (['cancel', 'complete', 'archive'] as LifecycleAction[]).filter(a => doc.allowedActions?.includes(a));
   return (
@@ -177,7 +181,9 @@ function Detail({ id, view, orderParam, onView, onBack }: { id: string; view: De
         actions={<Button variant="ghost" onClick={onBack}>{t('admin.events.backToQueue')}</Button>} />
       {!doc.permitOnFile && <div data-testid="admin-permit-missing"><Alert tone="warning">{t('events.review.permitMissing')}</Alert></div>}
       {/* S3 §6.5: orders and registrations of the event, full names (scope events). */}
-      {registrationOn && <Segmented className="w-fit" value={view} onChange={v => onView(v as DetailView)} options={DETAIL_VIEWS.map(v => [v, t(v === 'review' ? 'admin.events.view.review' : v === 'orders' ? 'admin.events.view.orders' : 'admin.events.view.registrations')] as [string, string])} />}
+      {registrationOn && <Segmented className="w-fit" value={view} onChange={v => onView(v as DetailView)} options={DETAIL_VIEWS.filter(v => v !== 'results' || resultsShown).map(v => [v, t(v === 'review' ? 'admin.events.view.review' : v === 'orders' ? 'admin.events.view.orders' : v === 'results' ? 'admin.events.view.results' : 'admin.events.view.registrations')] as [string, string])} />}
+      {/* Events S6 §9.1: a read-only Results block with the exception actions (correct, disqualify with a reason). */}
+      {view === 'results' && resultsShown && <AdminEventResults eventId={id} timezone={doc.timezone} timezoneAbbr={doc.timezoneAbbr} />}
       {view === 'orders' && !registrationOn && <EventsUnavailable />}
       {view === 'registrations' && !registrationOn && <EventsUnavailable />}
       {view === 'orders' && registrationOn && (

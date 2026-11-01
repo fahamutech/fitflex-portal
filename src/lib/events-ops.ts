@@ -52,7 +52,9 @@ export const API_SCOPES: Array<{ scope: ApiScope; risk: ScopeRisk; ownerOnly?: b
   { scope: 'kit:write', risk: 'write' },
   { scope: 'bibs:write', risk: 'write' },
   { scope: 'webhooks:manage', risk: 'high', ownerOnly: true },
-  { scope: 'results:write', risk: 'write', comingSoon: true },
+  // Events S6 §8.4: selectable only while the server's results flag is on (otherwise "coming soon"); results:write is High risk.
+  { scope: 'results:write', risk: 'high', comingSoon: true },
+  { scope: 'results:read', risk: 'read' },
 ];
 export const scopeKey = (scope: ApiScope) => `integrations.scope.${scope}` as MessageKey;
 export const riskKey = (risk: ScopeRisk) => `integrations.risk.${risk}` as MessageKey;
@@ -68,6 +70,8 @@ export const WEBHOOK_EVENT_GROUPS: Array<{ key: MessageKey; types: string[] }> =
   { key: 'integrations.webhooks.group.event', types: ['event.updated', 'event.cancelled', 'refund.updated'] },
 ];
 export const WEBHOOK_EVENT_TYPES = WEBHOOK_EVENT_GROUPS.flatMap(g => g.types);
+/** Events S6 §8.5: offered only while the server's results flag is on. Ids only, no wildcard. */
+export const RESULT_WEBHOOK_GROUP: { key: MessageKey; types: string[] } = { key: 'integrations.webhooks.group.results', types: ['result.verified', 'result.published', 'result.corrected', 'result.disputed'] };
 
 export const HEALTH_TONE = { healthy: 'success', degraded: 'warning', failing: 'danger', disabled: 'gray', unverified: 'info' } as const;
 export const healthKey = (h: string) => `integrations.health.${h}` as MessageKey;

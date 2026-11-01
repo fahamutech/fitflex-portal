@@ -5,8 +5,10 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api, type WebhookAttempt, type WebhookEndpointRow, type WebhookTestResult } from '@/lib/api';
 import { errorKey, eventDateTime, fmt, isFeatureOff, relativeTime } from '@/lib/events';
-import { HEALTH_TONE, WEBHOOK_EVENT_GROUPS, WEBHOOK_EVENT_TYPES, healthKey, hostOf, urlErrorKey } from '@/lib/events-ops';
+import { HEALTH_TONE, RESULT_WEBHOOK_GROUP, WEBHOOK_EVENT_GROUPS, healthKey, hostOf, urlErrorKey } from '@/lib/events-ops';
+import { resultsOf } from '@/lib/events-results';
 import { messages, type MessageKey } from '@/lib/i18n';
+import { useEventsOptions } from '@/components/events-options';
 import { Alert, Badge, Button, Card, CardContent, Checkbox, EmptyState, Field, Input, SkeletonTable, useToast } from '@/components/shared';
 import { DataTable, type ColumnDef } from '@/components/data-table';
 import { Dialog, DialogFooter } from '@/components/dialog';
@@ -139,7 +141,9 @@ function CreateEndpointDialog({ open, onClose, onCreated }: { open: boolean; onC
   const [urlError, setUrlError] = useState<MessageKey | null>(null);
   const [error, setError] = useState<MessageKey | null>(null);
   useEffect(() => { if (open) { setUrl(''); setEvents([]); setDescription(''); setUrlError(null); setError(null); setBusy(false); } }, [open]);
-  const all = events.length === WEBHOOK_EVENT_TYPES.length;
+  const groups = resultsOf(useEventsOptions()).enabled ? [...WEBHOOK_EVENT_GROUPS, RESULT_WEBHOOK_GROUP] : WEBHOOK_EVENT_GROUPS;
+  const allTypes = groups.flatMap(g => g.types);
+  const all = events.length === allTypes.length;
   const toggle = (type: string) => setEvents(cur => (cur.includes(type) ? cur.filter(x => x !== type) : [...cur, type]));
   async function create() {
     if (!token) return;
@@ -163,9 +167,9 @@ function CreateEndpointDialog({ open, onClose, onCreated }: { open: boolean; onC
         <fieldset className="space-y-3">
           <legend className="mb-1 flex w-full items-center justify-between text-sm font-semibold text-[var(--color-fg-primary)]">
             {t('integrations.webhooks.events')}
-            <Button type="button" variant="link" size="sm" onClick={() => setEvents(all ? [] : [...WEBHOOK_EVENT_TYPES])} data-testid="endpoint-select-all">{t('integrations.webhooks.selectAll')}</Button>
+            <Button type="button" variant="link" size="sm" onClick={() => setEvents(all ? [] : [...allTypes])} data-testid="endpoint-select-all">{t('integrations.webhooks.selectAll')}</Button>
           </legend>
-          {WEBHOOK_EVENT_GROUPS.map(g => (
+          {groups.map(g => (
             <div key={g.key} className="space-y-0.5">
               <p className="text-xs font-semibold uppercase tracking-wide text-[var(--color-fg-quaternary)]">{t(g.key)}</p>
               {g.types.map(type => <Checkbox key={type} label={<span className="font-mono text-xs">{type}</span>} checked={events.includes(type)} onChange={() => toggle(type)} data-testid={`endpoint-event-${type}`} />)}
