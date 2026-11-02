@@ -8,6 +8,8 @@ import { api, ApiError, ManualPaymentSettings, PaymentOptions } from '@/lib/api'
 import { Alert, Button, Card, Field, Input, Select, Textarea } from '@/components/shared';
 import { ConfirmDialog } from '@/components/dialog';
 import type { MessageKey } from '@/lib/i18n';
+import { ReasonField } from '@/components/reason-field';
+import { isReasonRequired, reasonOf, REASON_REQUIRED_KEY } from '@/lib/admin-reason';
 
 /** Network brand names: stored and shown as they are in both languages. */
 export const MANUAL_PAY_NETWORKS = ['M-Pesa', 'Airtel Money', 'Mixx by Yas', 'HaloPesa'] as const;
@@ -52,6 +54,7 @@ export function ManualPaymentSettingsCard({ initial }: { initial: ManualPaymentS
   const [notice, setNotice] = useState<string | null>(null);
   const [confirmClear, setConfirmClear] = useState(false);
   const [live, setLive] = useState<LiveState>(null);
+  const [reason, setReason] = useState('');
 
   // Only when the saved details really change (not on every settings reload / "Save all").
   const initialKey = JSON.stringify(initial ?? null);
@@ -79,15 +82,18 @@ export function ManualPaymentSettingsCard({ initial }: { initial: ManualPaymentS
     setFieldError(null);
     setNotice(null);
     try {
-      const updated = await api.updateSettings(token, { manualPayment: value });
+      const updated = await api.updateSettings(token, { manualPayment: value, reason: reasonOf(reason) });
       const next = updated?.manualPayment ?? null;
       setSaved(next);
       setForm(toForm(next));
+      setReason('');
       setNotice(t(value ? 'manualPay.saved' : 'manualPay.cleared'));
       await checkLive();
     } catch (e) {
       const body = e instanceof ApiError ? (e.body as { error?: string; field?: string } | null) : null;
-      if (body?.error === 'manual_payment_invalid') {
+      if (isReasonRequired(e)) {
+        setError(t(REASON_REQUIRED_KEY));
+      } else if (body?.error === 'manual_payment_invalid') {
         const f = body.field as FieldName | undefined;
         if (f && f in FIELD_ERROR) setFieldError(f);
         else setError(t('manualPay.err.generic'));
@@ -160,6 +166,7 @@ export function ManualPaymentSettingsCard({ initial }: { initial: ManualPaymentS
             <Textarea lang="sw" value={form.sw} onChange={e => set({ sw: e.target.value })} />
           </Field>
         </div>
+        <ReasonField value={reason} onChange={setReason} testId="manual-pay-reason" />
         <div className="flex flex-wrap justify-end gap-2">
           {saved && (
             <Button variant="secondary" size="sm" onClick={() => setConfirmClear(true)} disabled={busy}>
