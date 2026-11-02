@@ -111,6 +111,46 @@ test.describe('held payments worklist', () => {
     expect(posts(calls).at(-1)?.body).toEqual({ transactionId: 'TX-UNK', reasonCode: 'charged_twice', amountTzs: 30000 });
   });
 
+  test('maximum refundable is shown when known; a partial amount above it is blocked inline', async ({ page }) => {
+    const calls = await open(page, { 'GET /admin/payments/held': { json: { items: [row('TX-UNK', { amountTzs: null, amountReceivedKnown: false, requestAmountTzs: 40000 })] } } });
+    await page.getByTestId('held-refund').click();
+    await expect(page.getByTestId('held-max')).toContainText('Maximum refundable: TSh 40,000');
+    await page.getByTestId('held-reason').selectOption('payment_error');
+    await page.getByTestId('held-amount').fill('45000');
+    await expect(page.getByTestId('held-dialog')).toContainText('more than the maximum refundable');
+    await expect(page.getByTestId('held-submit')).toBeDisabled();
+    await expect(page.getByTestId('held-submit')).toContainText('45,000');
+    expect(posts(calls)).toHaveLength(0);
+    await page.getByTestId('held-amount').fill('40000');
+    await expect(page.getByTestId('held-submit')).toBeEnabled();
+    await page.getByTestId('held-submit').click();
+    await expect.poll(() => posts(calls).length).toBe(1);
+    expect(posts(calls)[0].body).toEqual({ transactionId: 'TX-UNK', reasonCode: 'payment_error', amountTzs: 40000 });
+  });
+
+  test('maximum refundable in Swahili', async ({ page }) => {
+    await open(page, { 'GET /admin/payments/held': { json: { items: [row('TX-OK', { requestAmountTzs: 50000 })] } } }, '/admin/payments-held/', 'sw');
+    await page.getByTestId('held-refund').click();
+    await expect(page.getByTestId('held-max')).toContainText('Kiwango cha juu cha kurejeshwa');
+  });
+
+  test('maximum unknown (null or missing): no maximum line, any amount is sent as before', async ({ page }) => {
+    for (const extra of [{ requestAmountTzs: null }, {}]) {
+      const calls = await open(page, {
+        'GET /admin/payments/held': { json: { items: [row('TX-UNK', { amountTzs: null, amountReceivedKnown: false, ...extra })] } },
+        'POST /admin/payments/held/pr_TX-UNK/refund': { status: 201, json: { refund: { id: 'rf_3' } } },
+      });
+      await page.getByTestId('held-refund').click();
+      await expect(page.getByTestId('held-max')).toHaveCount(0);
+      await page.getByTestId('held-reason').selectOption('payment_error');
+      await page.getByTestId('held-amount').fill('999999');
+      await expect(page.getByTestId('held-submit')).toBeEnabled();
+      await page.getByTestId('held-submit').click();
+      await expect.poll(() => posts(calls).length).toBe(1);
+      expect(posts(calls)[0].body).toEqual({ transactionId: 'TX-UNK', reasonCode: 'payment_error', amountTzs: 999999 });
+    }
+  });
+
   test('refund-scope and stale refusals are readable', async ({ page }) => {
     let code = 'cannot_approve_own_request';
     await open(page, {
