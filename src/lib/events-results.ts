@@ -38,7 +38,9 @@ export type FinishStatus = 'finished' | 'dnf' | 'dns' | 'dq';
 export type VerificationStatus = 'pending_verification' | 'verified' | 'rejected' | 'corrected' | 'disqualified';
 export type SourceType = 'timing_provider' | 'organizer_verified' | 'fitflex_gps' | 'manual_unverified';
 export type TimeBasis = 'net' | 'gun';
-export interface ResultsSettings { timeBasis?: TimeBasis; cutoffMinutes?: number | null; disputeWindowHours?: number; publicNames?: 'initial' | 'bib_only' }
+/** Events S7 §6.4: one race's own rules (bps = hundredths of a percent). */
+export interface RaceSettings { id: string; timeBasis?: TimeBasis | null; cutoffMinutes?: number | null; virtualDistanceToleranceBps?: number | null }
+export interface ResultsSettings { timeBasis?: TimeBasis; cutoffMinutes?: number | null; disputeWindowHours?: number; publicNames?: 'initial' | 'bib_only'; categories?: RaceSettings[] }
 export interface CategoryResultsSummary {
   categoryId: string; name: string; distanceMeters?: number | null; confirmed: number; finished: number; dnf: number; dns: number; dq: number;
   pending: number; rejected: number; noResult: number; flagged: number;
@@ -91,7 +93,11 @@ export function defaultArtKey(tier: string | null | undefined, virtual = false):
   return tier === 'finisher' ? 'finisher_green' : tier === 'gold' ? 'podium_gold' : tier === 'silver' ? 'podium_silver' : tier === 'bronze' ? 'podium_bronze' : tier === 'time' ? 'time_blue' : 'finisher_gold';
 }
 export type MedalRule = { type: 'finish' } | { type: 'placing'; scope: 'category' | 'overall'; top: number } | { type: 'time_under'; maxElapsedMs: number };
-export interface MedalArtInfo { source?: 'custom' | 'builtin'; artId?: string | null; revision?: number | null; artKey?: string | null; altText?: { en?: string; sw?: string } | null }
+export interface MedalArtInfo {
+  source?: 'custom' | 'builtin'; artId?: string | null; revision?: number | null; artKey?: string | null; altText?: { en?: string; sw?: string } | null;
+  /** Events S7 §6.1 H13: set by a FitFlex take-down; `takedown.reasonCode` is one of ART_TAKEDOWN_REASONS. */
+  status?: string | null; takedown?: { reasonCode: string; at?: string | null } | null;
+}
 /** `artConfirmation` of GET medal-templates: the CURRENT rights text and its version. */
 export interface ArtConfirmation { version: string; status?: string; en?: string; sw?: string }
 export interface MedalTemplate {

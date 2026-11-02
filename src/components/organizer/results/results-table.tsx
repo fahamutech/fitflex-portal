@@ -17,6 +17,7 @@ import { DataTable, type ColumnDef } from '@/components/data-table';
 import { Dialog, DialogFooter } from '@/components/dialog';
 import { FlagChip, StageBadge, StatusBadge } from '@/components/organizer/results/parts';
 import { BulkApproveDialog, CorrectDialog, DecisionDialog, useWriteError } from '@/components/organizer/results/result-dialogs';
+import { correctionPreviewApi } from '@/lib/events-s7-api';
 import { useApp } from '../../../../app/providers';
 
 const STATUS_FILTERS = ['needs_review', 'verified', 'rejected', 'dnf', 'dns', 'dq', 'no_result'] as const;
@@ -235,6 +236,7 @@ function ResultDrawer({ doc, registrationId, role, readOnly, onClose, onChanged 
       <DecisionDialog open={dialog === 'disqualify'} onClose={() => setDialog(null)} mode="disqualify" name={d?.displayName ?? ''}
         onSubmit={async (body, key) => { if (!token || !d?.resultId) return; await resultsApi.disqualify(token, doc.id, d.resultId, { expectedRevision: rev, reasonCode: body.reasonCode, ...(body.note ? { note: body.note } : {}) }, key); await done('organizer.results.disqualified'); }} />
       <CorrectDialog open={dialog === 'correct'} onClose={() => setDialog(null)} row={d}
+        preview={body => { if (!token || !d?.resultId) return Promise.reject(new Error('no result')); return correctionPreviewApi.preview(token, doc.id, d.resultId, { expectedRevision: rev, ...body }); }}
         onSubmit={async (body, key) => { if (!token || !d?.resultId) return; await resultsApi.correct(token, doc.id, d.resultId, { expectedRevision: rev, ...body }, key); await done('organizer.results.corrected'); }} />
       <EntryDialog open={dialog === 'enter'} onClose={() => setDialog(null)} row={d} role={role}
         onSubmit={async (body, key) => { if (!token) return; await resultsApi.enterResult(token, doc.id, registrationId, body, key); await done('organizer.results.entered'); }} />

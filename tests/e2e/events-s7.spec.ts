@@ -830,3 +830,98 @@ test.describe('waitlist: admin (AC-W16)', () => {
   });
 });
 
+// ═══ P4: results follow-ups and banners ═══
+test.describe('per race settings (AC-H18)', () => {
+  const RESULTS = '/organizer/events/?event=evt_pub&view=results&section=settings';
+  test('saves per-race time basis, cut-off and tolerance through the existing route; "Same for all races" sets every race', async ({ page }) => {
+    const mock = await setupEvents(page, OWNER, { me: organizerMe('active', 'owner'), s6: {}, s7: {} });
+    await page.goto(RESULTS);
+    const card = page.getByTestId('results-per-race');
+    await expect(card).toBeVisible();
+    await card.getByTestId('per-race-basis-cat_1').selectOption('gun');
+    await card.getByTestId('per-race-cutoff-cat_1').fill('240');
+    await card.getByTestId('per-race-tolerance-cat_1').fill('5');
+    await card.getByTestId('per-race-save').click();
+    await expect(page.getByText('Per race settings saved.')).toBeVisible();
+    const body = mock.s7!.settingsCalls[0];
+    expect(body.categories).toEqual([{ id: 'cat_1', timeBasis: 'gun', cutoffMinutes: 240, virtualDistanceToleranceBps: 500 }, { id: 'cat_2' }]);
+    await card.getByTestId('per-race-same').click();
+    await card.getByTestId('per-race-basis-all').selectOption('net');
+    await card.getByTestId('per-race-save').click();
+    await expect.poll(() => mock.s7!.settingsCalls.length).toBe(2);
+    expect((mock.s7!.settingsCalls[1].categories as Array<Record<string, unknown>>).every(x => x.timeBasis === 'net')).toBe(true);
+  });
+
+  test('after the first official release the fields disable with the explanation', async ({ page }) => {
+    await setupEvents(page, OWNER, { me: organizerMe('active', 'owner'), s6: { officialRelease: true }, s7: {} });
+    await page.goto(RESULTS);
+    await expect(page.getByTestId('results-per-race')).toContainText("These can't change after the official release");
+    await expect(page.getByTestId('per-race-basis-cat_1')).toBeDisabled();
+    await expect(page.getByTestId('per-race-save')).toHaveCount(0);
+  });
+});
+
+test.describe('correction preview (AC-H12)', () => {
+  test('Preview effect shows rank change, shifted runners and medals; Confirm waits for a matching preview', async ({ page }) => {
+    const mock = await setupEvents(page, OWNER, { me: organizerMe('active', 'owner'), s6: {}, s7: {} });
+    await page.goto('/organizer/events/?event=evt_pub&view=results&section=results');
+    await page.getByTestId('result-open-reg_3').click();
+    await page.getByTestId('act-correct').click();
+    await page.getByTestId('correct-net').fill('1:40:00');
+    await page.getByTestId('correct-reason').selectOption('timing_error');
+    await page.getByTestId('correct-note').fill('Timing mat missed the first split.');
+    await expect(page.getByTestId('correct-confirm')).toBeDisabled();
+    await page.getByTestId('correct-preview').click();
+    await expect(page.getByTestId('correct-preview-result')).toHaveText('Rank changes from 3 to 1. 2 other runners shift. 1 medals affected.');
+    expect(JSON.stringify(mock.s7!.previews[0])).not.toMatch(/Amina/);
+    await expect(page.getByTestId('correct-confirm')).toBeEnabled();
+    await page.getByTestId('correct-net').fill('1:41:00');
+    await expect(page.getByTestId('correct-confirm')).toBeDisabled();
+  });
+});
+
+test.describe('medal take-down banner (AC-H13)', () => {
+  test('shows the danger banner with the reason and an upload action; no banner without a take-down', async ({ page }) => {
+    await setupEvents(page, OWNER, { me: organizerMe('active', 'owner'), s6: {}, s7: { takedown: true } });
+    await page.goto('/organizer/events/?event=evt_pub&view=results&section=medals');
+    await expect(page.getByTestId('medal-takedown-banner')).toContainText('FitFlex removed your design for Finisher');
+    await expect(page.getByTestId('medal-takedown-banner')).toContainText('The built-in design is shown instead.');
+    await expect(page.getByTestId('medal-takedown-banner').getByRole('button', { name: 'Upload a new design' })).toBeVisible();
+  });
+  test('without a take-down there is no banner', async ({ page }) => {
+    await setupEvents(page, OWNER, { me: organizerMe('active', 'owner'), s6: {}, s7: {} });
+    await page.goto('/organizer/events/?event=evt_pub&view=results&section=medals');
+    await expect(page.getByTestId('medal-takedown-banner')).toHaveCount(0);
+  });
+});
+
+test.describe('payments-off banner on the organizer event page (AC-H14)', () => {
+  test('owner and finance see the cause; ops do not', async ({ page }) => {
+    await setupEvents(page, OWNER, { me: organizerMe('active', 'owner'), s7: { paymentsBlocked: 'no_ticket_secret' } });
+    await page.goto('/organizer/events/?event=evt_pub&view=registrations');
+    await expect(page.getByTestId('payments-off-banner')).toHaveText('Payments are off until the ticket key is set.');
+  });
+  test('ops never see it', async ({ page }) => {
+    await setupEvents(page, STAFF_OPS, { me: organizerMe('active', 'ops'), s7: { paymentsBlocked: 'flag_off' } });
+    await page.goto('/organizer/events/?event=evt_pub&view=registrations');
+    await expect(page.getByTestId('organizer-view-registrations')).toBeVisible();
+    await expect(page.getByTestId('payments-off-banner')).toHaveCount(0);
+  });
+  test('Swahili wording', async ({ page }) => {
+    await setupEvents(page, OWNER, { me: organizerMe('active', 'owner'), s7: { paymentsBlocked: 'second_approver_off' }, locale: 'sw' });
+    await page.goto('/organizer/events/?event=evt_pub&view=registrations');
+    await expect(page.getByTestId('payments-off-banner')).toHaveText(eventsS7Messages.sw['events.payments.blocked.second_approver_off']);
+  });
+});
+
+test.describe('flag off: nothing new renders (AC-F1)', () => {
+  test('older server without the S7 blocks: no new entry anywhere', async ({ page }) => {
+    await setupEvents(page, OWNER, { me: organizerMe('active', 'owner'), s6: {} });
+    await page.goto('/organizer/events/?event=evt_pub&view=kit');
+    await expect(page.getByTestId('kit-desk')).toBeVisible();
+    await expect(page.getByTestId('kit-offline-entry')).toHaveCount(0);
+    await page.goto('/organizer/events/?event=evt_pub&view=registrations');
+    await expect(page.getByTestId('waitlist-card')).toHaveCount(0);
+    await expect(page.getByTestId('payments-off-banner')).toHaveCount(0);
+  });
+});
