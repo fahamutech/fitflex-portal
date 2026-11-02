@@ -131,15 +131,13 @@ export function plural(t: (k: MessageKey) => string, n: number, one: MessageKey,
 }
 
 /**
- * Profit of a row (UAT D1): never "TSh 0" for a product without a cost price.
- * - profitTzs null, or the row has a costTzs that is null → unknown, said as "No cost price".
- * - Interim, until the backend sends null: a 0 with no cost information on the row → unknown ("—" only; a
- *   Products row carries no costTzs, so it cannot say why).
+ * Profit of a row (UAT D1): a product without a cost price is never shown as "TSh 0". The server answers
+ * profitTzs (or marginPct) null for it, and only then the cell says "—" + "No cost price". A 0 is a real zero
+ * profit and is shown as "TSh 0".
  */
-export function ProfitCell({ row }: { row: { profitTzs?: number | null; costTzs?: number | null } }) {
+export function ProfitCell({ row }: { row: { profitTzs?: number | null; marginPct?: number | null } }) {
   const { t } = useApp();
-  const noCost = row.profitTzs === null || ('costTzs' in row && row.costTzs == null);
-  if (noCost) {
+  if (row.profitTzs === null || row.marginPct === null) {
     return (
       <span data-testid="profit-unknown">
         <span aria-hidden="true">—</span>
@@ -147,8 +145,7 @@ export function ProfitCell({ row }: { row: { profitTzs?: number | null; costTzs?
       </span>
     );
   }
-  if (row.profitTzs == null || (row.profitTzs === 0 && !('costTzs' in row))) return <span data-testid="profit-unknown">—</span>;
-  return <>{money(row.profitTzs)}</>;
+  return <>{money(row.profitTzs ?? 0)}</>;
 }
 
 export function ViewLoading({ cards = 4 }: { cards?: number }) {

@@ -103,6 +103,8 @@ const profit = (req: Request) => ({
     { productId: 'p1', variant: null, name: 'Whey Protein', removed: false, units: 10, netExVatTzs: 400000, commissionTzs: 40000, costTzs: 260000, profitTzs: 100000, marginPct: 25 },
     // A mixed line the backend now answers with null profit (UAT D1).
     { productId: 'p6', variant: null, name: 'Bands', removed: false, units: 1, netExVatTzs: 33000, commissionTzs: 0, costTzs: null, profitTzs: null, marginPct: null },
+    { productId: 'p8', variant: null, name: 'Socks', removed: false, units: 1, netExVatTzs: 0, commissionTzs: 0, costTzs: 0, profitTzs: 0, marginPct: null },
+    { productId: 'p9', variant: null, name: 'Towel', removed: false, units: 2, netExVatTzs: 10000, commissionTzs: 0, costTzs: 10000, profitTzs: 0, marginPct: 0 },
   ],
   uncostedProducts: [{ productId: 'p2', variant: null, name: 'Gloves', removed: false, units: 2, revenueTzs: 20000 }],
 });
@@ -460,10 +462,11 @@ test.describe('period and URL', () => {
     const y = addDays(TODAY, -1);
     await mockApi(page, base({
       'GET /vendor/reports/sales': req => {
-        const from = new URL(req.url()).searchParams.get('from');
+        const q = new URL(req.url()).searchParams;
         const body = sales(req);
-        // Yesterday's answer is slow and would say 999; today's answer is fast.
-        return from === y ? { delayMs: 1500, json: { ...body, totals: { ...body.totals, netTzs: 999 } } } : { json: body };
+        // Yesterday's answer is slow and would say 999; today's answer is fast. Check `to` as well: on the 2nd of a
+        // month, "This month" also starts yesterday.
+        return q.get('from') === y && q.get('to') === y ? { delayMs: 1500, json: { ...body, totals: { ...body.totals, netTzs: 999 } } } : { json: body };
       },
     }));
     await page.goto('/vendor/reports/?view=sales');
@@ -616,7 +619,7 @@ test.describe('review fixes', () => {
 });
 
 test.describe('S6 UAT fixes', () => {
-  test('D1: no "Profit TSh 0" for a product without a cost price; D12: margin "25.0%"', async ({ page }) => {
+  test('D1: "No cost price" only when profit or margin is null; a real 0 is "TSh 0"; D12: margin "25.0%"', async ({ page }) => {
     await signedInAs(page, VENDOR);
     await mockApi(page, base({
       'GET /vendor/reports/products': req => ({ json: { ...products(req), nextCursor: null, rows: [
@@ -630,15 +633,19 @@ test.describe('S6 UAT fixes', () => {
     await expect(rows).toHaveCount(3);
     await expect(rows.nth(0)).toContainText('TSh 5,000');
     await expect(rows.nth(1).getByTestId('profit-unknown')).toHaveText('—No cost price');
-    // Interim (a backend still answering 0): unknown, never "TSh 0".
-    await expect(rows.nth(2).getByTestId('profit-unknown')).toHaveText('—');
-    await expect(page.getByTestId('products-table').getByText('TSh 0', { exact: true })).toHaveCount(0);
+    // A genuine zero profit stays a figure.
+    await expect(rows.nth(2).getByTestId('profit-unknown')).toHaveCount(0);
+    await expect(rows.nth(2).getByRole('cell').last()).toHaveText('TSh 0');
 
     await page.getByRole('button', { name: 'Profit', exact: true }).click();
     const byProduct = page.getByTestId('profit-products');
     await expect(byProduct).toContainText('25.0%');
-    await expect(byProduct.getByTestId('profit-unknown')).toHaveText('—No cost price');
-    await expect(byProduct.getByText('TSh 0', { exact: true })).toHaveCount(0);
+    const unknown = byProduct.getByTestId('profit-unknown');
+    await expect(unknown).toHaveCount(2); // profit null (Bands), margin null (Socks)
+    await expect(unknown.nth(0)).toHaveText('—No cost price');
+    await expect(unknown.nth(1)).toHaveText('—No cost price');
+    // Zero profit on a costed line (Towel) is "TSh 0".
+    await expect(byProduct.getByRole('row', { name: /Towel/ }).getByTestId('profit-product-profit')).toHaveText('TSh 0');
   });
 
   test('D1 in Swahili: "Hakuna bei ya kununua"', async ({ page }) => {
