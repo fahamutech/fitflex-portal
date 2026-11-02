@@ -14,6 +14,9 @@ import { useDocumentTitle } from '@/components/organizer/page-states';
 import { useEventsOptions } from '@/components/events-options';
 import { useOrganizer } from '@/components/organizer-context';
 import { KitDesk } from '@/components/organizer/kit-desk';
+import { DevicesPanel } from '@/components/organizer/kit-desk-offline/devices-panel';
+import { WaitlistCard } from '@/components/organizer/waitlist-card';
+import { PaymentsOffBanner } from '@/components/admin-event-controls';
 import { BibsView } from '@/components/organizer/bibs-view';
 import { ExportView } from '@/components/organizer/export-view';
 import { RegistrationDrawer } from '@/components/organizer/registration-drawer';
@@ -76,6 +79,7 @@ const VIEW_TITLE: Record<EventView, MessageKey> = {
 export function OrganizerEventView({ doc, view, role, onView, onBack }: { doc: EventDocument; view: EventView; role: OrganizerRole | null; onView: (v: EventView | null) => void; onBack: () => void }) {
   const { t } = useApp();
   const org = useOrganizer();
+  const eventsOptions = useEventsOptions();
   const st = eventStatusOf(doc.status);
   useDocumentTitle(`${doc.title} · ${t(VIEW_TITLE[view])}`);
   const published = hasRegistrationData(doc);
@@ -92,10 +96,22 @@ export function OrganizerEventView({ doc, view, role, onView, onBack }: { doc: E
     <div className="space-y-4" data-testid={`organizer-view-${view}`}>
       <PageHeader title={doc.title} description={<Badge tone={st.tone}>{t(st.key)}</Badge>} actions={<Button variant="ghost" size="sm" onClick={onBack}>{t('events.wizard.back')}</Button>} />
       <EventViewTabs view={view} role={role} onView={onView} published={published} eventId={doc.id} status={doc.status} />
+      {/* Events S7 §6.4: why payments are off, in words, for the roles that can see Finance. */}
+      {hasRole(FINANCE_ROLES, role) && <PaymentsOffBanner />}
+      {/* Events S7 §4.9: waitlist counts (owner, admin, ops on Registrations; finance on Orders). Timing never sees it. */}
+      {published && ((view === 'registrations' && hasRole(KIT_ROLES, role)) || (view === 'orders' && role === 'finance')) && (
+        <WaitlistCard eventId={doc.id} timezone={doc.timezone} canWrite={role === 'owner' || role === 'admin'} readOnly={readOnly} />
+      )}
       {view === 'finance'
         ? <EventFinanceView eventId={doc.id} timezone={doc.timezone} timezoneAbbr={doc.timezoneAbbr} published={published} />
         : view === 'kit'
-        ? <KitDesk doc={doc} role={role} readOnly={readOnly} onOpenRegistration={openReg} />
+        ? (
+          <div className="space-y-6">
+            <KitDesk doc={doc} role={role} readOnly={readOnly} onOpenRegistration={openReg} />
+            {/* Events S7 §3.14: the offline desks panel (owner/admin all desks, ops their own), only while the server says the offline desk is on */}
+            {eventsOptions?.ops?.kitOffline && hasRole(KIT_ROLES, role) && <DevicesPanel eventId={doc.id} timezone={doc.timezone} mode="organizer" canRemove />}
+          </div>
+        )
         : view === 'bibs'
         ? <BibsView doc={doc} role={role} readOnly={readOnly} onOpenRegistration={openReg} />
         : view === 'export'

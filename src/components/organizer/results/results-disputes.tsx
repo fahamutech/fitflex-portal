@@ -13,6 +13,7 @@ import { DataTable, type ColumnDef } from '@/components/data-table';
 import { Dialog, DialogFooter } from '@/components/dialog';
 import { StatusBadge } from '@/components/organizer/results/parts';
 import { CorrectDialog, useWriteError } from '@/components/organizer/results/result-dialogs';
+import { correctionPreviewApi } from '@/lib/events-s7-api';
 import { useApp } from '../../../../app/providers';
 
 const NOTE_MIN = 5; const NOTE_MAX = 500;
@@ -105,6 +106,7 @@ function DisputePanel({ doc, dispute, resolvable, onClose, onResolved, onOpenRes
         <div className="flex justify-end"><Button variant="secondary" onClick={onClose}>{t('events.reg.drawer.close')}</Button></div>
       </div>
       <CorrectDialog open={mode === 'correct'} onClose={() => setMode(null)} row={detail} title={t('organizer.results.disputes.outcome.upheld')}
+        preview={body => { if (!token || !detail?.resultId) return Promise.reject(new Error('no result')); return correctionPreviewApi.preview(token, doc.id, detail.resultId, { expectedRevision: detail.revision ?? 0, ...body }); }}
         onSubmit={async (body, key) => {
           if (!token || !detail) return;
           await resultsApi.resolveDispute(token, doc.id, dispute.id, { outcome: 'upheld', note: body.note, correction: { action: 'correct', expectedRevision: detail.revision ?? 0, ...body } }, key);

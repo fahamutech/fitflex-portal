@@ -4270,10 +4270,14 @@ export interface EventsOptions {
   hold?: { manualExtendHours: number; manualMaxHours: number; providerExtendMinutes: number; lateGraceHours: number };
   tickets?: { qr: boolean; scanning: boolean };
   // Events S5 (spec events-s5-venue-api-and-webhooks §11.1): the server's flags, so the portal never infers availability from the build flag alone.
-  ops?: { kit: boolean; api: boolean; webhooks: boolean };
+  ops?: { kit: boolean; api: boolean; webhooks: boolean; /** Events S7 §7.1: the offline kit desk (false unless the ticket secret is usable). */ kitOffline?: boolean };
   payoutSchedules?: PayoutSchedule[];
   // Events S6 (spec events-s6-runs-results-medals-rewards §8.3): the server's results flags. Absent or all false = S5 behaviour.
   results?: { enabled: boolean; runs: boolean; public: boolean; rewards: boolean; medalArt: boolean };
+  // Events S7 (spec events-s7-hardening-and-pilot §7.1, H14): additive blocks. An older server without them changes nothing.
+  waitlist?: { enabled: boolean; offerHours?: number; maxActivePerUser?: number };
+  analytics?: { enabled: boolean };
+  payments?: { blockedReason: null | 'second_approver_off' | 'no_ticket_secret' | 'flag_off' };
 }
 /** D33: the two payout schedules an event may choose (S5 §3). */
 export type PayoutSchedule = 'biweekly' | 'monthly';
@@ -4343,6 +4347,10 @@ export interface AdminEventRow extends OrganizerEventRow {
 }
 export interface AdminEventDetail extends EventDocument {
   organizer: EventSummary['organizer'] & { status: OrganizerStatus; kycCaseId: string | null }; permitOnFile: boolean;
+  /** Events S7 §6.1 H6: false by default; a FitFlex admin switches it. Absent on an older server. */
+  rewardsEligible?: boolean;
+  /** Events S7 §8: counts only. */
+  waitlist?: { waiting?: number; offered?: number } | null;
 }
 export interface EventAuditRow { id?: string; at: string; actor: { id: string; name: string | null }; action: string; target: string | null; reason: string | null; note: string | null }
 
