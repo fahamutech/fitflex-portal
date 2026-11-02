@@ -15,6 +15,7 @@ import { useEventsOptions } from '@/components/events-options';
 import { useOrganizer } from '@/components/organizer-context';
 import { KitDesk } from '@/components/organizer/kit-desk';
 import { DevicesPanel } from '@/components/organizer/kit-desk-offline/devices-panel';
+import { WaitlistCard } from '@/components/organizer/waitlist-card';
 import { BibsView } from '@/components/organizer/bibs-view';
 import { ExportView } from '@/components/organizer/export-view';
 import { RegistrationDrawer } from '@/components/organizer/registration-drawer';
@@ -94,6 +95,10 @@ export function OrganizerEventView({ doc, view, role, onView, onBack }: { doc: E
     <div className="space-y-4" data-testid={`organizer-view-${view}`}>
       <PageHeader title={doc.title} description={<Badge tone={st.tone}>{t(st.key)}</Badge>} actions={<Button variant="ghost" size="sm" onClick={onBack}>{t('events.wizard.back')}</Button>} />
       <EventViewTabs view={view} role={role} onView={onView} published={published} eventId={doc.id} status={doc.status} />
+      {/* Events S7 §4.9: waitlist counts (owner, admin, ops on Registrations; finance on Orders). Timing never sees it. */}
+      {published && ((view === 'registrations' && hasRole(KIT_ROLES, role)) || (view === 'orders' && role === 'finance')) && (
+        <WaitlistCard eventId={doc.id} timezone={doc.timezone} canWrite={role === 'owner' || role === 'admin'} readOnly={readOnly} />
+      )}
       {view === 'finance'
         ? <EventFinanceView eventId={doc.id} timezone={doc.timezone} timezoneAbbr={doc.timezoneAbbr} published={published} />
         : view === 'kit'

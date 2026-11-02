@@ -532,3 +532,71 @@ test.describe('Swahili and layout (AC-O21, AC-O22)', () => {
   });
 });
 
+// ═══ P2: waitlist (organizer counts and controls, admin masked list) ═══
+const EVENT_VIEW = '/organizer/events/?event=evt_pub&view=registrations';
+async function openRegistrations(page: Page, role: Role = 'owner', s7: S7Opts = {}, locale: 'en' | 'sw' = 'en') {
+  const mock = await setupEvents(page, who(role), { me: organizerMe('active', role), s7, locale });
+  await page.goto(EVENT_VIEW);
+  return mock;
+}
+
+test.describe('waitlist: organizer (AC-W1, AC-W15)', () => {
+  test('with the server flag off the card does not exist', async ({ page }) => {
+    const mock = await openRegistrations(page, 'owner', { waitlist: false });
+    await expect(page.getByTestId('organizer-view-registrations')).toBeVisible();
+    await expect(page.getByTestId('waitlist-card')).toHaveCount(0);
+    expect(mock.reads(/\/waitlist$/)).toHaveLength(0);
+  });
+
+  test('the owner sees counts only (no names, no positions, no promote or reorder), can stop sign-ups and resume them', async ({ page }) => {
+    const mock = await openRegistrations(page, 'owner');
+    const card = page.getByTestId('waitlist-card');
+    await expect(card).toBeVisible();
+    await expect(card).toContainText('You see counts only');
+    await expect(card.getByRole('cell', { name: '2', exact: true }).first()).toBeVisible(); // 2 waiting
+    for (const hidden of ['Neema', 'Juma K', 'Asha B']) await expect(card).not.toContainText(hidden);
+    await expect(card.getByRole('button', { name: /promote|reorder|skip/i })).toHaveCount(0);
+    await card.getByTestId('waitlist-toggle').click();
+    await expect.poll(() => mock.s7!.waitlistEnabled).toBe(false);
+    await expect(page.getByTestId('waitlist-paused')).toHaveText('New sign-ups are stopped.');
+    expect(mock.writes(/\/waitlist$/)[0].body).toEqual({ enabled: false });
+    expect(mock.writes(/\/waitlist$/)[0].headers?.['idempotency-key']).toMatch(/.{8,}/);
+    await card.getByTestId('waitlist-toggle').click();
+    await expect.poll(() => mock.s7!.waitlistEnabled).toBe(true);
+    await expectNoRawKeys(page);
+  });
+
+  test('closing needs the typed word, tells everyone and cannot be undone', async ({ page }) => {
+    const mock = await openRegistrations(page, 'admin');
+    await page.getByTestId('waitlist-close').click();
+    await expect(page.getByTestId('waitlist-close-dialog-confirm')).toBeDisabled();
+    await page.getByTestId('waitlist-close-dialog-typed').fill('close');
+    await page.getByTestId('waitlist-close-dialog-confirm').click();
+    await expect(page.getByTestId('waitlist-closed')).toContainText('Waitlist closed');
+    expect(mock.s7!.waitlistCalls).toEqual([{ type: 'close' }]);
+    await expect(page.getByTestId('waitlist-toggle')).toBeDisabled();
+    await expect(page.getByTestId('waitlist-close')).toBeDisabled();
+  });
+
+  test('ops read the counts but cannot change anything', async ({ page }) => {
+    await openRegistrations(page, 'ops');
+    await expect(page.getByTestId('waitlist-card')).toBeVisible();
+    await expect(page.getByTestId('waitlist-toggle')).toHaveCount(0);
+    await expect(page.getByTestId('waitlist-close')).toHaveCount(0);
+  });
+
+  test('Swahili: the typed word is FUNGA and the card has no raw keys at 375 px', async ({ page }) => {
+    await page.setViewportSize({ width: 375, height: 800 });
+    await openRegistrations(page, 'owner', {}, 'sw');
+    await expect(page.getByTestId('waitlist-card')).toContainText(eventsS7Messages.sw['organizer.waitlist.title']);
+    await page.getByTestId('waitlist-close').click();
+    await expect(page.getByText(eventsS7Messages.sw['organizer.waitlist.closeTyped'])).toBeVisible();
+    await page.getByTestId('waitlist-close-dialog-typed').fill('FUNGA');
+    await expect(page.getByTestId('waitlist-close-dialog-confirm')).toBeEnabled();
+    await page.keyboard.press('Escape');
+    const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+    expect(overflow).toBeLessThanOrEqual(1);
+    await expectNoRawKeys(page);
+  });
+});
+
