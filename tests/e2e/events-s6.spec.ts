@@ -22,6 +22,12 @@ const open = async (page: Page, role: Role, section: string | null, s6: S6Opts =
   await page.goto(`${EV}&view=results${section ? `&section=${section}` : ''}`);
   return mock;
 };
+/** The form resets when the saved settings arrive, so anything typed before that is lost. */
+const openSettings = async (page: Page) => {
+  const mock = await open(page, 'owner', 'settings');
+  await page.waitForLoadState('networkidle');
+  return mock;
+};
 const PRIVATE = /\+255|@example\.com|dateOfBirth|emergency|"route"|-6\.7/i;
 const csv = (rows: string[]) => ['bib,status,net_time,gun_time,category,note', ...rows].join('\n');
 const file = (text: string, name = 'results.csv') => ({ name, mimeType: 'text/csv', buffer: Buffer.from(text) });
@@ -517,7 +523,7 @@ test.describe('disputes and settings (§6.7, §9.2)', () => {
     await expect(page.getByTestId('dispute-correct')).toHaveCount(0);
   });
   test('settings save a window in days and the name rule; after official release only the window can be extended', async ({ page }) => {
-    const mock = await open(page, 'owner', 'settings');
+    const mock = await openSettings(page);
     await page.getByTestId('settings-basis').selectOption('gun');
     await page.getByTestId('settings-cutoff').fill('240');
     await page.getByTestId('settings-window').selectOption('14');
@@ -537,7 +543,7 @@ test.describe('disputes and settings (§6.7, §9.2)', () => {
     expect(mock.writes(/results-settings$/)[1].body).toEqual({ disputeWindowHours: 720 });
   });
   test('an invalid cut-off is stopped before sending', async ({ page }) => {
-    await open(page, 'owner', 'settings');
+    await openSettings(page);
     await page.getByTestId('settings-cutoff').fill('2000');
     await expect(page.getByTestId('results-settings')).toContainText('Use a whole number from 1 to 1440');
     await expect(page.getByTestId('settings-save')).toBeDisabled();

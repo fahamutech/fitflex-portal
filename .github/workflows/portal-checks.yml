@@ -176,7 +176,7 @@ jobs:
           failed=0
           suite() {
             echo "::group::$*"
-            env "$1" npx playwright test --config "playwright.$2.config.ts" --reporter=list || failed=1
+            env "$1" npx playwright test --config "playwright.$2.config.ts" --output "test-results/$1-$2" --reporter=list || failed=1
             echo "::endgroup::"
           }
           suite EVENTS_FLAG=true events
