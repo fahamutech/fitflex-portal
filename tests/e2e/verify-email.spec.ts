@@ -92,7 +92,8 @@ test('an unverified email is sent the link, then signs in once verified', async 
   // Verified: the retry carries a freshly minted token and the session opens.
   firebase.verified = true;
   await page.getByTestId('verify-email-continue').click();
-  await expect(page).toHaveURL(/\/admin/);
+  // The redirect waits for next dev to compile /admin.
+  await expect(page).toHaveURL(/\/admin/, { timeout: 25_000 });
   expect(sessionTokens).toHaveLength(2);
   const retried = JSON.parse(Buffer.from(sessionTokens[1].split('.')[1], 'base64url').toString());
   expect(retried).toMatchObject({ email_verified: true, n: 2 });
