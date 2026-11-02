@@ -8,7 +8,7 @@ import { fmt } from '@/lib/events';
 import { newIdempotencyKey } from '@/lib/events-ops';
 import { resultsApi } from '@/lib/events-results-api';
 import {
-  BUILTIN_ART, MEDAL_TIERS, bi, knownKey, canVerifyResults, defaultArtKey, formatElapsed, parseTime, resultsErrorKey,
+  ART_TAKEDOWN_REASONS, BUILTIN_ART, MEDAL_TIERS, bi, knownKey, canVerifyResults, defaultArtKey, formatElapsed, parseTime, resultsErrorKey,
   type ArtConfirmation, type BuiltinArt, type MedalRule, type MedalTemplate, type MedalTier, type ResultsSummary,
 } from '@/lib/events-results';
 import { messages, type MessageKey } from '@/lib/i18n';
@@ -20,6 +20,9 @@ import { useWriteError } from '@/components/organizer/results/result-dialogs';
 import { useApp } from '../../../../app/providers';
 
 const listOf = (r: { items?: MedalTemplate[] } | MedalTemplate[]): MedalTemplate[] => (Array.isArray(r) ? r : r.items ?? []);
+
+/** Events S7 §6.4: the take-down reason in words (the admin queue's reason list; an unknown code reads as "Other"). */
+const takedownReasonKey = (code: string | null | undefined): MessageKey => (`admin.medalArt.reason.${ART_TAKEDOWN_REASONS.includes(code as never) ? code : 'other'}` as MessageKey);
 
 export function ruleSummary(rule: MedalRule, t: (k: MessageKey) => string): string {
   if (rule.type === 'placing') return fmt(t(rule.scope === 'overall' ? 'organizer.results.medals.rule.placingOverall' : 'organizer.results.medals.rule.placing'), { n: rule.top });
@@ -92,6 +95,12 @@ export function MedalsPanel({ doc, role, readOnly, summary, artOn }: { doc: Even
             return (
               <Card key={m.id}><CardContent>
                 <article className="space-y-3" aria-label={name} data-testid={`medal-${m.id}`}>
+                  {m.art?.status === 'taken_down' && (
+                    <div data-testid="medal-takedown-banner" className="space-y-2">
+                      <Alert tone="error">{fmt(t('organizer.medals.takedown'), { medal: name, reason: t(takedownReasonKey(m.art.takedown?.reasonCode)) })}</Alert>
+                      {writable && artOn && <Button className="min-h-11" onClick={() => setArtFor(m)} data-testid={`medal-takedown-upload-${m.id}`}>{t('organizer.medals.uploadNew')}</Button>}
+                    </div>
+                  )}
                   <div className="flex items-start gap-4">
                     <MedalArtImage art={custom ? m.art : { ...m.art, source: 'builtin' }} tier={m.tier} virtual={virtual} path={custom ? resultsApi.artPreviewPath(doc.id, m.id, 240) : null} alt={alt} customEnabled={artOn} />
                     <div className="min-w-0 flex-1 space-y-1">

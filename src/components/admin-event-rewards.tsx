@@ -20,6 +20,7 @@ import { useEventsOptions } from '@/components/events-options';
 import { useDocumentTitle } from '@/components/organizer/page-states';
 import { BuiltinMedal, useAuthedImage } from '@/components/organizer/results/parts';
 import { useWriteError } from '@/components/organizer/results/result-dialogs';
+import { RecentRedemptions } from '@/components/admin-recent-redemptions';
 import { useApp } from '../../app/providers';
 
 const TABS = ['definitions', 'redemptions', 'ledger', 'tasks', 'medalArt'] as const;
@@ -304,6 +305,7 @@ function Redemptions() {
           </div>
         </CardContent></Card>
       )}
+      <RecentRedemptions />
     </div>
   );
 }

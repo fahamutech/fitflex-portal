@@ -22,6 +22,7 @@ import { ResultsImport } from '@/components/organizer/results/results-import';
 import { ResultsTable } from '@/components/organizer/results/results-table';
 import { ResultsDisputes } from '@/components/organizer/results/results-disputes';
 import { MedalsPanel } from '@/components/organizer/results/results-medals';
+import { PerRaceSettings } from '@/components/organizer/results/per-race-settings';
 import { useApp } from '../../../../app/providers';
 
 type Params = Partial<Record<'section' | 'registration' | 'category' | 'status', string | null>>;
@@ -88,6 +89,7 @@ export function ResultsView({ doc, role, readOnly }: { doc: EventDocument; role:
       {section === 'disputes' && <ResultsDisputes doc={doc} role={role} readOnly={readOnly} onChanged={() => void loadSummary()} onOpenResult={id => { go('results'); openRegistration(id); }} />}
       {section === 'medals' && flags.rewards && <MedalsPanel doc={doc} role={role} readOnly={readOnly} summary={summary} artOn={flags.medalArt} />}
       {section === 'settings' && owner && <ResultsSettingsCard doc={doc} readOnly={readOnly} summary={summary} onSaved={() => void loadSummary()} />}
+      {section === 'settings' && owner && <PerRaceSettings doc={doc} readOnly={readOnly} summary={summary} onSaved={() => void loadSummary()} />}
     </div>
   );
 }

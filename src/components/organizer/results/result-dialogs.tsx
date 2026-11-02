@@ -5,6 +5,7 @@ import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { errorBody, errorCode, fmt } from '@/lib/events';
 import { newIdempotencyKey } from '@/lib/events-ops';
 import { resultsApi } from '@/lib/events-results-api';
+import { overallRank, type CorrectionPreview } from '@/lib/events-s7-api';
 import {
   CORRECT_REASONS, DQ_REASONS, REJECT_REASONS, countOf, formatElapsed, parseTime, resultsErrorKey, retryAfterOf,
   type BulkPreview, type ReleasePreview, type ResultRow,
@@ -189,8 +190,10 @@ export function DecisionDialog({ open, onClose, mode, name, noteRequired = false
 
 // ── Correct (§6.6, §9.2) ──
 export type CorrectionBody = { netTime?: string; gunTime?: string; finishStatus?: string; reasonCode: string; note: string };
-export function CorrectDialog({ open, onClose, row, title, submitLabel, onSubmit }: {
+export function CorrectDialog({ open, onClose, row, title, submitLabel, onSubmit, preview }: {
   open: boolean; onClose: () => void; row: ResultRow | null; title?: string; submitLabel?: string; onSubmit: (body: CorrectionBody, key: string) => Promise<void>;
+  /** Events S7 §6.4 (H12): when given, "Preview effect" shows what the change does and Confirm waits for a preview that matches the form and the current revision. */
+  preview?: (body: CorrectionBody) => Promise<CorrectionPreview>;
 }) {
   const { t } = useApp();
   const [net, setNet] = useState('');
@@ -200,15 +203,30 @@ export function CorrectDialog({ open, onClose, row, title, submitLabel, onSubmit
   const [note, setNote] = useState('');
   const [busy, setBusy] = useState(false);
   const err = useWriteError();
+  const [pv, setPv] = useState<{ sig: string; data: CorrectionPreview } | null>(null);
+  const [pvBusy, setPvBusy] = useState(false);
+  const [pvStale, setPvStale] = useState(false);
   const key = useRef(newIdempotencyKey());
-  useEffect(() => { if (open) { setNet(''); setGun(''); setStatus(''); setReason(''); setNote(''); setBusy(false); err.clear(); key.current = newIdempotencyKey(); } // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { if (open) { setNet(''); setGun(''); setStatus(''); setReason(''); setNote(''); setBusy(false); setPv(null); setPvStale(false); err.clear(); key.current = newIdempotencyKey(); } // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, row?.registrationId]);
   const pNet = useMemo(() => (net.trim() ? parseTime(net) : null), [net]);
   const pGun = useMemo(() => (gun.trim() ? parseTime(gun) : null), [gun]);
   const timeErr = (p: ReturnType<typeof parseTime> | null) => (p && !p.ok ? t(p.reason === 'range' ? 'organizer.results.problem.time_out_of_range' : 'organizer.results.problem.time_invalid') : undefined);
   const changed = (pNet?.ok ?? false) || (pGun?.ok ?? false) || (!!status && status !== row?.finishStatus);
   const noteLen = note.trim().length;
-  const valid = changed && !(pNet && !pNet.ok) && !(pGun && !pGun.ok) && !!reason && noteLen >= NOTE_MIN && noteLen <= NOTE_MAX;
+  // The preview belongs to exactly these inputs and this revision; any edit (or a newer revision on the server) makes it stale.
+  const sig = JSON.stringify([pNet?.ok ? pNet.text : null, pGun?.ok ? pGun.text : null, status && status !== row?.finishStatus ? status : null, row?.revision ?? null]);
+  const previewOk = !preview || (!!pv && pv.sig === sig && (pv.data.revision == null || row?.revision == null || pv.data.revision === row.revision));
+  async function runPreview() {
+    if (!preview) return;
+    setPvBusy(true); setPvStale(false); err.clear();
+    // The server validates the preview like the correction itself (reason and a note of 10 to 300), so the button waits for both.
+    try { const data = await preview({ ...(pNet?.ok ? { netTime: pNet.text } : {}), ...(pGun?.ok ? { gunTime: pGun.text } : {}), ...(status && status !== row?.finishStatus ? { finishStatus: status } : {}), reasonCode: reason, note: note.trim() }); setPv({ sig, data }); }
+    catch (e) { setPv(null); if ((e as { body?: { error?: string } })?.body?.error === 'result_changed') setPvStale(true); else err.fail(e); }
+    finally { setPvBusy(false); }
+  }
+  const baseValid = changed && !(pNet && !pNet.ok) && !(pGun && !pGun.ok) && !!reason && noteLen >= NOTE_MIN && noteLen <= NOTE_MAX;
+  const valid = previewOk && baseValid;
   async function go() {
     setBusy(true); err.clear();
     try {
@@ -244,6 +262,14 @@ export function CorrectDialog({ open, onClose, row, title, submitLabel, onSubmit
           <Textarea rows={3} maxLength={NOTE_MAX} value={note} onChange={e => setNote(e.target.value)} data-testid="correct-note" />
         </Field>
         <p className="text-sm text-[var(--color-fg-secondary)]">{t('organizer.results.correct.warn')}</p>
+        {preview && (
+          <div className="space-y-2" data-testid="correct-preview-box">
+            <Button variant="secondary" className="min-h-11" loading={pvBusy} disabled={!baseValid} onClick={() => void runPreview()} data-testid="correct-preview">{t('organizer.results.preview.button')}</Button>
+            {pvStale && <Alert tone="warning">{t('organizer.results.preview.stale')}</Alert>}
+            {pv && pv.sig === sig && <p role="status" className="text-sm font-medium text-[var(--color-fg-primary)]" data-testid="correct-preview-result">{fmt(t('organizer.results.preview.body'), { a: overallRank(pv.data.rankBefore) ?? '—', b: overallRank(pv.data.rankAfter) ?? '—', n: pv.data.othersShifted, m: pv.data.medalsAffected })}</p>}
+            {!previewOk && !pvStale && <p className="text-xs text-[var(--color-fg-quaternary)]" data-testid="correct-preview-needed">{t(pv ? 'organizer.results.preview.stale' : 'organizer.results.preview.needed')}</p>}
+          </div>
+        )}
       </div>
       <DialogFooter>
         <Button variant="secondary" onClick={onClose} disabled={busy}>{t('common.cancel')}</Button>
