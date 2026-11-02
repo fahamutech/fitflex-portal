@@ -3,11 +3,12 @@ import { useEffect, useState } from 'react';
 import { RefreshCw, CheckCircle2, XCircle, Banknote } from 'lucide-react';
 import { useApp } from '../../providers';
 import { api, ApiError, Refund, RefundStatus } from '@/lib/api';
-import { Badge, Button, PageHeader, Alert, Spinner, Card, Field, ErrorState } from '@/components/shared';
+import { Badge, Button, PageHeader, Alert, Spinner, Card, Field, ErrorState, Select } from '@/components/shared';
 import { DataTable, ColumnDef } from '@/components/data-table';
-import { Dialog, DialogFooter } from '@/components/dialog';
-import { money } from '@/lib/admin-utils';
-import { REFUND_STAGE_TONE, flagOnErrorKey, refundStageKey, whenText } from '@/lib/money-approval';
+import { ConfirmDialog, Dialog, DialogFooter } from '@/components/dialog';
+import { formatNumber, money } from '@/lib/admin-utils';
+import { REFUND_SCOPES, refundScopeKey } from '@/lib/events';
+import { REFUND_STAGE_TONE, flagOnErrorKey, moneyErrorKey, refundStageKey, whenText } from '@/lib/money-approval';
 import { fill } from '@/components/communication-shared';
 import type { MessageKey } from '@/lib/i18n';
 
@@ -25,6 +26,7 @@ const STATUS_TONE: Record<RefundStatus, 'warning' | 'brand' | 'success' | 'gray'
 };
 const KIND: Record<string, MessageKey> = {
   subscription: 'refunds.kind.subscription', trainer_booking: 'refunds.kind.trainer_booking', shop_order: 'refunds.kind.shop_order',
+  event_order: 'refunds.kind.event_order',
 };
 const REASON: Record<string, MessageKey> = {
   member_cancelled: 'refunds.reason.member_cancelled', trainer_cancelled: 'refunds.reason.trainer_cancelled',
@@ -53,9 +55,33 @@ export default function RefundsPage() {
   const [loadFailed, setLoadFailed] = useState(false);
   const [filter, setFilter] = useState<Filter>('approved');
   const [action, setAction] = useState<Action | null>(null);
-  const [fields, setFields] = useState({ amount: '', note: '', endAccess: false, reference: '', paidTo: '' });
+  const [fields, setFields] = useState({ amount: '', note: '', noteSw: '', endAccess: false, reference: '', paidTo: '' });
   const [actionError, setActionError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // Events S4 (spec §6.3): filter by batch / scope / order reference (also set from the URL), batch approve and payouts.
+  const [batch, setBatchState] = useState('');
+  const [scope, setScope] = useState('');
+  const [orderRef, setOrderRef] = useState('');
+  const [approveAllOpen, setApproveAllOpen] = useState(false);
+  const [batchError, setBatchError] = useState<string | null>(null);
+  const [payoutsOpen, setPayoutsOpen] = useState(false);
+  const [payoutRows, setPayoutRows] = useState<Record<string, { reference: string; paidTo: string }>>({});
+  // The rows of the payouts dialog are fixed when it opens, so a saved row stays visible with its result.
+  const [payoutIds, setPayoutIds] = useState<string[]>([]);
+  const [payoutResult, setPayoutResult] = useState<Record<string, { saved: boolean; error?: string }> | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const setBatch = (v: string) => {
+    setBatchState(v);
+    const q = new URLSearchParams(window.location.search);
+    if (v) q.set('batch', v); else q.delete('batch');
+    window.history.replaceState(null, '', q.toString() ? `?${q}` : window.location.pathname);
+  };
+  useEffect(() => {
+    const q = new URLSearchParams(window.location.search);
+    setBatchState(q.get('batch') ?? ''); setOrderRef(q.get('order') ?? '');
+    // A batch or order link means "show me everything of it": all statuses.
+    if (q.get('batch') || q.get('order')) setFilter('all');
+  }, []);
 
   const load = async () => {
     if (!token) return;
@@ -76,7 +102,9 @@ export default function RefundsPage() {
   function open(refund: Refund, kind: Action['kind']) {
     setAction({ refund, kind });
     setActionError(null);
-    setFields({ amount: String(refund.amountTzs), note: '', endAccess: false, reference: '', paidTo: refund.member?.phone || '' });
+    // An event refund goes back to the number the payer paid from; an organisation's account is typed by the admin (S4 §6.3).
+    const paidTo = refund.kind === 'event_order' ? (refund.organizationName ? '' : (refund.payerPhone || refund.member?.phone || '')) : (refund.member?.phone || '');
+    setFields({ amount: String(refund.amountTzs), note: '', noteSw: '', endAccess: false, reference: '', paidTo });
   }
 
   async function submit() {
@@ -92,7 +120,7 @@ export default function RefundsPage() {
           endAccess: refund.kind === 'subscription' ? fields.endAccess : undefined,
         });
       } else {
-        await api.decideRefund(token, refund.id, { decision: 'reject', note: fields.note.trim() });
+        await api.decideRefund(token, refund.id, { decision: 'reject', note: fields.note.trim(), ...(refund.kind === 'event_order' && fields.noteSw.trim() ? { noteSw: fields.noteSw.trim() } : {}) });
       }
       setAction(null);
       await load();
@@ -103,6 +131,59 @@ export default function RefundsPage() {
     } finally {
       setBusy(false);
     }
+  }
+
+  /** A custom policy request: nothing was cancelled yet; approving cancels the place and revokes the ticket (S4 §3.12.2). */
+  const isManualReview = (r: Refund) => r.kind === 'event_order' && r.status === 'requested' && r.requestedRole === 'member' && r.policySnapshot?.preset === 'custom';
+
+  async function approveAll() {
+    if (!token || !batch) return;
+    const list = refunds.filter(r => r.batchId === batch && r.status === 'requested');
+    setBusy(true); setBatchError(null);
+    try {
+      const out = await api.approveRefundBatch(token, { batchId: batch, expectedTotalTzs: list.reduce((sum, r) => sum + r.amountTzs, 0), expectedCount: list.length });
+      setApproveAllOpen(false);
+      // Partial failure is shown, never full success (backend #270 answers `{ approved, failed, results }`).
+      const failed = Number(out?.failed) || 0;
+      if (failed > 0) {
+        const why = Array.from(new Set((out.results ?? []).filter(r => !r.ok && r.error).map(r => t(moneyErrorKey({ body: { error: r.error } }))))).join(' ');
+        setBatchError(`${fill(t('refunds.batch.partial'), { approved: Number(out.approved) || 0, failed })} ${why}`.trim());
+      } else setNotice(t('refunds.batch.approved'));
+      await load();
+    } catch (e) {
+      setApproveAllOpen(false);
+      const body = (e as { body?: { error?: string; totalTzs?: number; count?: number } } | null)?.body;
+      // batch_changed carries the live totals: say what the batch is now, then reload.
+      setBatchError(body?.error === 'batch_changed' && typeof body.totalTzs === 'number' && typeof body.count === 'number'
+        ? fill(t('refunds.batch.changed'), { count: body.count, total: formatNumber(body.totalTzs) }) : t(moneyErrorKey(e)));
+      await load();
+    }
+    finally { setBusy(false); }
+  }
+  async function recordPayouts() {
+    if (!token || !batch) return;
+    const list = refunds.filter(r => payoutIds.includes(r.id) && r.status === 'approved');
+    const items = list.map(r => ({ r, row: payoutRows[r.id] ?? { reference: '', paidTo: r.organizationName ? '' : (r.payerPhone || r.member?.phone || '') } }))
+      .filter(({ row }) => row.reference.trim()).map(({ r, row }) => ({ refundId: r.id, paymentReference: row.reference.trim(), ...(row.paidTo.trim() ? { paidTo: row.paidTo.trim() } : {}) }));
+    if (!items.length) return;
+    setBusy(true); setBatchError(null);
+    const errors: Record<string, string> = {};
+    try {
+      const res = await api.recordRefundBatchPaid(token, { batchId: batch, items });
+      // Per-item results (partial success is reported, never silent): the server's rows when it sends them.
+      const given = (res.results ?? res.items ?? []) as Array<{ refundId?: string; id?: string; error?: string }>;
+      for (const g of Array.isArray(given) ? given : []) { const id = g.refundId ?? g.id; if (id && g.error) errors[id] = t(moneyErrorKey({ body: { error: g.error } })); }
+    } catch (e) { setBatchError(t(moneyErrorKey(e))); }
+    // Truth is the refreshed list: a row that is now paid was saved, anything else was not.
+    try {
+      const fresh = (await api.refunds(token)).refunds;
+      setRefunds(fresh);
+      setPayoutResult(Object.fromEntries(items.map(i => {
+        const now = fresh.find(r => r.id === i.refundId);
+        return [i.refundId, now?.status === 'paid' ? { saved: true } : { saved: false, error: errors[i.refundId] }];
+      })));
+    } catch { setLoadFailed(true); }
+    finally { setBusy(false); }
   }
 
   if (!token || user?.userType !== 'admin') return null;
@@ -120,6 +201,8 @@ export default function RefundsPage() {
    * raised / approved it. One line, so nothing is said twice.
    */
   const auditLine = (r: Refund): string | null => {
+    // A refund the event's policy approved (member cancellation) says so; paying it still follows the two-admin rule.
+    if (r.kind === 'event_order' && r.status === 'approved' && r.decidedBy === 'policy' && !payBlocked(r)) return t('refunds.approvedByPolicy');
     if (!r.secondApproverRequired) return null;
     if (r.status === 'requested') {
       if (approveBlocked(r)) return approveBlocked(r);
@@ -132,7 +215,19 @@ export default function RefundsPage() {
     return null;
   };
 
-  const shown = refunds.filter(r => filter === 'all' || r.status === filter);
+  const shown = refunds
+    .filter(r => filter === 'all' || r.status === filter)
+    .filter(r => !batch || r.batchId === batch)
+    .filter(r => !scope || r.scope === scope)
+    .filter(r => !orderRef || r.orderReference === orderRef);
+  const eventRefunds = refunds.filter(r => r.kind === 'event_order');
+  const batches = Array.from(new Set(eventRefunds.map(r => r.batchId).filter((b): b is string => !!b)));
+  const inBatch = batch ? refunds.filter(r => r.batchId === batch) : [];
+  const batchSum = (list: Refund[]) => list.reduce((sum, r) => sum + r.amountTzs, 0);
+  const batchRequested = inBatch.filter(r => r.status === 'requested');
+  const batchApproved = inBatch.filter(r => r.status === 'approved');
+  // Under MONEY_SECOND_APPROVER the admin who started the batch approves none of it (the server answers cannot_approve_own_request).
+  const startedByMe = batchRequested.some(r => approveBlocked(r));
   const count = (s: RefundStatus) => refunds.filter(r => r.status === s).length;
   const toPay = refunds.filter(r => r.status === 'approved').reduce((sum, r) => sum + r.amountTzs, 0);
 
@@ -152,6 +247,14 @@ export default function RefundsPage() {
       cell: (r) => (
         <div>
           <Badge tone="brand">{kindText(r.kind)}</Badge>
+          {r.kind === 'event_order' && (
+            <div className="mt-1 space-y-0.5 text-xs" data-testid="refund-event-detail">
+              {refundScopeKey(r.scope) && <div className="font-medium text-[var(--color-fg-secondary)]" data-testid="refund-scope">{t(refundScopeKey(r.scope)!)}</div>}
+              {r.event?.title && <div className="text-[var(--color-fg-tertiary)]">{r.event.title}</div>}
+              {r.orderReference && <div className="font-mono text-[var(--color-fg-tertiary)]" data-testid="refund-order-ref">{r.orderReference}</div>}
+              {r.organizationName && <Badge tone="brand">{t('organizer.orders.organisation')}</Badge>}
+            </div>
+          )}
           <div className="mt-1 text-xs text-[var(--color-fg-tertiary)]">{REASON[r.reasonCode] ? t(REASON[r.reasonCode]) : r.reasonCode}</div>
           {r.note && <div className="mt-0.5 max-w-[240px] text-xs text-[var(--color-fg-quaternary)]">“{r.note}”</div>}
         </div>
@@ -212,6 +315,25 @@ export default function RefundsPage() {
       {/* A failed refresh keeps the rows already shown, with one message. */}
       {loadFailed && refunds.length > 0 && <Alert tone="error">{t('refunds.loadFailedTitle')}. {t('refunds.loadFailedBody')}</Alert>}
 
+      {notice && <Alert tone="success">{notice}</Alert>}
+      {batch && (
+        <div className="space-y-2" data-testid="refund-batch-strip">
+          <Alert tone="info">
+            <span data-testid="refund-batch-summary">{fill(t('refunds.batch.summary'), {
+              count: inBatch.length, total: formatNumber(batchSum(inBatch)), requested: batchRequested.length, approved: batchApproved.length, paid: inBatch.filter(r => r.status === 'paid').length,
+            })}</span>
+          </Alert>
+          {batchError && <div data-testid="refund-batch-error"><Alert tone="error">{batchError}</Alert></div>}
+          <div className="flex flex-wrap items-center gap-2">
+            <span title={startedByMe ? t('money2.refundApproveBlockedOwn') : undefined} data-testid="refund-approve-all-wrap">
+              <Button variant="secondary" size="sm" disabled={!batchRequested.length || startedByMe} onClick={() => { setBatchError(null); setApproveAllOpen(true); }} data-testid="refund-approve-all">{t('refunds.batch.approveAll')}</Button>
+            </span>
+            {startedByMe && <span className="text-xs font-medium text-[var(--color-warning-700)]" data-testid="refund-approve-all-hint">{t('money2.refundApproveBlockedOwn')}</span>}
+            <Button variant="secondary" size="sm" disabled={!batchApproved.length} onClick={() => { setPayoutResult(null); setPayoutRows({}); setPayoutIds(batchApproved.slice(0, 50).map(r => r.id)); setPayoutsOpen(true); }} data-testid="refund-record-payouts">{t('refunds.batch.recordPayouts')}</Button>
+          </div>
+        </div>
+      )}
+
       {loading && !refunds.length ? (
         <div className="flex h-64 items-center justify-center"><Spinner className="h-8 w-8" /></div>
       ) : nothingLoaded ? (
@@ -244,6 +366,24 @@ export default function RefundsPage() {
                       {t(FILTER_LABEL[f])}
                     </button>
                   ))}
+                  {eventRefunds.length > 0 && (
+                    <>
+                      <span className="mx-1 w-px self-stretch bg-[var(--color-border-secondary)]" aria-hidden />
+                      <Select size="sm" aria-label={t('refunds.batch.filter')} value={batch} onChange={e => setBatch(e.target.value)} data-testid="refund-filter-batch">
+                        <option value="">{t('refunds.batch.filter')}: {t('refunds.filter.all')}</option>
+                        {batches.map(b => <option key={b} value={b}>{b}</option>)}
+                      </Select>
+                      <Select size="sm" aria-label={t('refunds.scope.filter')} value={scope} onChange={e => setScope(e.target.value)} data-testid="refund-filter-scope">
+                        <option value="">{t('refunds.scope.filter')}: {t('refunds.filter.all')}</option>
+                        {REFUND_SCOPES.map(sc => <option key={sc} value={sc}>{t(refundScopeKey(sc)!)}</option>)}
+                      </Select>
+                    </>
+                  )}
+                  {orderRef && (
+                    <button type="button" className="hit-target rounded-[var(--radius-full)] bg-[var(--color-brand-50)] px-3 py-1 text-xs font-medium text-[var(--color-brand-700)]" onClick={() => { setOrderRef(''); const q = new URLSearchParams(window.location.search); q.delete('order'); window.history.replaceState(null, '', q.toString() ? `?${q}` : window.location.pathname); }} data-testid="refund-filter-order">
+                      {fill(t('refunds.order.filter'), { ref: orderRef })} ×
+                    </button>
+                  )}
                 </div>
               }
               actions={(refund) => (
@@ -286,6 +426,44 @@ export default function RefundsPage() {
         </Card>
       )}
 
+      <ConfirmDialog
+        open={approveAllOpen}
+        onClose={() => setApproveAllOpen(false)}
+        onConfirm={() => void approveAll()}
+        busy={busy}
+        tone="primary"
+        title={t('refunds.batch.approveAll')}
+        description={fill(t('refunds.batch.approveAll.confirm'), { count: batchRequested.length, total: formatNumber(batchSum(batchRequested)) })}
+        confirmLabel={t('refunds.batch.approveAll')}
+      />
+      <Dialog open={payoutsOpen} onClose={() => setPayoutsOpen(false)} title={t('refunds.batch.recordPayouts')} description={t('refunds.batch.payouts.body')} size="lg">
+        <div className="space-y-3" data-testid="refund-payouts-dialog">
+          {batchError && <Alert tone="error">{batchError}</Alert>}
+          <table className="ui-table ui-table-dense w-full">
+            <thead><tr><th scope="col">{t('refunds.col.for')}</th><th scope="col" className="text-right">{t('refunds.col.amount')}</th><th scope="col">{t('refunds.dialog.reference')}</th><th scope="col">{t('refunds.dialog.paidTo')}</th><th scope="col">{t('refunds.col.status')}</th></tr></thead>
+            <tbody>
+              {refunds.filter(r => payoutIds.includes(r.id)).map(r => {
+                const row = payoutRows[r.id] ?? { reference: '', paidTo: r.organizationName ? '' : (r.payerPhone || r.member?.phone || '') };
+                const res = payoutResult?.[r.id];
+                return (
+                  <tr key={r.id} data-testid={`refund-payout-row-${r.id}`}>
+                    <td>{r.member?.displayName || r.orderReference || r.memberId}</td>
+                    <td className="text-right tabular-nums">{money(r.amountTzs)}</td>
+                    <td><input className="ui-input" aria-label={`${t('refunds.dialog.reference')} ${r.orderReference ?? r.id}`} value={row.reference} onChange={e => setPayoutRows(cur => ({ ...cur, [r.id]: { ...row, reference: e.target.value } }))} data-testid={`refund-payout-ref-${r.id}`} /></td>
+                    <td><input className="ui-input" aria-label={`${t('refunds.dialog.paidTo')} ${r.orderReference ?? r.id}`} value={row.paidTo} onChange={e => setPayoutRows(cur => ({ ...cur, [r.id]: { ...row, paidTo: e.target.value } }))} /></td>
+                    <td data-testid={`refund-payout-result-${r.id}`}>{res ? (res.saved ? <Badge tone="success">{t('refunds.batch.result.saved')}</Badge> : <span><Badge tone="danger">{t('refunds.batch.result.failed')}</Badge>{res.error && <span className="ml-1 text-xs">{res.error}</span>}</span>) : '—'}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+        <DialogFooter>
+          <Button variant="secondary" onClick={() => setPayoutsOpen(false)} disabled={busy}>{t('money2.close')}</Button>
+          <Button loading={busy} disabled={!payoutIds.some(id => (payoutRows[id]?.reference ?? '').trim())} onClick={() => void recordPayouts()} data-testid="refund-payouts-submit">{t('refunds.batch.recordPayouts')}</Button>
+        </DialogFooter>
+      </Dialog>
+
       <Dialog
         open={!!action}
         onClose={() => setAction(null)}
@@ -307,6 +485,16 @@ export default function RefundsPage() {
           )}
           {action?.kind === 'approve' && (
             <>
+              {action.refund.kind === 'event_order' && action.refund.policy?.generated?.[locale] && (
+                <p className="text-xs text-[var(--color-fg-tertiary)]" data-testid="refund-policy-generated">{action.refund.policy.generated[locale]}</p>
+              )}
+              {action.refund.kind === 'event_order' && action.refund.policySnapshot?.preset && action.refund.policySnapshot.percent != null && (
+                <p className="text-xs text-[var(--color-fg-tertiary)]" data-testid="refund-policy-line">{fill(t('refunds.policy.line'), {
+                  preset: t(`events.terms.policy.${action.refund.policySnapshot.preset}` as 'events.terms.policy.custom'), percent: action.refund.policySnapshot.percent ?? 0,
+                  date: action.refund.policySnapshot.evaluatedAt ? whenText(action.refund.policySnapshot.evaluatedAt, locale) : '—',
+                })}</p>
+              )}
+              {isManualReview(action.refund) && <div data-testid="refund-review-warning"><Alert tone="warning">{t('refunds.review.warn')}</Alert></div>}
               <Field label={t('payments.refund.amount')} hint={fill(t('refunds.dialog.upTo'), { amount: money(action.refund.amountTzs) })}>
                 <input className="ui-input" inputMode="numeric" value={fields.amount} onChange={e => setFields({ ...fields, amount: e.target.value.replace(/[^0-9]/g, '') })} />
               </Field>
@@ -322,9 +510,16 @@ export default function RefundsPage() {
             </>
           )}
           {action?.kind === 'reject' && (
-            <Field label={t('money2.reason')} hint={t('refunds.dialog.reasonHint')}>
-              <textarea className="ui-input min-h-[90px]" value={fields.note} onChange={e => setFields({ ...fields, note: e.target.value })} />
-            </Field>
+            <>
+              <Field label={t('money2.reason')} hint={t('refunds.dialog.reasonHint')}>
+                <textarea className="ui-input min-h-[90px]" value={fields.note} onChange={e => setFields({ ...fields, note: e.target.value })} />
+              </Field>
+              {action.refund.kind === 'event_order' && (
+                <Field label={t('refunds.dialog.reasonSw')} hint={t('refunds.dialog.reasonHint')}>
+                  <textarea className="ui-input min-h-[70px]" data-testid="refund-reject-note-sw" value={fields.noteSw} onChange={e => setFields({ ...fields, noteSw: e.target.value })} />
+                </Field>
+              )}
+            </>
           )}
         </div>
         <DialogFooter>

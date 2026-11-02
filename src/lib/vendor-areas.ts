@@ -48,12 +48,26 @@ export function regionOf(id: string, byId: Map<string, GeoArea>): string | null 
   return ancestors(id, byId).find(p => p.level === 'region')?.id ?? null;
 }
 
-/** "Kinondoni, Dar es Salaam" (area then its city/region; the country is left out). Unknown ids show as-is. */
+/** "Kinondoni (Dar es Salaam)": the area, then the city/region it sits in (the country is left out). Unknown ids show as-is. */
 export function areaLabel(id: string, byId: Map<string, GeoArea>): string {
   const a = byId.get(id);
   if (!a) return id;
   const parent = ancestors(id, byId).find(p => p.level !== 'country' && p.name !== a.name);
-  return parent && a.level !== 'region' ? `${a.name}, ${parent.name}` : a.name;
+  return parent && a.level !== 'region' ? `${a.name} (${parent.name})` : a.name;
+}
+
+// Words that already say the level, in either language ("Zanzibar City", "Mji wa Zanzibar", "Wilaya ya Ilala").
+const LEVEL_WORDS: Record<GeoArea['level'], string[]> = {
+  country: ['country', 'nchi'],
+  region: ['region', 'mkoa'],
+  city: ['city', 'town', 'jiji', 'mji'],
+  district: ['district', 'wilaya'],
+};
+
+/** True when the place name already contains its level word, so "City" shouldn't be added again. */
+export function nameSaysLevel(a: GeoArea, levelWord?: string): boolean {
+  const words = a.name.toLowerCase().split(/[^\p{L}]+/u);
+  return [...LEVEL_WORDS[a.level], ...(levelWord ? [levelWord.toLowerCase()] : [])].some(w => words.includes(w));
 }
 
 export function hasBasedIn(p: VendorProfile | null | undefined): boolean {

@@ -22,7 +22,7 @@ const EAT_MS = 3 * 3_600_000;
 const toEatInput = (iso: string) => { const t = Date.parse(iso); return Number.isFinite(t) ? new Date(t + EAT_MS).toISOString().slice(0, 16) : ''; };
 const fromEatInput = (text: string) => { if (!text) return ''; const t = Date.parse(`${text}:00+03:00`); return Number.isFinite(t) ? new Date(t).toISOString() : ''; };
 
-function EatDateTime({ id, value, onChange, invalid, describedBy, testId }: { id: string; value: string; onChange: (iso: string) => void; invalid?: boolean; describedBy?: string; testId: string }) {
+export function EatDateTime({ id, value, onChange, invalid, describedBy, testId }: { id: string; value: string; onChange: (iso: string) => void; invalid?: boolean; describedBy?: string; testId: string }) {
   const [text, setText] = useState(toEatInput(value));
   useEffect(() => { if (fromEatInput(text) !== value) setText(toEatInput(value)); }, [value]); // eslint-disable-line react-hooks/exhaustive-deps
   return (

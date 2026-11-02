@@ -28,12 +28,11 @@ import { AutomationsTab, automationTitle } from './communication-automations';
 import { ResultsPanel, SourcesTable, periodTitle } from './communication-results';
 
 const TRANSACTIONAL: CommsPurpose[] = ['renewal', 'payment', 'announcement'];
-// Vendors get service messages only until the vendor app lets them switch
-// marketing off: the backend allows announcement, renewal and payment and
-// refuses promotion, engagement and general with vendor_marketing_not_available.
-const VENDOR_PURPOSES: CommsPurpose[] = ['announcement', 'renewal', 'payment'];
-const vendorBlocked = (recipients: CommsRecipients, purpose?: CommsPurpose) =>
-  recipients === 'vendors' && purpose != null && !VENDOR_PURPOSES.includes(purpose);
+// Vendors may get every purpose members can (fitflex-functions#274); the
+// backend honours each vendor's own opt-out per channel. An older backend may
+// still refuse marketing with vendor_marketing_not_available (see errorText).
+const vendorMarketing = (recipients: CommsRecipients, purpose?: CommsPurpose) =>
+  recipients === 'vendors' && purpose != null && !TRANSACTIONAL.includes(purpose);
 const CHANNELS: CommsChannel[] = ['in_app', 'push', 'whatsapp', 'sms'];
 const STEPS = ['purpose', 'audience', 'message', 'channels', 'schedule', 'preview', 'confirm'] as const;
 type Step = typeof STEPS[number];
@@ -508,13 +507,11 @@ function Composer({ scope, token, t, locale, gymId, campaign, templateId, onClos
     setContent(c => { const { [l]: _gone, ...rest } = c.translations ?? {}; return { ...c, translations: rest }; });
   }
 
-  const marketingToVendors = vendorBlocked(recipients, purpose);
+  const marketingToVendors = vendorMarketing(recipients, purpose);
 
   // Live "N members match" count.
   useEffect(() => {
     if (step !== 'audience') return;
-    // The backend would refuse it; the note explains why instead.
-    if (marketingToVendors) { setCount(null); return; }
     const timer = setTimeout(() => {
       api.commsAudiencePreview(token, scope, {
         gymId: scope === 'owner' ? gymId : undefined,
@@ -525,7 +522,7 @@ function Composer({ scope, token, t, locale, gymId, campaign, templateId, onClos
         .catch(e => setError(errorText(t, e)));
     }, 400);
     return () => clearTimeout(timer);
-  }, [step, token, scope, gymId, recipients, preset, JSON.stringify(filter), purpose, marketingToVendors]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [step, token, scope, gymId, recipients, preset, JSON.stringify(filter), purpose]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     setError(null);
@@ -550,8 +547,8 @@ function Composer({ scope, token, t, locale, gymId, campaign, templateId, onClos
   const largeSend = needsConfirm || (preview ? preview.counts.targeted >= preview.largeSendThreshold : false);
 
   const canContinue: Record<Step, boolean> = {
-    purpose: Boolean(purpose) && !marketingToVendors,
-    audience: (count?.n ?? 0) > 0 && !marketingToVendors,
+    purpose: Boolean(purpose),
+    audience: (count?.n ?? 0) > 0,
     message: textOk(texts[main], true) && others.every(l => textOk(texts[l], false)) && !unknown.length && !missing.length,
     channels: channels.length > 0,
     schedule: !tooSoon,
@@ -613,18 +610,15 @@ function Composer({ scope, token, t, locale, gymId, campaign, templateId, onClos
       <Card className="p-5 space-y-4">
         {step === 'purpose' && (
           <>
-            {recipients === 'vendors' && <div data-testid="vendor-marketing-note"><Alert tone="info">{t('comms.vendor.marketingUnavailable')}</Alert></div>}
+            {recipients === 'vendors' && <div data-testid="vendor-marketing-note"><Alert tone="info">{t('comms.vendor.promotionsOptOut')}</Alert></div>}
             <div className="grid gap-3 sm:grid-cols-2">
-              {PURPOSES.map(p => {
-                const off = vendorBlocked(recipients, p);
-                return (
-                  <button key={p} type="button" onClick={() => setPurpose(p)} data-testid={`purpose-${p}`} disabled={off}
-                    className={`rounded-[var(--radius-lg)] border p-4 text-left ${off ? 'cursor-not-allowed opacity-50' : ''} ${purpose === p ? 'border-[var(--color-brand-500)] ring-1 ring-[var(--color-brand-500)]' : 'border-[var(--color-border-secondary)]'}`}>
-                    <p className="text-sm font-semibold">{t(`comms.purpose.${p}`)}</p>
-                    <p className="text-xs text-[var(--color-fg-quaternary)]">{t(`comms.purpose.${p}.body`)}</p>
-                  </button>
-                );
-              })}
+              {PURPOSES.map(p => (
+                <button key={p} type="button" onClick={() => setPurpose(p)} data-testid={`purpose-${p}`}
+                  className={`rounded-[var(--radius-lg)] border p-4 text-left ${purpose === p ? 'border-[var(--color-brand-500)] ring-1 ring-[var(--color-brand-500)]' : 'border-[var(--color-border-secondary)]'}`}>
+                  <p className="text-sm font-semibold">{t(`comms.purpose.${p}`)}</p>
+                  <p className="text-xs text-[var(--color-fg-quaternary)]">{t(`comms.purpose.${p}.body`)}</p>
+                </button>
+              ))}
             </div>
           </>
         )}
@@ -643,17 +637,11 @@ function Composer({ scope, token, t, locale, gymId, campaign, templateId, onClos
                 </div>
               </Field>
             )}
-            {marketingToVendors && (
-              <div data-testid="vendor-marketing-blocked"><Alert tone="warning">
-                {t('comms.vendor.marketingUnavailable')}{' '}
-                <Button type="button" variant="link" className="inline min-h-11 px-0 font-medium text-inherit underline" onClick={() => setStep('purpose')}
-                  data-testid="vendor-change-purpose">{t('comms.vendor.changePurpose')}</Button>
-              </Alert></div>
-            )}
             <div data-testid="audience-count"><Alert tone="info">
               {count == null ? '…' : count.n === 0 ? t(audienceKeys(recipients, preset, 0).none)
                 : fill(t(audienceKeys(recipients, preset, count.n).match), { n: count.n })}
               {recipients === 'vendors' && <span className="block text-xs font-normal" data-testid="vendor-people-note">{t('comms.audience.vendorPeopleNote')}</span>}
+              {marketingToVendors && <span className="block text-xs font-normal" data-testid="vendor-optout-note">{t('comms.vendor.promotionsOptOut')}</span>}
               {count && count.names.length > 0 && <span className="block text-xs font-normal">{fill(t('comms.audience.forExample'), { names: count.names.slice(0, 3).join(', ') })}</span>}
             </Alert></div>
             <Field label={t('comms.audience.who')} hint={presets.includes(preset)

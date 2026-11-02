@@ -2,7 +2,8 @@
 import { ReactNode } from 'react';
 import type { EventDocument } from '@/lib/api';
 import { money } from '@/lib/admin-utils';
-import { distanceLabel, eventDateTime, fmt, stepKey, typeKey, type WizardStep } from '@/lib/events';
+import type { MessageKey } from '@/lib/i18n';
+import { distanceLabel, eventDateTime, fmt, generatedPolicyLine, stepKey, typeKey, type WizardStep } from '@/lib/events';
 import { Button, Card, CardContent, CardHeader } from '@/components/shared';
 import { useApp } from '../../app/providers';
 
@@ -74,6 +75,7 @@ export function EventReviewSummary({ doc, lang, onEdit }: { doc: EventDocument; 
         )}
       </Section>
       <Section step="tickets">
+        <p data-testid="review-payout" className="mb-1 text-sm"><span className="font-medium text-[var(--color-fg-primary)]">{t('events.payout.title')}</span>: {doc.payoutSchedule ? t(`events.payout.${doc.payoutSchedule}` as MessageKey) : t('events.payout.notSet')}</p>
         {doc.categories.flatMap(c => c.ticketTypes.map(tt => ({ c, tt }))).length === 0 ? <p>{t('events.review.noValue')}</p> : (
           <ul className="space-y-1">
             {doc.categories.map((c, i) => (
@@ -100,6 +102,10 @@ export function EventReviewSummary({ doc, lang, onEdit }: { doc: EventDocument; 
         <dl className="space-y-2">
           <Row label={t('events.terms.policy')} value={doc.refundPolicy?.preset ? t(`events.terms.policy.${doc.refundPolicy.preset}` as 'events.terms.policy.custom') : t('events.review.noValue')} />
           {doc.refundPolicy?.preset === 'custom' && <Row label={lang === 'sw' ? t('events.terms.policySw') : t('events.terms.policyEn')} value={text(doc.refundPolicy.text)} />}
+          {/* S4 §6.7: the sentence members read, generated from the structured fields (in the preview language). */}
+          {doc.refundPolicy?.preset && doc.refundPolicy.preset !== 'custom' && generatedPolicyLine(doc.refundPolicy.generated, lang) && (
+            <Row label={t('events.terms.policy.generated')} value={<span data-testid="review-policy-line">{generatedPolicyLine(doc.refundPolicy.generated, lang)}</span>} />
+          )}
           <Row label={t('events.terms.contactEmail')} value={doc.contact?.email || t('events.review.noValue')} />
           <Row label={t('events.terms.contactPhone')} value={doc.contact?.phone || '—'} />
           <Row label={t('events.terms.contactWhatsapp')} value={doc.contact?.whatsapp || '—'} />

@@ -2,19 +2,22 @@
 import { fmt, newTicket, type TicketForm } from '@/lib/events';
 import { Button, Checkbox } from '@/components/shared';
 import { DateField, MoneyField, RowCard, TextField, useErrorText, type StepProps } from './fields';
+import { PayoutScheduleCard } from './payout';
 import { useApp } from '../../../app/providers';
 
 /** Step 4 Ticket types (spec §6.2): 1–6 per category, grouped under each category. Currency fixed to TZS (D4). */
-export function TicketsStep({ form, update, errors, readOnly }: StepProps) {
+export function TicketsStep({ form, update, errors, readOnly, options, payoutLocked }: StepProps) {
   const { t } = useApp();
   const errText = useErrorText();
   const setTicket = (ci: number, ti: number, patch: Partial<TicketForm>) =>
     update(f => ({ categories: f.categories.map((c, j) => (j === ci ? { ...c, ticketTypes: c.ticketTypes.map((tt, k) => (k === ti ? { ...tt, ...patch } : tt)) } : c)) }));
   const add = (ci: number) => update(f => ({ categories: f.categories.map((c, j) => (j === ci ? { ...c, ticketTypes: [...c.ticketTypes, newTicket()] } : c)) }));
   const remove = (ci: number, ti: number) => update(f => ({ categories: f.categories.map((c, j) => (j === ci ? { ...c, ticketTypes: c.ticketTypes.filter((_, k) => k !== ti) } : c)) }));
-  if (!form.categories.length) return <p className="text-sm text-[var(--color-fg-quaternary)]">{t('events.tickets.noCategories')}</p>;
+  const payout = <PayoutScheduleCard form={form} update={update} errors={errors} options={options} locked={readOnly || !!payoutLocked} />;
+  if (!form.categories.length) return <div className="space-y-6">{payout}<p className="text-sm text-[var(--color-fg-quaternary)]">{t('events.tickets.noCategories')}</p></div>;
   return (
     <div className="space-y-6">
+      {payout}
       {form.categories.map((c, ci) => {
         const cp = `categories.${ci}`;
         return (

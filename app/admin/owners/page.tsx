@@ -11,6 +11,7 @@ import { statusTone, statusLabel, trainerNames } from '@/lib/admin-utils';
 import { GymCreateForm, GymDraft, BLANK_GYM_DRAFT, validateGymDraft } from '@/components/gym-create-form';
 import { TrainerInlineForm, TrainerFormDraft, BLANK_TRAINER_DRAFT, validateTrainerDraft } from '@/components/trainer-inline-form';
 import { PartnerPersonalDetails } from '@/components/partner-personal-details';
+import { PayoutOwnerRequiredAlert } from '@/components/gym-payout-owner';
 
 export default function OwnersPage() {
   const { token, user } = useApp();
@@ -34,6 +35,8 @@ export default function OwnersPage() {
   const [gymFormErrors, setGymFormErrors] = useState<Record<string, string>>({});
   const [trainerFormErrors, setTrainerFormErrors] = useState<Record<string, string>>({});
   const [filterGymId, setFilterGymId] = useState<string | null>(null);
+  // Gyms the last owner change left with 2+ owners and no payout owner (GYM_PAYOUT_OWNER on).
+  const [payoutRequiredIds, setPayoutRequiredIds] = useState<string[]>([]);
 
   const load = async () => {
     if (!token) return;
@@ -104,11 +107,10 @@ export default function OwnersPage() {
         gymId: draftGymIds[0] || null,
         gymIds: draftGymIds,
       };
-      if (editing) {
-        await api.saveGymOwner(token, { ...payload, id: editing.id });
-      } else {
-        await api.saveGymOwner(token, payload);
-      }
+      const saved = editing
+        ? await api.saveGymOwner(token, { ...payload, id: editing.id })
+        : await api.saveGymOwner(token, payload);
+      setPayoutRequiredIds(saved?.payoutOwnerRequiredGymIds ?? []);
       setDialogOpen(false);
       await load();
     } catch (e: any) {
@@ -140,7 +142,8 @@ export default function OwnersPage() {
   async function handleStatusChange(owner: GymOwner, newStatus: 'active' | 'suspended') {
     if (!token) return;
     try {
-      await api.saveGymOwner(token, { id: owner.id, accountStatus: newStatus });
+      const saved = await api.saveGymOwner(token, { id: owner.id, accountStatus: newStatus });
+      setPayoutRequiredIds(saved?.payoutOwnerRequiredGymIds ?? []);
       await load();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Status update failed');
@@ -300,6 +303,7 @@ export default function OwnersPage() {
       />
 
       {error && <Alert tone="error">{error}</Alert>}
+      <PayoutOwnerRequiredAlert gymIds={payoutRequiredIds} gymName={(id) => gymName(id)} />
 
       {loading && !owners.length ? (
         <div className="flex h-64 items-center justify-center"><Spinner className="h-8 w-8" /></div>

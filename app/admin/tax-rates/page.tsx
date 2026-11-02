@@ -42,8 +42,9 @@ export default function TaxRatesPageView() {
     try {
       setData(await adminTaxApi.rates(token)); setState('ready');
     } catch (err) {
-      // Any 404 is "VAT off" (feature_disabled, or an older backend without the route).
-      if (err instanceof ApiError && err.status === 404) { forgetTaxRatesAvailability(); setState('off'); return; }
+      // Only the server's own answer is "VAT off": 404 feature_disabled. Any other 404 (a wrong route, a proxy) or
+      // failure is a load error with a retry, never a quiet "unavailable".
+      if (err instanceof ApiError && err.status === 404 && errorCode(err) === 'feature_disabled') { forgetTaxRatesAvailability(); setState('off'); return; }
       setState('error');
     }
   }, [token]);

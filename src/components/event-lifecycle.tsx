@@ -59,7 +59,7 @@ export function LifecycleDialogs({ action, onClose, run }: { action: LifecycleAc
         <div className="space-y-4">
           {blocked && (
             <div data-testid="cancel-has-registrations">
-              <Alert tone="warning">{t('events.cancel.hasRegistrations')} <a href="#organizer-help" className="underline">{t('organizer.status.contactSupport')}</a></Alert>
+              <Alert tone="warning">{t('events.cancel.hasRegistrations')} {t('events.cancel.organizerHint')} <a href="#organizer-help" className="underline">{t('organizer.status.contactSupport')}</a></Alert>
             </div>
           )}
           <Field label={t('events.cancel.reason')} required>

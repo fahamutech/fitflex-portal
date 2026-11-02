@@ -280,12 +280,14 @@ type ChoiceProps = Omit<InputHTMLAttributes<HTMLInputElement>, 'type' | 'size'> 
   description?: ReactNode;
   /** Shows the error colour and sets aria-invalid. */
   invalid?: boolean;
+  /** Extra classes on the clickable label (the hit area), e.g. "flex w-full" for a full-width row. */
+  labelClassName?: string;
 };
 
 /** Shared by Checkbox and Radio: a native input inside a label whose hit area is at least 44px tall. */
 function makeChoice(kind: 'checkbox' | 'radio') {
   const Choice = Object.assign(
-    forwardRef<HTMLInputElement, ChoiceProps>(({ label, description, invalid, className, disabled, id, 'aria-describedby': describedByProp, ...rest }, ref) => {
+    forwardRef<HTMLInputElement, ChoiceProps>(({ label, description, invalid, className, labelClassName, disabled, id, 'aria-describedby': describedByProp, ...rest }, ref) => {
       const autoId = useId();
       const descId = description ? `${id ?? autoId}-desc` : undefined;
       const describedBy = [describedByProp, descId].filter(Boolean).join(' ') || undefined;
@@ -295,6 +297,7 @@ function makeChoice(kind: 'checkbox' | 'radio') {
             'inline-flex min-h-11 items-start gap-2.5 py-2.5 text-sm text-[var(--color-fg-secondary)]',
             disabled ? 'cursor-not-allowed opacity-50' : 'cursor-pointer',
             invalid && 'text-[var(--color-error-700)]',
+            labelClassName,
           )}
         >
           <input

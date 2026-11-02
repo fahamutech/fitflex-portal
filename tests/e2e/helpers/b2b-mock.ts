@@ -160,7 +160,8 @@ export type B2BMock = {
   on: (method: string, path: RegExp, handler: Handler) => void;
 };
 
-export async function setupB2B(page_: Page, user: Json = ADMIN, extra: Array<[string, RegExp, Handler]> = []): Promise<B2BMock> {
+/** `user: null` starts signed out (nothing stored), e.g. to drive the sign-in page. */
+export async function setupB2B(page_: Page, user: Json | null = ADMIN, extra: Array<[string, RegExp, Handler]> = []): Promise<B2BMock> {
   const calls: Call[] = [];
   const unmatched: Call[] = [];
   const routes: Array<[string, RegExp, Handler]> = [...extra];
@@ -211,14 +212,14 @@ export async function setupB2B(page_: Page, user: Json = ADMIN, extra: Array<[st
     ['GET', /^\/admin\/b2b\/collections$/, () => COLLECTIONS],
     ['GET', /^\/admin\/b2b\/payment-instructions$/, () => details()],
     ['PUT', /^\/admin\/b2b\/payment-instructions$/, c => {
-      pendingChange = { changeId: `pic_${String(c.body?.bankName ?? 'x').replace(/\W/g, '').toLowerCase()}`, instructions: { ...instructions, ...c.body }, requestedBy: user.id, requestedAt: '2026-10-19T09:30:00.000Z' };
+      pendingChange = { changeId: `pic_${String(c.body?.bankName ?? 'x').replace(/\W/g, '').toLowerCase()}`, instructions: { ...instructions, ...c.body }, requestedBy: user?.id, requestedAt: '2026-10-19T09:30:00.000Z' };
       return { status: 202, json: details() };
     }],
     ['POST', /^\/admin\/b2b\/payment-instructions\/confirm$/, c => {
       if (!c.body?.changeId) return { status: 400, json: { error: 'change_id_required' } };
       if (!pendingChange) return { status: 409, json: { error: 'no_pending_change' } };
       if (pendingChange.changeId !== c.body.changeId) return { status: 409, json: { error: 'change_superseded', changeId: pendingChange.changeId } };
-      if (pendingChange.requestedBy === user.id) return { status: 403, json: { error: 'cannot_confirm_own_request' } };
+      if (pendingChange.requestedBy === user?.id) return { status: 403, json: { error: 'cannot_confirm_own_request' } };
       instructions = { ...pendingChange.instructions }; pendingChange = null;
       return { status: 200, json: details() };
     }],
@@ -251,6 +252,8 @@ export async function setupB2B(page_: Page, user: Json = ADMIN, extra: Array<[st
     ['POST', /^\/admin\/b2b\/payments\/([^/]+)\/allocate$/, () => ({ payment: PAYMENTS[0] })],
     ['POST', /^\/admin\/b2b\/payments\/([^/]+)\/reverse$/, () => ({ payment: { ...PAYMENTS[0], status: 'reversed' } })],
     // Organisation's own billing
+    // B5b: what a sign-in would say about this session (functions#252). Flag off here; a spec overrides it.
+    ['GET', /^\/b2b\/me\/organization-session$/, () => ({ orgOnlySponsors: false })],
     ['GET', /^\/b2b\/me\/organizations$/, () => ({ organizations: [{ id: 'org-1', legalName: 'Safari Insurance Ltd', tradingName: 'Safari Cover', role: 'finance', status: 'active' }] })],
     ['GET', /^\/b2b\/organizations\/([^/]+)$/, (_c, m) => ({ organization: org(m[1]), access: { role: 'admin', permissions: ['beneficiaries.read', 'beneficiaries.manage', 'programs.read', 'analytics.read', 'analytics.people', 'billing.read', 'engagement.read'] } })],
     ['GET', /^\/b2b\/organizations\/([^/]+)\/billing$/, () => ({ ...BALANCES, organization: { id: 'org-1', name: 'Safari Cover' }, account: { organizationId: 'org-1', contactName: 'Neema Finance', email: 'finance@safari.test', phone: null, taxIdentificationNumber: 'TIN-200', registrationNumber: null, currency: 'TZS', source: 'billing_account' }, terms: { reference: 'AGR-0001', contractReference: null, billingCycle: 'monthly', prepaidTermsDays: 0, usageTermsDays: 14, platformFeeTzs: 50000 }, recentInvoices: INVOICES.slice(0, 2) })],
@@ -284,9 +287,11 @@ export async function setupB2B(page_: Page, user: Json = ADMIN, extra: Array<[st
     ['GET', /^\/admin\/shop-merch$/, () => ({ status: 404, json: { error: 'feature_disabled' } })],
   ];
 
-  await page_.addInitScript(([u]) => {
-    localStorage.setItem('token', 'b2b-e2e-token'); localStorage.setItem('user', JSON.stringify(u)); localStorage.setItem('locale', 'en');
-  }, [user]);
+  if (user) {
+    await page_.addInitScript(([u]) => {
+      localStorage.setItem('token', 'b2b-e2e-token'); localStorage.setItem('user', JSON.stringify(u)); localStorage.setItem('locale', 'en');
+    }, [user]);
+  }
 
   await page_.route(`${API}/**`, async route => {
     const req = route.request();

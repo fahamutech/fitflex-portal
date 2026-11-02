@@ -155,7 +155,7 @@ export function newClientRef() {
 }
 
 /** Permissions (and, for some, a switched-on vendor tool) a vendor user needs for each area. */
-export const VENDOR_AREAS: ReadonlyArray<{ href: string; permission: string | null; tool?: keyof VendorTools; nav?: false }> = [
+export const VENDOR_AREAS: ReadonlyArray<{ href: string; permission: string | null; tool?: keyof VendorTools; nav?: false; quietWhenOff?: true }> = [
   { href: '/vendor', permission: null },
   { href: '/vendor/products', permission: 'products' },
   // Shop banners (Phase 2 S1): owner + staff with `products` (spec Q-10). The nav item also waits for the
@@ -166,6 +166,9 @@ export const VENDOR_AREAS: ReadonlyArray<{ href: string; permission: string | nu
   { href: '/vendor/sales', permission: 'sales', tool: 'walkInSales' },
   // S4: customers need the tool on (fails closed) and the `customers` permission.
   { href: '/vendor/customers', permission: 'customers', tool: 'customers' },
+  // S6: reports need the tool on (fails closed) and the `reports` permission. With the tool off a deep link goes
+  // home with no message (spec §0.1, AC-1); without the permission it says "no access" (AC-3).
+  { href: '/vendor/reports', permission: 'reports', tool: 'reports', quietWhenOff: true },
   { href: '/vendor/payouts', permission: 'payments' },
   // S5: the document view needs documents switched on (fails closed); each kind checks its own permission on the
   // page (sale: sales or customers · payment, statement: customers · order: orders). Not a nav item.
@@ -241,11 +244,11 @@ function receiptRow(label: string, amount: string) {
 
 // The app's receipt clock (fitflexmobile lib/shared/formatters.dart formatDateTime / formatTimeOfDay), in EAT:
 // en "19 Oct 2026, 14:05"; sw a 12-hour clock with the part of the day, "19 Okt 2026, 2:05 mchana".
-const RECEIPT_MONTHS = {
+export const RECEIPT_MONTHS = {
   en: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'],
   sw: ['Jan', 'Feb', 'Mac', 'Apr', 'Mei', 'Jun', 'Jul', 'Ago', 'Sep', 'Okt', 'Nov', 'Des'],
 } as const;
-const swDayPeriod = (h: number) => (h >= 5 && h < 12 ? 'asubuhi' : h >= 12 && h < 16 ? 'mchana' : h >= 16 && h < 19 ? 'jioni' : 'usiku');
+export const swDayPeriod = (h: number) => (h >= 5 && h < 12 ? 'asubuhi' : h >= 12 && h < 16 ? 'mchana' : h >= 16 && h < 19 ? 'jioni' : 'usiku');
 /** "19 Oct 2026, 14:05" / "19 Okt 2026, 2:05 mchana" in EAT, as the app writes it on receipts. */
 export function receiptDateTime(iso: string | null | undefined, locale: Locale) {
   const ms = Date.parse(iso ?? '');
@@ -255,6 +258,18 @@ export function receiptDateTime(iso: string | null | undefined, locale: Locale) 
   const mm = String(m).padStart(2, '0');
   const time = locale === 'sw' ? `${h % 12 === 0 ? 12 : h % 12}:${mm} ${swDayPeriod(h)}` : `${String(h).padStart(2, '0')}:${mm}`;
   return `${d.getUTCDate()} ${RECEIPT_MONTHS[locale === 'sw' ? 'sw' : 'en'][d.getUTCMonth()]} ${d.getUTCFullYear()}, ${time}`;
+}
+/**
+ * "19 Oct, 14:05" / "19 Okt, 2:05 mchana" in EAT: eatDateTime with the Swahili time of day on a 12-hour clock
+ * and its part of the day (glossary, decided 2026-10-20; the app's formatTimeOfDay). Used on the flash sale screens.
+ */
+export function eatWhen(iso: string | null | undefined, locale: Locale) {
+  if (locale !== 'sw') return eatDateTime(iso, locale);
+  const ms = Date.parse(iso ?? '');
+  if (!Number.isFinite(ms)) return '—';
+  const d = new Date(ms + 3 * 3_600_000); // EAT has no DST: read the UTC fields of the shifted time.
+  const h = d.getUTCHours();
+  return `${d.getUTCDate()} ${RECEIPT_MONTHS.sw[d.getUTCMonth()]}, ${h % 12 === 0 ? 12 : h % 12}:${String(d.getUTCMinutes()).padStart(2, '0')} ${swDayPeriod(h)}`;
 }
 /**
  * The receipt as plain text (spec §4.2), in the language `t` speaks. Not a TRA fiscal receipt; no customer

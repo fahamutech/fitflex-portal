@@ -10,6 +10,7 @@ import {
 } from '@/lib/settlements';
 import { Alert, Badge, Button, Card, CardContent, CardHeader, Field, Input, MetricCard, Spinner } from '@/components/shared';
 import { ConfirmDialog, Dialog, DialogFooter } from '@/components/dialog';
+import { SettlementPayeeLine } from '@/components/gym-payout-owner';
 
 type Ask =
   | { kind: 'confirm'; step: SettlementStep; title: string; description: string; label: string }
@@ -52,7 +53,10 @@ export function SettlementStatementView({ statementId, onBack }: { statementId: 
       setNotice(done);
     } catch (err) {
       setAsk(null);
-      setError((err as { body?: { error?: string } })?.body?.error === 'invalid_receipt_url' ? t('settlement.err.invalid_receipt_url') : settlementError(err));
+      const body = (err as { body?: { error?: string; reason?: string } })?.body;
+      setError(body?.error === 'invalid_receipt_url' ? t('settlement.err.invalid_receipt_url')
+        : body?.error === 'not_payable' && body.reason === 'payout_owner_required' ? t('settlement.notPayable.payout_owner_required')
+        : settlementError(err));
     } finally {
       setBusy(false);
       await load();
@@ -152,6 +156,12 @@ export function SettlementStatementView({ statementId, onBack }: { statementId: 
         <MetricCard label="Adjustments" value={signed(s.adjustmentsTzs)} sub={proposed.length ? `${proposed.length} waiting for a decision` : 'Corrections and clawbacks'} />
         <MetricCard label={s.status === 'paid' ? 'Paid' : s.status === 'voided' ? 'Not paid (voided)' : 'To pay'} value={<span data-testid="settlement-net">{money(s.finalNetTzs)}</span>} sub={s.heldVisitCount ? `${s.heldVisitCount} visits held back` : undefined} />
       </div>
+
+      {detail.payee && (
+        <Card>
+          <CardContent className="text-sm"><SettlementPayeeLine payee={detail.payee} /></CardContent>
+        </Card>
+      )}
 
       {(s.status === 'payable' || s.status === 'paid') && (
         <Card>

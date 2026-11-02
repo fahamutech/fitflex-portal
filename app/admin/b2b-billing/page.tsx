@@ -1,12 +1,12 @@
 'use client';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { ArrowLeft, RefreshCw } from 'lucide-react';
 import { useApp } from '../../providers';
 import {
   api, ApiError, B2BAgreement, B2BBillingAccount, B2BBillingDashboard, B2BInvoiceDetail, B2BPayment, B2BReconciliation,
   B2BSponsorInvoice, B2BStatement,
 } from '@/lib/api';
-import { Alert, Badge, Button, Card, CardContent, Field, Input, PageHeader, Segmented, Select, Spinner, Table, TBody, Td, Th, THead, Tr } from '@/components/shared';
+import { Alert, Badge, Button, Card, CardContent, ErrorState, Field, Input, PageHeader, Segmented, Select, Spinner, Table, TBody, Td, Th, THead, Tr } from '@/components/shared';
 import { Aging, Balances, InvoiceDocument, InvoiceStatus, PrintButton, StatementTable, INVOICE_KIND, PAYMENT_METHOD, day } from '@/components/b2b-finance';
 import { CollectionsPanel } from '@/components/b2b-collections';
 import { money } from '@/lib/admin-utils';
@@ -63,7 +63,8 @@ const whole = (v: string) => (/^\d+$/.test(v.trim()) ? Number(v.trim()) : NaN);
  * are separate and are shown here just for comparison.
  */
 export default function B2BBillingPage() {
-  const { token, user, hasPermission } = useApp();
+  const { token, user, hasPermission, t } = useApp();
+  const [orgsFailed, setOrgsFailed] = useState(false);
   const [dash, setDash] = useState<B2BBillingDashboard | null>(null);
   const [orgs, setOrgs] = useState<Array<{ id: string; name: string }>>([]);
   const [period, setPeriod] = useState(thisMonth());
@@ -76,15 +77,19 @@ export default function B2BBillingPage() {
       setDash(await api.adminB2BBilling(token, period));
       setError(null);
     } catch {
+      // Not the previous month's figures under a new heading: nothing is shown but the error.
+      setDash(null);
       setError('Could not load billing.');
     }
   };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { load(); }, [token, period]);
-  useEffect(() => {
+  const loadOrgs = useCallback(() => {
     if (!token) return;
-    api.b2bOrganizations(token, { limit: 100 }).then(r => setOrgs(r.items.map(o => ({ id: o.id, name: o.tradingName || o.legalName })))).catch(() => undefined);
+    setOrgsFailed(false);
+    api.b2bOrganizations(token, { limit: 100 }).then(r => setOrgs(r.items.map(o => ({ id: o.id, name: o.tradingName || o.legalName })))).catch(() => setOrgsFailed(true));
   }, [token]);
+  useEffect(loadOrgs, [loadOrgs]);
 
   if (!token || user?.userType !== 'admin') return null;
   const can = { bill: hasPermission('b2b_billing'), approve: hasPermission('b2b_billing_approve'), pay: hasPermission('b2b_payments') };
@@ -95,8 +100,16 @@ export default function B2BBillingPage() {
     <div className="space-y-5" data-testid="b2b-billing">
       <PageHeader title="B2B billing" description="What organisations have been invoiced, what they have paid and what they owe."
         actions={<Button variant="secondary" size="sm" onClick={load}><RefreshCw className="h-4 w-4" />Refresh</Button>} />
-      {error && <Alert tone="error">{error}</Alert>}
-      {!dash ? <Spinner className="h-6 w-6" /> : (
+      {orgsFailed && (
+        <div data-testid="billing-orgs-error">
+          <ErrorState title={t('adminLoad.orgsTitle')} message={t('adminLoad.orgsBody')} onRetry={loadOrgs} retryLabel={t('common.tryAgain')} />
+        </div>
+      )}
+      {error && !dash ? (
+        <div data-testid="billing-load-error">
+          <ErrorState title={t('adminLoad.billingTitle')} message={t('adminLoad.billingBody')} onRetry={load} retryLabel={t('common.tryAgain')} />
+        </div>
+      ) : !dash ? <Spinner className="h-6 w-6" /> : (
         <>
           <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-5" data-testid="billing-totals">
             {([['Invoiced', dash.totals.invoicedTzs], ['Collected', dash.totals.collectedTzs], ['Outstanding', dash.totals.outstandingTzs],
@@ -205,7 +218,19 @@ function OrganizationBilling({ token, org, can, userId, onBack }: { token: strin
   const [draft, setDraft] = useState({ effectiveFrom: '', prepaidTermsDays: '0', usageTermsDays: '14', platformFee: '', vatPct: '', contractReference: '', rates: { basic: '', pro: '', premium: '', executive: '' } as Record<string, string> });
   const [contact, setContact] = useState({ contactName: '', email: '', phone: '' });
 
+  const [loadFailed, setLoadFailed] = useState(false);
+
   const load = async () => {
+    try {
+      await loadAll();
+      setLoadFailed(false);
+    } catch (e) {
+      // Whatever was on screen may be stale: hide it behind the error rather than leave it looking current.
+      setLoadFailed(true);
+      throw e;
+    }
+  };
+  const loadAll = async () => {
     const [s, i, p, a, acc] = await Promise.all([
       api.adminB2BStatement(token, org.id, { from: range.from || undefined, to: range.to || undefined }),
       api.adminB2BInvoices(token, { organizationId: org.id, limit: 100 }),
@@ -273,11 +298,16 @@ function OrganizationBilling({ token, org, can, userId, onBack }: { token: strin
         <PageHeader title={org.name} description="Agreement, invoices, payments and statement."
           actions={<Button variant="secondary" size="sm" onClick={onBack}><ArrowLeft className="h-4 w-4" />All organisations</Button>} />
       </div>
-      {error && <Alert tone="error">{error}</Alert>}
+      {loadFailed && (
+        <div data-testid="org-billing-load-error">
+          <ErrorState title={t('adminLoad.orgBillingTitle')} message={t('adminLoad.orgBillingBody')} onRetry={() => { setError(null); load().catch(() => undefined); }} retryLabel={t('common.tryAgain')} />
+        </div>
+      )}
+      {error && !loadFailed && <Alert tone="error">{error}</Alert>}
       {notice && <Alert tone="success">{notice}</Alert>}
-      {statement && !open && <div className="print:hidden"><Balances b={statement} /></div>}
+      {statement && !open && !loadFailed && <div className="print:hidden"><Balances b={statement} /></div>}
 
-      {open && inv && (
+      {open && inv && !loadFailed && (
         <Card>
           <CardContent className="space-y-3 py-5">
             <Button variant="secondary" size="sm" onClick={() => { setOpen(null); setTrace(null); }} className="print:hidden"><ArrowLeft className="h-4 w-4" />Back</Button>
@@ -360,7 +390,7 @@ function OrganizationBilling({ token, org, can, userId, onBack }: { token: strin
         </Card>
       )}
 
-      {!open && (
+      {!open && !loadFailed && (
         <>
           <Segmented className="w-fit print:hidden" value={tab} onChange={v => setTab(v as Tab)}
             options={[['invoices', 'Invoices'], ['payments', 'Payments'], ['statement', 'Statement'], ['agreement', 'Agreement and account']]} />

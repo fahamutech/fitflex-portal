@@ -28,7 +28,9 @@ const results = {
 
 type Seen = { previews: Array<Record<string, any>>; drafts: Array<Record<string, any>>; created: Array<Record<string, any>>; segments: string[]; outside: string[] };
 
-// As in fitflex-functions#257: vendors get service messages only for now.
+// fitflex-functions#274 lets vendors get every purpose (their own opt-out is
+// honoured per channel by the backend). The older #257 backend refused
+// marketing to vendors; `oldBackend` mocks that so its error still reads well.
 const MARKETING = ['promotion', 'engagement', 'general'];
 const refused = { status: 400, json: { error: 'vendor_marketing_not_available' } };
 const marketingToVendors = (b: Record<string, any>) =>
@@ -47,7 +49,7 @@ const DRAFTS = [
   draft('cmp_mixed', { all: [VENDOR_BASE, { all: [{ field: 'vendorWalkInSales', op: 'eq', value: 'yes' }] }] }),
 ];
 
-async function mockAdmin(page: Page, seen: Seen, opts: { refuseSend?: boolean; drafts?: boolean } = {}) {
+async function mockAdmin(page: Page, seen: Seen, opts: { refuseSend?: boolean; drafts?: boolean; oldBackend?: boolean } = {}) {
   await page.addInitScript(() => {
     localStorage.setItem('token', 'admin-e2e-token');
     localStorage.setItem('user', JSON.stringify({ id: 'admin-1', userType: 'admin', email: 'admin@example.com' }));
@@ -76,7 +78,7 @@ async function mockAdmin(page: Page, seen: Seen, opts: { refuseSend?: boolean; d
     if (p === '/admin/communications/audience/preview') {
       const body = req.postDataJSON() as Record<string, any>;
       seen.previews.push(body);
-      if (marketingToVendors(body)) return route.fulfill(refused);
+      if (opts.oldBackend && marketingToVendors(body)) return route.fulfill(refused);
       const vendors = body.recipients === 'vendors';
       return route.fulfill({ json: {
         count: vendors ? 4 : 120, category: vendors && body.purpose == null ? 'transactional' : 'marketing', channels,
@@ -91,7 +93,7 @@ async function mockAdmin(page: Page, seen: Seen, opts: { refuseSend?: boolean; d
     if (p === '/admin/communications/campaigns/preview') {
       const body = req.postDataJSON() as Record<string, any>;
       seen.drafts.push(body);
-      if (marketingToVendors(body)) return route.fulfill(refused);
+      if (opts.oldBackend && marketingToVendors(body)) return route.fulfill(refused);
       return route.fulfill({ json: {
         category: 'marketing', largeSendThreshold: 500,
         counts: { targeted: 4, queued: 4, skipped: {}, byChannel: { in_app: { queued: 4 } } },
@@ -102,7 +104,7 @@ async function mockAdmin(page: Page, seen: Seen, opts: { refuseSend?: boolean; d
     if (p === '/admin/communications/campaigns' && req.method() === 'POST') {
       const body = req.postDataJSON() as Record<string, any>;
       seen.created.push(body);
-      if (marketingToVendors(body)) return route.fulfill(refused);
+      if (opts.oldBackend && marketingToVendors(body)) return route.fulfill(refused);
       return route.fulfill({ status: 201, json: { campaign: { id: 'cmp_v', status: 'draft', ...body } } });
     }
     if (p === '/admin/communications/campaigns/cmp_v/send' && opts.refuseSend) return route.fulfill(refused);
@@ -221,10 +223,12 @@ test('Swahili: the vendor option and wording are translated', async ({ page }) =
   await page.getByTestId('comms-next').click();
   await expect(page.getByTestId('recipients-vendors')).toHaveText('Wauzaji');
   await page.getByTestId('recipients-vendors').click();
-  await expect(page.getByTestId('vendor-marketing-blocked')).toContainText('Promosheni kwa wauzaji bado hazipatikani — wauzaji bado hawawezi kujiondoa kwenye app.');
-  await page.getByTestId('vendor-change-purpose').click();
+  await expect(page.getByTestId('vendor-optout-note')).toHaveText('Promosheni huwafikia wauzaji tu ambao hawajazizima kwenye mipangilio yao ya ujumbe.');
+  await page.getByTestId('comms-back').click();
+  await expect(page.getByTestId('vendor-marketing-note')).toContainText('Promosheni huwafikia wauzaji tu ambao hawajazizima kwenye mipangilio yao ya ujumbe.');
   await page.getByTestId('purpose-announcement').click();
   await page.getByTestId('comms-next').click();
+  await expect(page.getByTestId('vendor-optout-note')).toHaveCount(0);
   await expect(page.getByTestId('preset-all')).toHaveText('Wauzaji wote');
   await expect(page.getByTestId('audience-count')).toContainText('Watu 4 wa wauzaji wanalingana');
   await expect(page.getByTestId('audience-count')).toContainText('Neema Joseph (Juma Sports, mfanyakazi wa admin)');
@@ -278,9 +282,60 @@ test('gym owners are never offered Vendors', async ({ page }) => {
   expect(outside).toEqual([]);
 });
 
-test('promotions to vendors are not offered yet: marketing purposes are disabled with a note', async ({ page }) => {
+test('promotions, engagement and general messages can go to vendors, with the opt-out note', async ({ page }) => {
   const runtimeErrors: Error[] = [];
   page.on('pageerror', e => runtimeErrors.push(e));
+  const seen: Seen = { previews: [], drafts: [], created: [], segments: [], outside: [] };
+  await mockAdmin(page, seen);
+  const NOTE = "Promotions reach only vendors who haven't switched them off in their message settings.";
+
+  await page.goto('/admin/communications');
+  await page.getByTestId('comms-new').click();
+  await page.getByTestId('purpose-promotion').click();
+  await page.getByTestId('comms-next').click();
+  await expect(page.getByTestId('audience-count')).toContainText('120 members match');
+  await expect(page.getByTestId('vendor-optout-note')).toHaveCount(0);
+
+  // Promotion, then Vendors: a real count, the opt-out note, and the way on is open.
+  await page.getByTestId('recipients-vendors').click();
+  await expect(page.getByTestId('audience-count')).toContainText('4 people at vendors match');
+  await expect(page.getByTestId('vendor-optout-note')).toHaveText(NOTE);
+  await expect(page.getByTestId('vendor-marketing-blocked')).toHaveCount(0);
+  await expect(page.getByTestId('vendor-change-purpose')).toHaveCount(0);
+  await expect.poll(() => seen.previews.at(-1)).toMatchObject({ recipients: 'vendors', purpose: 'promotion' });
+  await expect(page.getByTestId('comms-next')).toBeEnabled();
+
+  // Back on the purpose step: every purpose is open for vendors, with the note.
+  await page.getByTestId('comms-back').click();
+  await expect(page.getByTestId('vendor-marketing-note')).toHaveText(NOTE);
+  for (const p of [...MARKETING, 'renewal', 'payment', 'announcement']) await expect(page.getByTestId(`purpose-${p}`)).toBeEnabled();
+
+  for (const p of ['engagement', 'general']) {
+    await page.getByTestId(`purpose-${p}`).click();
+    await page.getByTestId('comms-next').click();
+    await expect.poll(() => seen.previews.at(-1)).toMatchObject({ recipients: 'vendors', purpose: p });
+    await expect(page.getByTestId('vendor-optout-note')).toHaveText(NOTE);
+    await expect(page.getByTestId('comms-next')).toBeEnabled();
+    await page.getByTestId('comms-back').click();
+  }
+
+  // A service purpose: no opt-out note on the audience step.
+  await page.getByTestId('purpose-renewal').click();
+  await page.getByTestId('comms-next').click();
+  await expect.poll(() => seen.previews.at(-1)).toMatchObject({ recipients: 'vendors', purpose: 'renewal' });
+  await expect(page.getByTestId('vendor-optout-note')).toHaveCount(0);
+
+  // Members again: no vendor note anywhere.
+  await page.getByTestId('recipients-members').click();
+  await expect(page.getByTestId('audience-count')).toContainText('120 members match');
+  await page.getByTestId('comms-back').click();
+  await expect(page.getByTestId('vendor-marketing-note')).toHaveCount(0);
+
+  expect(seen.outside).toEqual([]);
+  expect(runtimeErrors).toEqual([]);
+});
+
+test('a promotion to vendors is created and sent', async ({ page }) => {
   const seen: Seen = { previews: [], drafts: [], created: [], segments: [], outside: [] };
   await mockAdmin(page, seen);
 
@@ -288,37 +343,38 @@ test('promotions to vendors are not offered yet: marketing purposes are disabled
   await page.getByTestId('comms-new').click();
   await page.getByTestId('purpose-promotion').click();
   await page.getByTestId('comms-next').click();
-  await expect(page.getByTestId('audience-count')).toContainText('120 members match');
-
-  // Promotion, then Vendors: a note instead of a count, and no way on.
   await page.getByTestId('recipients-vendors').click();
-  await expect(page.getByTestId('vendor-marketing-blocked')).toContainText("Promotions to vendors aren't available yet — vendors can't opt out in the app yet.");
-  await expect(page.getByTestId('comms-next')).toBeDisabled();
-  await page.waitForTimeout(600); // past the count's debounce: no vendor preview with a marketing purpose is asked for
-  expect(seen.previews.filter(marketingToVendors)).toEqual([]);
-
-  // Back on the purpose step: marketing purposes are disabled, service ones are not.
-  await page.getByTestId('vendor-change-purpose').click();
-  await expect(page.getByTestId('vendor-marketing-note')).toBeVisible();
-  for (const p of MARKETING) await expect(page.getByTestId(`purpose-${p}`)).toBeDisabled();
-  for (const p of ['renewal', 'payment', 'announcement']) await expect(page.getByTestId(`purpose-${p}`)).toBeEnabled();
-  await expect(page.getByTestId('comms-next')).toBeDisabled();
-  await expect(page.getByTestId('vendor-change-purpose')).toHaveCount(0); // the link lives on the audience step only
-
-  await page.getByTestId('purpose-renewal').click();
-  await page.getByTestId('comms-next').click();
-  await expect(page.getByTestId('vendor-marketing-blocked')).toHaveCount(0);
   await expect(page.getByTestId('audience-count')).toContainText('4 people at vendors match');
-  await expect.poll(() => seen.previews.at(-1)).toMatchObject({ recipients: 'vendors', purpose: 'renewal' });
-
-  // Members again: every purpose is open.
-  await page.getByTestId('recipients-members').click();
-  await page.getByTestId('comms-back').click();
-  for (const p of MARKETING) await expect(page.getByTestId(`purpose-${p}`)).toBeEnabled();
-  await expect(page.getByTestId('vendor-marketing-note')).toHaveCount(0);
-
+  await page.getByTestId('comms-next').click();
+  await page.getByTestId('msg-title-en').fill('List your December stock');
+  await page.getByTestId('msg-body-en').fill('Shoppers are looking for gym gear this month.');
+  for (let i = 0; i < 4; i++) await page.getByTestId('comms-next').click(); // channels → schedule → preview → confirm
+  await page.getByTestId('comms-submit').click();
+  await expect.poll(() => seen.created.at(-1)).toMatchObject({ purpose: 'promotion', audience: { recipients: 'vendors' } });
+  expect(seen.drafts.some(b => b.purpose === 'promotion' && b.audience?.recipients === 'vendors')).toBe(true);
+  await expect(page.getByText('vendor_marketing_not_available')).toHaveCount(0);
+  await expect(page.getByText("Promotions to vendors aren't available yet")).toHaveCount(0);
   expect(seen.outside).toEqual([]);
-  expect(runtimeErrors).toEqual([]);
+});
+
+test('an older backend that still refuses marketing to vendors shows the plain EN and SW note', async ({ page }) => {
+  for (const [locale, text] of [
+    ['en', "Promotions to vendors aren't available yet — vendors can't opt out in the app yet."],
+    ['sw', 'Promosheni kwa wauzaji bado hazipatikani — wauzaji bado hawawezi kujiondoa kwenye app.'],
+  ] as const) {
+    const seen: Seen = { previews: [], drafts: [], created: [], segments: [], outside: [] };
+    await page.unrouteAll({ behavior: 'ignoreErrors' });
+    await page.addInitScript(l => localStorage.setItem('locale', l), locale);
+    await mockAdmin(page, seen, { oldBackend: true });
+    await page.goto('/admin/communications');
+    await page.getByTestId('comms-new').click();
+    await page.getByTestId('purpose-promotion').click();
+    await page.getByTestId('comms-next').click();
+    await page.getByTestId('recipients-vendors').click();
+    await expect(page.getByText(text)).toBeVisible();
+    await expect(page.getByText('vendor_marketing_not_available')).toHaveCount(0);
+    expect(seen.outside).toEqual([]);
+  }
 });
 
 test('vendor_marketing_not_available from the server reads as the plain note', async ({ page }) => {

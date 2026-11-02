@@ -23,6 +23,8 @@ interface SearchableSelectProps {
   className?: string;
   /** Accessible name of the control; defaults to the placeholder. */
   ariaLabel?: string;
+  /** A 44 px tall control whose trigger button fills it (touch target). */
+  touchTarget?: boolean;
 }
 
 /**
@@ -44,6 +46,7 @@ export function SearchableSelect({
   disabled = false,
   className,
   ariaLabel,
+  touchTarget = false,
 }: SearchableSelectProps) {
   const { t } = useApp();
   const placeholderText = placeholder ?? t('common.search');
@@ -182,7 +185,8 @@ export function SearchableSelect({
           if (!disabled) setOpen(true);
         }}
         className={cn(
-          'ui-input flex flex-wrap items-center gap-1.5 min-h-[40px] cursor-pointer',
+          'ui-input flex flex-wrap items-center gap-1.5 cursor-pointer',
+          touchTarget ? 'min-h-11 py-0' : 'min-h-[40px]',
           disabled && 'opacity-50 cursor-not-allowed',
           open && 'ring-2 ring-[var(--color-brand-500)]'
         )}
@@ -217,7 +221,7 @@ export function SearchableSelect({
           aria-controls={open ? listId : undefined}
           aria-label={triggerName}
           onKeyDown={onTriggerKeyDown}
-          className="min-h-[1.5rem] min-w-[3rem] flex-1 bg-transparent text-left text-sm text-[var(--color-fg-quaternary)] cursor-[inherit]"
+          className={cn('min-w-[3rem] flex-1 bg-transparent text-left text-sm text-[var(--color-fg-quaternary)] cursor-[inherit]', touchTarget ? 'min-h-11 self-stretch' : 'min-h-[1.5rem]')}
         >
           {selectedLabels.length === 0 ? placeholderText : ''}
         </button>

@@ -13,10 +13,13 @@ import { GymCreateForm, GymDraft, BLANK_GYM_DRAFT, validateGymDraft } from '@/co
 import { OwnerInlineForm, OwnerFormDraft, BLANK_OWNER_DRAFT, validateOwnerDraft } from '@/components/owner-inline-form';
 import { SOCIAL_PLATFORMS, cleanSocialLinks } from '@/lib/social-handles';
 import { PartnerPersonalDetails } from '@/components/partner-personal-details';
+import { PartnerMediaRowAction, PartnerMediaSetDialog } from '@/components/partner-media-set-dialog';
+import type { PartnerSubject } from '@/lib/partner-media';
 
 export default function TrainersPage() {
   const { token, user, t } = useApp();
   const [trainers, setTrainers] = useState<TrainerProfile[]>([]);
+  const [mediaSubject, setMediaSubject] = useState<PartnerSubject | null>(null);
   const [gyms, setGyms]         = useState<Gym[]>([]);
   const [owners, setOwners]     = useState<GymOwner[]>([]);
   const [loading, setLoading]   = useState(true);
@@ -373,6 +376,7 @@ export default function TrainersPage() {
               onRowClick={(trainer) => openEdit(trainer)}
               actions={(trainer) => (
                 <>
+                  <PartnerMediaRowAction subject={{ type: 'trainer', id: trainer.id, name: trainerNames(trainer).label || trainer.email || null }} onOpen={setMediaSubject} />
                   <Button variant="ghost" size="sm" onClick={(e) => { e.stopPropagation(); openEdit(trainer); }}>
                     <Pencil className="h-3.5 w-3.5" />
                   </Button>
@@ -646,6 +650,8 @@ export default function TrainersPage() {
       </Dialog>
 
       <ConfirmDialog open={!!deleteTarget} onClose={() => setDeleteTarget(null)} onConfirm={handleDelete} title="Delete trainer" description={`Remove "${deleteTarget?.displayName || deleteTarget?.email}"? This cannot be undone.`} confirmLabel="Delete" tone="danger" busy={busy} />
+
+      <PartnerMediaSetDialog subject={mediaSubject} onClose={() => setMediaSubject(null)} />
     </div>
   );
 }

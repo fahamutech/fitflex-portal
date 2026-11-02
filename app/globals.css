@@ -387,6 +387,11 @@ body {
   --hero-fade: 250ms;
   --hero-crosshair-light: #ffffff;                /* focal-point ring: white + slate outline shows on any photo */
   --hero-crosshair-dark: var(--hero-scrim);
+  /* Partner logo plate (spec photo-hero-screens §40.2, FFLogoPlate): light for dark or coloured logos, dark for white ones. */
+  --partner-plate-light: #ffffff;
+  --partner-plate-light-border: rgb(var(--hero-scrim-rgb) / 0.12);
+  --partner-plate-dark: var(--hero-placeholder);
+  --partner-plate-dark-border: color-mix(in srgb, var(--hero-text) 40%, transparent);
 }
 
 /* Login layout with the photo panel: band on top below 1024, columns from 1024.
@@ -676,6 +681,37 @@ body {
   line-height: calc(21px * var(--hero-preview-scale));
   color: var(--hero-text-body);
 }
+/* Partner photos admin (spec §40, §43.2): the home band at its app sizes with the
+   partner's logo plate. Phone band 342 x 240, plate top-left 16px in; wide banner
+   960 x 220, plate top-right 24px in. Plate 40 tall, 40-120 wide, radius 8, the logo
+   inside 108 x 28 with its aspect kept. */
+.hero-preview--partner-band { width: 342px; height: 240px; padding: 24px; border-radius: var(--hero-sheet-radius); }
+.hero-preview--partner-band .hero-preview__headline {
+  font-size: calc(var(--hero-display-size-small) * var(--hero-preview-scale));
+  line-height: calc(var(--hero-display-line-small) * var(--hero-preview-scale));
+}
+.hero-preview--partner-wide { width: 960px; height: 220px; padding: 32px; border-radius: var(--hero-sheet-radius); }
+.partner-plate {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  height: 40px;
+  min-width: 40px;
+  max-width: 120px;
+  padding: 0 6px;
+  border-radius: 8px;
+  border: 1px solid var(--partner-plate-light-border);
+  background: var(--partner-plate-light);
+}
+.partner-plate--dark { border-color: var(--partner-plate-dark-border); background: var(--partner-plate-dark); }
+.partner-plate img { display: block; max-width: 108px; max-height: 28px; width: auto; height: auto; object-fit: contain; }
+.partner-plate--placed { position: absolute; z-index: 1; top: 16px; left: 16px; }
+.hero-preview--partner-wide .partner-plate--placed { top: 24px; left: auto; right: 24px; }
+/* The logo at 2x on each plate, for the review card. */
+.partner-plate--large { height: 80px; min-width: 80px; max-width: 240px; padding: 0 12px; border-radius: 16px; }
+.partner-plate--large img { max-width: 216px; max-height: 56px; }
+
 /* Portal sign-in slot: the login row (1280 x 800) holding the real PhotoPanel;
    only the panel's 704 x 800 shows. "Show 1.3x text" sets --hero-text-scale (1 on the login). */
 .hero-preview-login { width: 1280px; height: 800px; }

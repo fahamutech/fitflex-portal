@@ -12,7 +12,7 @@ const PROBLEMS: Record<string, string> = {
   invalid_type: 'The type isn’t one FitFlex knows',
   listed_twice: 'Listed more than once in this file',
   external_reference_in_use: 'Someone else on your list already has that reference',
-  beneficiary_must_be_member: 'That account isn’t a member account',
+  // beneficiary_must_be_member: no longer comes back; imports never look accounts up (functions#283).
 };
 const ERRORS: Record<string, string> = {
   nothing_to_import: 'There is nobody in that list.',
@@ -33,9 +33,11 @@ const day = (v?: string | null) => (v ? new Date(v).toLocaleDateString('en-GB', 
 const EXAMPLE = 'name,email,phone,group,reference\nAsha Mollel,asha@example.co.tz,,Finance,EMP-001\nJuma Omari,,0712 345 678,Operations,EMP-002';
 
 /**
- * Add many people at once, and see who has been invited but has not joined
- * FitFlex yet. Someone who already has the app is added straight away;
- * everyone else is invited and added the moment they join.
+ * Add many people at once, and see who has been invited but has not joined yet.
+ * Consent slice (a) (functions#283): nobody is enrolled by an import and accounts are
+ * not looked up, so `enrolled` is always 0. Everyone new is invited; anyone already on
+ * FitFlex is asked in the app and added only if they accept. The screen never says who
+ * has an account.
  */
 export function PeopleImport({ token, orgId, canManage, onChanged }: { token: string; orgId: string; canManage: boolean; onChanged: () => void }) {
   const [open, setOpen] = useState(false);
@@ -49,6 +51,10 @@ export function PeopleImport({ token, orgId, canManage, onChanged }: { token: st
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const { t } = useApp();
+  // Members are asked in the app by a job within about 10 minutes of the upload, not at upload (functions#283).
+  // `enrolled` is always 0 on a backend with functions#283; counted in anyway so nothing is lost on an older one.
+  const toInvite = (r: B2BImportResult) => r.enrolled + r.invited;
+  const confirmLabel = (n: number) => t(n === 1 ? 'b2b.import.confirm.one' : 'b2b.import.confirm.other').replace('{n}', String(n));
 
   const loadInvites = () => api.b2bBeneficiaryInvites(token, orgId).then((r) => { setInvites(r.items); setEmailConfigured(r.emailConfigured); setSmsConfigured(r.smsConfigured); }).catch(() => setInvites([]));
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -77,9 +83,9 @@ export function PeopleImport({ token, orgId, canManage, onChanged }: { token: st
 
   const summary = (r: B2BImportResult, past: boolean) => (
     <div className="space-y-2" data-testid={past ? 'import-result' : 'import-preview'}>
-      <div className="grid gap-2 sm:grid-cols-4">
-        {([[past ? 'Added now' : 'Will be added now', r.enrolled, 'Already use FitFlex'], [past ? 'Invited' : 'Will be invited', r.invited, 'Added when they join'],
-          ['Already on your list', r.unchanged, 'Nothing to do'], ['Can’t be used', r.rejected, 'See below']] as Array<[string, number, string]>).map(([label, value, sub]) => (
+      <div className="grid gap-2 sm:grid-cols-3">
+        {([[past ? t('b2b.import.invited') : t('b2b.import.willInvite'), toInvite(r), t('b2b.import.invitedSub')],
+          [t('b2b.import.unchanged'), r.unchanged, t('b2b.import.unchangedSub')], [t('b2b.import.rejected'), r.rejected, t('b2b.import.rejectedSub')]] as Array<[string, number, string]>).map(([label, value, sub]) => (
           <div key={label} className="rounded-lg border border-[var(--color-border-secondary)] px-3 py-2">
             <div className="text-xs text-[var(--color-fg-quaternary)]">{label}</div><div className="text-lg font-semibold">{value}</div><div className="text-xs text-[var(--color-fg-tertiary)]">{sub}</div>
           </div>
@@ -120,8 +126,8 @@ export function PeopleImport({ token, orgId, canManage, onChanged }: { token: st
           <CardContent className="space-y-3 py-4">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div>
-                <div className="text-sm font-semibold">Add many people</div>
-                <div className="text-xs text-[var(--color-fg-quaternary)]">Paste or upload a list. People who already use FitFlex are added now; everyone else is invited and added when they join.</div>
+                <div className="text-sm font-semibold">{t('b2b.import.heading')}</div>
+                <div className="text-xs text-[var(--color-fg-quaternary)]">{t('b2b.import.description')}</div>
               </div>
               {!open && <Button size="sm" variant="secondary" onClick={() => setOpen(true)} data-testid="import-open"><Upload className="h-4 w-4" />Add a list</Button>}
             </div>
@@ -133,12 +139,12 @@ export function PeopleImport({ token, orgId, canManage, onChanged }: { token: st
                 <div className="flex flex-wrap items-center gap-2">
                   <input type="file" accept=".csv,text/csv,text/plain" className="text-sm" onChange={e => pick(e.target.files?.[0])} aria-label="Upload a CSV file" />
                   <Button size="sm" variant="secondary" disabled={busy || !text.trim()} onClick={() => send(true)} data-testid="import-check">{busy && !preview ? 'Checking…' : 'Check the list'}</Button>
-                  {preview && preview.enrolled + preview.invited > 0 && <Button size="sm" disabled={busy} onClick={() => send(false)} data-testid="import-confirm">Add {preview.enrolled + preview.invited} {preview.enrolled + preview.invited === 1 ? 'person' : 'people'}</Button>}
+                  {preview && toInvite(preview) > 0 && <Button size="sm" disabled={busy} onClick={() => send(false)} data-testid="import-confirm">{confirmLabel(toInvite(preview))}</Button>}
                   <Button size="sm" variant="secondary" onClick={() => { setOpen(false); setPreview(null); setDone(null); setText(''); }}>Close</Button>
                 </div>
                 {preview && summary(preview, false)}
-                {preview && preview.enrolled + preview.invited === 0 && <p className="text-sm text-[var(--color-fg-tertiary)]">There is nobody new to add in this list.</p>}
-                {done && <><Alert tone="success">Done. {done.enrolled} added, {done.invited} invited.</Alert>{summary(done, true)}</>}
+                {preview && toInvite(preview) === 0 && <p className="text-sm text-[var(--color-fg-tertiary)]">{t('b2b.import.nobodyNew')}</p>}
+                {done && <><Alert tone="success">{t('b2b.import.done').replace('{invited}', String(toInvite(done)))}</Alert>{summary(done, true)}</>}
               </div>
             )}
           </CardContent>
@@ -149,7 +155,7 @@ export function PeopleImport({ token, orgId, canManage, onChanged }: { token: st
         <Card>
           <CardContent className="space-y-2 py-4">
             <div className="text-sm font-semibold">{invites.length} invited, not joined yet</div>
-            {(!emailConfigured || !smsConfigured) && <Alert tone="warning">FitFlex can’t send invitations by {!emailConfigured && !smsConfigured ? 'email or SMS' : !emailConfigured ? 'email' : 'SMS'} at the moment. People are still added when they join; tell them to sign up with the email or number you listed.</Alert>}
+            {(!emailConfigured || !smsConfigured) && <Alert tone="warning">{t(!emailConfigured && !smsConfigured ? 'b2b.import.cantSend.both' : !emailConfigured ? 'b2b.import.cantSend.email' : 'b2b.import.cantSend.sms')}</Alert>}
             <div className="overflow-x-auto">
               <table className="w-full text-sm" data-testid="org-invites">
                 <thead>
@@ -171,7 +177,11 @@ export function PeopleImport({ token, orgId, canManage, onChanged }: { token: st
                       <td className="py-2 text-right whitespace-nowrap">
                         {canManage && (
                           <span className="inline-flex gap-2">
-                            {i.canResend && <Button size="sm" variant="secondary" disabled={busy} onClick={() => act(async () => { const r = await api.resendB2BBeneficiaryInvite(token, orgId, i.id); const how = [r.sent.email && 'email', r.sent.sms && 'SMS'].filter(Boolean).join(' and '); return how ? `Sent again by ${how}.` : 'It could not be sent just now.'; })}>Send again</Button>}
+                            {/* Resends the invitation email/SMS only; it never asks anyone in the app again (functions#283). */}
+                            {i.canResend && <Button size="sm" variant="secondary" disabled={busy} title={t('b2b.import.resendHint')} onClick={() => act(async () => {
+                              const r = await api.resendB2BBeneficiaryInvite(token, orgId, i.id);
+                              return t(r.sent.email && r.sent.sms ? 'b2b.import.resent.both' : r.sent.email ? 'b2b.import.resent.email' : r.sent.sms ? 'b2b.import.resent.sms' : 'b2b.import.resent.none');
+                            })}>{t('b2b.import.resend')}</Button>}
                             <Button size="sm" variant="secondary" disabled={busy} onClick={() => act(async () => { await api.cancelB2BBeneficiaryInvite(token, orgId, i.id); return 'Invite cancelled.'; })}>Cancel</Button>
                           </span>
                         )}
@@ -181,7 +191,7 @@ export function PeopleImport({ token, orgId, canManage, onChanged }: { token: st
                 </tbody>
               </table>
             </div>
-            <p className="text-xs text-[var(--color-fg-quaternary)]">They are added to your list the moment they join FitFlex as a member with the email or number shown. FitFlex sends the invitation by email (then reminders after 3 and 10 days) and by SMS to a listed mobile number (then one reminder after 3 days).</p>
+            <p className="text-xs text-[var(--color-fg-quaternary)]">{t('b2b.import.invitesNote')}</p>
           </CardContent>
         </Card>
       )}

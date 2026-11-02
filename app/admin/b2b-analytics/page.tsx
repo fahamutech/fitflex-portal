@@ -1,10 +1,10 @@
 'use client';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { ArrowLeft, RefreshCw } from 'lucide-react';
 import { useApp } from '../../providers';
 import { api, B2BAnalyticsOverview, B2BDataQuality } from '@/lib/api';
-import { Alert, Badge, Button, Card, CardContent, CardHeader, PageHeader, Spinner, Table, TBody, Td, Th, THead, Tr } from '@/components/shared';
+import { Alert, Badge, Button, Card, CardContent, CardHeader, ErrorState, PageHeader, Spinner, Table, TBody, Td, Th, THead, Tr } from '@/components/shared';
 import { OrgInsights, PERIODS } from '@/components/b2b-insights';
 import { day } from '@/components/b2b-finance';
 import { money } from '@/lib/admin-utils';
@@ -19,13 +19,14 @@ const TONE: Record<string, 'danger' | 'warning' | 'gray'> = { high: 'danger', me
  * second look, and any one organisation's insights exactly as it sees them.
  */
 export default function B2BAnalyticsPage() {
-  const { token, user, hasPermission } = useApp();
+  const { token, user, hasPermission, t } = useApp();
   const [period, setPeriod] = useState('this_month');
   const [data, setData] = useState<B2BAnalyticsOverview | null>(null);
   const [quality, setQuality] = useState<B2BDataQuality | null>(null);
   const [orgs, setOrgs] = useState<Array<{ id: string; name: string }>>([]);
   const [org, setOrg] = useState<{ id: string; name: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [orgsFailed, setOrgsFailed] = useState(false);
 
   const load = () => {
     if (!token) return;
@@ -35,10 +36,12 @@ export default function B2BAnalyticsPage() {
   };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(load, [token, period]);
-  useEffect(() => {
+  const loadOrgs = useCallback(() => {
     if (!token) return;
-    api.b2bOrganizations(token, { limit: 100 }).then(r => setOrgs(r.items.map(o => ({ id: o.id, name: o.tradingName || o.legalName })))).catch(() => undefined);
+    setOrgsFailed(false);
+    api.b2bOrganizations(token, { limit: 100 }).then(r => setOrgs(r.items.map(o => ({ id: o.id, name: o.tradingName || o.legalName })))).catch(() => setOrgsFailed(true));
   }, [token]);
+  useEffect(loadOrgs, [loadOrgs]);
 
   if (!token || user?.userType !== 'admin') return null;
   if (org) {
@@ -71,6 +74,11 @@ export default function B2BAnalyticsPage() {
           <option value="">Open an organisation…</option>
           {orgs.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
         </select>
+        {orgsFailed && (
+          <div className="w-full" data-testid="analytics-orgs-error">
+            <ErrorState title={t('adminLoad.orgsTitle')} message={t('adminLoad.orgsBody')} onRetry={loadOrgs} retryLabel={t('common.tryAgain')} />
+          </div>
+        )}
         {data && <span className="text-xs text-[var(--color-fg-quaternary)]">{day(data.period.from)} to {day(data.period.to)} · East Africa Time · live figures</span>}
       </div>
       {error && <Alert tone="error">{error}</Alert>}

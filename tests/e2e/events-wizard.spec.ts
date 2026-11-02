@@ -123,6 +123,11 @@ test.describe('wizard', () => {
     await page.getByTestId('ev-startsAt').fill(local(in2d));
     await page.getByTestId('ev-endsAt').fill(local(new Date(in2d.getTime() + 3 * 3_600_000)));
     await page.getByTestId('ev-registrationClosesAt').fill(local(new Date(in2d.getTime() - 3_600_000)));
+    // S5 §3 (D33): the payout schedule is required at submit; Review lists it until it is chosen on step 4.
+    await page.getByTestId('step-review').click();
+    await expect(page.getByTestId('review-problem-ev-payoutSchedule')).toBeVisible();
+    await page.getByTestId('step-tickets').click();
+    await page.getByTestId('payout-monthly').check();
     await page.getByTestId('step-review').click();
     await expect(page.getByTestId('review-problems')).toHaveCount(0);
     await expect(page.getByTestId('wizard-submit')).toBeDisabled();
