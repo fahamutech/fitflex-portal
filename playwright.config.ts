@@ -97,6 +97,8 @@ export default defineConfig({
   retries: 0,
   use: {
     baseURL: portalURL,
+    // Specs expect times as shown in Tanzania; CI runners are on UTC.
+    timezoneId: 'Africa/Dar_es_Salaam',
     trace: 'on-first-retry'
   },
   webServer: [
