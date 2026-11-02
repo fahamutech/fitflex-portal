@@ -391,6 +391,15 @@ export function makeS6(user: Json, me: Json | null, o: S6Opts) {
       Object.assign(state.settings, b); audit('events.results_settings_changed');
       return { status: 200, json: { settings: state.settings } };
     })],
+    // Events S7 H12: the correction preview (counts only). The S6 mock answers it so the Correct dialog works on an S6-only server too.
+    ['POST', /^\/organizer\/events\/([^/]+)\/results\/([^/]+)\/correct\/preview$/, (c, m) => {
+      if (!on()) return off();
+      if (!inRoles('owner', 'admin', 'timing')) return forbidden();
+      const res = Object.values(state.results).find(r => r.id === m[2]);
+      if (!res) return { status: 404, json: { error: 'result_not_found' } };
+      if (c.body?.expectedRevision !== res.revision) return { status: 409, json: { error: 'result_changed' } };
+      return { rankBefore: res.overallRank, rankAfter: res.overallRank, othersShifted: 0, medalsAffected: 0, revision: res.revision };
+    }],
     // ── one result ──
     ['GET', /^\/organizer\/events\/([^/]+)\/results\/([^/]+)$/, (_c, m) => {
       if (!on()) return off();
