@@ -63,7 +63,7 @@ export interface SummaryReport extends ReportHead {
   slowCount: number;
   methods: { byYou: MethodYou[]; viaFitFlex: MethodFitFlex[] };
   stock?: { atRetailTzs: number; units: number; atCostTzs?: number; costUnknownCount?: number };
-  profit?: { profitTzs: number; marginPct: number | null; netExVatTzs: number; commissionTzs: number; costTzs: number; uncosted: { qty: number; revenueTzs: number } };
+  profit?: { profitTzs: number | null; marginPct: number | null; netExVatTzs: number; commissionTzs: number; costTzs: number; uncosted: { qty: number; revenueTzs: number } };
   payouts?: { grossTzs: number; commissionTzs: number; payoutTzs: number; paidOutTzs: number; waitingTzs: number; notDeliveredTzs: number };
   customers?: { owedTzs: number; overdueTzs: number; collectedTzs: number };
 }
@@ -78,8 +78,9 @@ export interface ProductRow {
   unitsSold: number; appUnits: number; walkInUnits: number; netRevenueTzs: number;
   lastSoldAt: string | null; stock: number | null; avgDailyUnits30: number; daysOfCover: number | null; coverState: CoverState;
   noSalesInPeriod: boolean;
-  /** canSeeCost only. null = no cost price (UAT D1; the backend is moving from 0 to null). */
+  /** canSeeCost only. null = no cost price. 0 is a real zero profit. */
   profitTzs?: number | null;
+  marginPct?: number | null;
 }
 export interface ProductsReport extends ReportHead {
   sort: ProductSort;
@@ -98,7 +99,8 @@ export interface StockReport extends ReportHead {
   costUnknown?: { count: number; units: number; retailTzs: number };
   rows: StockRow[];
 }
-export interface ProfitFigures { netExVatTzs: number; commissionTzs: number; costTzs: number; profitTzs: number; marginPct: number | null }
+/** profitTzs null = nothing here has a cost price. marginPct null alone = net is 0 (a costed line can net to zero). */
+export interface ProfitFigures { netExVatTzs: number; commissionTzs: number; costTzs: number; profitTzs: number | null; marginPct: number | null }
 export interface ProfitReport extends ReportHead {
   totals: ProfitFigures;
   uncosted: { lineCount: number; qty: number; revenueTzs: number; netExVatTzs: number };
@@ -168,8 +170,12 @@ export const PRESETS: readonly ReportPreset[] = ['today', 'yesterday', 'thisWeek
 export const presetKey = (p: ReportPreset) => `vendor.reports.preset.${p}` as MessageKey;
 
 const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
-export const isDay = (v: string | null | undefined): v is string =>
-  !!v && DAY_RE.test(v) && new Date(`${v}T00:00:00Z`).toISOString().slice(0, 10) === v;
+/** A real calendar day. An impossible one ("2026-99-99", "2026-02-30") is false, never a RangeError. */
+export function isDay(v: string | null | undefined): v is string {
+  if (!v || !DAY_RE.test(v)) return false;
+  const ms = Date.parse(`${v}T00:00:00Z`);
+  return Number.isFinite(ms) && new Date(ms).toISOString().slice(0, 10) === v;
+}
 const dayMs = (day: string) => Date.parse(`${day}T00:00:00Z`);
 export const daysBetween = (from: string, to: string) => Math.round((dayMs(to) - dayMs(from)) / 86_400_000) + 1;
 /** Monday of the EAT week of `day`. */
