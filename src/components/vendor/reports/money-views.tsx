@@ -8,7 +8,7 @@ import { periodWords, type CustomersReport, type MethodsReport, type PayoutsRepo
 import { Badge, Card, CardContent, CardHeader, Table, TBody, Td, Th, THead, Tr } from '@/components/shared';
 import { useVendor } from '@/components/vendor-context';
 import { useApp } from '../../../../app/providers';
-import { Figure, figureGrid, HeaderLine, linkCls, minus, NoSales, numCell, useReport, useWalkInSeen, ViewState } from './bits';
+import { Figure, figureGrid, HeaderLine, linkCls, minus, NoSales, numCell, pct, plural, useReport, useWalkInSeen, ViewState } from './bits';
 import type { ViewProps } from './sales-views';
 
 export function PayoutsView({ query, onTryPeriod }: ViewProps) {
@@ -20,12 +20,12 @@ export function PayoutsView({ query, onTryPeriod }: ViewProps) {
       {(d: PayoutsReport) => {
         const s = d.status;
         const empty = !d.totals.orderCount && !s.notDelivered.orders;
-        const ordersN = (n: number) => fmt(t('vendor.reports.ordersN'), { n: formatNumber(n) });
+        const ordersN = (n: number) => plural(t, n, 'vendor.reports.ordersOne', 'vendor.reports.ordersN', { n: formatNumber(n) });
         return (
           <div className="space-y-4">
             <HeaderLine head={d} view="payouts" />
             <p className="text-sm text-[var(--color-fg-tertiary)]" data-testid="payouts-basis">{t('vendor.reports.payouts.basis')}</p>
-            {empty ? <NoSales from={d.from} to={d.to} onTryPeriod={onTryPeriod} /> : (
+            {empty ? <NoSales from={d.from} to={d.to} hasEverSold={d.hasEverSold} onTryPeriod={onTryPeriod} /> : (
               <>
                 <div className="grid gap-3 grid-cols-1 sm:grid-cols-3">
                   <Figure label={t('vendor.reports.appSales')} value={money(d.totals.grossTzs)} sub={ordersN(d.totals.orderCount)} testId="payouts-gross" />
@@ -96,7 +96,7 @@ export function CustomersView({ query }: ViewProps) {
           <div className={figureGrid}>
             <Figure strong label={t('vendor.owed.title')} value={money(d.owedTzs)} sub={t('vendor.reports.now')} testId="cust-owed" />
             <Figure label={t('vendor.owed.overdue')} value={money(d.overdueTzs)} sub={t('vendor.reports.now')} testId="cust-overdue" />
-            <Figure label={t('vendor.reports.cust.creditSales')} value={money(d.creditSales.totalTzs)} sub={fmt(t('vendor.reports.countN'), { n: formatNumber(d.creditSales.count) })} testId="cust-credit" />
+            <Figure label={t('vendor.reports.cust.creditSales')} value={money(d.creditSales.totalTzs)} sub={plural(t, d.creditSales.count, 'vendor.reports.countOne', 'vendor.reports.countN', { n: formatNumber(d.creditSales.count) })} testId="cust-credit" />
             <Figure label={t('vendor.reports.cust.collected')} value={money(d.collectedTzs)} testId="cust-collected" />
           </div>
           <Card>
@@ -118,33 +118,57 @@ export function CustomersView({ query }: ViewProps) {
   );
 }
 
+function ShareBar({ pctValue }: { pctValue: number }) {
+  return (
+    <span aria-hidden="true" className="block h-2 w-full max-w-24 overflow-hidden rounded-full bg-[var(--color-bg-tertiary)]">
+      <span className="block h-full rounded-full bg-[var(--color-brand-600)]" style={{ width: `${Math.max(0, Math.min(100, pctValue))}%` }} />
+    </span>
+  );
+}
+
+/**
+ * One group of payment methods. From md a table; below it (375px, UAT D3) one card per method, so nothing is
+ * clipped and nothing scrolls sideways.
+ */
 function MethodGroup({ title, rows, testId, note }: { title: string; rows: Array<{ key: string; label: string; amountTzs: number; count: number; sharePct: number }>; testId: string; note?: string }) {
   const { t } = useApp();
   return (
-    <Card data-testid={testId}>
+    <Card data-testid={testId} className="min-w-0">
       <CardHeader><h3 className="text-base font-semibold">{title}</h3></CardHeader>
       <CardContent className="space-y-3">
         {rows.length === 0 ? <p className="text-sm text-[var(--color-fg-quaternary)]">—</p> : (
-          <Table aria-label={title}>
-            <THead><Tr><Th>{t('vendor.reports.method')}</Th><Th className="!text-right">{t('vendor.reports.amount')}</Th><Th className="min-w-32">{t('vendor.reports.share')}</Th><Th className="!text-right">{t('vendor.reports.count')}</Th></Tr></THead>
-            <TBody>
+          <>
+            <div className="hidden md:block">
+              <Table aria-label={title}>
+                <THead><Tr><Th>{t('vendor.reports.method')}</Th><Th className="!text-right">{t('vendor.reports.amount')}</Th><Th className="min-w-32">{t('vendor.reports.share')}</Th><Th className="!text-right">{t('vendor.reports.count')}</Th></Tr></THead>
+                <TBody>
+                  {rows.map(r => (
+                    <Tr key={r.key}>
+                      <Th scope="row" className="!font-medium">{r.label}</Th>
+                      <Td className={numCell}>{money(r.amountTzs)}</Td>
+                      <Td><span className="flex items-center gap-2"><ShareBar pctValue={r.sharePct} /><span className="tabular-nums">{pct(r.sharePct)}</span></span></Td>
+                      <Td className={numCell}>{formatNumber(r.count)}</Td>
+                    </Tr>
+                  ))}
+                </TBody>
+              </Table>
+            </div>
+            <ul className="space-y-2 md:hidden" aria-label={title} data-testid={`${testId}-cards`}>
               {rows.map(r => (
-                <Tr key={r.key}>
-                  <Th scope="row" className="!font-medium">{r.label}</Th>
-                  <Td className={numCell}>{money(r.amountTzs)}</Td>
-                  <Td>
-                    <span className="flex items-center gap-2">
-                      <span aria-hidden="true" className="h-2 w-24 overflow-hidden rounded-full bg-[var(--color-bg-tertiary)]">
-                        <span className="block h-full rounded-full bg-[var(--color-brand-600)]" style={{ width: `${Math.max(0, Math.min(100, r.sharePct))}%` }} />
-                      </span>
-                      <span className="tabular-nums">{r.sharePct}%</span>
-                    </span>
-                  </Td>
-                  <Td className={numCell}>{formatNumber(r.count)}</Td>
-                </Tr>
+                <li key={r.key} className="rounded-[var(--radius-lg)] border border-[var(--color-border-secondary)] p-3 text-sm">
+                  <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+                    <span className="font-semibold [overflow-wrap:anywhere]">{r.label}</span>
+                    <span className="tabular-nums font-semibold">{money(r.amountTzs)}</span>
+                  </div>
+                  <div className="mt-2 flex items-center gap-2">
+                    <ShareBar pctValue={r.sharePct} />
+                    <span className="tabular-nums">{pct(r.sharePct)}</span>
+                    <span className="text-[var(--color-fg-quaternary)]">· {t('vendor.reports.count')} {formatNumber(r.count)}</span>
+                  </div>
+                </li>
               ))}
-            </TBody>
-          </Table>
+            </ul>
+          </>
         )}
         {note && <p className="text-xs text-[var(--color-fg-quaternary)]">{note}</p>}
       </CardContent>
@@ -161,8 +185,8 @@ export function MethodsView({ query, onTryPeriod, onWalkIn }: ViewProps) {
       {(d: MethodsReport) => (
         <div className="space-y-4">
           <HeaderLine head={d} view="methods" />
-          {!d.byYou.length && !d.viaFitFlex.length ? <NoSales from={d.from} to={d.to} onTryPeriod={onTryPeriod} /> : (
-            <div className="grid gap-4 lg:grid-cols-2">
+          {!d.byYou.length && !d.viaFitFlex.length ? <NoSales from={d.from} to={d.to} hasEverSold={d.hasEverSold} onTryPeriod={onTryPeriod} /> : (
+            <div className="grid min-w-0 gap-4 lg:grid-cols-2">
               <MethodGroup
                 title={t('vendor.reports.methods.byYou')} testId="methods-you"
                 rows={d.byYou.map(r => ({ key: r.method, label: r.method === 'cash' ? t('vendor.reports.methods.netOfChange') : saleMethodLabel(r.method, t), amountTzs: r.amountTzs, count: r.count, sharePct: r.sharePct }))}

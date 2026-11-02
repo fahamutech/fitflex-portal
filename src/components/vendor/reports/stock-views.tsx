@@ -13,7 +13,7 @@ import {
 import { Alert, Badge, Button, Card, CardContent, CardHeader, Input, Segmented, Spinner, Table, TBody, Td, Th, THead, Tr } from '@/components/shared';
 import { useVendor } from '@/components/vendor-context';
 import { useApp } from '../../../../app/providers';
-import { Figure, figureGrid, HeaderLine, minus, NoSales, numCell, pct, productLabel, ReportBarChart, useReport, useWalkInSeen, ViewState } from './bits';
+import { alertLinkCls, Figure, figureGrid, HeaderLine, minus, plural, ProfitCell, NoSales, numCell, pct, productLabel, ReportBarChart, useReport, useWalkInSeen, ViewState } from './bits';
 import type { ViewProps } from './sales-views';
 
 const SORT_KEYS: Record<ProductSort, MessageKey> = { revenue: 'vendor.reports.best', units: 'vendor.reports.mostUnits', slow: 'vendor.reports.slow' };
@@ -61,7 +61,7 @@ export function ProductsView({ query, onTryPeriod, onWalkIn, sort, onSort }: Vie
           const rows = [...d.rows, ...(more?.rows ?? [])];
           const next = more ? more.cursor : d.nextCursor;
           const cost = rows.some(r => 'profitTzs' in r);
-          if (!rows.length && !q && sort !== 'slow') return <><HeaderLine head={d} view="products" /><NoSales from={d.from} to={d.to} onTryPeriod={onTryPeriod} /></>;
+          if (!rows.length && !q && sort !== 'slow') return <><HeaderLine head={d} view="products" /><NoSales from={d.from} to={d.to} hasEverSold={d.hasEverSold} onTryPeriod={onTryPeriod} /></>;
           const lastSold = (r: ProductRow) => (r.lastSoldAt ? dayShort(eatDayOf(r.lastSoldAt), locale) : t('vendor.reports.never'));
           const units = (r: ProductRow) => (r.noSalesInPeriod && sort === 'slow' ? t('vendor.reports.noSalesPeriod') : formatNumber(r.unitsSold));
           return (
@@ -92,7 +92,7 @@ export function ProductsView({ query, onTryPeriod, onWalkIn, sort, onSort }: Vie
                         <Td className="whitespace-nowrap">{lastSold(r)}</Td>
                         <Td className={numCell}>{r.stock == null ? '—' : formatNumber(r.stock)}</Td>
                         <Td><CoverCell row={r} /></Td>
-                        {cost && <Td className={numCell}>{r.profitTzs == null ? '—' : money(r.profitTzs)}</Td>}
+                        {cost && <Td className={numCell}><ProfitCell row={r} /></Td>}
                       </Tr>
                     ))}
                   </TBody>
@@ -166,8 +166,8 @@ export function StockView() {
             </div>
             {cost && d.costUnknown && d.costUnknown.count > 0 && (
               <Alert tone="warning" className="!font-normal">
-                <span data-testid="stock-cost-unknown">{fmt(t('vendor.reports.stock.costUnknown'), { n: d.costUnknown.count })}</span>
-                {vendor.can('products') && <> <Link className="font-semibold underline underline-offset-4" href="/vendor/products/">{t('vendor.reports.addCost')}</Link></>}
+                <span data-testid="stock-cost-unknown">{plural(t, d.costUnknown.count, 'vendor.reports.stock.costUnknownOne', 'vendor.reports.stock.costUnknown')}</span>
+                {vendor.can('products') && <> <Link className={alertLinkCls} href="/vendor/products/?filter=noCost" data-testid="report-add-cost">{t('vendor.reports.addCost')}</Link></>}
               </Alert>
             )}
             <Table aria-label={t('vendor.reports.view.stock')} data-testid="stock-table">
@@ -214,7 +214,7 @@ export function ProfitView({ query, onTryPeriod, onWalkIn }: ViewProps) {
     return (
       <div className="space-y-4">
         <HeaderLine head={d} view="profit" />
-        {empty ? <NoSales from={d.from} to={d.to} onTryPeriod={onTryPeriod} /> : (
+        {empty ? <NoSales from={d.from} to={d.to} hasEverSold={d.hasEverSold} onTryPeriod={onTryPeriod} /> : (
           <>
             <div className="grid gap-3 grid-cols-2 lg:grid-cols-5" data-testid="profit-strip">
               <Figure label={t('vendor.reports.netExVat')} value={money(s.netExVatTzs)} testId="profit-net" />
@@ -226,8 +226,8 @@ export function ProfitView({ query, onTryPeriod, onWalkIn }: ViewProps) {
             {d.hasVat && <p className="text-sm text-[var(--color-fg-tertiary)]" data-testid="profit-novat">{t('vendor.reports.profit.noVat')}</p>}
             {d.uncosted.qty > 0 && (
               <Alert tone="warning" className="!font-normal">
-                <span data-testid="profit-uncosted">{fmt(t('vendor.reports.profit.uncosted'), { n: formatNumber(d.uncosted.qty), amount: money(d.uncosted.revenueTzs) })}</span>
-                {vendor.can('products') && <> <Link className="font-semibold underline underline-offset-4" href="/vendor/products/">{t('vendor.reports.addCost')}</Link></>}
+                <span data-testid="profit-uncosted">{plural(t, d.uncosted.qty, 'vendor.reports.profit.uncostedOne', 'vendor.reports.profit.uncosted', { n: formatNumber(d.uncosted.qty), amount: money(d.uncosted.revenueTzs) })}</span>
+                {vendor.can('products') && <> <Link className={alertLinkCls} href="/vendor/products/?filter=noCost" data-testid="report-add-cost">{t('vendor.reports.addCost')}</Link></>}
               </Alert>
             )}
             <Card><CardContent className="pt-6">
@@ -290,8 +290,8 @@ export function ProfitView({ query, onTryPeriod, onWalkIn }: ViewProps) {
                         <Th scope="row" className="!font-medium [overflow-wrap:anywhere]">{productLabel(p, t)}</Th>
                         <Td className={numCell}>{formatNumber(p.units)}</Td>
                         <Td className={numCell}>{money(p.netExVatTzs)}</Td>
-                        <Td className={numCell}>{minus(p.costTzs)}</Td>
-                        <Td className={numCell}>{money(p.profitTzs)}</Td>
+                        <Td className={numCell}>{p.costTzs == null ? '—' : minus(p.costTzs)}</Td>
+                        <Td className={numCell} data-testid="profit-product-profit"><ProfitCell row={p} /></Td>
                         <Td className={numCell}>{pct(p.marginPct)}</Td>
                       </Tr>
                     ))}
@@ -303,7 +303,7 @@ export function ProfitView({ query, onTryPeriod, onWalkIn }: ViewProps) {
                     <ul className="space-y-1 text-sm">
                       {d.uncostedProducts.map(p => (
                         <li key={`${p.productId}:${p.variant ?? ''}`} className="flex justify-between gap-3">
-                          <span className="[overflow-wrap:anywhere]">{productLabel(p, t)} · {fmt(t('vendor.reports.unitsN'), { n: formatNumber(p.units) })}</span>
+                          <span className="[overflow-wrap:anywhere]">{productLabel(p, t)} · {plural(t, p.units, 'vendor.reports.unitsOne', 'vendor.reports.unitsN', { n: formatNumber(p.units) })}</span>
                           <span className="tabular-nums">{money(p.revenueTzs)}</span>
                         </li>
                       ))}
