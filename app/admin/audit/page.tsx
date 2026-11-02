@@ -41,7 +41,7 @@ export default function AuditLogPage() {
     } catch (err) {
       if (mine !== gen.current) return;
       setItems([]); setCursor(null);
-      if (err instanceof ApiError && err.status === 403) setState('forbidden');
+      if (err instanceof ApiError && err.status === 403 && errorCode(err) === 'acl_forbidden') setState('forbidden');
       else if (err instanceof ApiError && err.status === 400 && errorCode(err) === 'invalid_filter') setState('invalid');
       else setState('error');
     }

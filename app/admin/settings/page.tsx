@@ -76,6 +76,7 @@ export default function SettingsPage() {
   useEffect(() => { load(); }, [token]);
 
   const [reason, setReason] = useState('');
+  const [reasonMissing, setReasonMissing] = useState(false);
   const canSave = !!settings && !loadFailed;
 
   async function handleSave(confirmed = false) {
@@ -90,6 +91,7 @@ export default function SettingsPage() {
     setSaving(true);
     setSuccess(null);
     setError(null);
+    setReasonMissing(false);
     try {
       const updated = await api.updateSettings(token, {
         subscriptionTiers: tiers,
@@ -116,7 +118,13 @@ export default function SettingsPage() {
         return;
       }
       // 400 reason_required: nothing was saved.
-      if (isReasonRequired(e)) { setError(t(REASON_REQUIRED_KEY)); return; }
+      if (isReasonRequired(e)) {
+        setError(t(REASON_REQUIRED_KEY));
+        setReasonMissing(true);
+        const box = document.querySelector<HTMLTextAreaElement>('[data-testid="settings-reason"]');
+        box?.scrollIntoView({ block: 'center' }); box?.focus();
+        return;
+      }
       const bad = settingsTierError(e);
       if (bad) { setError(bad.tier ? fillIn(t('tiers.err.server'), { tier: bad.tier, problem: t(bad.key) }) : t(bad.key)); return; }
       setError(t('settings.saveFailed'));
@@ -300,7 +308,7 @@ export default function SettingsPage() {
       {/* Why "Save all" is being pressed: stored in the audit log; the server may require it (ADMIN_REASONS_REQUIRED). */}
       <Card>
         <div className="p-5">
-          <ReasonField value={reason} onChange={setReason} testId="settings-reason" />
+          <ReasonField value={reason} onChange={v => { setReason(v); setReasonMissing(false); }} error={reasonMissing ? t(REASON_REQUIRED_KEY) : null} testId="settings-reason" />
         </div>
       </Card>
 

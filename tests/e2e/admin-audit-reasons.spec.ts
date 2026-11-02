@@ -7,7 +7,7 @@ const API = process.env.FITFLEX_API_URL || 'http://localhost:3000';
 test.use({ serviceWorkers: 'block' });
 
 type Reply = { status?: number; json?: unknown };
-type Routes = Record<string, Reply | ((req: Request) => Reply)>;
+type Routes = Record<string, Reply | ((req: Request) => Reply | Promise<Reply>)>;
 type Call = { method: string; path: string; search: string; body: Record<string, unknown> | null };
 
 const SUPER = { id: 'adm_1', userType: 'admin', email: 'one@fitflex.test' };
@@ -30,7 +30,7 @@ async function open(page: Page, user: Record<string, unknown>, routes: Routes, p
     calls.push({ method: req.method(), path: url.pathname, search: url.search, body });
     const hit = routes[`${req.method()} ${url.pathname}`];
     if (!hit) return route.fulfill({ status: 404, json: { error: 'not_found' } });
-    const reply = typeof hit === 'function' ? hit(req) : hit;
+    const reply = typeof hit === 'function' ? await hit(req) : hit;
     return route.fulfill({ status: reply.status ?? 200, json: reply.json ?? null });
   });
   await page.goto(path);
@@ -173,6 +173,18 @@ test.describe('audit log', () => {
     expect(calls.filter(c => c.path === '/admin/audit-log')).toEqual([]);
   });
 
+  test('a 403 that is not acl_forbidden gets the generic error, not the permission message', async ({ page }) => {
+    await open(page, SUPER, { 'GET /admin/audit-log': { status: 403, json: { error: 'something_else' } } }, '/admin/audit/');
+    await expect(page.getByTestId('audit-error')).toContainText("Couldn't load the audit log");
+    await expect(page.getByTestId('audit-forbidden')).toHaveCount(0);
+  });
+
+  test('the page and the users-page scope label warn about personal contact details (EN and SW)', async ({ page }) => {
+    await open(page, SUPER, { 'GET /admin/audit-log': { json: { items: [], nextCursor: null } } }, '/admin/audit/', 'sw');
+    await expect(page.getByText('mawasiliano binafsi').first()).toBeVisible();
+    await expect(page.getByTestId('audit-append-only')).toContainText('akaunti inapofutwa');
+  });
+
   test('nav entry shows for scope audit', async ({ page }) => {
     await open(page, staff(['audit']), { 'GET /admin/audit-log': { json: { items: [], nextCursor: null } } }, '/admin/audit/');
     await expect(page.locator('a[href^="/admin/audit"]').first()).toBeVisible();
@@ -196,6 +208,63 @@ test.describe('reasons', () => {
     expect(calls.find(c => c.path === '/admin/members/mem_1/status')!.body).toEqual({ status: 'suspended', reason: 'Chargeback abuse' });
   });
 
+  test('a failure other than reason_required is shown inside the dialog; a late close or backdrop click is ignored while busy', async ({ page }) => {
+    let release!: () => void;
+    const gate = new Promise<void>(res => { release = res; });
+    let n = 0;
+    await open(page, SUPER, {
+      'GET /admin/members': { json: [MEMBER] },
+      'POST /admin/members/mem_1/status': async () => { n++; if (n === 1) return { status: 500, json: { error: 'boom' } }; await gate; return { json: { ...MEMBER, accountStatus: 'suspended' } }; },
+    }, '/admin/members/');
+    await page.locator('select').filter({ hasText: 'Suspended' }).first().selectOption('suspended');
+    const dlg = page.getByRole('alertdialog');
+    await dlg.getByRole('button', { name: 'Suspend' }).click();
+    await expect(dlg.getByTestId('member-action-error')).toContainText("Couldn't change the member's status");
+    // Second attempt hangs: the backdrop and Escape do nothing while it is in flight, and the typed reason stays.
+    await page.getByTestId('member-status-reason').fill('Typed reason');
+    await dlg.getByRole('button', { name: 'Suspend' }).click();
+    await expect(dlg.getByRole('button', { name: 'Please wait' })).toBeVisible();
+    await page.mouse.click(5, 5);
+    await page.keyboard.press('Escape');
+    await expect(dlg).toBeVisible();
+    await expect(page.getByTestId('member-status-reason')).toHaveValue('Typed reason');
+    release();
+    await expect(dlg).toHaveCount(0);
+  });
+
+  test('a failed reload after a successful change does not read as a failed action', async ({ page }) => {
+    let posted = false;
+    await open(page, SUPER, {
+      'GET /admin/members': () => (posted ? { status: 500, json: { error: 'boom' } } : { json: [MEMBER] }),
+      'POST /admin/members/mem_1/status': () => { posted = true; return { json: { ...MEMBER, accountStatus: 'suspended' } }; },
+    }, '/admin/members/');
+    await page.locator('select').filter({ hasText: 'Suspended' }).first().selectOption('suspended');
+    await page.getByRole('alertdialog').getByRole('button', { name: 'Suspend' }).click();
+    await expect(page.getByRole('alertdialog')).toHaveCount(0);
+    await expect(page.getByText('API 500').first()).toBeVisible();
+    await expect(page.getByText('Action failed')).toHaveCount(0);
+  });
+
+  test('owner delete: another failure shows inside the dialog; closing resets the typed reason', async ({ page }) => {
+    const OWNER = { id: 'own-a', userType: 'gym_operator', displayName: 'Asha Owner', email: 'asha@example.com', gymIds: [], accountStatus: 'active', approvalStatus: 'approved' };
+    await open(page, SUPER, {
+      'GET /admin/gym-owners': { json: [OWNER] }, 'GET /admin/gyms': { json: [] }, 'GET /admin/trainers': { json: [] },
+      'DELETE /admin/gym-owners/own-a': { status: 500, json: { error: 'boom' } },
+    }, '/admin/owners/', 'sw');
+    const row = page.locator('tr', { hasText: 'Asha Owner' });
+    await row.locator('button').last().click();
+    const dlg = page.getByRole('alertdialog');
+    await expect(dlg).toContainText('Futa mmiliki');
+    await page.getByTestId('owner-delete-reason').fill('kitu');
+    await dlg.getByRole('button', { name: 'Futa' }).click();
+    await expect(dlg.getByTestId('owner-action-error')).toContainText('Imeshindwa kumfuta mmiliki');
+    await dlg.getByRole('button', { name: 'Ghairi' }).click();
+    await expect(dlg).toHaveCount(0);
+    await row.locator('button').last().click();
+    await expect(page.getByTestId('owner-delete-reason')).toHaveValue('');
+    await expect(page.getByTestId('owner-action-error')).toHaveCount(0);
+  });
+
   test('reason_required keeps the dialog open with a readable message (EN and SW); no reason sends no reason key', async ({ page }) => {
     const calls = await open(page, SUPER, {
       'GET /admin/members': { json: [MEMBER] },
@@ -204,12 +273,12 @@ test.describe('reasons', () => {
         : { status: 400, json: { error: 'reason_required' } },
     }, '/admin/members/', 'sw');
     await page.locator('select').filter({ hasText: 'Suspended' }).first().selectOption('suspended');
-    await page.getByRole('alertdialog').getByRole('button', { name: 'Suspend' }).click();
+    await page.getByRole('alertdialog').getByRole('button', { name: 'Sitisha' }).click();
     await expect(page.getByRole('alertdialog')).toContainText('Toa sababu ya hatua hii.');
     expect(calls.find(c => c.path === '/admin/members/mem_1/status')!.body).toEqual({ status: 'suspended' });
     await page.getByTestId('member-status-reason').fill('Sababu');
     await expect(page.getByRole('alertdialog')).not.toContainText('Toa sababu ya hatua hii.');
-    await page.getByRole('alertdialog').getByRole('button', { name: 'Suspend' }).click();
+    await page.getByRole('alertdialog').getByRole('button', { name: 'Sitisha' }).click();
     await expect(page.getByRole('alertdialog')).toHaveCount(0);
   });
 
@@ -243,8 +312,11 @@ test.describe('reasons', () => {
       'PUT /admin/settings': req => (req.postDataJSON() as { reason?: string }).reason ? { json: SETTINGS } : { status: 400, json: { error: 'reason_required' } },
     }, '/admin/settings/');
     await page.getByTestId('settings-save').click();
-    await expect(page.getByText('Give a reason for this action.')).toBeVisible();
+    // Shown as the page banner and inline next to the reason box, which takes focus.
+    await expect(page.getByText('Give a reason for this action.')).toHaveCount(2);
+    await expect(page.getByTestId('settings-reason')).toBeFocused();
     await page.getByTestId('settings-reason').fill('Price review');
+    await expect(page.getByText('Give a reason for this action.')).toHaveCount(1);
     await page.getByTestId('settings-save').click();
     await expect(page.getByText('Give a reason for this action.')).toHaveCount(0);
     const puts = calls.filter(c => c.method === 'PUT');
