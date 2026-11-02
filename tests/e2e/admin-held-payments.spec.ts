@@ -75,9 +75,10 @@ test.describe('held payments worklist', () => {
     let raised = false;
     const calls = await open(page, {
       'GET /admin/payments/held': () => ({ json: { items: raised ? [] : [ITEMS[0]] } }),
-      'POST /admin/payments/held/pr_TX-OK/refund': () => { raised = true; return { status: 201, json: { refund: { id: 'rf_9' } } }; },
+      'POST /admin/payments/held/pr_TX-OK/refund': () => { raised = true; return { status: 201, json: { refund: { id: 'rf_9', status: 'approved' } } }; },
     });
     await page.getByTestId('held-refund').click();
+    await expect(page.getByRole('dialog')).toContainText('approved immediately');
     await page.getByTestId('held-submit').click();
     await expect(page.getByTestId('held-error')).toContainText('Choose a reason');
     expect(posts(calls)).toHaveLength(0);
@@ -85,6 +86,7 @@ test.describe('held payments worklist', () => {
     await page.getByTestId('held-note').fill('Member charged after cancel');
     await page.getByTestId('held-submit').click();
     await expect(page.getByText('No held payments.')).toBeVisible();
+    await expect(page.getByText('Refund raised. Status: Approved.')).toBeVisible();
     expect(posts(calls)).toHaveLength(1);
     expect(posts(calls)[0].body).toEqual({ transactionId: 'TX-OK', reasonCode: 'payment_error', note: 'Member charged after cancel' });
   });
@@ -101,6 +103,7 @@ test.describe('held payments worklist', () => {
     await expect(page.getByTestId('held-error')).toContainText('Enter the amount');
     expect(posts(calls)).toHaveLength(0);
     await page.getByTestId('held-amount').fill('30000');
+    await expect(page.getByTestId('held-submit')).toContainText('30,000');
     await page.getByTestId('held-submit').click();
     await expect(page.getByTestId('held-error')).toContainText("amount received isn't on record");
     await page.getByTestId('held-submit').click();
@@ -112,7 +115,7 @@ test.describe('held payments worklist', () => {
     let code = 'cannot_approve_own_request';
     await open(page, {
       'GET /admin/payments/held': { json: { items: [ITEMS[0]] } },
-      'POST /admin/payments/held/pr_TX-OK/refund': () => ({ status: code === 'forbidden' ? 403 : 409, json: { error: code } }),
+      'POST /admin/payments/held/pr_TX-OK/refund': () => ({ status: code === 'forbidden' || code === 'acl_forbidden' ? 403 : 409, json: { error: code } }),
     });
     await page.getByTestId('held-refund').click();
     await page.getByTestId('held-reason').selectOption('payment_error');
@@ -122,6 +125,9 @@ test.describe('held payments worklist', () => {
     await page.getByTestId('held-submit').click();
     await expect(page.getByTestId('held-error')).toContainText("can't be refunded");
     code = 'forbidden';
+    await page.getByTestId('held-submit').click();
+    await expect(page.getByTestId('held-error')).toContainText("don't have permission");
+    code = 'acl_forbidden';
     await page.getByTestId('held-submit').click();
     await expect(page.getByTestId('held-error')).toContainText("don't have permission");
   });
@@ -142,5 +148,41 @@ test.describe('held payments worklist', () => {
     down = false;
     await page.getByRole('button', { name: 'Try again' }).click();
     await expect(page.getByText('No held payments.')).toBeVisible();
+  });
+
+  test('a row with no provider transaction shows the transaction_id_required message', async ({ page }) => {
+    const calls = await open(page, { 'GET /admin/payments/held': { json: { items: [row('x', { transactionId: null })] } } });
+    await page.getByTestId('held-refund').click();
+    await page.getByTestId('held-reason').selectOption('payment_error');
+    await page.getByTestId('held-submit').click();
+    await expect(page.getByTestId('held-error')).toContainText('no provider transaction');
+    expect(posts(calls)).toHaveLength(0);
+  });
+
+  test('stale row: the dialog closes with the reason, no skeleton while open; if still refundable it stays open', async ({ page }) => {
+    let posted = false;
+    await open(page, {
+      'GET /admin/payments/held': () => { return { json: { items: posted ? [row('TX-OK', { refundable: false, notRefundableReason: 'already_refunded', refundId: 'rf_1', refundStatus: 'requested' })] : [ITEMS[0]] } }; },
+      'POST /admin/payments/held/pr_TX-OK/refund': () => { posted = true; return { status: 409, json: { error: 'refund_already_requested' } }; },
+    });
+    await page.getByTestId('held-refund').click();
+    await page.getByTestId('held-reason').selectOption('payment_error');
+    await page.getByTestId('held-submit').click();
+    await expect(page.getByTestId('held-dialog')).toHaveCount(0);
+    await expect(page.getByText('A refund was already raised for this payment. The list was refreshed.')).toBeVisible();
+    await expect(page.getByTestId('held-row-TX-OK')).toContainText('already raised');
+  });
+
+  test('stale code but the row is still refundable after reload: dialog stays with the message, table not replaced by a skeleton', async ({ page }) => {
+    await open(page, {
+      'GET /admin/payments/held': { json: { items: [ITEMS[0]] } },
+      'POST /admin/payments/held/pr_TX-OK/refund': { status: 409, json: { error: 'not_held' } },
+    });
+    await page.getByTestId('held-refund').click();
+    await page.getByTestId('held-reason').selectOption('payment_error');
+    await page.getByTestId('held-submit').click();
+    await expect(page.getByTestId('held-error')).toContainText('no longer held');
+    await expect(page.getByTestId('held-dialog')).toBeVisible();
+    await expect(page.locator('[aria-busy="true"]')).toHaveCount(0);
   });
 });

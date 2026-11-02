@@ -26,7 +26,7 @@ export interface HeldRefundBody { transactionId: string; reasonCode: string; amo
 export const heldPaymentsApi = {
   list: (token: string, status: HeldStatus) => request<{ items: HeldPayment[] }>(`/admin/payments/held?status=${status}`, {}, token),
   refund: (token: string, paymentRequestId: string, body: HeldRefundBody) =>
-    request<{ refund: { id: string } }>(`/admin/payments/held/${encodeURIComponent(paymentRequestId)}/refund`, { method: 'POST', body: JSON.stringify(body) }, token),
+    request<{ refund: { id: string; status?: string } }>(`/admin/payments/held/${encodeURIComponent(paymentRequestId)}/refund`, { method: 'POST', body: JSON.stringify(body) }, token),
 };
 
 /** Reasons an admin may give for held money, in the order shown. Labels reuse refunds.reason.*. */

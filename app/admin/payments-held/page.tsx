@@ -49,15 +49,20 @@ export default function HeldPaymentsPage() {
   const [state, setState] = useState<'loading' | 'ready' | 'error' | 'off'>('loading');
   const [refunding, setRefunding] = useState<HeldPayment | null>(null);
 
-  const load = useCallback(async () => {
-    if (!token) return;
-    setState('loading');
+  /** `silent` reloads behind an open dialog: no skeleton, and a failed reload keeps what is on screen. Returns the fresh rows or null. */
+  const load = useCallback(async (silent = false): Promise<HeldPayment[] | null> => {
+    if (!token) return null;
+    if (!silent) setState('loading');
     try {
-      setItems((await heldPaymentsApi.list(token, status)).items); setState('ready');
+      const fresh = (await heldPaymentsApi.list(token, status)).items;
+      setItems(fresh); setState('ready');
+      return fresh;
     } catch (err) {
+      if (silent) return null;
       // Only the server's own 404 feature_disabled is "off"; any other failure (incl. a plain 404) is a load error with a retry.
-      if (err instanceof ApiError && err.status === 404 && errorCode(err) === 'feature_disabled') { setState('off'); return; }
+      if (err instanceof ApiError && err.status === 404 && errorCode(err) === 'feature_disabled') { setState('off'); return null; }
       setState('error');
+      return null;
     }
   }, [token, status]);
   useEffect(() => { void load(); }, [load]);
@@ -67,7 +72,7 @@ export default function HeldPaymentsPage() {
       title={t('heldPayments.title')}
       description={t('heldPayments.intro')}
       actions={state === 'ready' || state === 'error' ? (
-        <Button variant="secondary" className="min-h-11" onClick={load}><RefreshCw aria-hidden="true" className="h-4 w-4" />{t('admin.action.refresh')}</Button>
+        <Button variant="secondary" className="min-h-11" onClick={() => void load()}><RefreshCw aria-hidden="true" className="h-4 w-4" />{t('admin.action.refresh')}</Button>
       ) : undefined}
     />
   );
@@ -88,7 +93,7 @@ export default function HeldPaymentsPage() {
         </Field>
       </div>
       {state === 'loading' ? <div aria-busy="true"><SkeletonTable rows={5} columns={5} /></div>
-        : state === 'error' ? <ErrorState title={t('heldPayments.loadFailed')} onRetry={load} retryLabel={t('common.tryAgain')} />
+        : state === 'error' ? <ErrorState title={t('heldPayments.loadFailed')} onRetry={() => void load()} retryLabel={t('common.tryAgain')} />
         : items.length === 0 ? <EmptyState title={t(status === 'open' ? 'heldPayments.empty' : 'heldPayments.emptyResolved')} />
         : (
           <Card className="p-0">
@@ -143,15 +148,25 @@ export default function HeldPaymentsPage() {
         <RefundDialog
           item={refunding}
           onClose={() => setRefunding(null)}
-          onStale={() => { void load(); }}
-          onDone={async () => { setRefunding(null); toast.success(t('heldPayments.done')); await load(); }}
+          // The row went stale: reload quietly; when it is no longer refundable the dialog closes and the reason is toasted.
+          onStale={async (message) => {
+            const fresh = await load(true);
+            const still = fresh?.some(i => i.paymentRequestId === refunding.paymentRequestId && i.transactionId === refunding.transactionId && i.refundable);
+            if (fresh && !still) { setRefunding(null); toast.error(message); return true; }
+            return false;
+          }}
+          onDone={async (refundStatus) => {
+            setRefunding(null);
+            toast.success(fill(t('heldPayments.done'), { status: refundStatus && REFUND_STATUS[refundStatus] ? t(REFUND_STATUS[refundStatus]) : (refundStatus ?? '—') }));
+            await load(true);
+          }}
         />
       )}
     </div>
   );
 }
 
-function RefundDialog({ item, onClose, onDone, onStale }: { item: HeldPayment; onClose: () => void; onDone: () => void; onStale: () => void }) {
+function RefundDialog({ item, onClose, onDone, onStale }: { item: HeldPayment; onClose: () => void; onDone: (refundStatus: string | null) => void; onStale: (message: string) => Promise<boolean> }) {
   const { token, t } = useApp();
   const unknown = !item.amountReceivedKnown || item.amountTzs == null;
   const [reasonCode, setReasonCode] = useState('');
@@ -159,35 +174,39 @@ function RefundDialog({ item, onClose, onDone, onStale }: { item: HeldPayment; o
   const [amount, setAmount] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const stated = Math.round(Number(amount));
 
-  function refusal(err: unknown): string {
-    if (err instanceof ApiError && err.status === 403 && errorBody(err)?.error === 'forbidden') return t('heldPayments.err.forbidden');
+  /** The message for one refusal, and whether it means the row on screen is out of date. */
+  function refusal(err: unknown): { message: string; stale: boolean } {
+    if (err instanceof ApiError && err.status === 403 && ['forbidden', 'acl_forbidden'].includes(errorBody(err)?.error ?? '')) return { message: t('heldPayments.err.forbidden'), stale: false };
     const code = errorCode(err);
     if (code) {
       const own = `heldPayments.err.${code}` as MessageKey;
-      if (KNOWN.includes(own)) { if (STALE.includes(code)) onStale(); return t(own); }
-      if (code === 'cannot_approve_own_request' || code === 'cannot_pay_own_approval') return t(moneyErrorKey(err));
+      if (KNOWN.includes(own)) return { message: t(own), stale: STALE.includes(code) };
+      if (code === 'cannot_approve_own_request' || code === 'cannot_pay_own_approval') return { message: t(moneyErrorKey(err)), stale: false };
     }
-    return t('heldPayments.err.generic');
+    return { message: t('heldPayments.err.generic'), stale: false };
   }
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
-    if (!token || !item.transactionId) return;
+    if (!token) return;
+    if (!item.transactionId) { setError(t('heldPayments.err.transaction_id_required')); return; }
     if (!reasonCode) { setError(t('heldPayments.reason.required')); return; }
     if (reasonCode === 'other' && !note.trim()) { setError(t('heldPayments.note.required')); return; }
-    const stated = Math.round(Number(amount));
     if (unknown && !(Number.isFinite(stated) && stated > 0)) { setError(t('heldPayments.amount.required')); return; }
     setBusy(true); setError(null);
     try {
-      await heldPaymentsApi.refund(token, item.paymentRequestId, {
+      const res = await heldPaymentsApi.refund(token, item.paymentRequestId, {
         transactionId: item.transactionId, reasonCode,
         ...(unknown ? { amountTzs: stated } : {}),
         ...(note.trim() ? { note: note.trim() } : {}),
       });
-      onDone();
+      onDone(res?.refund?.status ?? null);
     } catch (err) {
-      setError(refusal(err));
+      const { message, stale } = refusal(err);
+      // Stale row: the page reloads and closes this dialog if the row is no longer refundable; otherwise the message stays here.
+      if (!stale || !(await onStale(message))) setError(message);
     } finally {
       setBusy(false);
     }
@@ -215,7 +234,7 @@ function RefundDialog({ item, onClose, onDone, onStale }: { item: HeldPayment; o
         <div className="flex flex-wrap justify-end gap-2 border-t border-[var(--color-border-secondary)] pt-4">
           <Button type="button" variant="secondary" className="min-h-11" onClick={onClose} disabled={busy}>{t('common.cancel')}</Button>
           <Button type="submit" variant="destructive" className="min-h-11" loading={busy} data-testid="held-submit">
-            {unknown ? t('heldPayments.confirmUnknown') : fill(t('heldPayments.confirm'), { amount: money(item.amountTzs) })}
+            {unknown && !(stated > 0) ? t('heldPayments.confirmUnknown') : fill(t('heldPayments.confirm'), { amount: money(unknown ? stated : item.amountTzs) })}
           </Button>
         </div>
       </form>
