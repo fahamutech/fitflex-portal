@@ -6,7 +6,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { AlertTriangle, Camera, CameraOff, CheckCircle2, Info, Search, WifiOff, XCircle } from 'lucide-react';
 import { api, ApiError, type EventDocument, type KitCard, type KitCollectionRow, type KitLookupItem, type KitSummary, type KitVerifyResult, type KitWarning, type OrganizerRole } from '@/lib/api';
 import { distanceLabel, errorBody, errorCode, errorKey, eventDateTime, fmt, isFeatureOff, isForbidden } from '@/lib/events';
-import { canOverrideKit, isEventTicketPayload, isRateLimited, lookupCard, newIdempotencyKey, retryAfterSeconds } from '@/lib/events-ops';
+import { KIT_ROLES, canOverrideKit, hasRole, isEventTicketPayload, isRateLimited, lookupCard, newIdempotencyKey, retryAfterSeconds } from '@/lib/events-ops';
 import type { MessageKey } from '@/lib/i18n';
 import { Alert, Badge, Button, Card, CardContent, CardHeader, EmptyState, Field, Input, Select, SkeletonCard, useToast } from '@/components/shared';
 import { QrScanner, type QrScannerState } from '@/components/qr-scanner';
@@ -14,6 +14,7 @@ import { EventsUnavailable, OrganizerForbidden, PageError } from '@/components/o
 import { ManualHandoverDialog, ReasonDialog } from '@/components/organizer/ops-dialogs';
 import { useEventsOptions } from '@/components/events-options';
 import { useApp } from '../../../app/providers';
+import Link from 'next/link';
 
 type Tone = 'success' | 'warning' | 'error' | 'info';
 const TONE: Record<Tone, { box: string; text: string; icon: string }> = {
@@ -56,13 +57,16 @@ export function KitCardBody({ card, tone }: { card: KitCard; tone: Tone }) {
   );
 }
 
-export function KitDesk({ doc, role, readOnly, onOpenRegistration }: {
+export function KitDesk({ doc, role, readOnly, onOpenRegistration, embedded = false }: {
+  /** Inside the offline desk page: no link back to itself. */ embedded?: boolean;
   doc: EventDocument; role: OrganizerRole | null; /** Suspended organizer: the desk reads but never writes (AC-B17). */ readOnly: boolean; onOpenRegistration: (registrationId: string) => void;
 }) {
   const { t, token, locale } = useApp();
   const toast = useToast();
   const options = useEventsOptions();
   const eventId = doc.id;
+  // Events S7 §3.14: the entry to the offline desk and the new offline wording exist only while the server says the offline desk is on.
+  const kitOfflineOn = !!options?.ops?.kitOffline && hasRole(KIT_ROLES, role);
   const points = (doc.collectionPoints ?? []).filter(p => !!p.id);
   const [pointId, setPointId] = useState('');
   const [summary, setSummary] = useState<KitSummary | null>(null);
@@ -261,7 +265,12 @@ export function KitDesk({ doc, role, readOnly, onOpenRegistration }: {
       {readOnly && <div data-testid="kit-suspended"><Alert tone="warning">{t('events.kit.suspended')}</Alert></div>}
       {!online && (
         <div data-testid="kit-offline" role="status" className="sticky top-0 z-10">
-          <Alert tone="warning"><span className="flex items-start gap-2"><WifiOff aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0" />{t('events.kit.offline')}</span></Alert>
+          <Alert tone="warning"><span className="flex items-start gap-2"><WifiOff aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0" />{kitOfflineOn ? t('organizer.kitOffline.banner.s5') : t('events.kit.offline')}</span></Alert>
+        </div>
+      )}
+      {kitOfflineOn && !embedded && (
+        <div className="flex justify-end" data-testid="kit-offline-entry">
+          <Link href={`/organizer/kit-desk?event=${encodeURIComponent(eventId)}`} className="inline-flex"><Button variant="secondary" className="min-h-11">{t('organizer.kitOffline.entry')}</Button></Link>
         </div>
       )}
       {wait > 0 && <div data-testid="kit-rate-limited" role="status"><Alert tone="warning">{fmt(t('events.kit.rateLimited'), { seconds: wait })}</Alert></div>}

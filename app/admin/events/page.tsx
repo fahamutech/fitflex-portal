@@ -15,6 +15,12 @@ import { EventRegistrationsTable } from '@/components/event-registrations-table'
 import { EventOrdersTable } from '@/components/event-orders-table';
 import { hasRegistrationData } from '@/components/organizer/event-views';
 import { useEventsOptions } from '@/components/events-options';
+import { AdminEventsHealth } from '@/components/admin-events-health';
+import { AdminEventsOps } from '@/components/admin-events-ops';
+import { AdminEventsDisputes } from '@/components/admin-events-disputes';
+import { AdminEventControls } from '@/components/admin-event-controls';
+import { AdminEventWaitlist } from '@/components/admin-event-waitlist';
+import { DevicesPanel } from '@/components/organizer/kit-desk-offline/devices-panel';
 import { AdminEventResults } from '@/components/admin-event-results';
 import { resultsOf, resultsOpenFor } from '@/lib/events-results';
 import { LifecycleButtons, LifecycleDialogs, type LifecycleAction } from '@/components/event-lifecycle';
@@ -24,7 +30,10 @@ import { EventsUnavailable, PageError, PageLoading, useDocumentTitle } from '@/c
 import { useApp } from '../../providers';
 
 const TABS = ['submitted', 'published', 'cancelled', 'all', 'audit'] as const;
-type Tab = (typeof TABS)[number];
+/** Events S7 (spec §5.5, §6.3, §6.4): the Health, Operations and Disputes tabs. Their labels and availability come from the server's options. */
+const S7_TABS = ['health', 'operations', 'disputes'] as const;
+type Tab = (typeof TABS)[number] | (typeof S7_TABS)[number];
+const isS7Tab = (tab: string): tab is (typeof S7_TABS)[number] => (S7_TABS as readonly string[]).includes(tab);
 
 function OrganizerBadge({ status }: { status: string }) {
   const { t } = useApp();
@@ -38,8 +47,9 @@ function Queue({ tab, onTab, onOpen }: { tab: Tab; onTab: (t: Tab) => void; onOp
   const [rows, setRows] = useState<AdminEventRow[] | null>(null);
   const [counts, setCounts] = useState<{ submitted: number } | null>(null);
   const [state, setState] = useState<'ok' | 'error' | 'off'>('ok');
+  const queueOptions = useEventsOptions();
   const load = useCallback(async () => {
-    if (!token || tab === 'audit') return;
+    if (!token || tab === 'audit' || isS7Tab(tab)) return;
     setRows(null); setState('ok');
     try {
       const out: AdminEventRow[] = [];
@@ -66,12 +76,15 @@ function Queue({ tab, onTab, onOpen }: { tab: Tab; onTab: (t: Tab) => void; onOp
     { key: 'permitOnFile', header: t('admin.events.col.permit'), cell: r => <Badge tone={r.permitOnFile ? 'success' : 'warning'}>{t(r.permitOnFile ? 'admin.events.permit.onFile' : 'admin.events.permit.missing')}</Badge> },
     { key: 'status', header: t('events.list.col.status'), sortable: true, cell: r => { const s = eventStatusOf(r.status); return <Badge tone={s.tone}>{t(s.key)}</Badge>; } },
   ];
-  const segLabel = (k: Tab) => (k === 'submitted' && counts ? `${t('admin.events.tab.submitted')} (${counts.submitted})` : t(`admin.events.tab.${k}` as 'admin.events.tab.all'));
+  // Health needs the analytics flag; Disputes needs results; Operations is always there for an events-scope admin (its actions say when a feature is off).
+  const s7Tabs = S7_TABS.filter(k => k === 'operations' || (k === 'health' ? !!queueOptions?.analytics?.enabled : !!queueOptions?.results?.enabled));
+  const segLabel = (k: Tab) => (isS7Tab(k) ? t(`admin.events.${k === 'operations' ? 'ops' : k}.tab` as 'admin.events.ops.tab')
+    : k === 'submitted' && counts ? `${t('admin.events.tab.submitted')} (${counts.submitted})` : t(`admin.events.tab.${k}` as 'admin.events.tab.all'));
   return (
     <div className="space-y-4" data-testid="admin-events-queue">
       <PageHeader title={t('admin.events.title')} />
-      <Segmented className="w-fit flex-wrap" value={tab} onChange={v => onTab(v as Tab)} options={TABS.map(k => [k, segLabel(k)] as [string, string])} />
-      {tab === 'audit' ? <AuditTable /> : state === 'error' ? <PageError onRetry={() => void load()} /> : !rows ? <div aria-busy="true"><SkeletonTable /></div> : (
+      <Segmented className="w-fit flex-wrap" value={tab} onChange={v => onTab(v as Tab)} options={[...TABS, ...s7Tabs].map(k => [k, segLabel(k)] as [string, string])} />
+      {tab === 'health' ? <AdminEventsHealth /> : tab === 'operations' ? <AdminEventsOps /> : tab === 'disputes' ? <AdminEventsDisputes /> : tab === 'audit' ? <AuditTable /> : state === 'error' ? <PageError onRetry={() => void load()} /> : !rows ? <div aria-busy="true"><SkeletonTable /></div> : (
         <Card><CardContent>
           <DataTable columns={columns} data={rows} keyFn={r => r.id} label={t('admin.events.tableLabel')} dense onRowClick={r => onOpen(r.id)}
             defaultSort={{ key: tab === 'submitted' ? 'submittedAt' : 'startsAt', dir: 'desc' }}
@@ -212,6 +225,10 @@ function Detail({ id, view, orderParam, onView, onBack }: { id: string; view: De
             </CardContent>
           </Card>
           <AdminPayoutCard doc={doc} onChanged={() => void load()} />
+          {/* Events S7: incident controls, payments banner, waitlist, offline desks (each hides itself while its server flag is off) */}
+          <AdminEventControls doc={doc} onChanged={() => void load()} />
+          <AdminEventWaitlist eventId={id} timezone={doc.timezone} />
+          {evOptions?.ops?.kitOffline && <DevicesPanel eventId={id} timezone={doc.timezone} mode="admin" canRemove />}
           <Card data-testid="admin-organizer-card">
             <CardHeader><h2 className="text-base font-semibold text-[var(--color-fg-primary)]">{t('admin.events.organizerCard')}</h2></CardHeader>
             <CardContent className="space-y-3 text-sm">
@@ -387,7 +404,7 @@ function AdminEventsInner() {
   const viewParam = params.get('view');
   const view: DetailView = (DETAIL_VIEWS as readonly string[]).includes(viewParam ?? '') ? (viewParam as DetailView) : 'review';
   const tabParam = params.get('tab');
-  const tab: Tab = (TABS as readonly string[]).includes(tabParam ?? '') ? (tabParam as Tab) : 'submitted';
+  const tab: Tab = ((TABS as readonly string[]).includes(tabParam ?? '') || isS7Tab(tabParam ?? '')) ? (tabParam as Tab) : 'submitted';
   const go = (patch: Record<string, string | null>) => {
     const q = new URLSearchParams(params.toString());
     for (const [k, v] of Object.entries(patch)) { if (v) q.set(k, v); else q.delete(k); }
