@@ -11,10 +11,12 @@ import { statusTone, statusLabel, trainerNames } from '@/lib/admin-utils';
 import { GymCreateForm, GymDraft, BLANK_GYM_DRAFT, validateGymDraft } from '@/components/gym-create-form';
 import { TrainerInlineForm, TrainerFormDraft, BLANK_TRAINER_DRAFT, validateTrainerDraft } from '@/components/trainer-inline-form';
 import { PartnerPersonalDetails } from '@/components/partner-personal-details';
+import { ReasonField } from '@/components/reason-field';
+import { isReasonRequired, reasonOf, REASON_REQUIRED_KEY } from '@/lib/admin-reason';
 import { PayoutOwnerRequiredAlert } from '@/components/gym-payout-owner';
 
 export default function OwnersPage() {
-  const { token, user } = useApp();
+  const { token, user, t } = useApp();
   const [owners, setOwners]     = useState<GymOwner[]>([]);
   const [gyms, setGyms]         = useState<Gym[]>([]);
   const [trainers, setTrainers] = useState<TrainerProfile[]>([]);
@@ -26,6 +28,8 @@ export default function OwnersPage() {
   const [draft, setDraft]       = useState<Partial<GymOwner>>({});
   const [draftGymIds, setDraftGymIds] = useState<string[]>([]);
   const [deleteTarget, setDeleteTarget] = useState<GymOwner | null>(null);
+  const [deleteReason, setDeleteReason] = useState('');
+  const [deleteReasonError, setDeleteReasonError] = useState(false);
   const [gymDialogOpen, setGymDialogOpen] = useState(false);
   const [newGym, setNewGym]     = useState<GymDraft>({ ...BLANK_GYM_DRAFT });
   const [gymTrainerIds, setGymTrainerIds] = useState<string[]>([]);
@@ -129,10 +133,13 @@ export default function OwnersPage() {
     if (!token || !deleteTarget) return;
     setBusy(true);
     try {
-      await api.deleteGymOwner(token, deleteTarget.id);
+      await api.deleteGymOwner(token, deleteTarget.id, reasonOf(deleteReason));
       setDeleteTarget(null);
+      setDeleteReason('');
       await load();
     } catch (e) {
+      // 400 reason_required: nothing was deleted; keep the dialog open so the reason can be typed.
+      if (isReasonRequired(e)) { setDeleteReasonError(true); return; }
       setError(e instanceof Error ? e.message : 'Delete failed');
     } finally {
       setBusy(false);
@@ -333,7 +340,7 @@ export default function OwnersPage() {
                   <Button variant="ghost" size="sm" onClick={(e) => { e.stopPropagation(); openEdit(owner); }}>
                     <Pencil className="h-3.5 w-3.5" />
                   </Button>
-                  <Button variant="ghost" size="sm" onClick={(e) => { e.stopPropagation(); setDeleteTarget(owner); }}>
+                  <Button variant="ghost" size="sm" onClick={(e) => { e.stopPropagation(); setDeleteReason(''); setDeleteReasonError(false); setDeleteTarget(owner); }}>
                     <Trash2 className="h-3.5 w-3.5 text-[var(--color-error-600)]" />
                   </Button>
                 </>
@@ -433,7 +440,12 @@ export default function OwnersPage() {
         </DialogFooter>
       </Dialog>
 
-      <ConfirmDialog open={!!deleteTarget} onClose={() => setDeleteTarget(null)} onConfirm={handleDelete} title="Delete owner" description={`Remove "${deleteTarget?.displayName || deleteTarget?.email}"?`} confirmLabel="Delete" tone="danger" busy={busy} />
+      <ConfirmDialog open={!!deleteTarget} onClose={() => setDeleteTarget(null)} onConfirm={handleDelete} title="Delete owner" description={(
+        <div className="space-y-3">
+          <p>{`Remove "${deleteTarget?.displayName || deleteTarget?.email}"?`}</p>
+          <ReasonField value={deleteReason} onChange={v => { setDeleteReason(v); setDeleteReasonError(false); }} error={deleteReasonError ? t(REASON_REQUIRED_KEY) : null} testId="owner-delete-reason" />
+        </div>
+      )} confirmLabel="Delete" tone="danger" busy={busy} />
     </div>
   );
 }

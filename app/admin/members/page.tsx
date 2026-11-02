@@ -8,6 +8,8 @@ import { Badge, Button, PageHeader, Alert, Spinner, Card, Field, Input, Select, 
 import { DataTable, ColumnDef } from '@/components/data-table';
 import { Dialog, DialogFooter, ConfirmDialog } from '@/components/dialog';
 import { statusTone, statusLabel, money, formatDateTime } from '@/lib/admin-utils';
+import { ReasonField } from '@/components/reason-field';
+import { isReasonRequired, reasonOf, REASON_REQUIRED_KEY } from '@/lib/admin-reason';
 import { DOB_MIN, dobMax, dateOfBirthProblem, isDateOfBirthRefusal } from '@/lib/date-of-birth';
 
 const FITNESS_GOALS = ['build_muscle', 'lose_weight', 'stay_fit', 'flexibility', 'endurance'];
@@ -32,6 +34,8 @@ export default function MembersPage() {
   const [error, setError]       = useState<string | null>(null);
   const [busy, setBusy]         = useState(false);
   const [actionTarget, setActionTarget] = useState<{ member: MemberSummary; action: 'suspend' | 'activate' } | null>(null);
+  const [actionReason, setActionReason] = useState('');
+  const [actionReasonError, setActionReasonError] = useState(false);
   const [filter, setFilter]     = useState<'all' | 'active' | 'suspended' | 'payment_pending'>('all');
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing]   = useState<MemberSummary | null>(null);
@@ -183,15 +187,22 @@ export default function MembersPage() {
     }
   }
 
+  function openAction(member: MemberSummary, action: 'suspend' | 'activate') {
+    setActionReason(''); setActionReasonError(false); setActionTarget({ member, action });
+  }
+
   async function handleAction() {
     if (!token || !actionTarget) return;
     setBusy(true);
     try {
       const newStatus = actionTarget.action === 'suspend' ? 'suspended' : 'active';
-      await api.setMemberStatus(token, actionTarget.member.id, newStatus);
+      await api.setMemberStatus(token, actionTarget.member.id, newStatus, reasonOf(actionReason));
       setActionTarget(null);
+      setActionReason('');
       await load();
     } catch (e) {
+      // 400 reason_required: nothing changed; keep the dialog open so the reason can be typed.
+      if (isReasonRequired(e)) { setActionReasonError(true); return; }
       setError(e instanceof Error ? e.message : 'Action failed');
     } finally {
       setBusy(false);
@@ -200,6 +211,8 @@ export default function MembersPage() {
 
   async function handleStatusChange(member: MemberSummary, newStatus: 'active' | 'suspended') {
     if (!token) return;
+    // Suspending asks for a reason first (dialog); reactivating needs none.
+    if (newStatus === 'suspended') { openAction(member, 'suspend'); return; }
     try {
       await api.setMemberStatus(token, member.id, newStatus);
       await load();
@@ -653,12 +666,17 @@ export default function MembersPage() {
       {/* Suspend/Activate Confirm */}
       <ConfirmDialog
         open={!!actionTarget}
-        onClose={() => setActionTarget(null)}
+        onClose={() => { setActionTarget(null); setActionReason(''); setActionReasonError(false); }}
         onConfirm={handleAction}
         title={actionTarget?.action === 'suspend' ? 'Suspend member' : 'Activate member'}
-        description={actionTarget?.action === 'suspend'
-          ? `Suspend "${actionTarget?.member.displayName || actionTarget?.member.email}"? They will lose platform access.`
-          : `Reactivate "${actionTarget?.member.displayName || actionTarget?.member.email}"?`}
+        description={(
+          <div className="space-y-3">
+            <p>{actionTarget?.action === 'suspend'
+              ? `Suspend "${actionTarget?.member.displayName || actionTarget?.member.email}"? They will lose platform access.`
+              : `Reactivate "${actionTarget?.member.displayName || actionTarget?.member.email}"?`}</p>
+            <ReasonField value={actionReason} onChange={v => { setActionReason(v); setActionReasonError(false); }} error={actionReasonError ? t(REASON_REQUIRED_KEY) : null} testId="member-status-reason" />
+          </div>
+        )}
         confirmLabel={actionTarget?.action === 'suspend' ? 'Suspend' : 'Activate'}
         tone={actionTarget?.action === 'suspend' ? 'danger' : 'primary'}
         busy={busy}
