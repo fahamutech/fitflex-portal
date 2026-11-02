@@ -17,6 +17,8 @@ export interface HeldPayment {
   refundable: boolean;
   notRefundableReason: HeldNotRefundableReason | null;
   amountReceivedKnown: boolean;
+  /** Maximum refundable when the refund request's own amount is null (functions#308); null, or absent on older backends, when unknown. */
+  requestAmountTzs?: number | null;
 }
 
 export type HeldStatus = 'open' | 'resolved';
