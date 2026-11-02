@@ -19,6 +19,7 @@ export type S7Opts = {
   /** Medal 1 starts taken down. */ takedown?: boolean;
   /** Per-race results settings already official-released. */ officialRelease?: boolean;
   /** Fail health groups by name. */ healthFail?: string[];
+  /** The first N snapshot downloads answer 503 (the desk already exists by then). */ snapshotFailures?: number;
 };
 type Reply = Json | { status: number; json: Json } | { status: 204 };
 type Call = { method: string; path: string; query: Record<string, string>; body: Json | null; headers?: Record<string, string> };
@@ -70,7 +71,7 @@ export function makeS7(user: Json, me: Json | null, o: S7Opts) {
     devices: [] as Desk[],
     scans: [] as Scan[],
     idem: {} as Record<string, { body: string; reply: Json }>,
-    seq: 10,
+    seq: 10, snapshotFails: 0,
     heartbeats: [] as Json[],
     syncs: [] as Json[],
     collectionsMade: [] as Json[],
@@ -212,10 +213,10 @@ export function makeS7(user: Json, me: Json | null, o: S7Opts) {
     }],
     ['POST', /^\/organizer\/events\/([^/]+)\/kit-offline\/devices\/([^/]+)\/revoke$/, (c, m) => {
       if (!kitOfflineOn()) return off();
-      if (!ownerAdmin()) return forbidden();
+      if (!inRoles('owner', 'admin', 'ops')) return forbidden();
       return idem(c, `revoke:${m[2]}`, () => {
         const d = state.devices.find(x => x.id === m[2]);
-        if (!d) return { status: 404, json: { error: 'device_not_found' } };
+        if (!d || (!ownerAdmin() && d.staffUserId !== user.id)) return { status: 404, json: { error: 'device_not_found' } };
         if (d.status !== 'active') return { status: 409, json: { error: 'already_ended' } };
         if (typeof c.body?.reason !== 'string' || c.body.reason.trim().length < 10 || c.body.reason.length > 300) return { status: 422, json: { error: 'reason_required' } };
         d.status = 'revoked'; d.revokedAt = nowIso();
@@ -228,6 +229,7 @@ export function makeS7(user: Json, me: Json | null, o: S7Opts) {
       if (!inRoles('owner', 'admin', 'ops')) return forbidden();
       const d = state.devices.find(x => x.id === c.query.deviceId);
       if (!d || d.status !== 'active') return { status: 403, json: { error: 'device_not_active' } };
+      if (state.snapshotFails < (o.snapshotFailures ?? 0)) { state.snapshotFails += 1; return { status: 503, json: { error: 'unavailable' } }; }
       const rows = all().filter(r => r.ticket && r.id !== state.lateReg.id).concat(state.lateIncluded ? [state.lateReg] : []).filter((r, i, a) => a.indexOf(r) === i);
       const filtered = rows.filter(r => !c.query.categoryId || r.cat === c.query.categoryId);
       if (!c.query.sinceSeq && filtered.length > (o.maxRows ?? 20000)) return { status: 413, json: { error: 'snapshot_too_large', rows: filtered.length, max: o.maxRows ?? 20000 } };
@@ -409,9 +411,9 @@ export function makeS7(user: Json, me: Json | null, o: S7Opts) {
         results: fail('results', { waitingForVerification: { count: 9, oldestAgeHours: 60 }, openDisputes: { count: 3, oldestAgeDays: 9 }, releasesInPeriod: 1 }),
         rewards: fail('rewards', { awardTasksFailed: 1, oldestAwardTaskAgeMinutes: 90, redemptionsWaiting: 2, duplicatePreventionIncidents: 0 }),
         waitlist: fail('waitlist', { waiting: state.waitlistEntries.filter(e => e.status === 'waiting').length, offersOpen: 1, converted: 2, expired: 1, promoterLastRunAt: nowIso(), promoterLastStatus: 'ok' }),
-        jobs: [{ name: 'event-hold-expiry', schedule: 'every 5 minutes', lastRunAt: nowIso(), outcome: 'ok', lastSuccessAt: nowIso(), flagOn: true, late: false }, { name: 'event-waitlist-promote', schedule: 'every minute', lastRunAt: '2027-03-12T20:00:00.000Z', outcome: 'ok', lastSuccessAt: '2027-03-12T20:00:00.000Z', flagOn: true, late: true }],
+        jobs: [{ name: 'event-hold-expiry', schedule: { type: 'every', minutes: 5 }, lastRunAt: nowIso(), outcome: 'ok', lastSuccessAt: nowIso(), flagOn: true, late: false }, { name: 'event-waitlist-promote', schedule: { type: 'every', minutes: 1 }, lastRunAt: '2027-03-12T20:00:00.000Z', outcome: 'ok', lastSuccessAt: '2027-03-12T20:00:00.000Z', flagOn: true, late: true }],
         errors: [{ group: 'registration', class: '5xx', count: 2 }],
-        alerts: [{ rule: 'A13', subject: 'retention', severity: 'warning', runbook: 'R10', counts: {} }],
+        alerts: [{ rule: 'A13', subject: 'retention', severity: 'high', runbook: 'R10', counts: {} }],
       };
     }],
     ['GET', /^\/admin\/events\/organizers$/, (c) => {
@@ -506,7 +508,7 @@ export function makeS7(user: Json, me: Json | null, o: S7Opts) {
         if (!['cat_1', 'cat_2'].includes(x.id)) return { status: 422, json: { error: 'validation_failed', fields: [{ path: 'categories.id', code: 'invalid' }] } };
         if (x.timeBasis != null && !['net', 'gun'].includes(x.timeBasis)) return { status: 422, json: { error: 'validation_failed', fields: [{ path: 'timeBasis', code: 'invalid' }] } };
         if (x.cutoffMinutes != null && (x.cutoffMinutes < 1 || x.cutoffMinutes > 1440)) return { status: 422, json: { error: 'validation_failed', fields: [{ path: 'cutoffMinutes', code: 'invalid' }] } };
-        if (x.virtualDistanceToleranceBps != null && (x.virtualDistanceToleranceBps < 0 || x.virtualDistanceToleranceBps > 10000)) return { status: 422, json: { error: 'validation_failed', fields: [{ path: 'virtualDistanceToleranceBps', code: 'invalid' }] } };
+        if (x.virtualDistanceToleranceBps != null && (x.virtualDistanceToleranceBps < 0 || x.virtualDistanceToleranceBps > 500)) return { status: 422, json: { error: 'validation_failed', fields: [{ path: 'virtualDistanceToleranceBps', code: 'invalid' }] } };
       }
       return undefined; // the S6 route stores it (locked rules answer settings_locked there) and the summary returns it
     }],

@@ -109,7 +109,7 @@ export function OrganizerEventView({ doc, view, role, onView, onBack }: { doc: E
           <div className="space-y-6">
             <KitDesk doc={doc} role={role} readOnly={readOnly} onOpenRegistration={openReg} />
             {/* Events S7 §3.14: the offline desks panel (owner/admin all desks, ops their own), only while the server says the offline desk is on */}
-            {eventsOptions?.ops?.kitOffline && hasRole(KIT_ROLES, role) && <DevicesPanel eventId={doc.id} timezone={doc.timezone} mode="organizer" canRemove={role === 'owner' || role === 'admin'} />}
+            {eventsOptions?.ops?.kitOffline && hasRole(KIT_ROLES, role) && <DevicesPanel eventId={doc.id} timezone={doc.timezone} mode="organizer" canRemove />}
           </div>
         )
         : view === 'bibs'

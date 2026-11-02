@@ -36,7 +36,7 @@ export interface SyncItem {
   claimedAt: string; outcomeOnDevice?: string;
 }
 export interface SyncBody { deviceId: string; batchId: string; snapshotSeq: number; snapshotTakenAt: string; clockOffsetMs: number; deskBuild?: string; items: SyncItem[] }
-export type SyncOutcome = 'accepted' | 'duplicate' | 'revoked_after_scan' | 'event_closed' | 'after_revoke' | 'organizer_suspended'
+export type SyncOutcome = 'accepted' | 'duplicate' | 'revoked_after_scan' | 'event_closed' | 'after_revoke' | 'after_expiry' | 'organizer_suspended'
   | 'invalid_token' | 'unknown_ticket' | 'wrong_event' | 'validation_failed' | 'deferred';
 export type BibOutcome = 'assigned' | 'same_already' | 'not_applied' | 'format_invalid' | 'no_range' | 'out_of_range' | 'registration_has_other' | 'taken';
 export interface SyncResult {
@@ -103,7 +103,7 @@ export interface HealthResponse {
   results?: HealthGroup<{ waitingForVerification?: AgedCount; openDisputes?: AgedCount; releasesInPeriod?: number }>;
   rewards?: HealthGroup<{ awardTasksFailed?: number; oldestAwardTaskAgeMinutes?: number | null; redemptionsWaiting?: number; duplicatePreventionIncidents?: number }>;
   waitlist?: HealthGroup<{ waiting?: number; offersOpen?: number; converted?: number; expired?: number; promoterLastRunAt?: string | null; promoterLastStatus?: string | null }>;
-  jobs?: Array<{ name: string; schedule?: string | null; lastRunAt: string | null; outcome: string | null; lastSuccessAt?: string | null; flagOn?: boolean; late?: boolean }>;
+  jobs?: Array<{ name: string; schedule?: { type?: string; minutes?: number; utc?: string } | string | null; lastRunAt: string | null; outcome: string | null; lastSuccessAt?: string | null; flagOn?: boolean; late?: boolean }>;
   errors?: Array<{ group: string; class?: string; count: number }>;
   alerts?: Array<{ rule: string; subject?: string | null; severity?: string | null; runbook?: string | null; counts?: Record<string, number> | null }>;
 }

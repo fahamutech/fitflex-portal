@@ -11,18 +11,16 @@ import { Alert, Button, Card, CardContent, Field, Input, Select, useToast } from
 import { useWriteError } from '@/components/organizer/results/result-dialogs';
 import { useApp } from '../../../../app/providers';
 
-type Row = { basis: '' | TimeBasis; cutoff: string; tol: string };
-const EMPTY: Row = { basis: '', cutoff: '', tol: '' };
+type Row = { basis: TimeBasis; cutoff: string; tol: string };
+const EMPTY: Row = { basis: 'net', cutoff: '', tol: '' };
 
-/** The server's per-race values, from `settings.categories` or from each category summary's own `settings`. */
+/** What the organizer saved: `perCategory[].rulesOverride` (null = unset); `rules` is the resolved fallback. */
 function savedRows(doc: EventDocument, summary: ResultsSummary | null): Record<string, Row> {
   const out: Record<string, Row> = {};
-  const fromSettings = new Map((summary?.settings?.categories ?? []).map(c => [c.id, c]));
   for (const cat of doc.categories) {
     if (!cat.id) continue;
-    const own = (summary?.perCategory.find(c => c.categoryId === cat.id) as { settings?: RaceSettings } | undefined)?.settings;
-    const v = fromSettings.get(cat.id) ?? own;
-    out[cat.id] = { basis: v?.timeBasis ?? '', cutoff: v?.cutoffMinutes ? String(v.cutoffMinutes) : '', tol: v?.virtualDistanceToleranceBps != null ? String(v.virtualDistanceToleranceBps / 100) : '' };
+    const v = (() => { const pc = summary?.perCategory.find(c => c.categoryId === cat.id) as { rules?: RaceSettings; rulesOverride?: RaceSettings } | undefined; return pc?.rulesOverride ?? pc?.rules; })();
+    out[cat.id] = { basis: v?.timeBasis === 'gun' ? 'gun' : 'net', cutoff: v?.cutoffMinutes ? String(v.cutoffMinutes) : '', tol: v?.virtualDistanceToleranceBps != null ? String(v.virtualDistanceToleranceBps / 100) : '' };
   }
   return out;
 }
@@ -32,7 +30,7 @@ export function PerRaceSettings({ doc, readOnly, summary, onSaved }: { doc: Even
   const toast = useToast();
   const cats = doc.categories.filter(c => !!c.id);
   const locked = summary?.perCategory?.some(c => c.release?.stage === 'official') ?? false;
-  const savedKey = JSON.stringify([summary?.settings?.categories ?? null, summary?.perCategory?.map(c => (c as { settings?: unknown }).settings ?? null)]);
+  const savedKey = JSON.stringify(summary?.perCategory?.map(c => (c as { rulesOverride?: unknown; rules?: unknown }).rulesOverride ?? (c as { rules?: unknown }).rules ?? null) ?? null);
   const [rows, setRows] = useState<Record<string, Row>>(() => savedRows(doc, summary));
   const [same, setSame] = useState(false);
   const [all, setAll] = useState<Row>(EMPTY);
@@ -45,7 +43,7 @@ export function PerRaceSettings({ doc, readOnly, summary, onSaved }: { doc: Even
 
   const set = (id: string, patch: Partial<Row>) => setRows(r => ({ ...r, [id]: { ...(r[id] ?? EMPTY), ...patch } }));
   const cutoffOk = (v: string) => !v.trim() || (Number.isInteger(Number(v)) && Number(v) >= 1 && Number(v) <= 1440);
-  const tolOk = (v: string) => !v.trim() || (Number.isFinite(Number(v)) && Number(v) >= 0 && Number(v) <= 100);
+  const tolOk = (v: string) => !v.trim() || (Number.isFinite(Number(v)) && Number(v) >= 0 && Number(v) <= 5);
   const effective = (id: string): Row => (same ? all : rows[id] ?? EMPTY);
   const valid = cats.every(c => cutoffOk(effective(c.id!).cutoff) && tolOk(effective(c.id!).tol));
 
@@ -54,7 +52,8 @@ export function PerRaceSettings({ doc, readOnly, summary, onSaved }: { doc: Even
     setBusy(true); err.clear();
     const categories: RaceSettings[] = cats.map(c => {
       const r = effective(c.id!);
-      return { id: c.id!, ...(r.basis ? { timeBasis: r.basis } : {}), ...(r.cutoff.trim() ? { cutoffMinutes: Number(r.cutoff) } : {}), ...(r.tol.trim() ? { virtualDistanceToleranceBps: Math.round(Number(r.tol) * 100) } : {}) };
+      // A cleared field is sent as null (back to the event default); omitting it would leave the saved value in place.
+      return { id: c.id!, timeBasis: r.basis, cutoffMinutes: r.cutoff.trim() ? Number(r.cutoff) : null, virtualDistanceToleranceBps: r.tol.trim() ? Math.round(Number(r.tol) * 100) : null };
     });
     try { await resultsApi.saveSettings(token, doc.id, { categories }, key.current); key.current = newIdempotencyKey(); toast.success(t('organizer.results.perRace.saved')); onSaved(); }
     catch (e) { err.fail(e); } finally { setBusy(false); }
@@ -65,8 +64,7 @@ export function PerRaceSettings({ doc, readOnly, summary, onSaved }: { doc: Even
   const controls = (r: Row, patch: (p: Partial<Row>) => void, suffix: string) => (
     <>
       <Field label={t('organizer.results.perRace.col.basis')}>
-        <Select value={r.basis} disabled={dis} onChange={e => patch({ basis: e.target.value as Row['basis'] })} data-testid={`per-race-basis-${suffix}`}>
-          <option value="">{t('organizer.results.perRace.useEvent')}</option>
+        <Select value={r.basis} disabled={dis} onChange={e => patch({ basis: e.target.value as TimeBasis })} data-testid={`per-race-basis-${suffix}`}>
           <option value="net">{t('organizer.results.basis.net')}</option><option value="gun">{t('organizer.results.basis.gun')}</option>
         </Select>
       </Field>

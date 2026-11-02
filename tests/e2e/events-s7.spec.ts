@@ -497,7 +497,22 @@ test.describe('desks panel (§3.14, AC-O24, AC-O25)', () => {
     await expect(panel).toContainText('Phone A');
     await expect(panel).not.toContainText('Other phone');
     await expect(panel.getByRole('columnheader', { name: 'Bib block' })).toHaveCount(0);
-    await expect(panel.getByRole('button', { name: /Remove desk/ })).toHaveCount(0);
+    // Ops can remove their OWN desk (a wrong or orphaned one), never another's: the list holds only theirs.
+    await expect(panel.getByRole('button', { name: /Remove desk/ })).toHaveCount(1);
+  });
+
+  test('a failed ticket-list download keeps the desk and the retry uses the same one (no orphan)', async ({ page }) => {
+    const mock = await openDesk(page, 'ops', { snapshotFailures: 1 });
+    await page.getByTestId('offline-label').fill('Phone A');
+    await page.getByTestId('offline-prepare-point').selectOption('cp_1');
+    await page.getByTestId('offline-download').click();
+    await expect(page.getByTestId('offline-prepare-error')).toBeVisible();
+    expect(mock.s7!.devices).toHaveLength(1);
+    await page.getByTestId('offline-download').click();
+    await expect(page.getByTestId('offline-syncbar')).toBeVisible();
+    expect(mock.s7!.devices).toHaveLength(1);
+    expect(mock.writes(/kit-offline\/devices$/)).toHaveLength(1);
+    expect(mock.reads(/kit-offline\/snapshot/).every(c => c.query.deviceId === 'dev_1')).toBe(true);
   });
 });
 
@@ -518,6 +533,18 @@ test.describe('Swahili and layout (AC-O21, AC-O22)', () => {
     // 44 px targets (56 px for the primary desk action).
     const h = await page.getByTestId('offline-confirm').boundingBox();
     expect(h!.height).toBeGreaterThanOrEqual(56);
+  });
+
+  test('the S7 Swahili strings avoid banned words, "saa" before a clock time, AM/PM and raw enum codes', async () => {
+    const sw = eventsS7Messages.sw as Record<string, string>;
+    for (const [k, v] of Object.entries(sw)) {
+      expect(v, k).not.toMatch(/\b(foleni|ofa|kifaa|jimu|programu|nambari)\b/i);
+      expect(v, k).not.toMatch(/\bnafasi\b/i); // reserved for roles, never a place or a slot
+      expect(v, k).not.toMatch(/saa \{time\}/);
+      expect(v, k).not.toMatch(/\b(AM|PM)\b/);
+      // A raw code is never interpolated; the take-down banner's {reason} is filled with the translated reason, not the code.
+      if (k !== 'organizer.medals.takedown') expect(v, k).not.toMatch(/\{reason\}|\{outcome\}|\{status\}/);
+    }
   });
 
   test('every offline key exists in both languages (parity)', async () => {
@@ -618,6 +645,7 @@ test.describe('admin Health tab (AC-N6)', () => {
     await expect(page.getByTestId('health-group-funnel')).toContainText('1,000');
     await expect(page.getByTestId('health-group-funnel')).toContainText('40% of the step before');
     await expect(page.getByTestId('health-group-jobs')).toContainText('Late');
+    await expect(page.getByTestId('health-group-jobs')).toContainText('Every 5 minutes');
     await expect(page.getByTestId('health-group-alerts')).toContainText('A13');
     await expect(page.getByTestId('health-alerts-off')).toHaveText('Alert emails are off because no recipients are set.');
     await expect(page.getByTestId('health-retention')).toHaveText('Not configured');
@@ -686,21 +714,21 @@ test.describe('admin Operations tab (AC-H17)', () => {
     expect(mock.s7!.opLog[0]).toMatchObject({ type: 'revoke_all', n: 2 });
   });
 
-  test('Turn off all webhooks needs a reason and the typed name; Change rate (1 to 600) sends rateLimitPerMinute only', async ({ page }) => {
-    const mock = await adminTab(page, 'operations');
+  test('Turn off all webhooks needs a reason and the typed name; there is no client-rate action (the server lists no clients)', async ({ page }) => {
+    await adminTab(page, 'operations');
     await page.getByTestId('ops-webhooks-org_1').click();
     await page.getByTestId('ops-dialog-reason').fill('Endpoint is flooding a customer.');
     await page.getByTestId('ops-dialog-typed').fill('dar runners');
     await page.getByTestId('ops-dialog-confirm').click();
     await expect(page.getByText('1 webhook endpoints turned off.')).toBeVisible();
-    await page.getByTestId('ops-rate-org_1').click();
-    await page.getByTestId('ops-client').fill('cli_1');
-    await page.getByTestId('ops-rate').fill('900');
-    await expect(page.getByTestId('ops-dialog-confirm')).toBeDisabled();
-    await page.getByTestId('ops-rate').fill('20');
-    await page.getByTestId('ops-dialog-confirm').click();
-    await expect.poll(() => mock.s7!.clients.find(k => k.id === 'cli_1')!.ratePerMinute).toBe(20);
-    expect(mock.writes(/api-clients\/cli_1$/)[0].body).toEqual({ rateLimitPerMinute: 20 });
+    await expect(page.getByTestId('ops-orgs').getByRole('button', { name: /rate/i })).toHaveCount(0);
+  });
+
+  test('jobs show their schedule in words (the server sends { type, minutes } or { type, utc }) and the organizer status is translated', async ({ page }) => {
+    await adminTab(page, 'operations');
+    await expect(page.getByTestId('ops-jobs')).toContainText('Every 5 minutes');
+    await expect(page.getByTestId('ops-orgs')).toContainText('Verified');
+    await expect(page.getByTestId('ops-orgs')).not.toContainText(/\bactive\b/);
   });
 
   test('a flag that is off says which feature is not available', async ({ page }) => {
@@ -844,12 +872,25 @@ test.describe('per race settings (AC-H18)', () => {
     await card.getByTestId('per-race-save').click();
     await expect(page.getByText('Per race settings saved.')).toBeVisible();
     const body = mock.s7!.settingsCalls[0];
-    expect(body.categories).toEqual([{ id: 'cat_1', timeBasis: 'gun', cutoffMinutes: 240, virtualDistanceToleranceBps: 500 }, { id: 'cat_2' }]);
-    await card.getByTestId('per-race-same').click();
+    // A cleared field is sent as null, never omitted; time basis is always net or gun.
+    expect(body.categories).toEqual([{ id: 'cat_1', timeBasis: 'gun', cutoffMinutes: 240, virtualDistanceToleranceBps: 500 }, { id: 'cat_2', timeBasis: 'net', cutoffMinutes: null, virtualDistanceToleranceBps: null }]);
+    // The saved values come back from perCategory[].rules and fill the form after a reload.
+    await page.reload();
+    await expect(page.getByTestId('per-race-basis-cat_1')).toHaveValue('gun');
+    await expect(page.getByTestId('per-race-cutoff-cat_1')).toHaveValue('240');
+    await expect(page.getByTestId('per-race-tolerance-cat_1')).toHaveValue('5');
+    // 5 % is the most the server takes.
+    await page.getByTestId('per-race-tolerance-cat_1').fill('6');
+    await expect(page.getByTestId('per-race-save')).toBeDisabled();
+    await page.getByTestId('per-race-tolerance-cat_1').fill('');
+    await page.getByTestId('per-race-save').click();
+    await expect.poll(() => mock.s7!.settingsCalls.length).toBe(2);
+    expect((mock.s7!.settingsCalls[1].categories as Array<Record<string, unknown>>)[0]).toMatchObject({ id: 'cat_1', virtualDistanceToleranceBps: null });
+    await page.getByTestId('per-race-same').check();
     await card.getByTestId('per-race-basis-all').selectOption('net');
     await card.getByTestId('per-race-save').click();
-    await expect.poll(() => mock.s7!.settingsCalls.length).toBe(2);
-    expect((mock.s7!.settingsCalls[1].categories as Array<Record<string, unknown>>).every(x => x.timeBasis === 'net')).toBe(true);
+    await expect.poll(() => mock.s7!.settingsCalls.length).toBe(3);
+    expect((mock.s7!.settingsCalls[2].categories as Array<Record<string, unknown>>).every(x => x.timeBasis === 'net')).toBe(true);
   });
 
   test('after the first official release the fields disable with the explanation', async ({ page }) => {

@@ -39,7 +39,7 @@ self.addEventListener('fetch', event => {
       if (cached) { event.waitUntil(refresh); return cached; }
       const res = await refresh;
       if (res) return res;
-      return new Response('Offline', { status: 503, headers: { 'content-type': 'text/plain' } });
+      return new Response('Hakuna intaneti / No internet connection', { status: 503, headers: { 'content-type': 'text/plain; charset=utf-8' } });
     })());
     return;
   }

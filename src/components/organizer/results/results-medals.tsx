@@ -21,10 +21,10 @@ import { useApp } from '../../../../app/providers';
 
 const listOf = (r: { items?: MedalTemplate[] } | MedalTemplate[]): MedalTemplate[] => (Array.isArray(r) ? r : r.items ?? []);
 
-export /** Events S7 §6.4: the take-down reason in words (the admin queue's reason list; an unknown code reads as "Other"). */
+/** Events S7 §6.4: the take-down reason in words (the admin queue's reason list; an unknown code reads as "Other"). */
 const takedownReasonKey = (code: string | null | undefined): MessageKey => (`admin.medalArt.reason.${ART_TAKEDOWN_REASONS.includes(code as never) ? code : 'other'}` as MessageKey);
 
-function ruleSummary(rule: MedalRule, t: (k: MessageKey) => string): string {
+export function ruleSummary(rule: MedalRule, t: (k: MessageKey) => string): string {
   if (rule.type === 'placing') return fmt(t(rule.scope === 'overall' ? 'organizer.results.medals.rule.placingOverall' : 'organizer.results.medals.rule.placing'), { n: rule.top });
   if (rule.type === 'time_under') return fmt(t('organizer.results.medals.rule.timeUnder'), { time: formatElapsed(rule.maxElapsedMs) });
   return t('organizer.results.medals.rule.finish');

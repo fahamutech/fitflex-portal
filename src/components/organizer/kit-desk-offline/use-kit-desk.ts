@@ -5,7 +5,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ApiError } from '@/lib/api';
 import { errorBody, errorCode } from '@/lib/events';
-import { kitOfflineApi, type HeartbeatResult, type PrepareDeskBody, type SnapshotHeader, type SnapshotPage, type SyncItem, type SyncResponse } from '@/lib/events-s7-api';
+import { kitOfflineApi, type HeartbeatResult, type PrepareDeskBody, type PrepareDeskResult, type SnapshotHeader, type SnapshotPage, type SyncItem, type SyncResponse } from '@/lib/events-s7-api';
 import { newIdempotencyKey } from '@/lib/events-ops';
 import {
   DESK_BUILD, checkClock, decideScan, isBibException, newClientRef, normaliseRow, queueStats, stateForOutcome,
@@ -60,6 +60,7 @@ export function useKitDesk({ eventId, token, userId, enabled }: { eventId: strin
   const sendingRef = useRef(false);
   const regRef = useRef<ServiceWorkerRegistration | null>(null);
   const failRef = useRef<number[]>([]);
+  const createdRef = useRef<PrepareDeskResult | null>(null);
   const swSupported = typeof navigator !== 'undefined' && 'serviceWorker' in navigator;
 
   const commitMeta = useCallback(async (next: DeskMeta) => { metaRef.current = next; setMeta(next); await saveMeta(next); }, []);
@@ -161,7 +162,9 @@ export function useKitDesk({ eventId, token, userId, enabled }: { eventId: strin
     setProgress({ done: 0, total: 0 });
     try {
       const body: PrepareDeskBody = { label: input.label.trim(), clientKind: 'web', deskBuild: DESK_BUILD, ...(input.bib ? { bibRange: { ...(input.bib.prefix ? { prefix: input.bib.prefix } : {}), padTo: input.bib.padTo, start: input.bib.start, end: input.bib.end } } : {}) };
-      const created = await kitOfflineApi.prepare(token, eventId, body, newIdempotencyKey());
+      // A failed download after the desk exists is retried on the SAME desk (never a second one): the created desk is kept until the list is saved.
+      let created = createdRef.current;
+      if (!created) { created = await kitOfflineApi.prepare(token, eventId, body, newIdempotencyKey()); createdRef.current = created; }
       const persistedNow = await requestPersistence(); setPersisted(persistedNow);
       let header: SnapshotHeader | null = null; const all: DeskRow[] = []; let cursor: string | null = null;
       for (let guard = 0; guard < 100; guard++) {
@@ -184,6 +187,7 @@ export function useKitDesk({ eventId, token, userId, enabled }: { eventId: strin
       await saveList(eventId, all);
       setRows(all);
       await commitMeta(next);
+      createdRef.current = null;
       setPhase('ready');
       noteContact(true);
       return null;

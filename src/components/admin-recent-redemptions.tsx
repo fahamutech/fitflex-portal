@@ -4,6 +4,7 @@
 import { useEffect, useState } from 'react';
 import { adminS7Api, type RedemptionRow } from '@/lib/events-s7-api';
 import { eventDateTime } from '@/lib/events';
+import { knownKey } from '@/lib/events-results';
 import { Badge, Card, CardContent, CardHeader, SkeletonTable } from '@/components/shared';
 import { DataTable, type ColumnDef } from '@/components/data-table';
 import { useApp } from '../../app/providers';
@@ -22,7 +23,7 @@ export function RecentRedemptions() {
   const columns: ColumnDef<RedemptionRow>[] = [
     { key: 'reward', header: t('admin.events.redemptions.col.reward'), cell: r => <span className="[overflow-wrap:anywhere]">{title(r)}</span> },
     { key: 'person', header: t('admin.events.redemptions.col.person'), cell: r => r.person ?? '—' },
-    { key: 'state', header: t('admin.events.redemptions.col.state'), cell: r => <Badge tone={r.codeState === 'redeemed' ? 'success' : r.needsReview ? 'warning' : 'gray'}>{r.codeState ?? '—'}</Badge> },
+    { key: 'state', header: t('admin.events.redemptions.col.state'), cell: r => <Badge tone={r.codeState === 'redeemed' ? 'success' : r.needsReview ? 'warning' : 'gray'}>{r.codeState ? t(knownKey(`admin.rewards.redemption.${r.codeState}`, 'admin.rewards.redemption.expired')) : '—'}</Badge> },
     { key: 'claimed', header: t('admin.events.redemptions.col.claimed'), cell: r => when(r.claimedAt) },
     { key: 'redeemed', header: t('admin.events.redemptions.col.redeemed'), cell: r => when(r.redeemedAt) },
   ];

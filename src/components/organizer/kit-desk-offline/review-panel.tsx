@@ -16,15 +16,21 @@ import { useApp } from '../../../../app/providers';
 
 const OUTCOME_KEY: Record<string, MessageKey> = {
   duplicate: 'organizer.kitOffline.review.duplicate', revoked_after_scan: 'organizer.kitOffline.review.revoked', event_closed: 'organizer.kitOffline.review.closed',
-  after_revoke: 'organizer.kitOffline.review.afterRevoke', organizer_suspended: 'organizer.kitOffline.review.suspended',
+  after_revoke: 'organizer.kitOffline.review.afterRevoke', after_expiry: 'organizer.kitOffline.review.afterExpiry', organizer_suspended: 'organizer.kitOffline.review.suspended',
 };
 
+/** One sentence per bib outcome; an outcome this build does not know gets the generic sentence (never the raw code). */
 export function bibReviewText(t: (k: MessageKey) => string, bib: { outcome: string; claimed?: string | null; number?: string | null }): string {
   const n = bib.claimed ?? bib.number ?? '';
-  if (bib.outcome === 'taken') return fmt(t('organizer.kitOffline.review.bib.taken'), { bib: n });
-  if (bib.outcome === 'out_of_range') return fmt(t('organizer.kitOffline.review.bib.outOfRange'), { bib: n });
-  if (bib.outcome === 'registration_has_other') return fmt(t('organizer.kitOffline.review.bib.hasOther'), { bib: bib.number ?? n });
-  return fmt(t('organizer.kitOffline.review.bib.other'), { bib: n, reason: bib.outcome.replace(/_/g, ' ') });
+  switch (bib.outcome) {
+    case 'taken': return fmt(t('organizer.kitOffline.review.bib.taken'), { bib: n });
+    case 'out_of_range': return fmt(t('organizer.kitOffline.review.bib.outOfRange'), { bib: n });
+    case 'registration_has_other': return fmt(t('organizer.kitOffline.review.bib.hasOther'), { bib: bib.number ?? n });
+    case 'format_invalid': return t('organizer.kitOffline.review.bib.format_invalid');
+    case 'no_range': return t('organizer.kitOffline.review.bib.no_range');
+    case 'not_applied': return fmt(t('organizer.kitOffline.review.bib.not_applied'), { bib: n });
+    default: return t('organizer.kitOffline.review.bib.other');
+  }
 }
 
 export function ReviewPanel({ eventId, timezone, canCheck, local, active, onChanged }: {

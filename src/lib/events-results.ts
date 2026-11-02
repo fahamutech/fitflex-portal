@@ -39,13 +39,17 @@ export type VerificationStatus = 'pending_verification' | 'verified' | 'rejected
 export type SourceType = 'timing_provider' | 'organizer_verified' | 'fitflex_gps' | 'manual_unverified';
 export type TimeBasis = 'net' | 'gun';
 /** Events S7 §6.4: one race's own rules (bps = hundredths of a percent). */
-export interface RaceSettings { id: string; timeBasis?: TimeBasis | null; cutoffMinutes?: number | null; virtualDistanceToleranceBps?: number | null }
+export interface RaceSettings { id?: string; timeBasis?: TimeBasis | null; cutoffMinutes?: number | null; virtualDistanceToleranceBps?: number | null }
 export interface ResultsSettings { timeBasis?: TimeBasis; cutoffMinutes?: number | null; disputeWindowHours?: number; publicNames?: 'initial' | 'bib_only'; categories?: RaceSettings[] }
 export interface CategoryResultsSummary {
   categoryId: string; name: string; distanceMeters?: number | null; confirmed: number; finished: number; dnf: number; dns: number; dq: number;
   pending: number; rejected: number; noResult: number; flagged: number;
   release?: { stage: ReleaseStage; releasedAt?: string | null; releasedBy?: { name?: string | null } | null };
   disputesOpen?: number;
+  /** Events S7 §6.4: this race's own rules (null = the event default). */
+  rules?: RaceSettings;
+  /** What the organizer saved (null = unset); `rules` holds the resolved values. */
+  rulesOverride?: RaceSettings;
 }
 export interface ResultsSummary { perCategory: CategoryResultsSummary[]; disputesOpen?: number; importsCount?: number; settings?: ResultsSettings }
 export interface ResultRow {

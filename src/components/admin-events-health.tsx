@@ -7,7 +7,7 @@ import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { api, type AdminEventRow } from '@/lib/api';
 import { adminS7Api, type HealthResponse } from '@/lib/events-s7-api';
 import { eventDateTime, fmt, isFeatureOff, isForbidden } from '@/lib/events';
-import { clockOf } from '@/lib/events-s7';
+import { clockOf, scheduleText } from '@/lib/events-s7';
 import type { MessageKey } from '@/lib/i18n';
 import { Alert, Badge, Button, Card, CardContent, CardHeader, EmptyState, MetricCard, Select, Segmented, SkeletonCard } from '@/components/shared';
 import { DataTable, type ColumnDef } from '@/components/data-table';
@@ -99,7 +99,7 @@ export function AdminEventsHealth() {
 
   const jobColumns: ColumnDef<NonNullable<HealthResponse['jobs']>[number]>[] = [
     { key: 'name', header: t('admin.events.health.jobs.job'), cell: j => <span className="font-mono text-xs [overflow-wrap:anywhere]">{j.name}</span> },
-    { key: 'schedule', header: t('admin.events.health.jobs.schedule'), cell: j => j.schedule ?? '—' },
+    { key: 'schedule', header: t('admin.events.health.jobs.schedule'), cell: j => scheduleText(j.schedule, t) },
     { key: 'lastRunAt', header: t('admin.events.health.jobs.lastRun'), cell: j => (j.lastRunAt ? eventDateTime(j.lastRunAt, 'Africa/Dar_es_Salaam', locale) : t('admin.events.health.jobs.never')) },
     { key: 'outcome', header: t('admin.events.health.jobs.outcome'), cell: j => <span className="inline-flex items-center gap-2">{j.outcome ?? '—'}{j.late && <Badge tone="warning">{t('admin.events.health.late')}</Badge>}{j.flagOn === false && <Badge tone="gray">{t('admin.events.health.off')}</Badge>}</span> },
   ];
@@ -153,7 +153,7 @@ export function AdminEventsHealth() {
           {(data.alerts ?? []).length > 0 && (
             <section aria-label={t('admin.events.health.group.alerts')} className="space-y-2" data-testid="health-group-alerts">
               <h2 className="text-sm font-semibold text-[var(--color-fg-primary)]">{t('admin.events.health.group.alerts')}</h2>
-              <ul className="space-y-1">{(data.alerts ?? []).map((a, i) => <li key={`${a.rule}-${i}`}><Alert tone={a.severity === 'critical' ? 'error' : 'warning'}><span className="font-mono text-xs">{a.rule}</span> {a.subject ?? ''}</Alert></li>)}</ul>
+              <ul className="space-y-1">{(data.alerts ?? []).map((a, i) => <li key={`${a.rule}-${i}`}><Alert tone={a.severity === 'high' ? 'error' : 'warning'}><span className="font-mono text-xs">{a.rule}</span> {a.subject ?? ''}</Alert></li>)}</ul>
             </section>
           )}
           <section aria-label={t('admin.events.health.group.errors')} className="space-y-2" data-testid="health-group-errors">

@@ -151,7 +151,7 @@ export function queueStats(scans: LocalScan[]): { pending: number; oldestPending
 export function stateForOutcome(outcome: string): LocalState {
   switch (outcome) {
     case 'accepted': return 'confirmed';
-    case 'duplicate': case 'revoked_after_scan': case 'event_closed': case 'after_revoke': case 'organizer_suspended': return 'needs_review';
+    case 'duplicate': case 'revoked_after_scan': case 'event_closed': case 'after_revoke': case 'after_expiry': case 'organizer_suspended': return 'needs_review';
     case 'invalid_token': case 'unknown_ticket': case 'wrong_event': case 'validation_failed': return 'rejected';
     default: return 'pending';
   }

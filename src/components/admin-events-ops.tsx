@@ -6,7 +6,8 @@ import Link from 'next/link';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, type AdminEventRow } from '@/lib/api';
 import { adminS7Api, type HealthResponse, type OrganizerIntegrationRow } from '@/lib/events-s7-api';
-import { eventDateTime, fmt, isFeatureOff } from '@/lib/events';
+import { ORGANIZER_STATUS, eventDateTime, fmt, isFeatureOff } from '@/lib/events';
+import { scheduleText } from '@/lib/events-s7';
 import type { MessageKey } from '@/lib/i18n';
 import { Alert, Badge, Button, Card, CardContent, CardHeader, Field, Input, Select, SkeletonTable, useToast } from '@/components/shared';
 import { DataTable, type ColumnDef } from '@/components/data-table';
@@ -15,9 +16,9 @@ import { useEventsOptions } from '@/components/events-options';
 import { PageError } from '@/components/organizer/page-states';
 import { useApp } from '../../app/providers';
 
-type Action = 'apiOn' | 'apiOff' | 'revokeAll' | 'disableAll' | 'rate';
-type OrgRow = OrganizerIntegrationRow & { clients?: Array<{ id: string; name?: string | null; ratePerMinute?: number | null }> };
-const FEATURE: Record<Action, string> = { apiOn: 'API', apiOff: 'API', revokeAll: 'API', disableAll: 'webhooks', rate: 'API' };
+type Action = 'apiOn' | 'apiOff' | 'revokeAll' | 'disableAll';
+type OrgRow = OrganizerIntegrationRow;
+const FEATURE: Record<Action, string> = { apiOn: 'API', apiOff: 'API', revokeAll: 'API', disableAll: 'webhooks' };
 
 export function AdminEventsOps() {
   const { t, token, locale } = useApp();
@@ -29,8 +30,6 @@ export function AdminEventsOps() {
   const [state, setState] = useState<'ok' | 'error'>('ok');
   const [paused, setPaused] = useState<AdminEventRow[]>([]);
   const [act, setAct] = useState<{ action: Action; org: OrgRow } | null>(null);
-  const [rate, setRate] = useState('');
-  const [clientId, setClientId] = useState('');
   const seq = useRef(0);
 
   useEffect(() => { if (token) adminS7Api.health(token, { days: 1 }).then(setHealth).catch(() => setHealth(null)); }, [token]);
@@ -50,30 +49,14 @@ export function AdminEventsOps() {
   ];
   const columns: ColumnDef<OrgRow>[] = [
     { key: 'name', header: t('admin.events.ops.col.organizer'), cell: o => <span className="font-medium [overflow-wrap:anywhere]">{o.name}</span> },
-    { key: 'status', header: t('admin.events.ops.col.status'), cell: o => (o.status === 'suspended' ? <Badge tone="danger">{t('admin.events.ops.suspended')}</Badge> : <Badge tone="success">{o.status}</Badge>) },
+    { key: 'status', header: t('admin.events.ops.col.status'), cell: o => (<Badge tone={ORGANIZER_STATUS[o.status as keyof typeof ORGANIZER_STATUS]?.tone ?? 'gray'}>{ORGANIZER_STATUS[o.status as keyof typeof ORGANIZER_STATUS] ? t(ORGANIZER_STATUS[o.status as keyof typeof ORGANIZER_STATUS].key) : o.status}</Badge>) },
     { key: 'api', header: t('admin.events.ops.col.api'), cell: o => <Badge tone={o.apiAccessEnabled ? 'success' : 'gray'}>{t(o.apiAccessEnabled ? 'admin.events.health.on' : 'admin.events.health.off')}</Badge> },
     { key: 'clients', header: t('admin.events.ops.col.clients'), cell: o => o.activeClients },
     { key: 'endpoints', header: t('admin.events.ops.col.endpoints'), cell: o => o.activeEndpoints },
     ...((orgs ?? []).some(o => o.lastFailureAt) ? [{ key: 'lastFailureAt', header: t('admin.events.ops.col.lastFailure'), cell: (o: OrgRow) => (o.lastFailureAt ? eventDateTime(o.lastFailureAt, 'Africa/Dar_es_Salaam', locale) : '—') }] : []),
   ];
-  const label = (a: Action): MessageKey => (a === 'apiOn' ? 'admin.events.ops.apiOn' : a === 'apiOff' ? 'admin.events.ops.apiOff' : a === 'revokeAll' ? 'admin.events.ops.revokeAll' : a === 'disableAll' ? 'admin.events.ops.disableAll' : 'admin.events.ops.rateAction');
+  const label = (a: Action): MessageKey => (a === 'apiOn' ? 'admin.events.ops.apiOn' : a === 'apiOff' ? 'admin.events.ops.apiOff' : a === 'revokeAll' ? 'admin.events.ops.revokeAll' : 'admin.events.ops.disableAll');
   const dangerous = act?.action === 'revokeAll' || act?.action === 'disableAll';
-  const rateNum = Number(rate);
-  const rateOk = Number.isInteger(rateNum) && rateNum >= 1 && rateNum <= 600;
-  const needsClient = act?.action === 'rate';
-  const rateExtra = needsClient ? (
-    <div className="space-y-3">
-      {act!.org.clients && act!.org.clients.length > 0
-        ? <Field label={t('admin.events.ops.client')} required><Select value={clientId} onChange={e => setClientId(e.target.value)} data-testid="ops-client">
-            <option value="">—</option>{act!.org.clients.map(c => <option key={c.id} value={c.id}>{c.name ?? c.id}{c.ratePerMinute ? ` (${c.ratePerMinute})` : ''}</option>)}
-          </Select></Field>
-        : <Field label={t('admin.events.ops.client')} required><Input value={clientId} onChange={e => setClientId(e.target.value.trim())} className="font-mono" autoComplete="off" data-testid="ops-client" /></Field>}
-      <Field label={t('admin.events.ops.rate')} error={rate && !rateOk ? t('admin.events.ops.rateRange') : undefined} required>
-        <Input inputMode="numeric" value={rate} onChange={e => setRate(e.target.value.replace(/\D/g, ''))} data-testid="ops-rate" />
-      </Field>
-    </div>
-  ) : null;
-
   async function run(r: { reason: string; reasonSw?: string; key: string }) {
     if (!token || !act) return;
     const base = { reason: r.reason }; // the contract takes a reason only on these routes (no Swahili text)
@@ -82,7 +65,6 @@ export function AdminEventsOps() {
       if (act.action === 'apiOn' || act.action === 'apiOff') { await adminS7Api.setApiAccess(token, id, { enabled: act.action === 'apiOn', ...base }, r.key); toast.success(t('admin.events.ops.result.api')); }
       else if (act.action === 'revokeAll') { const out = await adminS7Api.revokeAllClients(token, id, base, r.key); toast.success(fmt(t('admin.events.ops.result.revoked'), { n: Number(out.revoked ?? (out as { count?: number }).count ?? 0) })); }
       else if (act.action === 'disableAll') { const out = await adminS7Api.disableAllWebhooks(token, id, base, r.key); toast.success(fmt(t('admin.events.ops.result.disabled'), { n: Number(out.disabled ?? (out as { count?: number }).count ?? 0) })); }
-      else { await adminS7Api.setClientRate(token, clientId, { rateLimitPerMinute: rateNum }, r.key); toast.success(t('admin.events.ops.result.rate')); }
     } catch (err) {
       // A 404 feature_disabled says which feature is off (AC-H17); the dialog keeps its inputs.
       if (isFeatureOff(err)) throw Object.assign(new Error('feature_off'), { featureOff: FEATURE[act.action] });
@@ -107,7 +89,7 @@ export function AdminEventsOps() {
         {(health?.jobs ?? []).length === 0 ? <p className="text-sm text-[var(--color-fg-quaternary)]">{t('admin.events.health.empty')}</p> : (
           <DataTable columns={[
             { key: 'name', header: t('admin.events.health.jobs.job'), cell: j => <span className="font-mono text-xs [overflow-wrap:anywhere]">{j.name}</span> },
-            { key: 'schedule', header: t('admin.events.health.jobs.schedule'), cell: j => j.schedule ?? '—' },
+            { key: 'schedule', header: t('admin.events.health.jobs.schedule'), cell: j => scheduleText(j.schedule, t) },
             { key: 'lastRunAt', header: t('admin.events.health.jobs.lastRun'), cell: j => (j.lastRunAt ? eventDateTime(j.lastRunAt, 'Africa/Dar_es_Salaam', locale) : t('admin.events.health.jobs.never')) },
             { key: 'outcome', header: t('admin.events.health.jobs.outcome'), cell: j => <span className="inline-flex items-center gap-2">{j.outcome ?? '—'}{j.late && <Badge tone="warning">{t('admin.events.health.late')}</Badge>}</span> },
           ]} data={health!.jobs ?? []} keyFn={j => j.name} label={t('admin.events.ops.jobs.title')} dense />
@@ -123,7 +105,6 @@ export function AdminEventsOps() {
                 <Button variant="ghost" size="sm" onClick={() => setAct({ action: o.apiAccessEnabled ? 'apiOff' : 'apiOn', org: o })} aria-label={`${t(o.apiAccessEnabled ? 'admin.events.ops.apiOff' : 'admin.events.ops.apiOn')}: ${o.name}`} data-testid={`ops-api-${o.id}`}>{t(o.apiAccessEnabled ? 'admin.events.ops.apiOff' : 'admin.events.ops.apiOn')}</Button>
                 <Button variant="ghost" size="sm" onClick={() => setAct({ action: 'revokeAll', org: o })} aria-label={`${t('admin.events.ops.revokeAll')}: ${o.name}`} data-testid={`ops-revoke-${o.id}`}>{t('admin.events.ops.revokeAll')}</Button>
                 <Button variant="ghost" size="sm" onClick={() => setAct({ action: 'disableAll', org: o })} aria-label={`${t('admin.events.ops.disableAll')}: ${o.name}`} data-testid={`ops-webhooks-${o.id}`}>{t('admin.events.ops.disableAll')}</Button>
-                <Button variant="ghost" size="sm" onClick={() => { setRate(''); setClientId(''); setAct({ action: 'rate', org: o }); }} aria-label={`${t('admin.events.ops.rateAction')}: ${o.name}`} data-testid={`ops-rate-${o.id}`}>{t('admin.events.ops.rateAction')}</Button>
               </div>
             )} />
         )}
@@ -136,8 +117,8 @@ export function AdminEventsOps() {
       </CardContent></Card>
 
       <ReasonTypedDialog open={!!act} onClose={() => setAct(null)} title={act ? t(label(act.action)) : ''} confirmLabel={act ? t(label(act.action)) : ''} testId="ops-dialog" tone={dangerous ? 'danger' : 'primary'}
-        body={act ? <strong className="[overflow-wrap:anywhere]">{act.org.name}</strong> : undefined} reasonLabel={t('admin.events.ops.reason')} noReason={needsClient}
-        typed={dangerous && act ? [act.org.name] : undefined} typedLabel={t('admin.events.ops.typeName')} extra={rateExtra} extraValid={!needsClient || (rateOk && !!clientId)}
+        body={act ? <strong className="[overflow-wrap:anywhere]">{act.org.name}</strong> : undefined} reasonLabel={t('admin.events.ops.reason')}
+        typed={dangerous && act ? [act.org.name] : undefined} typedLabel={t('admin.events.ops.typeName')}
         errorText={err => { const f = (err as { featureOff?: string }).featureOff; return f ? fmt(t('admin.events.ops.featureOff'), { feature: f }) : null; }}
         onConfirm={run} />
     </div>

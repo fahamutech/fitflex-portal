@@ -129,7 +129,7 @@ function Inner() {
             ? <div data-testid="offline-online-desk"><KitDesk embedded doc={doc} role={role} readOnly={suspended} onOpenRegistration={id => router.push(`/organizer/events?event=${encodeURIComponent(eventId)}&view=kit&registration=${encodeURIComponent(id)}`)} /></div>
             : <ScanPanel desk={desk} timezone={timezone} readOnly={suspended} />)}
           {tab === 'review' && <ReviewPanel eventId={eventId} timezone={timezone} canCheck={canCheck} local={desk.scans} active={tab === 'review'} onChanged={() => setReloadKey(k => k + 1)} />}
-          {tab === 'desks' && <DevicesPanel eventId={eventId} timezone={timezone} mode="organizer" reloadKey={reloadKey} canRemove={canCheck} />}
+          {tab === 'desks' && <DevicesPanel eventId={eventId} timezone={timezone} mode="organizer" reloadKey={reloadKey} canRemove />}
 
           <div className="flex flex-wrap items-center gap-3 border-t border-[var(--color-border-secondary)] pt-3 text-sm" data-testid="offline-footer">
             {desk.scans.some(s => s.state === 'confirmed' || s.state === 'needs_review' || s.state === 'rejected') && <Button variant="ghost" size="sm" onClick={() => void desk.clearSent()} data-testid="offline-clear-sent">{t('events.s7.clearSent')}</Button>}

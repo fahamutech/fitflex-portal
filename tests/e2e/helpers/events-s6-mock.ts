@@ -142,6 +142,9 @@ export function makeS6(user: Json, me: Json | null, o: S6Opts) {
         noResult: regs.length - rs.length, flagged: rs.filter(r => r.flags.length && r.verificationStatus === 'pending_verification').length,
         release: rel ? { stage: rel.stage, releasedAt: rel.releasedAt, releasedBy: { name: 'Neema Organizer' } } : { stage: 'none', releasedAt: null, releasedBy: null },
         disputesOpen: state.disputes.filter(d => d.status === 'open' && reg(d.registrationId)?.cat === id).length,
+        // Events S7 H18 (real server: events-results-service perCategory[].rules): this race's rules, 'net' and null when unset.
+        rules: (() => { const own = (state.settings.categories as Json[] | undefined)?.find(x => x.id === id); return { timeBasis: own?.timeBasis ?? state.settings.timeBasis ?? 'net', cutoffMinutes: own?.cutoffMinutes ?? state.settings.cutoffMinutes ?? null, virtualDistanceToleranceBps: own?.virtualDistanceToleranceBps ?? null }; })(),
+        rulesOverride: (() => { const own = (state.settings.categories as Json[] | undefined)?.find(x => x.id === id); return { timeBasis: own?.timeBasis ?? null, cutoffMinutes: own?.cutoffMinutes ?? null, virtualDistanceToleranceBps: own?.virtualDistanceToleranceBps ?? null }; })(),
       };
     }),
     disputesOpen: state.disputes.filter(d => d.status === 'open').length, importsCount: state.imports.length, settings: state.settings,
