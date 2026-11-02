@@ -90,3 +90,15 @@ test('S6: the Results deep link, the reward desk and the admin results view are 
   await page.goto('/admin/events/?event=evt_pub&view=results');
   await expect(page.getByTestId('events-unavailable')).toBeVisible();
 });
+
+// Events S7 (spec §3.14, AC-O1, AC-F1): with the build flag off the offline kit desk, the Health/Operations/Disputes tabs and the S7 reads vanish and make no S7 call.
+test('S7: the offline kit desk and the admin S7 tabs are not available and make no S7 call', async ({ page }) => {
+  const mock = await setupEvents(page, OWNER, { s7: {} });
+  await page.goto('/organizer/kit-desk/?event=evt_pub');
+  await expect(page.getByTestId('events-unavailable')).toBeVisible();
+  expect(mock.reads(/kit-offline|waitlist|events\/health/)).toHaveLength(0);
+  expect(mock.writes(/kit-offline/)).toHaveLength(0);
+  await setupEvents(page, SUPER_ADMIN, { s7: {} });
+  await page.goto('/admin/events/?tab=health');
+  await expect(page.getByTestId('events-unavailable')).toBeVisible();
+});
