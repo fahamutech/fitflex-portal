@@ -86,27 +86,35 @@ test.describe('refund refusals', () => {
       });
     }
   }
-
-  test('approver_unknown reads in Swahili on a refund payment', async ({ page }) => {
-    await open(page, { ...rows, 'POST /admin/refunds/r-2/paid': { status: 409, json: { error: 'approver_unknown' } } }, '/admin/refunds', 'sw');
-    await page.getByTestId('refund-filter-all').click();
-    await page.getByTestId('refund-paid').click();
-    await page.getByRole('dialog').getByRole('textbox').first().fill('REF-1');
-    await page.getByTestId('refund-submit').click();
-    await expect(page.getByText('Hakuna aliyerekodiwa kuidhinisha kipengele hiki')).toBeVisible();
-  });
 });
 
 test.describe('statement pay refusals', () => {
-  test('gym statement: cannot_pay_own_approval reads in English', async ({ page }) => {
-    const s = { id: 'st1', gymId: 'g1', gymName: 'Kariakoo Gym', periodStartDate: '2026-10-01', mode: 'live', status: 'payable', finalNetTzs: 100000, currency: 'TZS' };
+  const st = { id: 'st1', gymId: 'g1', gymName: 'Kariakoo Gym', periodStartDate: '2026-10-01', mode: 'live', status: 'payable', finalNetTzs: 100000, currency: 'TZS' };
+  for (const [code, status, locale, text] of [
+    ['cannot_pay_own_approval', 403, 'en', 'You approved this statement. A different admin must record the payment.'],
+    ['approver_unknown', 409, 'sw', 'Hakuna aliyerekodiwa kuidhinisha taarifa hii'],
+  ] as const) {
+    test(`gym statement pay: ${code} (${locale})`, async ({ page }) => {
+      await open(page, {
+        'GET /admin/settlements/statements/st1': { json: { statement: st, lines: [], visits: [], adjustments: [] } },
+        'POST /admin/settlements/statements/st1/pay': { status, json: { error: code } },
+      }, '/admin/settlements?statement=st1', locale);
+      await page.getByTestId('settlement-pay').click();
+      await page.getByTestId('settlement-pay-reference').fill('REF-9');
+      await page.getByTestId('settlement-pay-submit').click();
+      await expect(page.getByText(text)).toBeVisible();
+      await expect(page.getByText(text)).not.toContainText(/refund|marejesho/i);
+    });
+  }
+
+  test('statement pay: a missing-scope 403 keeps the statement screen own message', async ({ page }) => {
     await open(page, {
-      'GET /admin/settlements/statements/st1': { json: { statement: s, lines: [], visits: [], adjustments: [] } },
-      'POST /admin/settlements/statements/st1/pay': { status: 403, json: { error: 'cannot_pay_own_approval' } },
+      'GET /admin/settlements/statements/st1': { json: { statement: st, lines: [], visits: [], adjustments: [] } },
+      'POST /admin/settlements/statements/st1/pay': { status: 403, json: { error: 'acl_forbidden', requiredScope: 'settlements_pay' } },
     }, '/admin/settlements?statement=st1');
     await page.getByTestId('settlement-pay').click();
     await page.getByTestId('settlement-pay-reference').fill('REF-9');
     await page.getByTestId('settlement-pay-submit').click();
-    await expect(page.getByText('You approved this refund. A different admin must record the payment.')).toBeVisible();
+    await expect(page.getByText('You don’t have permission to do that.')).toBeVisible();
   });
 });

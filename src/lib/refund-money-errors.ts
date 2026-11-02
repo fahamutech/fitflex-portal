@@ -17,3 +17,12 @@ export function refundMoneyErrorKey(err: unknown): MessageKey | null {
   }
   return null;
 }
+
+/**
+ * Statement payouts (gym, trainer, vendor): only the two second-person codes get new text, worded for a statement.
+ * Everything else (reason_required on a void or hold, acl_forbidden, ...) keeps the screen's existing, more specific message.
+ */
+export function statementPayErrorKey(err: unknown): MessageKey | null {
+  const code = errorCode(err);
+  return code === 'cannot_pay_own_approval' || code === 'approver_unknown' ? (`refundMoney.stmt.${code}` as MessageKey) : null;
+}
