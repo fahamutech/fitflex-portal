@@ -49,7 +49,16 @@ export FITFLEX_E2E_DATABASE_URL=postgresql://localhost:5432/fitflex_e2e_portal_m
 npm run test:e2e
 ```
 
-Servers already on those ports are reused only with `FITFLEX_E2E_REUSE_SERVERS=1` (never in CI). `tests/e2e/flutter-marketplace-web.spec.ts` runs only when `FITFLEX_FLUTTER_WEB_URL` points at a Flutter web build. CI runs the suite in the Portal Checks workflow.
+Servers already on those ports are reused only with `FITFLEX_E2E_REUSE_SERVERS=1` (never in CI). `tests/e2e/flutter-marketplace-web.spec.ts` runs only when `FITFLEX_FLUTTER_WEB_URL` points at a Flutter web build. CI runs the suite in the Portal Checks workflow, split into three shards.
+
+Specs that need a build flag are left out of that run: a flag is fixed when the portal starts, so each has its own `playwright.<name>.config.ts` (events, partner-media, web-checkin, web-gym, shop-merch, admin-phase0). These mock the API, so they need no backend or database:
+
+```bash
+npx playwright test --config playwright.events.config.ts
+EVENTS_FLAG=false npx playwright test --config playwright.events.config.ts
+```
+
+They reuse a server already on their port, so set `FITFLEX_PORTAL_PORT` if another checkout is using it.
 
 The spec at `tests/e2e/checkin-flow.spec.ts` exercises the full member-→ operator check-in slice end to end.
 

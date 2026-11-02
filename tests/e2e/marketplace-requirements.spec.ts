@@ -1,6 +1,8 @@
 import { expect, request, test } from '@playwright/test';
 
 const API = process.env.FITFLEX_API_URL || 'http://localhost:3000';
+// The server checks that an uploaded image really is one.
+const PIXEL = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
 
 function devToken(payload: Record<string, string>) {
   return `dev:${Buffer.from(JSON.stringify(payload)).toString('base64url')}`;
@@ -35,8 +37,8 @@ test('marketplace requirements: portal approval connects vendor, every buyer rol
     headers: auth(vendor.token),
     data: {
       businessName: `Market Store ${suffix}`,
-      logo: 'data:image/png;base64,bG9nbw==',
-      banner: 'data:image/png;base64,YmFubmVy',
+      logo: PIXEL,
+      banner: PIXEL,
       description: 'End-to-end marketplace store',
       businessCategory: 'Equipment',
       contactNumber: '+255700000111',
@@ -48,7 +50,7 @@ test('marketplace requirements: portal approval connects vendor, every buyer rol
       publish: true,
     },
   });
-  expect(profile.ok()).toBeTruthy();
+  expect(profile.ok(), await profile.text()).toBeTruthy();
   expect((await profile.json()).status).toBe('published');
 
   const productName = `Marketplace Bands ${suffix}`;
@@ -66,7 +68,7 @@ test('marketplace requirements: portal approval connects vendor, every buyer rol
       sku: `BAND-${suffix}`,
       weightKg: 0.8,
       variants: [{ name: 'Green', stock: 10 }, { name: 'Black', stock: 10 }],
-      images: ['data:image/png;base64,aW1hZ2Ux', 'data:image/png;base64,aW1hZ2Uy'],
+      images: [PIXEL, PIXEL],
       deliveryAvailable: true,
     },
   });

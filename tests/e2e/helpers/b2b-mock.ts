@@ -175,6 +175,7 @@ export async function setupB2B(page_: Page, user: Json | null = ADMIN, extra: Ar
     // Shell background calls (identity V2 is "off")
     ['GET', /^\/me\/personas$/, () => ({ status: 404, json: { error: 'not_found' } })],
     ['GET', /^\/me\/invitations$/, () => ({ status: 404, json: { error: 'not_found' } })],
+    ['GET', /^\/admin\/tax-rates$/, () => ({ status: 404, json: { error: 'feature_disabled' } })],
     // B2B reference
     ['GET', /^\/b2b\/reference$/, () => REF],
     ['GET', /^\/b2b\/programs\/reference$/, () => PROGRAM_REF],

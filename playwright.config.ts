@@ -82,6 +82,15 @@ const reuseExistingServer = !process.env.CI && process.env.FITFLEX_E2E_REUSE_SER
 
 export default defineConfig({
   testDir: './tests/e2e',
+  // Run by their own playwright.*.config.ts: a build flag is fixed when the portal starts, and each spec here needs its own value.
+  testIgnore: [
+    /events-[a-z0-9-]+\.spec\.ts$/,
+    /partner-media\.spec\.ts$/,
+    /web-checkin\.spec\.ts$/,
+    /web-gym-profile\.spec\.ts$/,
+    /shop-(banners|flash-sales)\.spec\.ts$/,
+    /admin-load-errors\.spec\.ts$/,
+  ],
   timeout: 30_000,
   fullyParallel: false,
   workers: 1,

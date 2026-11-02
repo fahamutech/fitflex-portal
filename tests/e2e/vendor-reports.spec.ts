@@ -453,10 +453,11 @@ test.describe('period and URL', () => {
     const y = addDays(TODAY, -1);
     await mockApi(page, base({
       'GET /vendor/reports/sales': req => {
-        const from = new URL(req.url()).searchParams.get('from');
+        const q = new URL(req.url()).searchParams;
         const body = sales(req);
         // Yesterday's answer is slow and would say 999; today's answer is fast.
-        return from === y ? { delayMs: 1500, json: { ...body, totals: { ...body.totals, netTzs: 999 } } } : { json: body };
+        // `to` too: on the 2nd of a month, This month also starts yesterday.
+        return q.get('from') === y && q.get('to') === y ? { delayMs: 1500, json: { ...body, totals: { ...body.totals, netTzs: 999 } } } : { json: body };
       },
     }));
     await page.goto('/vendor/reports/?view=sales');

@@ -215,7 +215,8 @@ test.describe('document view', () => {
     expect(await page.frameLocator('[data-testid="document-frame"]').locator('body').evaluate(() => (window as unknown as { __docScriptRan?: boolean }).__docScriptRan)).toBeUndefined();
     await expect(page.getByTestId('document-links')).toHaveText('Links (1 active)');
     const views = callsTo(calls, 'GET', '/vendor/documents/sale/sal_1');
-    expect(views.map(c => c.search.get('format')).sort()).toEqual(['html', 'json']);
+    // Strict mode in `next dev` runs the load effect twice.
+    expect([...new Set(views.map(c => c.search.get('format')))].sort()).toEqual(['html', 'json']);
     expect(views.every(c => c.search.get('lang') === 'en')).toBe(true);
     await expect(page.getByTestId('document-back')).toHaveAttribute('href', '/vendor/sales/?id=sal_1');
     expect(calls.filter(c => c.method === 'POST')).toHaveLength(0);
@@ -563,9 +564,11 @@ test.describe('tax details', () => {
     await page.getByTestId('tax-save').click();
     await expect(page.getByText('Enter the VRN as shown on your certificate.')).toBeVisible();
     expect(callsTo(calls, 'PUT', '/vendor/tax-profile')[0].body).not.toHaveProperty('tin');
+    // Strict mode in `next dev` runs the load effect twice, so count from here.
+    const loaded = callsTo(calls, 'GET', '/vendor/tax-profile').length;
     await page.getByTestId('tax-save').click();
     await expect(page.getByText("These details changed on another device. We've reloaded them.")).toBeVisible();
-    await expect.poll(() => callsTo(calls, 'GET', '/vendor/tax-profile').length).toBe(2);
+    await expect.poll(() => callsTo(calls, 'GET', '/vendor/tax-profile').length).toBe(loaded + 1);
   });
 
   test('409 case_locked on upload: the verification is under review', async ({ page }) => {

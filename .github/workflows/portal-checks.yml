@@ -61,9 +61,13 @@ jobs:
         run: npm run build
 
   e2e:
-    name: Playwright e2e
+    name: Playwright e2e (${{ matrix.shard }}/3)
     runs-on: ubuntu-latest
     timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
 
     services:
       postgres:
@@ -126,12 +130,69 @@ jobs:
 
       - name: Run e2e
         working-directory: portal
-        run: npx playwright test --reporter=list
+        run: npx playwright test --shard=${{ matrix.shard }}/3 --reporter=list
 
       - name: Upload Playwright results
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: playwright-results
+          name: playwright-results-${{ matrix.shard }}
           path: portal/test-results
+          retention-days: 7
+
+  # A build flag is fixed when the portal starts, so these specs have their own configs.
+  # Their API is mocked: no backend or database.
+  e2e-flags:
+    name: Playwright e2e (build flags)
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+
+    env:
+      CI: 'true'
+
+    steps:
+      - name: Checkout portal
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright browser
+        run: npx playwright install --with-deps chromium
+
+      - name: Use the public example env
+        run: cp .env.example .env.local
+
+      - name: Run e2e for each build flag
+        run: |
+          failed=0
+          suite() {
+            echo "::group::$*"
+            env "$1" npx playwright test --config "playwright.$2.config.ts" --reporter=list || failed=1
+            echo "::endgroup::"
+          }
+          suite EVENTS_FLAG=true events
+          suite EVENTS_FLAG=false events
+          suite PARTNER_MEDIA_FLAG=true partner-media
+          suite PARTNER_MEDIA_FLAG=false partner-media
+          suite WEB_CHECKIN_FLAG=true web-checkin
+          suite WEB_CHECKIN_FLAG=false web-checkin
+          suite WEB_GYM_FLAG=true web-gym
+          suite WEB_GYM_FLAG=false web-gym
+          suite CI=true shop-merch
+          suite CI=true admin-phase0
+          exit $failed
+
+      - name: Upload Playwright results
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-results-flags
+          path: test-results
           retention-days: 7
