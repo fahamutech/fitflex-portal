@@ -92,6 +92,8 @@ export default defineConfig({
     /admin-load-errors\.spec\.ts$/,
   ],
   timeout: 30_000,
+  // next dev compiles a page on its first visit, and again once it has been idle: on CI that can outlast the default 5s.
+  expect: { timeout: 20_000 },
   fullyParallel: false,
   workers: 1,
   retries: 0,
