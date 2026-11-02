@@ -86,7 +86,7 @@ test.describe('held payments worklist', () => {
     await page.getByTestId('held-note').fill('Member charged after cancel');
     await page.getByTestId('held-submit').click();
     await expect(page.getByText('No held payments.')).toBeVisible();
-    await expect(page.getByText('Refund raised. Status: Approved.')).toBeVisible();
+    await expect(page.getByText('Refund raised. Status: To pay.')).toBeVisible();
     expect(posts(calls)).toHaveLength(1);
     expect(posts(calls)[0].body).toEqual({ transactionId: 'TX-OK', reasonCode: 'payment_error', note: 'Member charged after cancel' });
   });
