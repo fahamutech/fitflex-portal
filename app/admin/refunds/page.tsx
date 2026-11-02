@@ -9,6 +9,7 @@ import { ConfirmDialog, Dialog, DialogFooter } from '@/components/dialog';
 import { formatNumber, money } from '@/lib/admin-utils';
 import { REFUND_SCOPES, refundScopeKey } from '@/lib/events';
 import { REFUND_STAGE_TONE, flagOnErrorKey, moneyErrorKey, refundStageKey, whenText } from '@/lib/money-approval';
+import { refundMoneyErrorKey } from '@/lib/refund-money-errors';
 import { fill } from '@/components/communication-shared';
 import type { MessageKey } from '@/lib/i18n';
 
@@ -126,7 +127,7 @@ export default function RefundsPage() {
       await load();
     } catch (e) {
       // Two-admin refusals (flag on only) have their own text; everything else keeps today's.
-      const key = flagOnErrorKey(e);
+      const key = refundMoneyErrorKey(e) ?? flagOnErrorKey(e);
       setActionError(t(key ?? errorKey(e)));
     } finally {
       setBusy(false);
@@ -146,7 +147,7 @@ export default function RefundsPage() {
       // Partial failure is shown, never full success (backend #270 answers `{ approved, failed, results }`).
       const failed = Number(out?.failed) || 0;
       if (failed > 0) {
-        const why = Array.from(new Set((out.results ?? []).filter(r => !r.ok && r.error).map(r => t(moneyErrorKey({ body: { error: r.error } }))))).join(' ');
+        const why = Array.from(new Set((out.results ?? []).filter(r => !r.ok && r.error).map(r => t(refundMoneyErrorKey({ body: { error: r.error } }) ?? moneyErrorKey({ body: { error: r.error } }))))).join(' ');
         setBatchError(`${fill(t('refunds.batch.partial'), { approved: Number(out.approved) || 0, failed })} ${why}`.trim());
       } else setNotice(t('refunds.batch.approved'));
       await load();
@@ -155,7 +156,7 @@ export default function RefundsPage() {
       const body = (e as { body?: { error?: string; totalTzs?: number; count?: number } } | null)?.body;
       // batch_changed carries the live totals: say what the batch is now, then reload.
       setBatchError(body?.error === 'batch_changed' && typeof body.totalTzs === 'number' && typeof body.count === 'number'
-        ? fill(t('refunds.batch.changed'), { count: body.count, total: formatNumber(body.totalTzs) }) : t(moneyErrorKey(e)));
+        ? fill(t('refunds.batch.changed'), { count: body.count, total: formatNumber(body.totalTzs) }) : t(refundMoneyErrorKey(e) ?? moneyErrorKey(e)));
       await load();
     }
     finally { setBusy(false); }
@@ -172,8 +173,8 @@ export default function RefundsPage() {
       const res = await api.recordRefundBatchPaid(token, { batchId: batch, items });
       // Per-item results (partial success is reported, never silent): the server's rows when it sends them.
       const given = (res.results ?? res.items ?? []) as Array<{ refundId?: string; id?: string; error?: string }>;
-      for (const g of Array.isArray(given) ? given : []) { const id = g.refundId ?? g.id; if (id && g.error) errors[id] = t(moneyErrorKey({ body: { error: g.error } })); }
-    } catch (e) { setBatchError(t(moneyErrorKey(e))); }
+      for (const g of Array.isArray(given) ? given : []) { const id = g.refundId ?? g.id; if (id && g.error) errors[id] = t(refundMoneyErrorKey({ body: { error: g.error } }) ?? moneyErrorKey({ body: { error: g.error } })); }
+    } catch (e) { setBatchError(t(refundMoneyErrorKey(e) ?? moneyErrorKey(e))); }
     // Truth is the refreshed list: a row that is now paid was saved, anything else was not.
     try {
       const fresh = (await api.refunds(token)).refunds;
@@ -271,6 +272,9 @@ export default function RefundsPage() {
             <span data-testid="refund-stage"><Badge tone={REFUND_STAGE_TONE[r.approvalStage] ?? 'warning'}>{t(refundStageKey(r.approvalStage))}</Badge></span>
           ) : (
             <span data-testid="refund-status"><Badge tone={STATUS_TONE[r.status] ?? 'gray'}>{FILTER_LABEL[r.status] ? t(FILTER_LABEL[r.status]) : r.status}</Badge></span>
+          )}
+          {r.status === 'requested' && !(r.secondApproverRequired && r.approvalStage) && (
+            <div className="text-xs text-[var(--color-fg-tertiary)]" data-testid="refund-requested-note">{t('refundMoney.requestedNote')}</div>
           )}
           {auditLine(r) && (
             <div
