@@ -175,6 +175,8 @@ function RefundDialog({ item, onClose, onDone, onStale }: { item: HeldPayment; o
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const stated = Math.round(Number(amount));
+  const max = typeof item.requestAmountTzs === 'number' && item.requestAmountTzs > 0 ? item.requestAmountTzs : null;
+  const overMax = unknown && max != null && stated > max;
 
   /** The message for one refusal, and whether it means the row on screen is out of date. */
   function refusal(err: unknown): { message: string; stale: boolean } {
@@ -195,6 +197,7 @@ function RefundDialog({ item, onClose, onDone, onStale }: { item: HeldPayment; o
     if (!reasonCode) { setError(t('heldPayments.reason.required')); return; }
     if (reasonCode === 'other' && !note.trim()) { setError(t('heldPayments.note.required')); return; }
     if (unknown && !(Number.isFinite(stated) && stated > 0)) { setError(t('heldPayments.amount.required')); return; }
+    if (overMax) return;
     setBusy(true); setError(null);
     try {
       const res = await heldPaymentsApi.refund(token, item.paymentRequestId, {
@@ -222,8 +225,9 @@ function RefundDialog({ item, onClose, onDone, onStale }: { item: HeldPayment; o
             {HELD_REFUND_REASONS.map(c => <option key={c} value={c}>{t(REASON_LABEL[c])}</option>)}
           </Select>
         </Field>
+        {max != null && <div className="text-sm" data-testid="held-max">{fill(t('heldPayments.amount.max'), { amount: money(max) })}</div>}
         {unknown && (
-          <Field label={t('heldPayments.amount')} required hint={t('heldPayments.amount.hint')}>
+          <Field label={t('heldPayments.amount')} required hint={t('heldPayments.amount.hint')} error={overMax ? fill(t('heldPayments.amount.overMax'), { amount: money(max) }) : undefined}>
             <Input type="number" inputMode="numeric" min={1} step={1} value={amount} onChange={e => { setAmount(e.target.value); setError(null); }} data-testid="held-amount" />
           </Field>
         )}
@@ -233,7 +237,7 @@ function RefundDialog({ item, onClose, onDone, onStale }: { item: HeldPayment; o
         {error && <div data-testid="held-error"><Alert tone="error">{error}</Alert></div>}
         <div className="flex flex-wrap justify-end gap-2 border-t border-[var(--color-border-secondary)] pt-4">
           <Button type="button" variant="secondary" className="min-h-11" onClick={onClose} disabled={busy}>{t('common.cancel')}</Button>
-          <Button type="submit" variant="destructive" className="min-h-11" loading={busy} data-testid="held-submit">
+          <Button type="submit" variant="destructive" className="min-h-11" loading={busy} disabled={overMax} data-testid="held-submit">
             {unknown && !(stated > 0) ? t('heldPayments.confirmUnknown') : fill(t('heldPayments.confirm'), { amount: money(unknown ? stated : item.amountTzs) })}
           </Button>
         </div>
