@@ -2,6 +2,7 @@
 import { createContext, ReactNode, useCallback, useContext, useEffect, useState } from 'react';
 import { Locale, MessageKey, t as translate } from '@/lib/i18n';
 import { api, ApiError, setOnPasswordChangeRequired, setOnUnauthorized, tokenRequiresPasswordChange, type PersonaSummary } from '@/lib/api';
+import { wipeAllListsOnSignOut } from '@/components/organizer/kit-desk-offline/desk-store';
 import { PwaRegistration } from '@/components/pwa-registration';
 import { ToastProvider } from '@/components/ui/toast';
 import { VendorProvider } from '@/components/vendor-context';
@@ -90,6 +91,8 @@ export function Providers({ children }: { children: ReactNode }) {
     setToken(tk); setUser(u); setPwcRefused(false);
   };
   const signOut = useCallback(() => {
+    // Events S7 §3.11: signing out removes any saved offline ticket list from this browser. Unsent scans are kept (never lost to a sign-out).
+    void wipeAllListsOnSignOut();
     localStorage.removeItem('token'); localStorage.removeItem('user');
     setToken(null); setUser(null); setPersonas([]); setPwcRefused(false);
   }, []);

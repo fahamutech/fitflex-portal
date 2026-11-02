@@ -9,6 +9,7 @@ import { Button, PageHeader, Alert, Spinner, Card, Badge, Field, Table, TBody, T
 import { ConfirmDialog } from '@/components/dialog';
 import { EVENTS_MODULE, HERO_IMAGES_ADMIN, PARTNER_MEDIA_ADMIN } from '@/lib/flags';
 import { fmt } from '@/lib/vendor';
+import type { MessageKey } from '@/lib/i18n';
 
 const ALL_ACL_SCOPES = [
   { key: 'gyms',      label: 'Gyms' },
@@ -48,6 +49,11 @@ const ALL_ACL_SCOPES = [
   // App photos (spec photo-hero-screens §36). Offered only in builds with NEXT_PUBLIC_HERO_IMAGES_ADMIN=true;
   // its label is translated (admin.nav.heroImages) where it is drawn.
   { key: 'brand_media', label: 'App photos' },
+  // Phase 1: refund deciding and paying are separate grants once REFUND_SPLIT_SCOPES is on; `audit` is the read-only audit log.
+  // Labels are translated (refundMoney.scope.*) where they are drawn.
+  { key: 'refunds_approve', label: 'Refunds: approve or reject' },
+  { key: 'refunds_pay', label: 'Refunds: record payment' },
+  { key: 'audit', label: 'Audit log' },
 ] as const;
 
 type AclScope = typeof ALL_ACL_SCOPES[number]['key'];
@@ -74,7 +80,7 @@ const EMPTY_FORM: CreateForm = { email: '', password: '', displayName: '', aclPe
 
 export default function PortalUsersPage() {
   const { token, user, t, hasPermission } = useApp();
-  const scopeLabel = (s: typeof ALL_ACL_SCOPES[number]) => (s.key === 'brand_media' ? t('admin.nav.heroImages') : s.label);
+  const scopeLabel = (s: typeof ALL_ACL_SCOPES[number]) => (s.key === 'brand_media' ? t('admin.nav.heroImages') : s.key === 'refunds_approve' || s.key === 'refunds_pay' || s.key === 'audit' ? t(`refundMoney.scope.${s.key}` as MessageKey) : s.label);
   const [users, setUsers]           = useState<PortalUser[]>([]);
   const [loading, setLoading]       = useState(true);
   const [error, setError]           = useState<string | null>(null);
@@ -323,6 +329,7 @@ export default function PortalUsersPage() {
                       </button>
                     ))}
                   </div>
+                  <p className="text-xs text-[var(--color-fg-tertiary)]" data-testid="refund-scopes-hint">{t('refundMoney.scopeHint')}</p>
                   <p className="text-xs font-medium text-[var(--color-fg-secondary)]">ACL Permissions</p>
                   <div className="flex flex-wrap gap-2">
                     {ACL_SCOPES.map(s => (
@@ -419,6 +426,7 @@ export default function PortalUsersPage() {
                   </button>
                 ))}
               </div>
+              <p className="text-xs text-[var(--color-fg-tertiary)]" data-testid="refund-scopes-hint">{t('refundMoney.scopeHint')}</p>
             </div>
 
             <div className="flex flex-wrap items-center gap-6">

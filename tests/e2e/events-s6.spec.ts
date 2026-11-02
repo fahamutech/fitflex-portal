@@ -313,6 +313,10 @@ test.describe('results table and drawer (§6.3, §6.6, §9.2)', () => {
     await expect(page.getByTestId('correct-confirm')).toBeDisabled();
     await page.getByTestId('correct-note').fill('Mat read was late; fixed to the chip time');
     await expect(c).toContainText('This changes ranks and may change medals.');
+    // Events S7 H12: Confirm waits for a preview of the effect.
+    await expect(page.getByTestId('correct-confirm')).toBeDisabled();
+    await page.getByTestId('correct-preview').click();
+    await expect(page.getByTestId('correct-preview-result')).toBeVisible();
     await page.getByTestId('correct-confirm').click();
     await expect(page.getByTestId('drawer-live')).toHaveText('Result corrected');
     expect(mock.writes(/correct$/)[0].body).toEqual({ expectedRevision: 1, netTime: '1:52:00', reasonCode: 'timing_error', note: 'Mat read was late; fixed to the chip time' });
@@ -487,6 +491,8 @@ test.describe('disputes and settings (§6.7, §9.2)', () => {
     await page.getByTestId('correct-net').fill('1:52:10');
     await page.getByTestId('correct-reason').selectOption('timing_error');
     await page.getByTestId('correct-note').fill('Runner is right: chip read late');
+    await page.getByTestId('correct-preview').click();
+    await expect(page.getByTestId('correct-preview-result')).toBeVisible();
     await page.getByTestId('correct-confirm').click();
     const w = mock.writes(/disputes\/dsp_1\/resolve$/);
     expect(w).toHaveLength(1);

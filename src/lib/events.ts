@@ -70,6 +70,8 @@ export const cancelReasonKey = (reason: string) => `events.cancel.reason.${(CANC
 export const AUDIT_ACTIONS = [
   'organizer_created', 'organizer_status', 'event_created', 'event_updated', 'submitted', 'withdrawn', 'published', 'rejected', 'cancelled',
   'completed', 'archived', 'started', 'registration_closed', 'deleted', 'staff_invited', 'staff_removed', 'staff_role_changed', 'order_cancelled',
+  // Events S7: offline desks, waitlist, incident controls, hardening jobs.
+  'admin_registration_state_changed', 'rewards_eligible_changed', 'kit_offline_device_prepared', 'kit_offline_device_revoked', 'kit_offline_snapshot', 'kit_offline_synced', 'kit_offline_checked', 'kit_offline_invalid_burst', 'kit_offline_bib_assigned', 'kit_offline_bib_exception', 'kit_manual_collected', 'bib_assigned', 'organizer_status_corrected', 'alerts_sent', 'waitlist_joined', 'waitlist_offered', 'waitlist_left', 'waitlist_removed', 'waitlist_closed', 'waitlist_organizer_toggled', 'api_access_changed', 'admin_api_clients_revoked', 'admin_webhooks_disabled', 'registration_anonymised',
 ] as const;
 export const AUDIT_ACTION_PREFIX = 'events.';
 export const auditActionName = (code: string) => code.replace(/^events\./, '');

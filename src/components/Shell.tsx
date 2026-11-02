@@ -36,7 +36,7 @@ import {
   Star,
   HandCoins,
   SlidersHorizontal,
-  Undo2, Receipt, KeyRound, ShieldAlert, Images, Landmark, Percent, CalendarCheck, ImageUp, Plug
+  Undo2, Receipt, KeyRound, ShieldAlert, Images, Landmark, Percent, CalendarCheck, ImageUp, Plug, ScrollText
 } from 'lucide-react';
 import { useApp } from '../../app/providers';
 import { ChangePasswordGate } from './change-password-gate';
@@ -242,11 +242,13 @@ const ADMIN_NAV: NavItem[] = [
   { href: '/admin/book-keeping',  labelKey: 'admin.nav.bookkeeping',    icon: BookOpen,        groupKey: 'nav.group.finance',  aclScope: 'payments' },
   { href: '/admin/payments',      labelKey: 'admin.nav.payments',       icon: CreditCard,      groupKey: 'nav.group.operations', aclScope: 'payments' },
   { href: '/admin/refunds',       labelKey: 'admin.nav.refunds',        icon: Undo2,           groupKey: 'nav.group.operations', aclScope: 'payments' },
+  { href: '/admin/payments-held', labelKey: 'heldPayments.nav',     icon: ShieldAlert,     groupKey: 'nav.group.operations', aclScope: 'payments' },
   { href: '/admin/kyc',           labelKey: 'admin.nav.kyc',            icon: BadgeCheck,      groupKey: 'nav.group.operations', aclScope: 'kyc' },
   { href: '/admin/account-recovery', labelKey: 'admin.nav.accountRecovery', icon: KeyRound,    groupKey: 'nav.group.operations', aclScope: 'account_recovery' },
   { href: '/admin/approvals',     labelKey: 'admin.nav.approvals',      icon: ShieldCheck,     groupKey: 'nav.group.operations', aclScope: 'approvals' },
   { href: '/admin/settings',      labelKey: 'admin.nav.settings',       icon: Settings,        groupKey: 'nav.group.system',   aclScope: 'settings' },
   { href: '/admin/users',         labelKey: 'admin.nav.users',          icon: UserCog,         groupKey: 'nav.group.system',   aclScope: 'users' },
+  { href: '/admin/audit',         labelKey: 'auditLog.nav',             icon: ScrollText,      groupKey: 'nav.group.system',   aclScope: 'audit' },
 ];
 
 /* ── SidebarLink ─────────────────────────────────────────── */
@@ -598,11 +600,11 @@ export function Shell({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!redirectTo) { if (!vendorPermissionMissing) bouncedFrom.current = null; return; }
     if (vendorPermissionMissing && bouncedFrom.current !== path) {
-      if (!vendorBounceQuiet) toast.error(t('vendor.noAccess'));
+      if (!vendorBounceQuiet) toast.error(t(vendorArea?.noAccessKey ?? 'vendor.noAccess'));
       bouncedFrom.current = path;
     }
     router.replace(redirectTo);
-  }, [redirectTo, vendorPermissionMissing, vendorBounceQuiet, path, router, toast, t]);
+  }, [redirectTo, vendorPermissionMissing, vendorBounceQuiet, vendorArea, path, router, toast, t]);
 
   /* Close mobile drawer on route change */
   useEffect(() => { setMobileOpen(false); }, [pathname]);

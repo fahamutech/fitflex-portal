@@ -8,7 +8,7 @@ import { Alert, Card, CardContent, CardHeader, Table, TBody, Td, Th, THead, Tr }
 import { useVendor } from '@/components/vendor-context';
 import { useApp } from '../../../../app/providers';
 import {
-  Figure, figureGrid, HeaderLine, minus, NoSales, numCell, productLabel, ReportBarChart, useReport, useWalkInSeen, ViewState,
+  Figure, figureGrid, HeaderLine, minus, pct, plural, NoSales, numCell, productLabel, ReportBarChart, useReport, useWalkInSeen, ViewState,
 } from './bits';
 
 /** walkInShown: the Shop channel shows (tool on, or the server saw walk-in data in the period). */
@@ -26,7 +26,7 @@ function MethodsCompact({ data }: { data: SummaryReport['methods'] }) {
         <ul className="space-y-1 text-sm">
           {rows.map(r => (
             <li key={r.label} className="flex justify-between gap-3">
-              <span>{r.label}</span><span className="tabular-nums">{money(r.amountTzs)} · {r.sharePct}%</span>
+              <span>{r.label}</span><span className="tabular-nums">{money(r.amountTzs)} · {pct(r.sharePct)}</span>
             </li>
           ))}
         </ul>
@@ -51,7 +51,7 @@ export function OverviewView({ query, onTryPeriod, onWalkIn }: ViewProps) {
         const s = d.sales;
         const cards = [
           <Figure key="net" strong testId="ov-net" label={t('vendor.reports.net')} value={money(s.netTzs)}
-            sub={fmt(t('vendor.reports.grossShort'), { g: money(s.grossTzs), d: money(s.discountTzs) })} />,
+            sub={fmt(t('vendor.reports.grossLine'), { g: money(s.grossTzs), d: minus(s.discountTzs), r: minus(s.refundTzs) })} />,
           <Figure key="items" testId="ov-items" label={t('vendor.reports.itemsSold')} value={formatNumber(s.itemsSold)} />,
           ...(d.profit ? [<Figure key="profit" testId="ov-profit" label={t('vendor.reports.profit')} value={money(d.profit.profitTzs)} sub={t('vendor.reports.profitHint')} />] : []),
           ...(d.customers ? [<Figure key="owed" testId="ov-owed" label={t('vendor.owed.title')} value={money(d.customers.owedTzs)} />] : []),
@@ -60,7 +60,7 @@ export function OverviewView({ query, onTryPeriod, onWalkIn }: ViewProps) {
         return (
           <div className="space-y-4">
             <HeaderLine head={d} view="overview" />
-            {salesEmpty(s) ? <NoSales from={d.from} to={d.to} onTryPeriod={onTryPeriod} /> : (
+            {salesEmpty(s) ? <NoSales from={d.from} to={d.to} hasEverSold={d.hasEverSold} onTryPeriod={onTryPeriod} /> : (
               <>
                 <div className={figureGrid}>{cards}</div>
                 <div className="grid gap-4 lg:grid-cols-3">
@@ -81,7 +81,7 @@ export function OverviewView({ query, onTryPeriod, onWalkIn }: ViewProps) {
                         {d.topProducts.map(p => (
                           <li key={`${p.productId}:${p.variant ?? ''}`} className="flex justify-between gap-3">
                             <span className="[overflow-wrap:anywhere]">{productLabel(p, t)}</span>
-                            <span className="shrink-0 text-right tabular-nums">{money(p.netRevenueTzs)}<span className="block text-xs text-[var(--color-fg-quaternary)]">{fmt(t('vendor.reports.unitsN'), { n: formatNumber(p.unitsSold) })}</span></span>
+                            <span className="shrink-0 text-right tabular-nums">{money(p.netRevenueTzs)}<span className="block text-xs text-[var(--color-fg-quaternary)]">{plural(t, p.unitsSold, 'vendor.reports.unitsOne', 'vendor.reports.unitsN', { n: formatNumber(p.unitsSold) })}</span></span>
                           </li>
                         ))}
                       </ol>
@@ -130,11 +130,11 @@ export function SalesView({ query, onTryPeriod, onWalkIn, walkInShown }: ViewPro
         const count = (b: { app: { count: number }; walkIn: { count: number } }) => b.app.count + b.walkIn.count;
         const total = d.byChannel.app.netTzs + d.byChannel.walkIn.netTzs;
         const share = (n: number) => (total ? `${Math.round((n * 1000) / total) / 10}%` : '—');
-        const voidedText = fmt(t('vendor.reports.voided'), { n: s.voided.count, amount: money(s.voided.totalTzs) });
+        const voidedText = plural(t, s.voided.count, 'vendor.reports.voidedOne', 'vendor.reports.voided', { amount: money(s.voided.totalTzs) });
         return (
           <div className="space-y-4">
             <HeaderLine head={d} view="sales" />
-            {salesEmpty(s) ? <NoSales from={d.from} to={d.to} onTryPeriod={onTryPeriod} /> : (
+            {salesEmpty(s) ? <NoSales from={d.from} to={d.to} hasEverSold={d.hasEverSold} onTryPeriod={onTryPeriod} /> : (
               <>
                 <div className="grid gap-3 grid-cols-2 lg:grid-cols-4 xl:grid-cols-7" data-testid="sales-strip">
                   <Figure label={t('vendor.reports.gross')} value={money(s.grossTzs)} testId="sales-gross" />
@@ -214,7 +214,7 @@ export function SalesView({ query, onTryPeriod, onWalkIn, walkInShown }: ViewPro
                         {([['app', d.byChannel.app], ['walkIn', d.byChannel.walkIn]] as const).map(([k, c]) => (
                           <div key={k}>
                             <dt className="font-semibold">{t(k === 'app' ? 'vendor.reports.channel.app' : 'vendor.reports.channel.walkIn')}</dt>
-                            <dd className="tabular-nums">{money(c.netTzs)} · {t('vendor.reports.share')} {share(c.netTzs)} · {fmt(t('vendor.reports.countN'), { n: formatNumber(c.count) })}</dd>
+                            <dd className="tabular-nums">{money(c.netTzs)} · {t('vendor.reports.share')} {share(c.netTzs)} · {plural(t, c.count, 'vendor.reports.countOne', 'vendor.reports.countN', { n: formatNumber(c.count) })}</dd>
                           </div>
                         ))}
                       </dl>

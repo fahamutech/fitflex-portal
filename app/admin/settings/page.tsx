@@ -7,6 +7,8 @@ import { SubscriptionTiersEditor, missingSavedKeys, tiersSavable } from '@/compo
 import { fillIn, settingsTierError, tierInUse, tierSellable } from '@/lib/pass-tiers';
 import type { MessageKey } from '@/lib/i18n';
 import { ConfirmDialog } from '@/components/dialog';
+import { ReasonField } from '@/components/reason-field';
+import { isReasonRequired, reasonOf, REASON_REQUIRED_KEY } from '@/lib/admin-reason';
 import { Button, PageHeader, Alert, Spinner, Card, Field, Input, Select, Table, TBody, Td, Th, THead, Tr, ErrorState } from '@/components/shared';
 import { whenText } from '@/lib/money-approval';
 import { ManualPaymentSettingsCard } from '@/components/manual-payment-settings';
@@ -73,6 +75,8 @@ export default function SettingsPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { load(); }, [token]);
 
+  const [reason, setReason] = useState('');
+  const [reasonMissing, setReasonMissing] = useState(false);
   const canSave = !!settings && !loadFailed;
 
   async function handleSave(confirmed = false) {
@@ -87,6 +91,7 @@ export default function SettingsPage() {
     setSaving(true);
     setSuccess(null);
     setError(null);
+    setReasonMissing(false);
     try {
       const updated = await api.updateSettings(token, {
         subscriptionTiers: tiers,
@@ -94,8 +99,10 @@ export default function SettingsPage() {
         paymentPeriodDays: period,
         payoutModel: model,
         currency,
+        reason: reasonOf(reason),
       });
       setSettings(updated);
+      setReason('');
       setAgreedRemovals([]);
       setSuccess(t('admin.settings.saved'));
       setTimeout(() => setSuccess(null), 3000);
@@ -108,6 +115,14 @@ export default function SettingsPage() {
         // Singular for one holder; no number when the server did not say how many.
         const key = held.holders == null ? 'tiers.err.inUseSome' : held.holders === 1 ? 'tiers.err.inUseOne' : 'tiers.err.inUse';
         setError(fillIn(t(key), { tier: label, holders: held.holders ?? '' }));
+        return;
+      }
+      // 400 reason_required: nothing was saved.
+      if (isReasonRequired(e)) {
+        setError(t(REASON_REQUIRED_KEY));
+        setReasonMissing(true);
+        const box = document.querySelector<HTMLTextAreaElement>('[data-testid="settings-reason"]');
+        box?.scrollIntoView({ block: 'center' }); box?.focus();
         return;
       }
       const bad = settingsTierError(e);
@@ -287,6 +302,13 @@ export default function SettingsPage() {
               ))}
             </div>
           )}
+        </div>
+      </Card>
+
+      {/* Why "Save all" is being pressed: stored in the audit log; the server may require it (ADMIN_REASONS_REQUIRED). */}
+      <Card>
+        <div className="p-5">
+          <ReasonField value={reason} onChange={v => { setReason(v); setReasonMissing(false); }} error={reasonMissing ? t(REASON_REQUIRED_KEY) : null} testId="settings-reason" />
         </div>
       </Card>
 

@@ -142,6 +142,9 @@ export function makeS6(user: Json, me: Json | null, o: S6Opts) {
         noResult: regs.length - rs.length, flagged: rs.filter(r => r.flags.length && r.verificationStatus === 'pending_verification').length,
         release: rel ? { stage: rel.stage, releasedAt: rel.releasedAt, releasedBy: { name: 'Neema Organizer' } } : { stage: 'none', releasedAt: null, releasedBy: null },
         disputesOpen: state.disputes.filter(d => d.status === 'open' && reg(d.registrationId)?.cat === id).length,
+        // Events S7 H18 (real server: events-results-service perCategory[].rules): this race's rules, 'net' and null when unset.
+        rules: (() => { const own = (state.settings.categories as Json[] | undefined)?.find(x => x.id === id); return { timeBasis: own?.timeBasis ?? state.settings.timeBasis ?? 'net', cutoffMinutes: own?.cutoffMinutes ?? state.settings.cutoffMinutes ?? null, virtualDistanceToleranceBps: own?.virtualDistanceToleranceBps ?? null }; })(),
+        rulesOverride: (() => { const own = (state.settings.categories as Json[] | undefined)?.find(x => x.id === id); return { timeBasis: own?.timeBasis ?? null, cutoffMinutes: own?.cutoffMinutes ?? null, virtualDistanceToleranceBps: own?.virtualDistanceToleranceBps ?? null }; })(),
       };
     }),
     disputesOpen: state.disputes.filter(d => d.status === 'open').length, importsCount: state.imports.length, settings: state.settings,
@@ -391,6 +394,16 @@ export function makeS6(user: Json, me: Json | null, o: S6Opts) {
       Object.assign(state.settings, b); audit('events.results_settings_changed');
       return { status: 200, json: { settings: state.settings } };
     })],
+    // Events S7 H12: the correction preview (counts only). The S6 mock answers it so the Correct dialog works on an S6-only server too.
+    ['POST', /^\/organizer\/events\/([^/]+)\/results\/([^/]+)\/correct\/preview$/, (c, m) => {
+      if (!on()) return off();
+      if (!inRoles('owner', 'admin', 'timing')) return forbidden();
+      const res = Object.values(state.results).find(r => r.id === m[2]);
+      if (!res) return { status: 404, json: { error: 'result_not_found' } };
+      if (!c.body?.reasonCode || String(c.body?.note ?? '').trim().length < 10) return { status: 422, json: { error: 'validation_failed' } };
+      if (c.body?.expectedRevision !== res.revision) return { status: 409, json: { error: 'result_changed' } };
+      return { revision: res.revision, rankBefore: { overall: res.overallRank, category: res.categoryRank }, rankAfter: { overall: res.overallRank, category: res.categoryRank }, othersShifted: 0, medalsAffected: 0 };
+    }],
     // ── one result ──
     ['GET', /^\/organizer\/events\/([^/]+)\/results\/([^/]+)$/, (_c, m) => {
       if (!on()) return off();
