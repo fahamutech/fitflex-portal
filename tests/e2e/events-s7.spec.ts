@@ -600,3 +600,233 @@ test.describe('waitlist: organizer (AC-W1, AC-W15)', () => {
   });
 });
 
+// ═══ P3: admin Health, Operations, Disputes, event controls ═══
+const PAYMENTS_STAFF = { id: 'admin-5', userType: 'admin', portalUser: true, aclPermissions: ['events', 'payments'] };
+async function adminTab(page: Page, tab: string, user = EVENTS_STAFF, s7: S7Opts = {}, locale: 'en' | 'sw' = 'en') {
+  const mock = await setupEvents(page, user, { s7, locale });
+  await page.goto(`/admin/events/?tab=${tab}`);
+  return mock;
+}
+
+test.describe('admin Health tab (AC-N6)', () => {
+  test('renders every group from the server, with the counts-not-people note, and hides payment cards without the payments scope', async ({ page }) => {
+    await adminTab(page, 'health');
+    await expect(page.getByTestId('admin-health')).toBeVisible();
+    await expect(page.getByTestId('health-counts-note')).toHaveText('These are counts of events, not people.');
+    for (const g of ['funnel', 'refunds', 'webhooks', 'kit', 'results', 'rewards', 'waitlist', 'jobs', 'errors', 'setup']) await expect(page.getByTestId(`health-group-${g}`)).toBeVisible();
+    await expect(page.getByTestId('health-group-payments')).toHaveCount(0);
+    await expect(page.getByTestId('health-group-funnel')).toContainText('1,000');
+    await expect(page.getByTestId('health-group-funnel')).toContainText('40% of the step before');
+    await expect(page.getByTestId('health-group-jobs')).toContainText('Late');
+    await expect(page.getByTestId('health-group-alerts')).toContainText('A13');
+    await expect(page.getByTestId('health-alerts-off')).toHaveText('Alert emails are off because no recipients are set.');
+    await expect(page.getByTestId('health-retention')).toHaveText('Not configured');
+    await expectNoRawKeys(page);
+  });
+
+  test('payment cards show for the payments scope with the oldest age', async ({ page }) => {
+    await adminTab(page, 'health', PAYMENTS_STAFF);
+    await expect(page.getByTestId('health-group-payments')).toContainText('Manual payments waiting');
+    await expect(page.getByTestId('health-group-payments')).toContainText('Oldest: 30 h');
+  });
+
+  test('one failing group shows its own error while the rest render', async ({ page }) => {
+    await adminTab(page, 'health', EVENTS_STAFF, { healthFail: ['refunds'] });
+    await expect(page.getByTestId('health-group-refunds-error')).toBeVisible();
+    await expect(page.getByTestId('health-group-webhooks')).toContainText('Webhook messages waiting');
+  });
+
+  test('the period filter asks the server for 1, 7 or 30 days and a feature that is off says Off', async ({ page }) => {
+    const mock = await adminTab(page, 'health', EVENTS_STAFF, { waitlist: false });
+    await expect(page.getByTestId('health-group-waitlist')).toContainText('Off');
+    await page.getByRole('button', { name: 'Last 30 days' }).click();
+    await expect.poll(() => mock.reads(/events\/health$/).some(c => c.query.days === '30')).toBe(true);
+  });
+
+  test('with analytics off the tab is not available', async ({ page }) => {
+    await adminTab(page, 'health', EVENTS_STAFF, { analytics: false });
+    await expect(page.getByTestId('health-off')).toBeVisible();
+  });
+
+  test('Swahili at 375 px', async ({ page }) => {
+    await page.setViewportSize({ width: 375, height: 800 });
+    await adminTab(page, 'health', EVENTS_STAFF, {}, 'sw');
+    await expect(page.getByTestId('health-counts-note')).toHaveText(eventsS7Messages.sw['admin.events.health.countsNote']);
+    const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+    expect(overflow).toBeLessThanOrEqual(1);
+    await expectNoRawKeys(page);
+  });
+});
+
+test.describe('admin Operations tab (AC-H17)', () => {
+  test('finds organizers by name; Disable API access needs a reason and writes it with the optional Swahili text', async ({ page }) => {
+    const mock = await adminTab(page, 'operations');
+    await expect(page.getByTestId('ops-setup')).toContainText('Feature switches are changed in the server settings by the owner, not here.');
+    await page.getByTestId('ops-search').fill('arusha');
+    await expect(page.getByTestId('ops-orgs')).not.toContainText('Dar Runners');
+    await page.getByTestId('ops-search').fill('dar');
+    await page.getByTestId('ops-api-org_1').click();
+    await expect(page.getByTestId('ops-dialog-confirm')).toBeDisabled();
+    await page.getByTestId('ops-dialog-reason').fill('Abuse of the roster feed.');
+    await page.getByTestId('ops-dialog-reason-sw').fill('Matumizi mabaya ya orodha.');
+    await page.getByTestId('ops-dialog-confirm').click();
+    await expect.poll(() => mock.s7!.opLog.length).toBe(1);
+    expect(mock.s7!.opLog[0]).toMatchObject({ type: 'api_access', enabled: false, reason: 'Abuse of the roster feed.', reasonSw: 'Matumizi mabaya ya orodha.' });
+    expect(JSON.stringify(mock.writes(/api-access$/)[0].body)).not.toMatch(/userId/);
+  });
+
+  test('Revoke all clients needs the organizer name typed and shows the count', async ({ page }) => {
+    const mock = await adminTab(page, 'operations');
+    await page.getByTestId('ops-revoke-org_1').click();
+    await page.getByTestId('ops-dialog-reason').fill('Credentials leaked in public repo.');
+    await expect(page.getByTestId('ops-dialog-confirm')).toBeDisabled();
+    await page.getByTestId('ops-dialog-typed').fill('Dar Runners');
+    await page.getByTestId('ops-dialog-confirm').click();
+    await expect(page.getByText('2 API clients revoked.')).toBeVisible();
+    expect(mock.s7!.opLog[0]).toMatchObject({ type: 'revoke_all', n: 2 });
+  });
+
+  test('Turn off all webhooks and Change rate (1 to 600) each need a reason', async ({ page }) => {
+    const mock = await adminTab(page, 'operations');
+    await page.getByTestId('ops-webhooks-org_1').click();
+    await page.getByTestId('ops-dialog-reason').fill('Endpoint is flooding a customer.');
+    await page.getByTestId('ops-dialog-typed').fill('dar runners');
+    await page.getByTestId('ops-dialog-confirm').click();
+    await expect(page.getByText('1 webhook endpoints turned off.')).toBeVisible();
+    await page.getByTestId('ops-rate-org_1').click();
+    await page.getByTestId('ops-client').selectOption('cli_1');
+    await page.getByTestId('ops-rate').fill('900');
+    await page.getByTestId('ops-dialog-reason').fill('Rate was too high for the host.');
+    await expect(page.getByTestId('ops-dialog-confirm')).toBeDisabled();
+    await page.getByTestId('ops-rate').fill('20');
+    await page.getByTestId('ops-dialog-confirm').click();
+    await expect.poll(() => mock.s7!.clients.find(k => k.id === 'cli_1')!.ratePerMinute).toBe(20);
+  });
+
+  test('a flag that is off says which feature is not available', async ({ page }) => {
+    const mock = await adminTab(page, 'operations');
+    mock.on('POST', /api-clients\/revoke-all$/, () => ({ status: 404, json: { error: 'feature_disabled' } }));
+    await page.getByTestId('ops-revoke-org_1').click();
+    await page.getByTestId('ops-dialog-reason').fill('Credentials leaked in public repo.');
+    await page.getByTestId('ops-dialog-typed').fill('Dar Runners');
+    await page.getByTestId('ops-dialog-confirm').click();
+    await expect(page.getByTestId('ops-dialog')).toContainText('Not available because API is off.');
+  });
+
+  test('timing and an admin without the events scope get nothing', async ({ page }) => {
+    await setupEvents(page, { id: 'admin-9', userType: 'admin', portalUser: true, aclPermissions: ['gyms'] }, { s7: {} });
+    await page.goto('/admin/events/?tab=operations');
+    await expect(page.getByTestId('admin-ops')).toHaveCount(0);
+  });
+});
+
+test.describe('admin Disputes tab (AC-H10)', () => {
+  test('lists open questions with age and May resolve, and the chips filter', async ({ page }) => {
+    const mock = await adminTab(page, 'disputes');
+    await expect(page.getByTestId('admin-disputes').getByRole('row')).toHaveCount(4); // header + 3
+    await expect(page.getByTestId('admin-disputes')).toContainText('May resolve');
+    await page.getByRole('button', { name: 'Older than 7 days' }).click();
+    await expect(page.getByTestId('admin-disputes').getByRole('row')).toHaveCount(2);
+    await page.getByRole('button', { name: 'Organizer suspended' }).click();
+    await expect(page.getByTestId('admin-disputes')).toContainText('Moshi Fun Run');
+    expect(mock.reads(/results\/disputes$/).map(c => c.query.organizerStatus).filter(Boolean)).toContain('suspended');
+    await page.getByTestId('dispute-open-dsp_3').click();
+    await expect(page).toHaveURL(/event=evt_1&view=results/);
+  });
+});
+
+test.describe('admin event controls (AC-H6, AC-H16)', () => {
+  test('Pause registrations needs a reason and the event title, then Resume reverses it', async ({ page }) => {
+    const mock = await setupEvents(page, EVENTS_STAFF, { s7: {} });
+    await page.goto('/admin/events/?event=evt_pub');
+    await page.getByTestId('admin-pause').click();
+    await page.getByTestId('admin-pause-dialog-reason').fill('Payment provider incident.');
+    await page.getByTestId('admin-pause-dialog-reason-sw').fill('Tatizo la mtoa huduma wa malipo.');
+    await expect(page.getByTestId('admin-pause-dialog-confirm')).toBeDisabled();
+    await page.getByTestId('admin-pause-dialog-typed').fill('Arusha Trail 10K');
+    await page.getByTestId('admin-pause-dialog-confirm').click();
+    await expect(page.getByTestId('admin-paused-note')).toBeVisible();
+    expect(mock.s7!.opLog[0]).toMatchObject({ type: 'registration_state', to: 'closed', reasonSw: 'Tatizo la mtoa huduma wa malipo.' });
+    await page.getByTestId('admin-resume').click();
+    await page.getByTestId('admin-pause-dialog-reason').fill('Incident is over.');
+    await page.getByTestId('admin-pause-dialog-typed').fill('Arusha Trail 10K');
+    await page.getByTestId('admin-pause-dialog-confirm').click();
+    await expect(page.getByTestId('admin-pause')).toBeVisible();
+    expect(mock.s7!.opLog[1]).toMatchObject({ to: 'open' });
+  });
+
+  test('the rewards-eligible switch is off by default, asks for a reason, and the integrations block shows counts only', async ({ page }) => {
+    const mock = await setupEvents(page, EVENTS_STAFF, { s7: {} });
+    await page.goto('/admin/events/?event=evt_pub');
+    await expect(page.getByTestId('admin-rewards-switch')).not.toBeChecked();
+    await expect(page.getByTestId('admin-integrations-block')).toContainText('2 API clients, 1 webhook endpoints');
+    await expect(page.getByTestId('admin-integrations-block')).not.toContainText(/cli_|secret|whsec/);
+    await page.getByTestId('admin-rewards-switch').click();
+    await page.getByTestId('admin-rewards-dialog-reason').fill('Approved for the pilot rewards.');
+    await page.getByTestId('admin-rewards-dialog-confirm').click();
+    await expect.poll(() => mock.s7!.rewardsEligible).toBe(true);
+    await expect(page.getByTestId('admin-rewards-switch')).toBeChecked();
+  });
+
+  test('the payments-off banner names the cause in words', async ({ page }) => {
+    await setupEvents(page, EVENTS_STAFF, { s7: { paymentsBlocked: 'second_approver_off' } });
+    await page.goto('/admin/events/?event=evt_pub');
+    await expect(page.getByTestId('payments-off-banner')).toHaveText('Payments are off because two approvers are not turned on yet.');
+  });
+});
+
+test.describe('admin redemptions (AC-H11)', () => {
+  test('Recent redemptions shows reward, masked person, state and times and no code', async ({ page }) => {
+    await setupEvents(page, SUPER_ADMIN, { s7: {} });
+    await page.goto('/admin/event-rewards/?tab=redemptions');
+    const table = page.getByTestId('admin-redemptions');
+    await expect(table).toContainText('Finisher perk');
+    await expect(table).toContainText('Baraka M.');
+    await expect(table).not.toContainText(/FFR-|code/i);
+  });
+});
+
+
+test.describe('admin: offline desks and waitlist blocks', () => {
+  test('a FitFlex admin reads the desks of an event and can remove one with a reason', async ({ page }) => {
+    const mock = await setupEvents(page, EVENTS_STAFF, { s7: {} });
+    mock.s7!.devices.push({ id: 'dev_a', label: 'Gate 1', status: 'active', staffUserId: 'u', staffFirstName: 'Ali', issuedAt: '2027-03-12T08:00:00.000Z', expiresAt: '2027-03-14T08:00:00.000Z', bibRange: null, pending: 3, discarded: 0, lastSyncAt: null, lastHeartbeatAt: null, snapshotRows: 5, snapshotSeq: 1, deskBuild: '1', bibsRecorded: 0, bibExceptions: 0 });
+    await page.goto('/admin/events/?event=evt_pub');
+    await expect(page.getByTestId('admin-event-detail')).toBeVisible();
+    const panel = page.getByTestId('offline-devices');
+    await expect(panel).toContainText('Gate 1');
+    await panel.getByTestId('offline-remove-dev_a').click();
+    await page.getByTestId('offline-remove-dialog-reason').fill('Device reported stolen.');
+    await page.getByTestId('offline-remove-dialog-reason-sw').fill('Kifaa kimeripotiwa kuibiwa.');
+    await page.getByTestId('offline-remove-dialog-typed').fill('Gate 1');
+    await page.getByTestId('offline-remove-dialog-confirm').click();
+    await expect.poll(() => mock.s7!.devices[0].status).toBe('revoked');
+    expect(mock.s7!.opLog[0]).toMatchObject({ type: 'admin_desk_revoked', reasonSw: 'Kifaa kimeripotiwa kuibiwa.' });
+    void SUPER_ADMIN; void sha; void tokenOf;
+  });
+});
+
+test.describe('waitlist: admin (AC-W16)', () => {
+  test('a FitFlex admin sees masked entries and removes one with a reason and an optional Swahili reason', async ({ page }) => {
+    const mock = await setupEvents(page, EVENTS_STAFF, { s7: {} });
+    await page.goto('/admin/events/?event=evt_pub');
+    const block = page.getByTestId('admin-waitlist');
+    await expect(block).toContainText('Neema S.');
+    expect(JSON.stringify(await block.innerText())).not.toMatch(/\+255|@|phone|email/i);
+    await block.getByTestId('admin-waitlist-remove-wle_1').click();
+    await expect(page.getByTestId('admin-waitlist-dialog-confirm')).toBeDisabled();
+    await page.getByTestId('admin-waitlist-dialog-reason').fill('Account used for resale.');
+    await page.getByTestId('admin-waitlist-dialog-reason-sw').fill('Akaunti ilitumika kuuza tena.');
+    await page.getByTestId('admin-waitlist-dialog-confirm').click();
+    await expect.poll(() => mock.s7!.waitlistCalls.length).toBe(1);
+    expect(mock.s7!.waitlistCalls[0]).toMatchObject({ type: 'remove', id: 'wle_1', reasonSw: 'Akaunti ilitumika kuuza tena.' });
+  });
+
+  test('with the flag off the admin block does not exist', async ({ page }) => {
+    await setupEvents(page, EVENTS_STAFF, { s7: { waitlist: false } });
+    await page.goto('/admin/events/?event=evt_pub');
+    await expect(page.getByTestId('admin-event-detail')).toBeVisible();
+    await expect(page.getByTestId('admin-waitlist')).toHaveCount(0);
+  });
+});
+
