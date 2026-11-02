@@ -5,7 +5,7 @@ import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { errorBody, errorCode, fmt } from '@/lib/events';
 import { newIdempotencyKey } from '@/lib/events-ops';
 import { resultsApi } from '@/lib/events-results-api';
-import type { CorrectionPreview } from '@/lib/events-s7-api';
+import { overallRank, type CorrectionPreview } from '@/lib/events-s7-api';
 import {
   CORRECT_REASONS, DQ_REASONS, REJECT_REASONS, countOf, formatElapsed, parseTime, resultsErrorKey, retryAfterOf,
   type BulkPreview, type ReleasePreview, type ResultRow,
@@ -193,7 +193,7 @@ export type CorrectionBody = { netTime?: string; gunTime?: string; finishStatus?
 export function CorrectDialog({ open, onClose, row, title, submitLabel, onSubmit, preview }: {
   open: boolean; onClose: () => void; row: ResultRow | null; title?: string; submitLabel?: string; onSubmit: (body: CorrectionBody, key: string) => Promise<void>;
   /** Events S7 §6.4 (H12): when given, "Preview effect" shows what the change does and Confirm waits for a preview that matches the form and the current revision. */
-  preview?: (body: { netTime?: string; gunTime?: string; finishStatus?: string }) => Promise<CorrectionPreview>;
+  preview?: (body: CorrectionBody) => Promise<CorrectionPreview>;
 }) {
   const { t } = useApp();
   const [net, setNet] = useState('');
@@ -220,11 +220,13 @@ export function CorrectDialog({ open, onClose, row, title, submitLabel, onSubmit
   async function runPreview() {
     if (!preview) return;
     setPvBusy(true); setPvStale(false); err.clear();
-    try { const data = await preview({ ...(pNet?.ok ? { netTime: pNet.text } : {}), ...(pGun?.ok ? { gunTime: pGun.text } : {}), ...(status && status !== row?.finishStatus ? { finishStatus: status } : {}) }); setPv({ sig, data }); }
+    // The server validates the preview like the correction itself (reason and a note of 10 to 300), so the button waits for both.
+    try { const data = await preview({ ...(pNet?.ok ? { netTime: pNet.text } : {}), ...(pGun?.ok ? { gunTime: pGun.text } : {}), ...(status && status !== row?.finishStatus ? { finishStatus: status } : {}), reasonCode: reason, note: note.trim() }); setPv({ sig, data }); }
     catch (e) { setPv(null); if ((e as { body?: { error?: string } })?.body?.error === 'result_changed') setPvStale(true); else err.fail(e); }
     finally { setPvBusy(false); }
   }
-  const valid = previewOk && changed && !(pNet && !pNet.ok) && !(pGun && !pGun.ok) && !!reason && noteLen >= NOTE_MIN && noteLen <= NOTE_MAX;
+  const baseValid = changed && !(pNet && !pNet.ok) && !(pGun && !pGun.ok) && !!reason && noteLen >= NOTE_MIN && noteLen <= NOTE_MAX;
+  const valid = previewOk && baseValid;
   async function go() {
     setBusy(true); err.clear();
     try {
@@ -262,9 +264,9 @@ export function CorrectDialog({ open, onClose, row, title, submitLabel, onSubmit
         <p className="text-sm text-[var(--color-fg-secondary)]">{t('organizer.results.correct.warn')}</p>
         {preview && (
           <div className="space-y-2" data-testid="correct-preview-box">
-            <Button variant="secondary" className="min-h-11" loading={pvBusy} disabled={!changed || (pNet ? !pNet.ok : false) || (pGun ? !pGun.ok : false)} onClick={() => void runPreview()} data-testid="correct-preview">{t('organizer.results.preview.button')}</Button>
+            <Button variant="secondary" className="min-h-11" loading={pvBusy} disabled={!baseValid} onClick={() => void runPreview()} data-testid="correct-preview">{t('organizer.results.preview.button')}</Button>
             {pvStale && <Alert tone="warning">{t('organizer.results.preview.stale')}</Alert>}
-            {pv && pv.sig === sig && <p role="status" className="text-sm font-medium text-[var(--color-fg-primary)]" data-testid="correct-preview-result">{fmt(t('organizer.results.preview.body'), { a: pv.data.rankBefore ?? '—', b: pv.data.rankAfter ?? '—', n: pv.data.othersShifted, m: pv.data.medalsAffected })}</p>}
+            {pv && pv.sig === sig && <p role="status" className="text-sm font-medium text-[var(--color-fg-primary)]" data-testid="correct-preview-result">{fmt(t('organizer.results.preview.body'), { a: overallRank(pv.data.rankBefore) ?? '—', b: overallRank(pv.data.rankAfter) ?? '—', n: pv.data.othersShifted, m: pv.data.medalsAffected })}</p>}
             {!previewOk && !pvStale && <p className="text-xs text-[var(--color-fg-quaternary)]" data-testid="correct-preview-needed">{t(pv ? 'organizer.results.preview.stale' : 'organizer.results.preview.needed')}</p>}
           </div>
         )}

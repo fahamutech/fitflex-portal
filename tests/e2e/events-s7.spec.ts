@@ -668,10 +668,10 @@ test.describe('admin Operations tab (AC-H17)', () => {
     await page.getByTestId('ops-api-org_1').click();
     await expect(page.getByTestId('ops-dialog-confirm')).toBeDisabled();
     await page.getByTestId('ops-dialog-reason').fill('Abuse of the roster feed.');
-    await page.getByTestId('ops-dialog-reason-sw').fill('Matumizi mabaya ya orodha.');
     await page.getByTestId('ops-dialog-confirm').click();
     await expect.poll(() => mock.s7!.opLog.length).toBe(1);
-    expect(mock.s7!.opLog[0]).toMatchObject({ type: 'api_access', enabled: false, reason: 'Abuse of the roster feed.', reasonSw: 'Matumizi mabaya ya orodha.' });
+    expect(mock.s7!.opLog[0]).toMatchObject({ type: 'api_access', enabled: false, reason: 'Abuse of the roster feed.' });
+    expect(mock.writes(/api-access$/)[0].body).toEqual({ enabled: false, reason: 'Abuse of the roster feed.' }); // the contract takes a reason only
     expect(JSON.stringify(mock.writes(/api-access$/)[0].body)).not.toMatch(/userId/);
   });
 
@@ -686,7 +686,7 @@ test.describe('admin Operations tab (AC-H17)', () => {
     expect(mock.s7!.opLog[0]).toMatchObject({ type: 'revoke_all', n: 2 });
   });
 
-  test('Turn off all webhooks and Change rate (1 to 600) each need a reason', async ({ page }) => {
+  test('Turn off all webhooks needs a reason and the typed name; Change rate (1 to 600) sends rateLimitPerMinute only', async ({ page }) => {
     const mock = await adminTab(page, 'operations');
     await page.getByTestId('ops-webhooks-org_1').click();
     await page.getByTestId('ops-dialog-reason').fill('Endpoint is flooding a customer.');
@@ -694,13 +694,13 @@ test.describe('admin Operations tab (AC-H17)', () => {
     await page.getByTestId('ops-dialog-confirm').click();
     await expect(page.getByText('1 webhook endpoints turned off.')).toBeVisible();
     await page.getByTestId('ops-rate-org_1').click();
-    await page.getByTestId('ops-client').selectOption('cli_1');
+    await page.getByTestId('ops-client').fill('cli_1');
     await page.getByTestId('ops-rate').fill('900');
-    await page.getByTestId('ops-dialog-reason').fill('Rate was too high for the host.');
     await expect(page.getByTestId('ops-dialog-confirm')).toBeDisabled();
     await page.getByTestId('ops-rate').fill('20');
     await page.getByTestId('ops-dialog-confirm').click();
     await expect.poll(() => mock.s7!.clients.find(k => k.id === 'cli_1')!.ratePerMinute).toBe(20);
+    expect(mock.writes(/api-clients\/cli_1$/)[0].body).toEqual({ rateLimitPerMinute: 20 });
   });
 
   test('a flag that is off says which feature is not available', async ({ page }) => {

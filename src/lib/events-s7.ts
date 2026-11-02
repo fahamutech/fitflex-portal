@@ -29,6 +29,7 @@ const S7_ERRORS: Record<string, MessageKey> = {
   reason_required: 'events.s7.error.reason_required',
   invalid_state: 'events.s7.error.invalid_state',
   invalid_transition: 'events.s7.error.invalid_state',
+  registration_window_over: 'events.s7.error.registration_window_over',
 };
 export const s7ErrorKey = (err: unknown): MessageKey => S7_ERRORS[errorCode(err) ?? ''] ?? errorKey(err);
 export const s7CodeKey = (code: string | null | undefined): MessageKey => S7_ERRORS[code ?? ''] ?? 'common.somethingWrong';

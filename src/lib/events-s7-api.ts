@@ -108,27 +108,32 @@ export interface HealthResponse {
   alerts?: Array<{ rule: string; subject?: string | null; severity?: string | null; runbook?: string | null; counts?: Record<string, number> | null }>;
 }
 export interface OrganizerIntegrationRow {
-  id: string; name: string; status: string; apiAccessEnabled: boolean; activeClients: number; activeEndpoints: number; lastFailureAt?: string | null; apiRatePerMinute?: number | null;
+  id: string; name: string; status: string; apiAccessEnabled: boolean; activeClients: number; activeEndpoints: number; /** Not in the contract today; shown only when the server sends it. */ lastFailureAt?: string | null;
 }
 export interface ApiClientRow { id: string; name?: string | null; label?: string | null; ratePerMinute?: number | null; status?: string }
 export interface DisputeListRow {
   id: string; eventId: string; eventTitle: string; organizerName: string; openedAt: string; ageDays: number; status: string; adminMayResolve: boolean;
 }
-export interface RedemptionRow { id: string; rewardTitle?: { en?: string; sw?: string } | string | null; person?: string | null; status?: string; codeState?: string | null; claimedAt?: string | null; redeemedAt?: string | null }
-export interface CorrectionPreview { rankBefore: number | null; rankAfter: number | null; othersShifted: number; medalsAffected: number; revision?: number | null }
+/** H11: never a code, hash or user id. */
+export interface RedemptionRow { id: string; person?: string | null; reward?: { en?: string; sw?: string } | string | null; redeemMode?: string | null; codeState?: string | null; claimedAt?: string | null; redeemedAt?: string | null; expiresAt?: string | null; needsReview?: boolean }
+/** H12: ranks are `{ overall, category }`, null until the category has an official release. */
+export type RankPair = { overall: number | null; category: number | null } | number | null;
+export interface CorrectionPreview { rankBefore: RankPair; rankAfter: RankPair; othersShifted: number; medalsAffected: number; revision?: number | null }
+export const overallRank = (r: RankPair | undefined): number | null => (typeof r === 'number' ? r : r?.overall ?? null);
 
 export const adminS7Api = {
   health: (token: string, q: { days: 1 | 7 | 30; eventId?: string }) => request<HealthResponse>(`/admin/events/health${qs(q)}`, {}, token),
   organizers: (token: string, q: { q?: string; apiAccess?: string; cursor?: string | null } = {}) => request<Page<OrganizerIntegrationRow>>(`/admin/events/organizers${qs(q)}`, {}, token),
-  setApiAccess: (token: string, organizerId: string, body: { enabled: boolean; reason: string; reasonSw?: string }, key: string) =>
+  setApiAccess: (token: string, organizerId: string, body: { enabled: boolean; reason: string }, key: string) =>
     post<Record<string, unknown>>(token, `/admin/events/organizers/${encodeURIComponent(organizerId)}/api-access`, body, key),
-  revokeAllClients: (token: string, organizerId: string, body: { reason: string; reasonSw?: string }, key: string) =>
+  revokeAllClients: (token: string, organizerId: string, body: { reason: string }, key: string) =>
     post<{ revoked?: number } & Record<string, unknown>>(token, `/admin/events/organizers/${encodeURIComponent(organizerId)}/api-clients/revoke-all`, body, key),
-  disableAllWebhooks: (token: string, organizerId: string, body: { reason: string; reasonSw?: string }, key: string) =>
+  disableAllWebhooks: (token: string, organizerId: string, body: { reason: string }, key: string) =>
     post<{ disabled?: number } & Record<string, unknown>>(token, `/admin/events/organizers/${encodeURIComponent(organizerId)}/webhook-endpoints/disable-all`, body, key),
-  setClientRate: (token: string, clientId: string, body: { ratePerMinute: number; reason: string; reasonSw?: string }, key: string) =>
+  /** Contract: PATCH body is `{ rateLimitPerMinute }` only (no reason is accepted). */
+  setClientRate: (token: string, clientId: string, body: { rateLimitPerMinute: number }, key: string) =>
     request<Record<string, unknown>>(`/admin/events/api-clients/${encodeURIComponent(clientId)}`, { method: 'PATCH', body: JSON.stringify(body), headers: idem(key) }, token),
-  integrations: (token: string, eventId: string) => request<Record<string, unknown>>(`/admin/events/${encodeURIComponent(eventId)}/integrations`, {}, token),
+  integrations: (token: string, eventId: string) => request<{ organizerId?: string; apiAccessEnabled?: boolean; activeClients?: number; activeEndpoints?: number; lastDeliveryFailureAt?: string | null }>(`/admin/events/${encodeURIComponent(eventId)}/integrations`, {}, token),
   registrationState: (token: string, eventId: string, body: { state: 'closed' | 'open'; reason: string; reasonSw?: string }, key: string) =>
     post<Record<string, unknown>>(token, `/admin/events/${encodeURIComponent(eventId)}/registration-state`, body, key),
   rewardsEligible: (token: string, eventId: string, body: { eligible: boolean; reason: string; reasonSw?: string }, key: string) =>

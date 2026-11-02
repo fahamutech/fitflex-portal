@@ -96,7 +96,7 @@ export function makeS7(user: Json, me: Json | null, o: S7Opts) {
     resultRevision: 1,
   };
   state.orgs.push(
-    { id: 'org_1', name: 'Dar Runners', status: 'active', apiAccessEnabled: true, activeClients: 2, activeEndpoints: 1, lastFailureAt: '2027-03-01T08:00:00.000Z' },
+    { id: 'org_1', name: 'Dar Runners', status: 'active', apiAccessEnabled: true, activeClients: 2, activeEndpoints: 1 },
     { id: 'org_2', name: 'Arusha Trail Club', status: 'suspended', apiAccessEnabled: false, activeClients: 0, activeEndpoints: 0, lastFailureAt: null },
   );
   state.clients.push({ id: 'cli_1', organizerId: 'org_1', name: 'Timing feed', ratePerMinute: 60, status: 'active' }, { id: 'cli_2', organizerId: 'org_1', name: 'Roster sync', ratePerMinute: 30, status: 'active' });
@@ -106,8 +106,8 @@ export function makeS7(user: Json, me: Json | null, o: S7Opts) {
     { id: 'dsp_3', eventId: 'evt_1', eventTitle: 'Moshi Fun Run', organizerName: 'Arusha Trail Club', openedAt: '2027-03-09T08:00:00.000Z', ageDays: 1, status: 'open', adminMayResolve: true, organizerStatus: 'suspended' },
   );
   state.redemptions.push(
-    { id: 'red_1', rewardTitle: { en: 'Finisher perk', sw: 'Faida ya aliyemaliza' }, person: 'Baraka M.', status: 'redeemed', claimedAt: '2027-03-12T08:00:00.000Z', redeemedAt: '2027-03-12T10:00:00.000Z' },
-    { id: 'red_2', rewardTitle: { en: 'Finisher certificate', sw: 'Cheti cha aliyemaliza' }, person: 'Amina M.', status: 'claimed', claimedAt: '2027-03-12T09:00:00.000Z', redeemedAt: null },
+    { id: 'red_1', reward: { en: 'Finisher perk', sw: 'Faida ya aliyemaliza' }, redeemMode: 'code', person: 'Baraka M.', codeState: 'redeemed', claimedAt: '2027-03-12T08:00:00.000Z', redeemedAt: '2027-03-12T10:00:00.000Z', expiresAt: null, needsReview: false },
+    { id: 'red_2', reward: { en: 'Finisher certificate', sw: 'Cheti cha aliyemaliza' }, redeemMode: 'certificate', person: 'Amina M.', codeState: 'reserved', claimedAt: '2027-03-12T09:00:00.000Z', redeemedAt: null, expiresAt: null, needsReview: false },
   );
 
   const all = () => [...state.regs, ...(state.lateIncluded ? [state.lateReg] : [])];
@@ -417,7 +417,8 @@ export function makeS7(user: Json, me: Json | null, o: S7Opts) {
     ['GET', /^\/admin\/events\/organizers$/, (c) => {
       if (!hasScope('events')) return { status: 403, json: { error: 'forbidden' } };
       const q = (c.query.q ?? '').toLowerCase();
-      return { items: state.orgs.filter(x => !q || String(x.name).toLowerCase().includes(q)).map(x => ({ ...x, clients: state.clients.filter(k => k.organizerId === x.id && k.status === 'active') })), nextCursor: null };
+      // Contract H17: id, name, status, apiAccessEnabled, activeClients, activeEndpoints (no client list, no last failure).
+      return { items: state.orgs.filter(x => !q || String(x.name).toLowerCase().includes(q)).map(({ lastFailureAt, ...x }) => { void lastFailureAt; return x; }), nextCursor: null };
     }],
     ['POST', /^\/admin\/events\/organizers\/([^/]+)\/api-access$/, (c, m) => {
       if (!hasScope('events')) return { status: 403, json: { error: 'forbidden' } };
@@ -451,17 +452,17 @@ export function makeS7(user: Json, me: Json | null, o: S7Opts) {
       if (!hasScope('events')) return { status: 403, json: { error: 'forbidden' } };
       return idem(c, `rate:${m[1]}`, () => {
         const k = state.clients.find(x => x.id === m[1]); if (!k) return { status: 404, json: { error: 'client_not_found' } };
-        const n = c.body?.ratePerMinute;
-        if (!Number.isInteger(n) || n < 1 || n > 600 || String(c.body?.reason ?? '').trim().length < 10) return { status: 422, json: { error: 'validation_failed' } };
-        k.ratePerMinute = n; state.opLog.push({ type: 'rate', id: k.id, n, reason: c.body.reason });
-        return { status: 200, json: { client: k } };
+        const n = c.body?.rateLimitPerMinute;
+        if (!Number.isInteger(n) || n < 1 || n > 600) return { status: 422, json: { error: 'validation_failed' } };
+        k.ratePerMinute = n; state.opLog.push({ type: 'rate', id: k.id, n });
+        return { status: 200, json: { id: k.id, rateLimitPerMinute: n } };
       });
     }],
     ['GET', /^\/admin\/events\/([^/]+)\/integrations$/, (_c, m) => {
       if (!hasScope('events')) return { status: 403, json: { error: 'forbidden' } };
       if (m[1] !== 'evt_pub') return undefined;
       const org = state.orgs[0];
-      return { apiClients: { active: org.activeClients, expiringSoon: 0 }, webhooks: { endpoints: org.activeEndpoints } };
+      return { organizerId: org.id, apiAccessEnabled: org.apiAccessEnabled, activeClients: org.activeClients, activeEndpoints: org.activeEndpoints, lastDeliveryFailureAt: null };
     }],
     ['POST', /^\/admin\/events\/([^/]+)\/registration-state$/, (c) => {
       if (!hasScope('events')) return { status: 403, json: { error: 'forbidden' } };
@@ -469,16 +470,18 @@ export function makeS7(user: Json, me: Json | null, o: S7Opts) {
         const to = c.body?.state;
         if (!['closed', 'open'].includes(to) || String(c.body?.reason ?? '').trim().length < 10) return { status: 422, json: { error: 'validation_failed' } };
         if ((to === 'closed') === state.paused) return { status: 409, json: { error: 'invalid_transition' } };
+        const from = state.paused ? 'registration_closed' : 'published';
         state.paused = to === 'closed'; state.opLog.push({ type: 'registration_state', to, reason: c.body.reason, reasonSw: c.body.reasonSw ?? null });
-        return { status: 200, json: { status: state.paused ? 'registration_closed' : 'published' } };
+        return { status: 200, json: { eventStatus: state.paused ? 'registration_closed' : 'published', from } };
       });
     }],
     ['POST', /^\/admin\/events\/([^/]+)\/rewards-eligible$/, (c) => {
       if (!hasScope('events')) return { status: 403, json: { error: 'forbidden' } };
       return idem(c, 'rewards-eligible', () => {
         if (typeof c.body?.eligible !== 'boolean' || String(c.body?.reason ?? '').trim().length < 10) return { status: 422, json: { error: 'validation_failed' } };
+        const changed = state.rewardsEligible !== c.body.eligible;
         state.rewardsEligible = c.body.eligible; state.opLog.push({ type: 'rewards_eligible', eligible: c.body.eligible, reason: c.body.reason, reasonSw: c.body.reasonSw ?? null });
-        return { status: 200, json: { rewardsEligible: state.rewardsEligible } };
+        return { status: 200, json: { rewardsEligible: state.rewardsEligible, changed } };
       });
     }],
     ['GET', /^\/admin\/events\/results\/disputes$/, (c) => {
@@ -510,9 +513,11 @@ export function makeS7(user: Json, me: Json | null, o: S7Opts) {
     ['POST', /^\/organizer\/events\/([^/]+)\/results\/([^/]+)\/correct\/preview$/, (c) => {
       if (!inRoles('owner', 'admin', 'timing')) return forbidden();
       state.previews.push(c.body ?? {});
-      const stale = c.body?.expectedRevision != null && c.body.expectedRevision !== state.resultRevision;
-      if (stale) return { status: 409, json: { error: 'result_changed' } };
-      return { rankBefore: 3, rankAfter: 1, othersShifted: 2, medalsAffected: 1, revision: state.resultRevision };
+      // Contract H12: the same body as /correct (reasonCode and a note of 10 to 300 are required), owner and admin only.
+      if (!inRoles('owner', 'admin')) return forbidden();
+      if (!c.body?.reasonCode || String(c.body?.note ?? '').trim().length < 10) return { status: 422, json: { error: 'validation_failed' } };
+      if (c.body?.expectedRevision !== state.resultRevision) return { status: 409, json: { error: 'result_changed' } };
+      return { revision: state.resultRevision, rankBefore: { overall: 3, category: 3 }, rankAfter: { overall: 1, category: 1 }, othersShifted: 2, medalsAffected: 1 };
     }],
   ];
 

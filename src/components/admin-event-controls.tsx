@@ -39,8 +39,8 @@ export function AdminEventControls({ doc, onChanged }: { doc: AdminEventDetail; 
   const loadIntegrations = useCallback(async () => {
     if (!token) return;
     try {
-      const raw = await adminS7Api.integrations(token, doc.id) as { apiClients?: { active?: number } | null; webhooks?: { endpoints?: number } | null; clients?: number; endpoints?: number };
-      setIntegrations({ clients: raw.apiClients?.active ?? raw.clients ?? 0, endpoints: raw.webhooks?.endpoints ?? raw.endpoints ?? 0 });
+      const raw = await adminS7Api.integrations(token, doc.id);
+      setIntegrations({ clients: raw.activeClients ?? 0, endpoints: raw.activeEndpoints ?? 0 });
     } catch (err) { if (!isFeatureOff(err)) setIntegrations(null); }
   }, [token, doc.id]);
   useEffect(() => { void loadIntegrations(); }, [loadIntegrations]);

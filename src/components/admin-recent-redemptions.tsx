@@ -17,12 +17,12 @@ export function RecentRedemptions() {
     adminS7Api.redemptions(token, { limit: 20 }).then(p => setRows(p.items ?? [])).catch(() => setHidden(true));
   }, [token]);
   if (hidden) return null;
-  const title = (r: RedemptionRow) => (typeof r.rewardTitle === 'string' ? r.rewardTitle : (locale === 'sw' ? r.rewardTitle?.sw || r.rewardTitle?.en : r.rewardTitle?.en || r.rewardTitle?.sw) ?? '—');
+  const title = (r: RedemptionRow) => (typeof r.reward === 'string' ? r.reward : (locale === 'sw' ? r.reward?.sw || r.reward?.en : r.reward?.en || r.reward?.sw) ?? '—');
   const when = (iso: string | null | undefined) => (iso ? eventDateTime(iso, 'Africa/Dar_es_Salaam', locale) : '—');
   const columns: ColumnDef<RedemptionRow>[] = [
     { key: 'reward', header: t('admin.events.redemptions.col.reward'), cell: r => <span className="[overflow-wrap:anywhere]">{title(r)}</span> },
     { key: 'person', header: t('admin.events.redemptions.col.person'), cell: r => r.person ?? '—' },
-    { key: 'state', header: t('admin.events.redemptions.col.state'), cell: r => <Badge tone={r.status === 'redeemed' ? 'success' : 'gray'}>{r.status ?? '—'}</Badge> },
+    { key: 'state', header: t('admin.events.redemptions.col.state'), cell: r => <Badge tone={r.codeState === 'redeemed' ? 'success' : r.needsReview ? 'warning' : 'gray'}>{r.codeState ?? '—'}</Badge> },
     { key: 'claimed', header: t('admin.events.redemptions.col.claimed'), cell: r => when(r.claimedAt) },
     { key: 'redeemed', header: t('admin.events.redemptions.col.redeemed'), cell: r => when(r.redeemedAt) },
   ];

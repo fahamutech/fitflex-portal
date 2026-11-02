@@ -397,8 +397,9 @@ export function makeS6(user: Json, me: Json | null, o: S6Opts) {
       if (!inRoles('owner', 'admin', 'timing')) return forbidden();
       const res = Object.values(state.results).find(r => r.id === m[2]);
       if (!res) return { status: 404, json: { error: 'result_not_found' } };
+      if (!c.body?.reasonCode || String(c.body?.note ?? '').trim().length < 10) return { status: 422, json: { error: 'validation_failed' } };
       if (c.body?.expectedRevision !== res.revision) return { status: 409, json: { error: 'result_changed' } };
-      return { rankBefore: res.overallRank, rankAfter: res.overallRank, othersShifted: 0, medalsAffected: 0, revision: res.revision };
+      return { revision: res.revision, rankBefore: { overall: res.overallRank, category: res.categoryRank }, rankAfter: { overall: res.overallRank, category: res.categoryRank }, othersShifted: 0, medalsAffected: 0 };
     }],
     // ── one result ──
     ['GET', /^\/organizer\/events\/([^/]+)\/results\/([^/]+)$/, (_c, m) => {

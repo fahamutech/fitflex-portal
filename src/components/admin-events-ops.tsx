@@ -54,7 +54,7 @@ export function AdminEventsOps() {
     { key: 'api', header: t('admin.events.ops.col.api'), cell: o => <Badge tone={o.apiAccessEnabled ? 'success' : 'gray'}>{t(o.apiAccessEnabled ? 'admin.events.health.on' : 'admin.events.health.off')}</Badge> },
     { key: 'clients', header: t('admin.events.ops.col.clients'), cell: o => o.activeClients },
     { key: 'endpoints', header: t('admin.events.ops.col.endpoints'), cell: o => o.activeEndpoints },
-    { key: 'lastFailureAt', header: t('admin.events.ops.col.lastFailure'), cell: o => (o.lastFailureAt ? eventDateTime(o.lastFailureAt, 'Africa/Dar_es_Salaam', locale) : '—') },
+    ...((orgs ?? []).some(o => o.lastFailureAt) ? [{ key: 'lastFailureAt', header: t('admin.events.ops.col.lastFailure'), cell: (o: OrgRow) => (o.lastFailureAt ? eventDateTime(o.lastFailureAt, 'Africa/Dar_es_Salaam', locale) : '—') }] : []),
   ];
   const label = (a: Action): MessageKey => (a === 'apiOn' ? 'admin.events.ops.apiOn' : a === 'apiOff' ? 'admin.events.ops.apiOff' : a === 'revokeAll' ? 'admin.events.ops.revokeAll' : a === 'disableAll' ? 'admin.events.ops.disableAll' : 'admin.events.ops.rateAction');
   const dangerous = act?.action === 'revokeAll' || act?.action === 'disableAll';
@@ -76,13 +76,13 @@ export function AdminEventsOps() {
 
   async function run(r: { reason: string; reasonSw?: string; key: string }) {
     if (!token || !act) return;
-    const base = { reason: r.reason, ...(r.reasonSw ? { reasonSw: r.reasonSw } : {}) };
+    const base = { reason: r.reason }; // the contract takes a reason only on these routes (no Swahili text)
     const id = act.org.id;
     try {
       if (act.action === 'apiOn' || act.action === 'apiOff') { await adminS7Api.setApiAccess(token, id, { enabled: act.action === 'apiOn', ...base }, r.key); toast.success(t('admin.events.ops.result.api')); }
       else if (act.action === 'revokeAll') { const out = await adminS7Api.revokeAllClients(token, id, base, r.key); toast.success(fmt(t('admin.events.ops.result.revoked'), { n: Number(out.revoked ?? (out as { count?: number }).count ?? 0) })); }
       else if (act.action === 'disableAll') { const out = await adminS7Api.disableAllWebhooks(token, id, base, r.key); toast.success(fmt(t('admin.events.ops.result.disabled'), { n: Number(out.disabled ?? (out as { count?: number }).count ?? 0) })); }
-      else { await adminS7Api.setClientRate(token, clientId, { ratePerMinute: rateNum, ...base }, r.key); toast.success(t('admin.events.ops.result.rate')); }
+      else { await adminS7Api.setClientRate(token, clientId, { rateLimitPerMinute: rateNum }, r.key); toast.success(t('admin.events.ops.result.rate')); }
     } catch (err) {
       // A 404 feature_disabled says which feature is off (AC-H17); the dialog keeps its inputs.
       if (isFeatureOff(err)) throw Object.assign(new Error('feature_off'), { featureOff: FEATURE[act.action] });
@@ -136,7 +136,7 @@ export function AdminEventsOps() {
       </CardContent></Card>
 
       <ReasonTypedDialog open={!!act} onClose={() => setAct(null)} title={act ? t(label(act.action)) : ''} confirmLabel={act ? t(label(act.action)) : ''} testId="ops-dialog" tone={dangerous ? 'danger' : 'primary'}
-        body={act ? <strong className="[overflow-wrap:anywhere]">{act.org.name}</strong> : undefined} reasonLabel={t('admin.events.ops.reason')} reasonSwLabel={t('admin.events.ops.reasonSw')}
+        body={act ? <strong className="[overflow-wrap:anywhere]">{act.org.name}</strong> : undefined} reasonLabel={t('admin.events.ops.reason')} noReason={needsClient}
         typed={dangerous && act ? [act.org.name] : undefined} typedLabel={t('admin.events.ops.typeName')} extra={rateExtra} extraValid={!needsClient || (rateOk && !!clientId)}
         errorText={err => { const f = (err as { featureOff?: string }).featureOff; return f ? fmt(t('admin.events.ops.featureOff'), { feature: f }) : null; }}
         onConfirm={run} />
