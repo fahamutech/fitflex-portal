@@ -10,6 +10,7 @@ import {
 } from '@/lib/settlements';
 import { Alert, Badge, Button, Card, CardContent, CardHeader, Field, Input, MetricCard, Spinner } from '@/components/shared';
 import { ConfirmDialog, Dialog, DialogFooter } from '@/components/dialog';
+import { refundMoneyErrorKey } from '@/lib/refund-money-errors';
 import { SettlementPayeeLine } from '@/components/gym-payout-owner';
 
 type Ask =
@@ -54,7 +55,8 @@ export function SettlementStatementView({ statementId, onBack }: { statementId: 
     } catch (err) {
       setAsk(null);
       const body = (err as { body?: { error?: string; reason?: string } })?.body;
-      setError(body?.error === 'invalid_receipt_url' ? t('settlement.err.invalid_receipt_url')
+      const money = refundMoneyErrorKey(err);
+      setError(money ? t(money) : body?.error === 'invalid_receipt_url' ? t('settlement.err.invalid_receipt_url')
         : body?.error === 'not_payable' && body.reason === 'payout_owner_required' ? t('settlement.notPayable.payout_owner_required')
         : settlementError(err));
     } finally {

@@ -10,6 +10,7 @@ import {
 import { money, trainerNames } from '@/lib/admin-utils';
 import type { MessageKey } from '@/lib/i18n';
 import { STATEMENT_STATUS, STATEMENT_TABS, shortDay } from '@/lib/settlements';
+import { refundMoneyErrorKey } from '@/lib/refund-money-errors';
 import { dayMonth, eatDay, errorCode, fmt, payLabel, payoutWhyKey, shortRefOf } from '@/lib/vendor';
 import { Alert, Badge, Button, Card, CardContent, CardHeader, EmptyState, ErrorState, Field, Input, PageHeader, SkeletonTable, Spinner, Table, TBody, Td, Textarea, Th, THead, Tr } from '@/components/shared';
 import { Dialog, DialogFooter } from '@/components/dialog';
@@ -51,6 +52,8 @@ function whyNot(t: T, reason?: string) {
 
 function errorText(t: T, kind: PayoutKind, err: unknown) {
   const body = (err as { body?: { error?: string; reason?: string } })?.body;
+  const money = refundMoneyErrorKey(err);
+  if (money) return t(money);
   if (body?.error === 'not_payable') return fmt(t(k(kind, 'notPayable')), { reason: whyNot(t, body.reason) });
   if (body?.error === 'acl_forbidden' || body?.error === 'forbidden') return t('payouts.err.forbidden');
   return body?.error && ERRORS.has(body.error) ? t(`payouts.err.${body.error}` as MessageKey) : t('payouts.err.generic');
