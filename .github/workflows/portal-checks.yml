@@ -85,6 +85,8 @@ jobs:
 
     env:
       CI: 'true'
+      # Same zone as the browser (playwright.config.ts): specs compute expected times in Node.
+      TZ: Africa/Dar_es_Salaam
       FITFLEX_FUNCTIONS_DIR: ${{ github.workspace }}/fitflex-functions
       FITFLEX_E2E_DATABASE_URL: postgresql://fitflex:fitflex@localhost:5432/fitflex_e2e_portal
       JWT_SECRET: ci-only-secret-not-used-outside-github-actions
