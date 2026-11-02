@@ -4,6 +4,7 @@
 import { expect, Page } from '@playwright/test';
 import { makeS5, type S5Opts, type S5State } from './events-s5-mock';
 import { makeS6, type S6Opts, type S6State } from './events-s6-mock';
+import { makeS7, type S7Opts, type S7State } from './events-s7-mock';
 
 export const API = process.env.FITFLEX_API_URL || 'http://localhost:3000';
 export type Json = Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
@@ -616,6 +617,7 @@ export type EventsMock = {
   /** S4 state for assertions (statuses move as the strict routes accept writes). */ s4: S4State | null;
   /** S5 state for assertions (kit, bibs, clients, endpoints, payout schedule). */ s5: S5State | null;
   /** S6 state for assertions (results, releases, medals, art uploads, rewards). */ s6: S6State | null;
+  /** S7 state for assertions (offline desks, scans, waitlist, admin operations, settings). */ s7: S7State | null;
   calls: Call[]; unmatched: Call[];
   writes: (path?: RegExp) => Call[];
   reads: (path: RegExp) => Call[];
@@ -631,7 +633,8 @@ export async function setupEvents(page_: Page, user: Json = OWNER, opts: { me?: 
   /** S3: the options probe says registration + corporate are on, and the S3 routes answer. */ s3?: boolean; orgPermissions?: string[]; orgStatus?: string; orders?: Record<string, Json>;
   /** S4 (spec events-s4-payments-and-tickets): payments, refunds, finance and the corporate payment routes, strict about the spec's shapes. Implies s3. */ s4?: S4Opts;
   /** S5 (spec events-s5-venue-api-and-webhooks): kit desk, bibs, export, integrations and the payout schedule, strict about the spec's shapes. Implies s3. */ s5?: S5Opts;
-  /** S6 (spec events-s6-runs-results-medals-rewards): results, medals, artwork and the admin reward desk, strict about the spec. Implies s5 and s3. */ s6?: S6Opts } = {}): Promise<EventsMock> {
+  /** S6 (spec events-s6-runs-results-medals-rewards): results, medals, artwork and the admin reward desk, strict about the spec. Implies s5 and s3. */ s6?: S6Opts;
+  /** S7 (spec events-s7-hardening-and-pilot): offline kit desk, waitlist, admin health/operations/disputes, per-race settings. Implies s6, s5 and s3. */ s7?: S7Opts } = {}): Promise<EventsMock> {
   const calls: Call[] = [];
   const unmatched: Call[] = [];
   const routes: Array<[string, RegExp, Handler]> = [...(opts.extra ?? [])];
@@ -648,16 +651,21 @@ export async function setupEvents(page_: Page, user: Json = OWNER, opts: { me?: 
   const orgRole = (user.organizationRoles ?? [])[0] ?? (user.userType === 'corporate_hr' ? 'hr' : 'member');
   const s4 = opts.s4 ? makeS4(user, me, orgRole, opts.s4, opts) : null;
   if (s4) opts = { ...opts, s3: true };
+  const s7 = opts.s7 ? makeS7(user, me, opts.s7) : null;
+  if (s7 && !opts.s6) opts = { ...opts, s6: { eventStatus: 'published' } };
   const s6 = opts.s6 ? makeS6(user, me, opts.s6) : null;
   const s5 = opts.s5 || s6 ? makeS5(user, me, { ...(opts.s5 ?? {}), resultsScopes: !!s6?.flags.enabled }) : null;
   if (s5) { opts = { ...opts, s3: true }; docs.evt_pub = { ...docs.evt_pub, ...s5.doc('evt_pub'), allowedActions: ['edit', 'cancel'] }; docs.evt_1 = { ...docs.evt_1, payoutSchedule: null }; }
   // The S5 routes answer GET /events/options first, so the S6 flags ride on that same object.
   if (s6) { Object.assign(s5!.options, { results: s6.flags }); docs.evt_pub = { ...docs.evt_pub, status: s6.status }; }
+  if (s7 && s6 && s7.state.takedown && s6.state.templates[0]) s6.state.templates[0] = { ...s6.state.templates[0], art: { source: 'builtin', artKey: 'finisher_green', status: 'taken_down', takedown: { reasonCode: 'rights', at: '2027-03-12T08:00:00.000Z' } } };
+  if (s7) { Object.assign(s5!.options, { ...s7.optionsPatch, ops: { ...s5!.options.ops, ...s7.optionsPatch.ops } }); }
   const orders: Record<string, Json> = opts.orders ?? { ord_1: ORDER_DETAIL() };
   const adminCancelled = new Set<string>();
   let version = 3;
 
   const defaults: Array<[string, RegExp, Handler]> = [
+    ...(s7 ? s7.routes : []),
     ...(s6 ? s6.routes : []),
     ...(s5 ? s5.routes : []),
     ...(s4 ? s4.routes : []),
@@ -757,7 +765,7 @@ export async function setupEvents(page_: Page, user: Json = OWNER, opts: { me?: 
     ['GET', /^\/admin\/events\/summary$/, () => ({ submitted: ADMIN_ROWS.filter(r => r.status === 'submitted').length })],
     ['GET', /^\/admin\/events\/audit$/, () => pageOf(AUDIT)],
     ['GET', /^\/admin\/events\/([^/]+)\/audit$/, () => pageOf(AUDIT)],
-    ['GET', /^\/admin\/events\/([^/]+)$/, (_c, m) => (s5 && m[1] === 'evt_pub' ? ADMIN_DOC({ ...docs.evt_pub, payoutSchedule: s5.state.payout.evt_pub }, { permitOnFile: true }) : ADMIN_DOC(m[1] === 'evt_pub' ? PUBLISHED : m[1] === 'evt_1' ? DOC() : SUBMITTED, m[1] === 'evt_pub' ? { permitOnFile: true } : {}))],
+    ['GET', /^\/admin\/events\/([^/]+)$/, (_c, m) => (s7 && m[1] === 'evt_pub' ? ADMIN_DOC({ ...docs.evt_pub, status: s7.state.paused ? 'registration_closed' : docs.evt_pub.status, payoutSchedule: s5?.state.payout.evt_pub }, { permitOnFile: true, rewardsEligible: s7.state.rewardsEligible, waitlist: { waiting: s7.state.waitlistEntries.filter(e => e.status === 'waiting').length, offered: s7.state.waitlistEntries.filter(e => e.status === 'offered').length }, allowedActions: s7.state.paused ? [] : ['cancel'] }) : s5 && m[1] === 'evt_pub' ? ADMIN_DOC({ ...docs.evt_pub, payoutSchedule: s5.state.payout.evt_pub }, { permitOnFile: true }) : ADMIN_DOC(m[1] === 'evt_pub' ? PUBLISHED : m[1] === 'evt_1' ? DOC() : SUBMITTED, m[1] === 'evt_pub' ? { permitOnFile: true } : {}))],
     ['GET', /^\/admin\/events$/, c => pageOf(c.query.status ? ADMIN_ROWS.filter(r => r.status === c.query.status) : ADMIN_ROWS)],
     ['POST', /^\/admin\/events\/([^/]+)\/decision$/, c => {
       if (c.body?.decision === 'reject' && !c.body?.reason) return { status: 400, json: { error: 'reason_code_required' } };
@@ -802,6 +810,7 @@ export async function setupEvents(page_: Page, user: Json = OWNER, opts: { me?: 
     s4: s4 ? s4.state : null,
     s5: s5 ? s5.state : null,
     s6: s6 ? s6.state : null,
+    s7: s7 ? s7.state : null,
     calls, unmatched,
     writes: path => calls.filter(c => c.method !== 'GET' && (!path || path.test(c.path))),
     reads: path => calls.filter(c => c.method === 'GET' && path.test(c.path)),

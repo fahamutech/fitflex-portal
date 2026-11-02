@@ -37,6 +37,19 @@
             "value": "frame-ancestors 'none'"
           }
         ]
+      },
+      {
+        "source": "/organizer/kit-desk/sw.js",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "no-cache"
+          },
+          {
+            "key": "Service-Worker-Allowed",
+            "value": "/organizer/kit-desk/"
+          }
+        ]
       }
     ]
   }
