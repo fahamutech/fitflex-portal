@@ -304,7 +304,7 @@ export function useKitDesk({ eventId, token, userId, enabled }: { eventId: strin
     const pending = scansRef.current.filter(s => s.state === 'pending').sort((a, b) => (a.claimedAt < b.claimedAt ? -1 : 1));
     if (!pending.length) { await heartbeat(); return; }
     sendingRef.current = true; setSendFailed(false); setLastSummary(null);
-    let done = 0; let accepted = 0; let review = 0; let failed = false;
+    let done = 0; let accepted = 0; let review = 0; let failed = false; let deferred = 0;
     setSending({ done: 0, total: pending.length });
     try {
       const size = Math.max(1, m0.limits.syncBatch || 200);
@@ -344,6 +344,7 @@ export function useKitDesk({ eventId, token, userId, enabled }: { eventId: strin
         });
         commitScans(applied);
         for (const s of applied) if (by.has(s.clientRef)) await putScan(eventId, s);
+        deferred += res.summary?.deferred ?? 0;
         accepted += res.summary?.accepted ?? 0; review += (res.summary?.needsReview ?? 0) + (res.summary?.bibExceptions ?? 0);
         done += batch.length; setSending({ done, total: pending.length });
         await applyContact({ serverTime: res.serverTime, deviceStatus: res.deviceStatus, minDeskBuild: res.minDeskBuild });
@@ -352,6 +353,8 @@ export function useKitDesk({ eventId, token, userId, enabled }: { eventId: strin
     } finally {
       sendingRef.current = false; setSending(null);
     }
+    // `deferred` items were not stored by the server (its time budget ran out): they stay pending and are sent again like a failed send (the 30 s retry).
+    failed = failed || deferred > 0;
     setSendFailed(failed);
     if (!failed) setLastSummary({ accepted, review });
     await wipeIfDone();

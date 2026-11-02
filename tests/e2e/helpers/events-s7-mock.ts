@@ -19,6 +19,7 @@ export type S7Opts = {
   /** Medal 1 starts taken down. */ takedown?: boolean;
   /** Per-race results settings already official-released. */ officialRelease?: boolean;
   /** Fail health groups by name. */ healthFail?: string[];
+  /** The first N sync calls answer every item `deferred` (not stored). */ deferSyncs?: number;
   /** The first N snapshot downloads answer 503 (the desk already exists by then). */ snapshotFailures?: number;
 };
 type Reply = Json | { status: number; json: Json } | { status: 204 };
@@ -71,7 +72,7 @@ export function makeS7(user: Json, me: Json | null, o: S7Opts) {
     devices: [] as Desk[],
     scans: [] as Scan[],
     idem: {} as Record<string, { body: string; reply: Json }>,
-    seq: 10, snapshotFails: 0,
+    seq: 10, snapshotFails: 0, deferred: 0,
     heartbeats: [] as Json[],
     syncs: [] as Json[],
     collectionsMade: [] as Json[],
@@ -261,6 +262,7 @@ export function makeS7(user: Json, me: Json | null, o: S7Opts) {
       if (!Array.isArray(b.items) || !b.batchId) return { status: 400, json: { error: 'invalid_batch' } };
       if (b.items.length > 200) return { status: 413, json: { error: 'too_many_items' } };
       state.syncs.push(b);
+      if (state.deferred < (o.deferSyncs ?? 0)) { state.deferred += 1; return { status: 200, json: { results: (b.items as Json[]).map(i => ({ clientRef: i.clientRef, outcome: 'deferred', warnings: [] })), summary: { accepted: 0, duplicate: 0, needsReview: 0, bibExceptions: 0, rejected: 0, deferred: b.items.length }, serverTime: serverNow().toISOString(), deviceStatus: d.status, minDeskBuild: null } }; }
       const results: Json[] = [];
       const summary = { accepted: 0, duplicate: 0, needsReview: 0, bibExceptions: 0, rejected: 0, deferred: 0 };
       for (const it of b.items as Json[]) {

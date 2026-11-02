@@ -130,9 +130,6 @@ export const adminS7Api = {
     post<{ revoked?: number } & Record<string, unknown>>(token, `/admin/events/organizers/${encodeURIComponent(organizerId)}/api-clients/revoke-all`, body, key),
   disableAllWebhooks: (token: string, organizerId: string, body: { reason: string }, key: string) =>
     post<{ disabled?: number } & Record<string, unknown>>(token, `/admin/events/organizers/${encodeURIComponent(organizerId)}/webhook-endpoints/disable-all`, body, key),
-  /** Contract: PATCH body is `{ rateLimitPerMinute }` only (no reason is accepted). */
-  setClientRate: (token: string, clientId: string, body: { rateLimitPerMinute: number }, key: string) =>
-    request<Record<string, unknown>>(`/admin/events/api-clients/${encodeURIComponent(clientId)}`, { method: 'PATCH', body: JSON.stringify(body), headers: idem(key) }, token),
   integrations: (token: string, eventId: string) => request<{ organizerId?: string; apiAccessEnabled?: boolean; activeClients?: number; activeEndpoints?: number; lastDeliveryFailureAt?: string | null }>(`/admin/events/${encodeURIComponent(eventId)}/integrations`, {}, token),
   registrationState: (token: string, eventId: string, body: { state: 'closed' | 'open'; reason: string; reasonSw?: string }, key: string) =>
     post<Record<string, unknown>>(token, `/admin/events/${encodeURIComponent(eventId)}/registration-state`, body, key),

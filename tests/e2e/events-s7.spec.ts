@@ -358,6 +358,20 @@ test.describe('sending (§3.6, §3.7, AC-O8 to AC-O13)', () => {
     expect(new Set(sent).size).toBe(1);
   });
 
+  test('deferred items are not stored by the server: they stay pending and the 30 s auto-retry sends them', async ({ page, context }) => {
+    const mock = await readyOffline(page, context, 'owner', { deferSyncs: 1 });
+    await scan(page, TK.valid);
+    await page.getByTestId('offline-confirm').click();
+    await context.setOffline(false);
+    await expect(page.getByTestId('offline-send-failed')).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByTestId('offline-pending')).toHaveText('1 waiting to be sent');
+    expect(mock.s7!.collectionsMade).toHaveLength(0);
+    await expect(page.getByTestId('offline-summary')).toBeVisible({ timeout: 60_000 }); // no click: the retry timer sends it
+    expect(mock.s7!.collectionsMade).toHaveLength(1);
+    const refs = mock.writes(/kit-offline\/sync/).map(c => c.body!.items[0].clientRef);
+    expect(new Set(refs).size).toBe(1);
+  });
+
   test('a garbled code syncs as rejected and stores nothing; a ticket sold after the list was taken is rejected', async ({ page, context }) => {
     const mock = await readyOffline(page, context);
     // Force the items through the queue by editing what the desk may scan: the server re-verifies everything.
