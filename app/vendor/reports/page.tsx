@@ -6,14 +6,14 @@ import type { MessageKey } from '@/lib/i18n';
 import { eatToday } from '@/lib/vendor';
 import {
   autoGroupBy, bucketCount, CHANNELS, channelKey, GROUP_BYS, GROUPED, NO_CHANNEL, presetKey, presetOf, presetRange, PRESETS,
-  PRODUCT_SORTS, rangeProblem, rangeProblemKey, REPORT_LIMITS, REPORT_VIEWS, reportAccess, viewKey,
+  PRODUCT_SORTS, rangeProblem, rangeProblemKey, REPORT_LIMITS, REPORT_VIEWS, reportAccess, reportsApi, viewKey,
   type ProductSort, type ReportChannel, type ReportGroupBy, type ReportPreset, type ReportQuery, type ReportView,
 } from '@/lib/vendor-reports';
 import { Button, Field, Input, PageHeader, Segmented, Select, useToast } from '@/components/shared';
 import { useVendor } from '@/components/vendor-context';
 import { OverviewView, SalesView, type ViewProps } from '@/components/vendor/reports/sales-views';
 import { ProductsView, ProfitView, StockView } from '@/components/vendor/reports/stock-views';
-import { CustomersView, MethodsView, PayoutsView } from '@/components/vendor/reports/money-views';
+import { CustomersView, MethodsView, PayoutsView, RefundsView } from '@/components/vendor/reports/money-views';
 import { ExportDialog } from '@/components/vendor/reports/export-dialog';
 import { useApp } from '../../providers';
 
@@ -30,16 +30,39 @@ const presetBtn = (on: boolean, disabled: boolean) =>
  * permission, failing closed); sections the person may not see are not offered at all.
  */
 function ReportsInner() {
-  const { t } = useApp();
+  const { t, token } = useApp();
   const vendor = useVendor();
   const toast = useToast();
   const router = useRouter();
   const pathname = usePathname();
   const params = useSearchParams();
-  const access = reportAccess(vendor.me);
+  const baseAccess = reportAccess(vendor.me);
   const today = eatToday();
 
   // ── Read the URL, falling back on anything invalid ──
+  // S7 §0.2: with the refunds tool off, the Refunds view still shows for a period that has refund rows (refunds already
+  // made stay visible). Asked once per period; until the answer comes, a ?view=refunds link is left alone.
+  const probeRange = (() => {
+    const f = params.get('from'); const tt = params.get('to');
+    return f != null && tt != null && !rangeProblem(f, tt, today) ? { from: f, to: tt } : presetRange('thisMonth', today);
+  })();
+  const probeKey = `${probeRange.from}|${probeRange.to}`;
+  const needProbe = baseAccess.open && !baseAccess.refunds && vendor.me?.tools.walkInSales === true;
+  const [refundsSeen, setRefundsSeen] = useState<Record<string, boolean>>({});
+  useEffect(() => {
+    if (!needProbe || !token || refundsSeen[probeKey] !== undefined) return;
+    let alive = true;
+    reportsApi.get(token, 'refunds', probeRange)
+      .then(d => { if (alive) setRefundsSeen(cur => ({ ...cur, [probeKey]: (d.rows ?? []).length > 0 })); })
+      .catch(() => { if (alive) setRefundsSeen(cur => ({ ...cur, [probeKey]: false })); });
+    return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [needProbe, token, probeKey]);
+  const probing = needProbe && refundsSeen[probeKey] === undefined;
+  const access = needProbe && refundsSeen[probeKey]
+    ? { ...baseAccess, views: REPORT_VIEWS.filter(v => v === 'refunds' || baseAccess.views.includes(v)) }
+    : baseAccess;
+
   const rawView = params.get('view');
   const knownView = REPORT_VIEWS.includes(rawView as ReportView) ? (rawView as ReportView) : null;
   const view: ReportView = knownView && access.views.includes(knownView) ? knownView : 'overview';
@@ -70,7 +93,7 @@ function ReportsInner() {
     // UAT D13: an invalid value is replaced by the value actually in use (This month, all, auto grouping…),
     // so the address always says what the page shows.
     const patch: Record<string, string | null> = {};
-    if (rawView != null && rawView !== view) patch.view = view;
+    if (rawView != null && rawView !== view && !(rawView === 'refunds' && probing)) patch.view = view;
     if (hasRange && !rangeOk) { patch.from = from; patch.to = to; }
     if (rawChannel != null && rawChannel !== channel) patch.channel = channel;
     if (rawGroup != null && !groupOk) patch.groupBy = autoGroupBy(from, to);
@@ -79,9 +102,10 @@ function ReportsInner() {
     const sig = params.toString();
     if (fixed.current === sig) return;
     fixed.current = sig;
-    if (knownView && knownView !== view) toast.error(t('vendor.reports.noAccess'));
+    // A refunds link for a period without refunds (tool off) is not "no access": it just shows the Overview.
+    if (knownView && knownView !== view && knownView !== 'refunds') toast.error(t('vendor.reports.noAccess'));
     setParams(patch);
-  }, [rawView, view, knownView, hasRange, rangeOk, from, to, rawChannel, channel, rawGroup, groupOk, rawSort, sort, params, setParams, toast, t]);
+  }, [rawView, view, knownView, hasRange, rangeOk, from, to, rawChannel, channel, rawGroup, groupOk, rawSort, sort, params, setParams, toast, t, probing]);
 
   // ── Controls ──
   const [walkInSeen, setWalkInSeen] = useState(false);
@@ -212,6 +236,7 @@ function ReportsInner() {
         {view === 'payouts' && <PayoutsView {...props} />}
         {view === 'customers' && <CustomersView {...props} />}
         {view === 'methods' && <MethodsView {...props} />}
+        {view === 'refunds' && <RefundsView {...props} />}
       </section>
 
       <ExportDialog open={exportOpen} onClose={() => setExportOpen(false)} views={exportViews} query={query} />

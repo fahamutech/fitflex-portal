@@ -5,13 +5,14 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { ArrowLeft, History, SlidersHorizontal } from 'lucide-react';
 import { api, type LowStockRow, type StockMovement, type StockMovementPage, type VendorProduct } from '@/lib/api';
 import type { MessageKey } from '@/lib/i18n';
-import { addDays, canWalkInSales, eatDateTime, eatToday, errorCode, fmt, lowKey, PRODUCTS_QS_KEY, shortRefOf, systemNoteKey, variantsOf } from '@/lib/vendor';
+import { addDays, canWalkInSales, documentsOn, eatDateTime, eatToday, errorCode, fmt, lowKey, PRODUCTS_QS_KEY, shortRefOf, systemNoteKey, variantsOf } from '@/lib/vendor';
 import { Alert, Badge, Button, Card, CardContent, EmptyState, ErrorState, Field, Input, PageHeader, Segmented, Select, SkeletonCard, SkeletonTable, Spinner, Table, TBody, Td, Th, THead, Tr } from '@/components/shared';
 import { AdjustStockDialog } from '@/components/vendor/adjust-stock-dialog';
+import { documentHref } from '@/lib/vendor-documents';
 import { useVendor } from '@/components/vendor-context';
 import { useApp } from '../../../providers';
 
-const KNOWN_REASONS = new Set(['count', 'restock', 'returned', 'found', 'damaged', 'expired', 'lost', 'other', 'reserve', 'release', 'sale', 'sale_void']);
+const KNOWN_REASONS = new Set(['count', 'restock', 'returned', 'found', 'damaged', 'expired', 'lost', 'other', 'reserve', 'release', 'sale', 'sale_void', 'refund_restock', 'refund_revert']);
 type Range = '7d' | '30d' | 'custom';
 
 function HistoryInner() {
@@ -114,6 +115,13 @@ function HistoryInner() {
       const label = fmt(t('vendor.stock.sale'), { number: r.document.number || shortRefOf(r.document.id) });
       return canSales
         ? <Link href={`/vendor/sales/?id=${encodeURIComponent(r.document.id)}`} className="inline-flex min-h-11 items-center font-medium text-[var(--color-brand-700)] underline-offset-4 hover:underline">{label}</Link>
+        : <span>{label}</span>;
+    }
+    // S7: a refund's restock (or its undo) links to the credit note when documents are on and this person has `sales`.
+    if (r.document?.type === 'refund') {
+      const label = fmt(t('vendor.stock.creditNote'), { number: r.document.number || shortRefOf(r.document.id) });
+      return canSales && documentsOn(vendor.me)
+        ? <Link href={documentHref('credit_note', r.document.id)} className="inline-flex min-h-11 items-center font-medium text-[var(--color-brand-700)] underline-offset-4 hover:underline">{label}</Link>
         : <span>{label}</span>;
     }
     if (r.document?.type !== 'order') return null;

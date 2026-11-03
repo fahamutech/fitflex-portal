@@ -4,11 +4,11 @@ import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { ArrowLeft, FileDown, Link2, Printer, Share2 } from 'lucide-react';
 import type { MessageKey } from '@/lib/i18n';
-import { errorCode, fmt } from '@/lib/vendor';
+import { errorCode, fmt, refundsOn } from '@/lib/vendor';
 import {
-  docTitleKey, documentsApi, isDocKind, mayOpenKind, pdfName, type DocKind, type DocLang, type VendorDocument,
+  docStatusKey, docStatusTone, docTitleKey, documentsApi, isDocKind, mayOpenKind, pdfName, type DocKind, type DocLang, type VendorDocument,
 } from '@/lib/vendor-documents';
-import { Alert, Button, ErrorState, Segmented, SkeletonCard, useToast } from '@/components/shared';
+import { Alert, Badge, Button, ErrorState, Segmented, SkeletonCard, useToast } from '@/components/shared';
 import { ShareMenu, saveBlob } from '@/components/vendor/documents/share-menu';
 import { useVendor } from '@/components/vendor-context';
 import { useApp } from '../../providers';
@@ -16,9 +16,11 @@ import { useApp } from '../../providers';
 type State = 'loading' | 'ready' | 'notFound' | 'noAccess' | 'notReady' | 'error';
 
 /** Where the breadcrumb goes back to: the screen the document was opened from. */
-function sourceOf(kind: DocKind, id: string, customerId: string | null): { href: string; label: MessageKey } {
+function sourceOf(kind: DocKind, id: string, customerId: string | null, saleId: string | null): { href: string; label: MessageKey } {
   const e = encodeURIComponent;
   if (kind === 'sale') return { href: `/vendor/sales/?id=${e(id)}`, label: 'vendor.sales.back' };
+  // S7: a credit note goes back to its sale when it was opened from one, else to the sales list.
+  if (kind === 'credit_note') return { href: saleId ? `/vendor/sales/?id=${e(saleId)}` : '/vendor/sales/', label: 'vendor.sales.back' };
   if (kind === 'order') return { href: `/vendor/orders/?id=${e(id)}`, label: 'vendor.orders.back' };
   if (kind === 'statement') return { href: `/vendor/customers/?id=${e(id)}`, label: 'vendor.documents.backToCustomer' };
   return customerId
@@ -27,7 +29,7 @@ function sourceOf(kind: DocKind, id: string, customerId: string | null): { href:
 }
 
 /**
- * The document view (S5 §7.1): ?type=sale|payment|statement|order&id=…(&customer=…). The server's HTML is shown in a
+ * The document view (S5 §7.1): ?type=sale|payment|statement|order|credit_note&id=…(&customer=…)(&sale=… for a credit note). The server's HTML is shown in a
  * sandboxed iframe (no scripts; same origin only so Print works); it is never put into this page's DOM. The Shell
  * guards the area (tools.documents, failing closed); the kind's permission is checked here (the server decides).
  */
@@ -40,6 +42,7 @@ function DocumentInner() {
   const typeParam = params.get('type');
   const id = params.get('id') ?? '';
   const customerId = params.get('customer');
+  const saleId = params.get('sale');
   const kind: DocKind | null = isDocKind(typeParam) ? typeParam : null;
 
   const [lang, setLang] = useState<DocLang>(locale);
@@ -55,7 +58,8 @@ function DocumentInner() {
   const headingRef = useRef<HTMLHeadingElement>(null);
   const requestId = useRef(0);
 
-  const allowed = !!kind && mayOpenKind(kind, vendor.me?.permissions);
+  // S7 (functions#318 L1): a credit note is a walk-in document; it needs walk-in sales on (not refunds).
+  const allowed = !!kind && mayOpenKind(kind, vendor.me?.permissions) && (kind !== 'credit_note' || vendor.me?.tools.walkInSales === true);
 
   // Missing permission: back to the dashboard with "no access" once (the server would refuse it anyway).
   const bounced = useRef(false);
@@ -136,7 +140,7 @@ function DocumentInner() {
   }
   if (!allowed) return <div aria-busy="true" />;
 
-  const source = sourceOf(kind, id, customerId);
+  const source = sourceOf(kind, id, customerId, saleId);
   const back = (
     <Link href={source.href} className="inline-flex min-h-11 items-center gap-2 text-sm font-semibold text-[var(--color-brand-700)] underline-offset-4 hover:underline print:hidden" data-testid="document-back">
       <ArrowLeft aria-hidden="true" className="h-4 w-4" />{t(source.label)}
@@ -154,6 +158,9 @@ function DocumentInner() {
   const title = t(docTitleKey(doc.docType));
   const docLabel = doc.number ? `${title} ${doc.number}` : title;
   const cancelled = doc.status === 'cancelled';
+  const statusKey = docStatusKey(doc.status);
+  // S7 §0.2: a credit note is shared only while refunds are switched on (read only otherwise); never once undone.
+  const shareable = !cancelled && (kind !== 'credit_note' || refundsOn(vendor.me));
 
   return (
     <div className="mx-auto max-w-[760px] space-y-4" data-testid="document-view">
@@ -161,6 +168,12 @@ function DocumentInner() {
       <h1 ref={headingRef} tabIndex={-1} className="text-xl font-semibold text-[var(--color-fg-primary)] outline-none [overflow-wrap:anywhere]" data-testid="document-heading">
         {docLabel}
       </h1>
+      {statusKey && (
+        <p className="print:hidden" data-testid="document-status">
+          <span className="sr-only">{fmt(t('vendor.documents.status.label'), { status: t(statusKey) })}</span>
+          <span aria-hidden="true"><Badge tone={docStatusTone(doc.status)}>{t(statusKey)}</Badge></span>
+        </p>
+      )}
       <div className="flex flex-wrap items-center gap-2 print:hidden" role="toolbar" aria-label={t('vendor.documents.viewTitle')} data-testid="document-toolbar">
         <div role="group" aria-label={t('vendor.documents.language')}>
           <Segmented value={lang} onChange={v => setLang(v as DocLang)} options={[['en', t('vendor.documents.langEn')], ['sw', t('vendor.documents.langSw')]]} />
@@ -169,7 +182,7 @@ function DocumentInner() {
         <Button variant="secondary" className="min-h-11" onClick={downloadPdf} loading={pdfBusy} aria-label={fmt(t('vendor.documents.downloadPdfOf'), { doc: docLabel })} data-testid="document-pdf">
           {!pdfBusy && <FileDown aria-hidden="true" className="h-4 w-4" />}{pdfBusy ? t('vendor.documents.pdfPreparing') : t('vendor.documents.downloadPdf')}
         </Button>
-        {!cancelled && (
+        {shareable && (
           <Button className="min-h-11" onClick={() => setMenu('share')} data-testid="document-share"><Share2 aria-hidden="true" className="h-4 w-4" />{t('vendor.documents.share')}</Button>
         )}
         <Button variant="secondary" className="min-h-11" onClick={() => setMenu('links')} data-testid="document-links">
@@ -216,7 +229,7 @@ function DocumentInner() {
   );
 }
 
-/** Vendor (or staff with the document's permission), documents on: one receipt, invoice, payment receipt, statement or order invoice. */
+/** Vendor (or staff with the document's permission), documents on: one receipt, invoice, payment receipt, statement, order invoice or credit note. */
 export default function VendorDocumentPage() {
   return <Suspense fallback={null}><DocumentInner /></Suspense>;
 }

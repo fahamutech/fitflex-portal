@@ -9,12 +9,12 @@ import { addDays, eatToday, RECEIPT_MONTHS, swDayPeriod } from '@/lib/vendor';
 
 // ── Views, sections, query ──
 
-export type ReportView = 'overview' | 'sales' | 'products' | 'stock' | 'profit' | 'payouts' | 'customers' | 'methods';
-export const REPORT_VIEWS: readonly ReportView[] = ['overview', 'sales', 'products', 'stock', 'profit', 'payouts', 'customers', 'methods'];
-export type ReportSection = 'summary' | 'sales' | 'products' | 'stock-value' | 'profit' | 'marketplace-net' | 'customers' | 'payment-methods';
+export type ReportView = 'overview' | 'sales' | 'products' | 'stock' | 'profit' | 'payouts' | 'customers' | 'methods' | 'refunds';
+export const REPORT_VIEWS: readonly ReportView[] = ['overview', 'sales', 'products', 'stock', 'profit', 'payouts', 'customers', 'methods', 'refunds'];
+export type ReportSection = 'summary' | 'sales' | 'products' | 'stock-value' | 'profit' | 'marketplace-net' | 'customers' | 'payment-methods' | 'refunds';
 export const SECTION_OF: Record<ReportView, ReportSection> = {
   overview: 'summary', sales: 'sales', products: 'products', stock: 'stock-value', profit: 'profit',
-  payouts: 'marketplace-net', customers: 'customers', methods: 'payment-methods',
+  payouts: 'marketplace-net', customers: 'customers', methods: 'payment-methods', refunds: 'refunds',
 };
 export const viewKey = (view: ReportView) => `vendor.reports.view.${view}` as MessageKey;
 
@@ -27,7 +27,7 @@ export type ProductSort = 'revenue' | 'units' | 'slow';
 export const PRODUCT_SORTS: readonly ProductSort[] = ['revenue', 'units', 'slow'];
 
 /** Channel is ignored by these (the header says "All channels" / "App only" instead). */
-export const NO_CHANNEL = new Set<ReportView>(['stock', 'payouts', 'customers']);
+export const NO_CHANNEL = new Set<ReportView>(['stock', 'payouts', 'customers', 'refunds']);
 /** Grouping applies to these only. */
 export const GROUPED = new Set<ReportView>(['overview', 'sales', 'profit']);
 
@@ -55,13 +55,15 @@ export interface SalesTotals {
 }
 export interface MethodYou { method: string; amountTzs: number; count: number; sharePct: number }
 export interface MethodFitFlex { paymentMethod: string; amountTzs: number; count: number; sharePct: number }
+/** S7: money paid back on walk-in refunds (refunds − undos); its own group, never summed with money in, no share. */
+export interface MethodPaidBack { method: string; amountTzs: number; count: number }
 export interface TopProduct { productId: string; variant: string | null; name: string | null; removed: boolean; unitsSold: number; netRevenueTzs: number }
 
 export interface SummaryReport extends ReportHead {
   sales: SalesTotals & { buckets: Array<{ start: string; end: string; netTzs: number }> };
   topProducts: TopProduct[];
   slowCount: number;
-  methods: { byYou: MethodYou[]; viaFitFlex: MethodFitFlex[] };
+  methods: { byYou: MethodYou[]; viaFitFlex: MethodFitFlex[]; paidBack?: MethodPaidBack[] };
   stock?: { atRetailTzs: number; units: number; atCostTzs?: number; costUnknownCount?: number };
   profit?: { profitTzs: number | null; marginPct: number | null; netExVatTzs: number; commissionTzs: number; costTzs: number; uncosted: { qty: number; revenueTzs: number } };
   payouts?: { grossTzs: number; commissionTzs: number; payoutTzs: number; paidOutTzs: number; waitingTzs: number; notDeliveredTzs: number };
@@ -131,12 +133,26 @@ export interface CustomersReport extends ReportHead {
   creditSales: { count: number; totalTzs: number };
   collectedTzs: number;
   buyers: { shop: number; app: number };
+  /** S7: balance taken off pay-later sales by refunds in the period, minus undos (not money). */
+  refundedOffTzs?: number;
 }
-export interface MethodsReport extends ReportHead { byYou: MethodYou[]; viaFitFlex: MethodFitFlex[] }
+export interface MethodsReport extends ReportHead { byYou: MethodYou[]; viaFitFlex: MethodFitFlex[]; paidBack?: MethodPaidBack[] }
+/** S7 §2.11: one row per refund and per undo in the period, oldest first; undo rows negative in every money/unit column. */
+export interface RefundEventRow {
+  type: 'refund' | 'revert';
+  refundId: string; number: string; at: string; date: string; saleId: string; saleNumber: string;
+  amountTzs: number; paidOutTzs: number; balanceReducedTzs: number; method: string | null; restockedUnits: number;
+  status: 'active' | 'reverted';
+}
+export interface RefundsReport extends ReportHead {
+  rows: RefundEventRow[];
+  /** amountTzs = refunds − undos (equals the Sales walk-in Refunds figure). */
+  totals: { count: number; amountTzs: number; paidOutTzs: number; balanceReducedTzs: number; restockedUnits: number; revertedCount: number };
+}
 
 export type ReportOf = {
   overview: SummaryReport; sales: SalesReport; products: ProductsReport; stock: StockReport; profit: ProfitReport;
-  payouts: PayoutsReport; customers: CustomersReport; methods: MethodsReport;
+  payouts: PayoutsReport; customers: CustomersReport; methods: MethodsReport; refunds: RefundsReport;
 };
 
 // ── Access (spec §0.1, §0.2; all fail closed) ──
@@ -148,6 +164,8 @@ export interface ReportAccess {
   payout: boolean;
   customers: boolean;
   stock: boolean;
+  /** S7: the refunds tool is on (the Refunds view also shows when a period has refund rows; the page asks). */
+  refunds: boolean;
   views: ReportView[];
 }
 export function reportAccess(me: { permissions?: string[]; tools?: VendorTools } | null | undefined): ReportAccess {
@@ -158,9 +176,10 @@ export function reportAccess(me: { permissions?: string[]; tools?: VendorTools }
   const payout = open && tools?.canSeeOrderMoney === true;
   const customers = open && tools?.customers === true && perms.includes('customers');
   const stock = open && tools?.stockLedger === true;
+  const refunds = open && tools?.walkInSales === true && tools?.refunds === true;
   const views = !open ? [] : REPORT_VIEWS.filter(v =>
-    (v !== 'stock' || stock) && (v !== 'profit' || cost) && (v !== 'payouts' || payout) && (v !== 'customers' || customers));
-  return { open, cost, payout, customers, stock, views };
+    (v !== 'stock' || stock) && (v !== 'profit' || cost) && (v !== 'payouts' || payout) && (v !== 'customers' || customers) && (v !== 'refunds' || refunds));
+  return { open, cost, payout, customers, stock, refunds, views };
 }
 
 // ── Periods, EAT calendar days (spec §3; server owns the bucketing, this mirrors it for the controls) ──

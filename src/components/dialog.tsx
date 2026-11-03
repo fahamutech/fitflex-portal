@@ -63,6 +63,8 @@ export function Dialog({
   description,
   children,
   size = 'md',
+  sheetOnMobile = false,
+  testId,
 }: {
   open: boolean;
   onClose: () => void;
@@ -70,6 +72,9 @@ export function Dialog({
   description?: ReactNode;
   children: ReactNode;
   size?: 'sm' | 'md' | 'lg' | 'xl' | 'full';
+  /** Below 640px the panel fills the screen (no rounded corners, no margin), e.g. a multi-line form at 375px. */
+  sheetOnMobile?: boolean;
+  testId?: string;
 }) {
   const panelRef = useRef<HTMLDivElement>(null);
   const titleId = useId();
@@ -82,7 +87,7 @@ export function Dialog({
   const widths = { sm: 'max-w-sm', md: 'max-w-lg', lg: 'max-w-2xl', xl: 'max-w-4xl', full: 'max-w-[min(1400px,100%)]' };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+    <div className={cn('fixed inset-0 z-50 flex items-center justify-center p-4', sheetOnMobile && 'max-sm:p-0')}>
       {/* Backdrop */}
       <div
         className="absolute inset-0 bg-black/50 backdrop-blur-sm"
@@ -96,10 +101,12 @@ export function Dialog({
         aria-modal="true"
         aria-labelledby={titleId}
         tabIndex={-1}
+        data-testid={testId}
         className={cn(
           'relative z-10 w-full outline-none rounded-[var(--radius-2xl)] bg-[var(--color-bg-primary)]',
           'shadow-[var(--shadow-xl)] flex flex-col max-h-[90vh] max-h-[90dvh]',
           widths[size],
+          sheetOnMobile && 'max-sm:h-[100dvh] max-sm:max-h-[100dvh] max-sm:max-w-none max-sm:rounded-none',
         )}
       >
         {/* Header */}
