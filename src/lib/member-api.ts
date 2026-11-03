@@ -5,7 +5,10 @@
 import { API_BASE } from './api';
 import { normaliseError, type CheckinCode } from './web-checkin';
 
-export const MEMBER_ROUTES = { home: '/m/', signin: '/m/signin/', pass: '/m/pass/', checkIn: '/m/check-in/' } as const;
+export const MEMBER_ROUTES = {
+  home: '/m/', signin: '/m/signin/', pass: '/m/pass/', checkIn: '/m/check-in/',
+  gyms: '/m/gyms/', trainers: '/m/trainers/', orders: '/m/orders/',
+} as const;
 const SESSION_KEY = 'ff_member_session';
 const TIMEOUT_MS = 15_000;
 
@@ -21,16 +24,41 @@ export interface ManualPayment { enabled: boolean; lipaNamba?: string; accountNa
 export interface PaymentOptions { enabled: boolean; provider?: string; environment?: string | null; manual?: ManualPayment; mobileMoney?: { products: string[] } }
 export interface MemberQr { token: string; expiresAt: string; rotatesEverySeconds: number }
 export interface Checkin { id: string; timestamp: string; status?: string; visitConsumed?: boolean; gym?: { id: string; name: string } | null }
+export interface OperatingHours { [day: string]: { open?: string; close?: string; closed?: boolean } | string | null }
+export interface Gym {
+  id: string; name: string; tier?: string | null; location?: string | null; venueType?: string | null; accessMode?: string | null;
+  coordinates?: { lat: number; lng: number } | null; thumbnail?: string | null; thumbnails?: string[]; images?: string[];
+  operatingHours?: OperatingHours | null; amenities?: string[]; equipment?: string[]; verified?: boolean;
+  rating?: number | null; reviewCount?: number | null;
+}
+export interface Trainer {
+  id: string; displayName: string; photoUrl?: string | null; specialties?: string[]; bio?: string | null; gender?: string | null;
+  rating?: number | null; reviewCount?: number | null; hourlyRateTzs?: number | null; experienceYears?: number | null;
+  gymIds?: string[]; gyms?: Array<{ id: string; name: string }>; verified?: boolean; bookable?: boolean;
+}
+export interface ScheduleDay { date: string; weekday?: string; slots: Array<{ slot: string; status: 'available' | 'booked' | 'past'; gymIds?: string[] }> }
+export interface BookingQuote { summary: { trainerId: string; gymId: string; slots: Array<{ date: string; slot: string }>; currency: string; passTier?: string | null; pricePerSession: number; discountPct: number; subtotal: number; discount: number; total: number } }
+export interface TrainerBooking {
+  id: string; trainerId: string; gymId: string; date: string; slot: string; status: string; amountTzs?: number; paymentRequestId?: string | null;
+  trainer?: { id: string; displayName: string } | null; gym?: { id: string; name: string } | null;
+}
+export interface OrderItem { productId: string; name?: string | null; qty: number; priceTzs?: number; variant?: string | null; vendorName?: string | null }
+export interface ShopOrder {
+  id: string; items: OrderItem[]; totalTzs: number; status: string; deliveryMethod?: string; pickupGymId?: string | null; pickupGym?: { id: string; name: string } | null;
+  paymentStatus?: string; timeline?: Array<{ status: string; at: string }>; createdAt: string; canCancel?: boolean;
+}
 export type PayState = 'in_progress' | 'completed' | 'failed' | 'held' | 'none';
 export interface PayReply { state: PayState; reason?: string; paymentRequest?: PaymentRequest }
 
 /** Error codes the member pages show. Sign-in codes come from the web check-in (same PIN sign-in, same EN/SW messages). */
 export type MemberCode = CheckinCode | 'not_member' | 'payment_already_pending' | 'no_active_pass' | 'payment_reference_required'
   | 'payment_reference_invalid' | 'payment_reference_duplicate' | 'payer_phone_required' | 'payer_phone_invalid' | 'invalid_phone'
-  | 'feature_disabled' | 'payment_not_pending' | 'too_many_attempts' | 'active_subscription_required';
+  | 'feature_disabled' | 'payment_not_pending' | 'too_many_attempts' | 'active_subscription_required'
+  | 'slot_already_booked' | 'slot_in_past' | 'slot_not_available' | 'trainer_unavailable' | 'trainer_not_available_at_gym' | 'cannot_book_own_sessions';
 const MEMBER_PASSTHROUGH = new Set<string>(['payment_already_pending', 'no_active_pass', 'payment_reference_required', 'payment_reference_invalid',
   'payment_reference_duplicate', 'payer_phone_required', 'payer_phone_invalid', 'invalid_phone', 'feature_disabled', 'payment_not_pending',
-  'active_subscription_required']);
+  'active_subscription_required', 'slot_already_booked', 'slot_in_past', 'slot_not_available', 'trainer_unavailable',
+  'trainer_not_available_at_gym', 'cannot_book_own_sessions']);
 
 export class MemberApiError extends Error {
   constructor(public status: number, public code: MemberCode) { super(code); }
@@ -62,7 +90,7 @@ export function clearSession() {
 
 // ── HTTP ──────────────────────────────────────────────────────────────────────────────────────────────────────────
 interface Reply { status: number; body: Record<string, unknown> | null }
-async function call(method: 'GET' | 'POST', path: string, opts: { body?: unknown; bearer?: string | null } = {}): Promise<Reply> {
+async function call(method: 'GET' | 'POST' | 'PUT' | 'DELETE', path: string, opts: { body?: unknown; bearer?: string | null } = {}): Promise<Reply> {
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), TIMEOUT_MS);
   try {
@@ -89,7 +117,7 @@ function codeOf(r: Reply): MemberCode {
 }
 
 /** Signed-in request. A 401 ends the member session (never the staff one). */
-async function authed<T>(method: 'GET' | 'POST', path: string, body?: unknown): Promise<T> {
+async function authed<T>(method: 'GET' | 'POST' | 'PUT' | 'DELETE', path: string, body?: unknown): Promise<T> {
   const s = loadSession();
   if (!s) throw new MemberApiError(401, 'unauthorized');
   const r = await call(method, path, { body, bearer: s.token });
@@ -127,6 +155,17 @@ export const memberApi = {
     authed<{ paymentRequest: PaymentRequest }>('POST', '/me/subscribe', { type: 'platform_pass', ...body }),
   upgrade: (body: { tier: string; reference?: string; payerPhone?: string }) =>
     authed<{ paymentRequest: PaymentRequest }>('POST', '/me/upgrade', body),
+  gyms: () => authed<Gym[]>('GET', '/gyms').then(r => Array.isArray(r) ? r : []),
+  favoriteGymIds: () => authed<{ favoriteGymIds: string[] }>('GET', '/me/favorites/gyms').then(r => r.favoriteGymIds ?? []),
+  setFavorite: (gymId: string, on: boolean) => authed<unknown>(on ? 'PUT' : 'DELETE', `/me/favorites/gyms/${encodeURIComponent(gymId)}`),
+  trainers: () => authed<Trainer[] | { trainers: Trainer[] }>('GET', '/trainers').then(r => Array.isArray(r) ? r : (r.trainers ?? [])),
+  trainerSchedule: (id: string, gymId: string, from: string, days = 7) =>
+    authed<{ days: ScheduleDay[] }>('GET', `/trainers/${encodeURIComponent(id)}/schedule?from=${from}&days=${days}&gymId=${encodeURIComponent(gymId)}`).then(r => r.days ?? []),
+  quoteBooking: (body: { trainerId: string; gymId: string; slots: Array<{ date: string; slot: string }> }) => authed<BookingQuote>('POST', '/me/trainer-bookings/quote', body),
+  book: (body: { trainerId: string; gymId: string; slots: Array<{ date: string; slot: string }> }) =>
+    authed<{ bookings: TrainerBooking[]; paymentRequest: PaymentRequest | null }>('POST', '/me/trainer-bookings', body),
+  myBookings: () => authed<TrainerBooking[] | { bookings: TrainerBooking[] }>('GET', '/me/trainer-bookings').then(r => Array.isArray(r) ? r : (r.bookings ?? [])),
+  shopOrders: () => authed<ShopOrder[] | { orders: ShopOrder[] }>('GET', '/me/shop-orders').then(r => Array.isArray(r) ? r : (r.orders ?? [])),
   payByMobileMoney: (paymentId: string, phone: string) =>
     authed<PayReply>('POST', `/me/payments/${encodeURIComponent(paymentId)}/mobile-money`, { phone }),
   refreshMobileMoney: (paymentId: string) =>
@@ -135,8 +174,21 @@ export const memberApi = {
 
 /** Mobile money can pay a FitFlex Pass now (the `mobileMoney` key is absent while the B6a flag is off: passes are payable). */
 export function canPayPassByMobileMoney(o: PaymentOptions | null): boolean {
+  return canPayByMobileMoney(o, 'FITFLEX_PASS');
+}
+/**
+ * Whether mobile money can pay this product now. Without the `mobileMoney` key (TUNZAA_TRAINER_PRODUCTS off) only
+ * passes and gym plans are payable this way; trainer sessions then are not.
+ */
+export function canPayByMobileMoney(o: PaymentOptions | null, product: 'FITFLEX_PASS' | 'TRAINER_SERVICE'): boolean {
   if (!o?.enabled) return false;
-  return !o.mobileMoney || o.mobileMoney.products.includes('FITFLEX_PASS');
+  if (!o.mobileMoney) return product === 'FITFLEX_PASS';
+  return o.mobileMoney.products.includes(product);
+}
+
+/** Today in East Africa as YYYY-MM-DD. */
+export function eatToday(now = new Date()): string {
+  return new Date(+now + 3 * 3600_000).toISOString().slice(0, 10);
 }
 
 export function formatTzs(n: number, locale: 'en' | 'sw'): string {

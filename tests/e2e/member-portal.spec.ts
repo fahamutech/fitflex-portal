@@ -1,7 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 import { messages } from '../../src/lib/i18n';
 
-// Member portal slice 1 (/m): sign-in, Today, Pass and paying by mobile money, check-in QR. The API is mocked. Run twice:
+// Member portal (/m): slice 1 sign-in, Today, Pass and paying by mobile money, check-in QR; slice 2 Gyms, Trainers, Orders. The API is mocked. Run twice:
 //   npx playwright test --config playwright.member-portal.config.ts                        (flag on)
 //   MEMBER_PORTAL_FLAG=false npx playwright test --config playwright.member-portal.config.ts (flag off)
 const FLAG_ON = (process.env.MEMBER_PORTAL_FLAG ?? 'true') === 'true';
@@ -20,6 +20,20 @@ const USER = { id: 'usr_m1', userType: 'member', name: 'Neema Mushi', phone: '07
 const ACTIVE = { id: 'sub1', tier: 'pro', type: 'platform_pass', status: 'active', expiresAt: '2030-11-18T21:00:00.000Z' };
 const PAY = { id: 'pay_1', tier: 'basic', amountTzs: 60000, status: 'pending', requestedAt: '2026-11-03T08:00:00.000Z', provider: 'admin_approved', reference: null };
 
+const GYMS = [
+  { id: 'g1', name: 'Kijiweni Strength Club', tier: 'standard', location: 'Sinza', verified: true, rating: 4.6, reviewCount: 82,
+    operatingHours: { default: { open: '05:30', close: '22:00' } }, amenities: ['Lockers'], coordinates: { lat: -6.78, lng: 39.22 } },
+  { id: 'g2', name: 'Msasani Bay Fitness', tier: 'premium', location: 'Msasani' },
+];
+const TRAINERS = [
+  { id: 't1', displayName: 'Coach Daudi', specialties: ['Strength'], hourlyRateTzs: 35000, gyms: [{ id: 'g1', name: 'Kijiweni Strength Club' }], gymIds: ['g1'], bookable: true },
+  { id: 't2', displayName: 'Coach Rehema', specialties: ['HIIT'], hourlyRateTzs: 30000, gyms: [{ id: 'g2', name: 'Msasani Bay Fitness' }], gymIds: ['g2'], bookable: true },
+];
+const ORDERS = [
+  { id: 'ord_ready001', items: [{ productId: 'p1', name: 'Whey protein 1 kg', qty: 1 }], totalTzs: 85000, status: 'ready_for_pickup', deliveryMethod: 'gym_pickup', pickupGymId: 'g1', paymentStatus: 'paid', createdAt: '2026-11-01T08:00:00.000Z' },
+  { id: 'ord_onway002', items: [{ productId: 'p2', name: 'Resistance bands', qty: 2 }], totalTzs: 42000, status: 'dispatched', deliveryMethod: 'gym_pickup', pickupGymId: 'g1', paymentStatus: 'paid', createdAt: '2026-11-02T08:00:00.000Z' },
+  { id: 'ord_done003', items: [{ productId: 'p3', name: 'Lifting gloves', qty: 1 }], totalTzs: 20000, status: 'delivered', deliveryMethod: 'gym_pickup', pickupGymId: 'g1', paymentStatus: 'paid', createdAt: '2026-10-10T08:00:00.000Z' },
+];
 type Json = { status: number; body: unknown };
 const ok = (body: unknown, status = 200): Json => ({ status, body });
 interface Mock { [route: string]: Json | ((n: number, body: any) => Json) }
@@ -39,6 +53,17 @@ function base(): Mock {
     'POST /me/subscribe': ok({ subscription: { id: 'sub2' }, paymentRequest: PAY }, 202),
     'POST /me/payments/pay_1/mobile-money': ok({ state: 'in_progress', paymentRequest: PAY }, 202),
     'POST /me/payments/pay_1/mobile-money/refresh': n => ok({ state: n < 2 ? 'in_progress' : 'completed', paymentRequest: PAY }),
+    'GET /gyms': ok(GYMS),
+    'GET /me/favorites/gyms': ok({ favoriteGymIds: ['g2'] }),
+    'PUT /me/favorites/gyms/g1': ok({ ok: true }),
+    'GET /trainers': ok(TRAINERS),
+    'GET /trainers/t1/schedule': ok({ days: [{ date: '2030-01-10', weekday: 'thu', slots: [{ slot: '06:00', status: 'booked' }, { slot: '17:30', status: 'available' }] }] }),
+    'POST /me/trainer-bookings/quote': ok({ summary: { trainerId: 't1', gymId: 'g1', slots: [{ date: '2030-01-10', slot: '17:30' }], currency: 'TZS', pricePerSession: 35000, discountPct: 10, subtotal: 35000, discount: 3500, total: 31500 } }),
+    'POST /me/trainer-bookings': ok({ bookings: [{ id: 'b1' }], paymentRequest: { ...PAY, id: 'pay_t1', amountTzs: 31500 } }, 201),
+    'POST /me/payments/pay_t1/mobile-money': ok({ state: 'in_progress' }, 202),
+    'POST /me/payments/pay_t1/mobile-money/refresh': ok({ state: 'completed' }),
+    'GET /me/trainer-bookings': ok([]),
+    'GET /me/shop-orders': ok(ORDERS),
   };
 }
 
@@ -72,7 +97,7 @@ test.describe('member portal, flag off', () => {
   test.skip(FLAG_ON, 'flag-off build only');
   test('every page shows "not available yet" and makes no request', async ({ page }) => {
     const h = await setup(page);
-    for (const p of ['/m/', '/m/signin/', '/m/pass/', '/m/check-in/']) {
+    for (const p of ['/m/', '/m/signin/', '/m/pass/', '/m/check-in/', '/m/gyms/', '/m/trainers/', '/m/orders/']) {
       await page.goto(p);
       await expect(page.getByTestId('member-flag-off')).toBeVisible();
     }
@@ -193,5 +218,64 @@ test.describe('member portal, flag on', () => {
     await page.getByTestId('member-lang-toggle').click();
     await expect(page.getByRole('link', { name: sw['member.nav.pass'], exact: true }).first()).toBeVisible();
     await expect(page.getByRole('heading', { name: 'Habari, Neema' })).toBeVisible();
+  });
+
+  test('gyms: search, pass coverage from the pass level, save a favourite', async ({ page }) => {
+    const h = await setup(page, { 'GET /me': ok({ user: USER, subscription: { ...ACTIVE, tier: 'basic' }, pendingPayment: null, visitsUsed: 1, visitCap: 16 }),
+      'GET /passes': ok(PASSES.map(p => ({ ...p, gymAccess: p.key === 'basic' ? 'standard' : 'premium' }))) });
+    await page.goto('/m/gyms/');
+    await expect(page.getByTestId('member-gym-g1')).toContainText(en['member.gyms.covered']);
+    await expect(page.getByTestId('member-gym-g2')).toContainText(en['member.gyms.notCovered']);
+    await page.getByTestId('member-gyms-filter-covered').click();
+    await expect(page.getByTestId('member-gym-g2')).toHaveCount(0);
+    await page.getByTestId('member-gyms-filter-covered').click();
+    await page.getByTestId('member-gyms-search').fill('msasani');
+    await expect(page.getByTestId('member-gym-g1')).toHaveCount(0);
+    await page.getByTestId('member-gyms-search').fill('');
+    await page.getByTestId('member-gym-g1').click();
+    await expect(page.getByTestId('member-gym-detail')).toContainText('05:30 – 22:00');
+    await page.getByTestId('member-gym-fav').click();
+    await expect.poll(() => h.count('PUT /me/favorites/gyms/g1')).toBe(1);
+  });
+
+  test('trainers: pick a time, see the quote with the pass discount, book and pay by mobile money', async ({ page }) => {
+    const h = await setup(page, { 'GET /payments/options': ok({ enabled: true, environment: 'production', mobileMoney: { products: ['FITFLEX_PASS', 'TRAINER_SERVICE'] } }) });
+    await page.goto('/m/trainers/');
+    await page.getByTestId('member-trainer-t1').click();
+    await expect(page.getByLabel('06:00, booked')).toBeVisible();
+    await page.getByTestId('member-slot-17:30').click();
+    await expect(page.getByTestId('member-trainer-quote')).toContainText('31,500');
+    await page.getByTestId('member-trainer-book').click();
+    await page.getByTestId('member-pay-send').click();
+    await expect(page.getByTestId('member-pay-done')).toContainText(en['member.trainers.bookedTitle'], { timeout: 15_000 });
+    expect(h.reqs.find(r => r.method === 'POST' && r.path === '/me/trainer-bookings')!.body).toEqual({ trainerId: 't1', gymId: 'g1', slots: [{ date: '2030-01-10', slot: '17:30' }] });
+  });
+
+  test('trainers: when trainer sessions are not payable by mobile money, nothing is booked on the web', async ({ page }) => {
+    const h = await setup(page);
+    await page.goto('/m/trainers/');
+    await page.getByTestId('member-trainer-t1').click();
+    await page.getByTestId('member-slot-17:30').click();
+    await expect(page.getByTestId('member-trainer-in-app')).toBeVisible();
+    await expect(page.getByTestId('member-trainer-book')).toHaveCount(0);
+    expect(h.count('POST /me/trainer-bookings')).toBe(0);
+  });
+
+  test('orders: ready for pickup shows the gym and order number; collected ones are in the second tab', async ({ page }) => {
+    await setup(page);
+    await page.goto('/m/orders/');
+    const ready = page.getByTestId('member-order-ord_ready001');
+    await expect(ready).toContainText('Kijiweni Strength Club');
+    await expect(ready).toContainText(en['member.orders.collectHint']);
+    await expect(page.getByTestId('member-order-ord_onway002')).toContainText(en['member.orders.step.onWay']);
+    await expect(page.getByTestId('member-order-ord_done003')).toHaveCount(0);
+    await page.getByTestId('member-orders-tab-past').click();
+    await expect(page.getByTestId('member-order-ord_done003')).toBeVisible();
+  });
+
+  test('today lists a ready pickup under coming up', async ({ page }) => {
+    await setup(page);
+    await page.goto('/m/');
+    await expect(page.getByTestId('member-today-next')).toContainText('Whey protein 1 kg');
   });
 });

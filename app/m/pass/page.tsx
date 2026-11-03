@@ -71,7 +71,14 @@ function PassPage({ session }: { session: MemberSession | null }) {
   const proceed = () => {
     const c = choices.find(x => x.key === choice);
     if (!c) { setChooseError(true); return; }
-    setTarget({ kind: c.kind, tier: c.key, tierLabel: c.label, amountTzs: c.amount });
+    setTarget({
+      label: c.label, amountTzs: c.amount, product: 'FITFLEX_PASS', manual: true,
+      create: async extra => {
+        const body = { tier: c.key, ...(extra ?? {}) };
+        const r = c.kind === 'upgrade' ? await memberApi.upgrade(body) : await memberApi.subscribe(body);
+        return r.paymentRequest.id;
+      },
+    });
   };
 
   return (
@@ -103,7 +110,7 @@ function PassPage({ session }: { session: MemberSession | null }) {
                 ? <p className={muted}>{t('member.pay.pendingManual')}</p>
                 : (
                   <button type="button" className="inline-flex min-h-11 items-center justify-center self-start rounded-full bg-[#c8f04a] px-5 text-sm font-extrabold text-[#020617]"
-                    onClick={() => setTarget({ kind: 'existing', tier: pending.tier ?? '', tierLabel: tierLabel(pending.tier, passes), amountTzs: pending.amountTzs, paymentId: pending.id })}
+                    onClick={() => setTarget({ label: tierLabel(pending.tier, passes), amountTzs: pending.amountTzs, product: 'FITFLEX_PASS', paymentId: pending.id })}
                     data-testid="member-pass-pay-existing">
                     {t('member.pay.continueExisting')}
                   </button>

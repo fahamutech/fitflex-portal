@@ -21,3 +21,11 @@ export function nameOf(me: MeResponse | null): string {
 }
 
 export type { Locale };
+
+/** On a narrow screen the detail panel sits below the list: bring it into view after a choice. */
+export function revealPanel(testId: string) {
+  if (typeof window === 'undefined' || window.matchMedia('(min-width: 1024px)').matches) return;
+  window.setTimeout(() => {
+    document.querySelector(`[data-testid="${testId}"]`)?.scrollIntoView({ behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' });
+  }, 50);
+}

@@ -14,6 +14,9 @@ import { BrandLogo } from '@/components/brand-logo';
 
 const NAV: Array<{ href: string; key: MessageKey }> = [
   { href: MEMBER_ROUTES.home, key: 'member.nav.today' },
+  { href: MEMBER_ROUTES.gyms, key: 'member.nav.gyms' },
+  { href: MEMBER_ROUTES.trainers, key: 'member.nav.trainers' },
+  { href: MEMBER_ROUTES.orders, key: 'member.nav.orders' },
   { href: MEMBER_ROUTES.pass, key: 'member.nav.pass' },
 ];
 
@@ -61,7 +64,7 @@ export function MemberFrame({ testId, needsSession = true, children }: {
             <span>FitFlex</span>
           </Link>
           {showNav && (
-            <nav aria-label={t('member.nav.label')} className="ml-4 hidden gap-1 sm:flex">
+            <nav aria-label={t('member.nav.label')} className="ml-4 hidden gap-1 md:flex">
               {NAV.map(n => (
                 <Link key={n.href} href={n.href} aria-current={here === n.href ? 'page' : undefined}
                   className={`rounded-full px-4 py-2 text-sm font-semibold ${here === n.href ? 'bg-[#1e293b] text-[#f1f5f9]' : 'text-[#aab4c4] hover:text-[#f1f5f9]'}`}>
@@ -90,7 +93,7 @@ export function MemberFrame({ testId, needsSession = true, children }: {
           </div>
         </div>
         {showNav && (
-          <nav aria-label={t('member.nav.label')} className="flex gap-1 px-4 pb-2 sm:hidden">
+          <nav aria-label={t('member.nav.label')} className="flex gap-1 overflow-x-auto px-4 pb-2 md:hidden">
             {NAV.map(n => (
               <Link key={n.href} href={n.href} aria-current={here === n.href ? 'page' : undefined}
                 className={`rounded-full px-4 py-2 text-sm font-semibold ${here === n.href ? 'bg-[#1e293b]' : 'text-[#aab4c4]'}`}>{t(n.key)}</Link>

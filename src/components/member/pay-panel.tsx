@@ -8,28 +8,39 @@ import { CheckCircle2 } from 'lucide-react';
 import { useApp } from '../../../app/providers';
 import { card, ghostBtn, input, muted, primaryBtn } from './member-frame';
 import { fmt } from './member-shared';
-import { canPayPassByMobileMoney, formatTzs, MEMBER_ROUTES, MemberApiError, memberApi, type MemberCode, type PaymentOptions } from '@/lib/member-api';
+import { canPayByMobileMoney, formatTzs, MEMBER_ROUTES, MemberApiError, memberApi, type MemberCode, type PaymentOptions } from '@/lib/member-api';
 import { ERROR_KEYS, type CheckinCode } from '@/lib/web-checkin';
 import type { MessageKey } from '@/lib/i18n';
 
-export interface PayTarget { kind: 'subscribe' | 'upgrade' | 'existing'; tier: string; tierLabel: string; amountTzs: number; paymentId?: string }
+/**
+ * What is being paid. `create` makes the payment request (once; it is then reused for retries); without it,
+ * `paymentId` is an existing request. `manual` allows the Lipa Namba path (passes only: the server takes the
+ * transaction ID when the request is created).
+ */
+export interface PayTarget {
+  label: string; amountTzs: number; product: 'FITFLEX_PASS' | 'TRAINER_SERVICE'; paymentId?: string;
+  create?: (extra?: { reference: string; payerPhone: string }) => Promise<string>; manual?: boolean;
+  doneTitleKey?: MessageKey; doneBody?: string; doneHref?: string;
+}
 type Step = 'form' | 'waiting' | 'slow' | 'done' | 'failed' | 'held' | 'manual_done';
 
 const POLL_MS = 4000;
 const POLL_MAX = 45; // about three minutes, then "still waiting"
 
-function errorKey(code: MemberCode): MessageKey {
+/** The message for an error code: the member portal's own, else the shared sign-in/check-in one. */
+export function errorKey(code: MemberCode): MessageKey {
   const own = `member.err.${code}` as MessageKey;
   return (MEMBER_ERR.has(code) ? own : ERROR_KEYS[code as CheckinCode]) ?? 'web.checkin.err.unknown';
 }
 const MEMBER_ERR = new Set<string>(['payment_already_pending', 'no_active_pass', 'payment_reference_required', 'payment_reference_invalid',
   'payment_reference_duplicate', 'payer_phone_required', 'payer_phone_invalid', 'invalid_phone', 'feature_disabled', 'payment_not_pending',
-  'active_subscription_required']);
+  'active_subscription_required', 'slot_already_booked', 'slot_in_past', 'slot_not_available', 'trainer_unavailable',
+  'trainer_not_available_at_gym', 'cannot_book_own_sessions']);
 
 export function PayPanel({ target, options, defaultPhone, onBack }: { target: PayTarget; options: PaymentOptions | null; defaultPhone: string; onBack: () => void }) {
   const { t, locale } = useApp();
-  const mobile = canPayPassByMobileMoney(options);
-  const manual = !mobile && options?.manual?.enabled ? options.manual : null;
+  const mobile = canPayByMobileMoney(options, target.product);
+  const manual = !mobile && target.manual && target.create && options?.manual?.enabled ? options.manual : null;
   const [phone, setPhone] = useState(defaultPhone);
   const [reference, setReference] = useState('');
   const [step, setStep] = useState<Step>('form');
@@ -47,10 +58,9 @@ export function PayPanel({ target, options, defaultPhone, onBack }: { target: Pa
   /** The payment request to pay: the existing one, or a new one for this pass (created once, then reused). */
   async function ensureRequest(extra?: { reference: string; payerPhone: string }): Promise<string> {
     if (paymentId.current) return paymentId.current;
-    const body = { tier: target.tier, ...(extra ?? {}) };
-    const r = target.kind === 'upgrade' ? await memberApi.upgrade(body) : await memberApi.subscribe(body);
-    paymentId.current = r.paymentRequest.id;
-    return r.paymentRequest.id;
+    if (!target.create) throw new MemberApiError(409, 'payment_not_pending');
+    paymentId.current = await target.create(extra);
+    return paymentId.current;
   }
 
   async function check() {
@@ -97,7 +107,7 @@ export function PayPanel({ target, options, defaultPhone, onBack }: { target: Pa
   const retry = () => { if (timer.current) window.clearTimeout(timer.current); setStep('form'); };
 
   const Summary = (
-    <p className="text-lg font-bold tabular-nums" data-testid="member-pay-summary">{fmt(t('member.pay.summary'), { tier: target.tierLabel, amount })}</p>
+    <p className="text-lg font-bold tabular-nums" data-testid="member-pay-summary">{fmt(t('member.pay.summary'), { tier: target.label, amount })}</p>
   );
   const ErrorBox = error && (
     <div role="alert" data-testid="member-pay-error" className="rounded-xl bg-[#3a1d14] px-4 py-3 text-sm text-[#ffd2c4]">{t(errorKey(error))}</div>
@@ -107,9 +117,9 @@ export function PayPanel({ target, options, defaultPhone, onBack }: { target: Pa
     return (
       <section className={`${card} flex flex-col items-center gap-4 text-center`} data-testid="member-pay-done">
         <CheckCircle2 aria-hidden="true" className="h-16 w-16 text-[#3dd98e]" />
-        <h2 ref={headingRef} tabIndex={-1} className="text-2xl font-extrabold">{t('member.pay.doneTitle')}</h2>
-        <p>{fmt(t('member.pay.doneBody'), { tier: target.tierLabel })}</p>
-        <Link href={MEMBER_ROUTES.home} className={primaryBtn}>{t('member.pay.backToday')}</Link>
+        <h2 ref={headingRef} tabIndex={-1} className="text-2xl font-extrabold">{t(target.doneTitleKey ?? 'member.pay.doneTitle')}</h2>
+        <p>{target.doneBody ?? fmt(t('member.pay.doneBody'), { tier: target.label })}</p>
+        <Link href={target.doneHref ?? MEMBER_ROUTES.home} className={primaryBtn}>{t('member.pay.backToday')}</Link>
       </section>
     );
   }
@@ -167,7 +177,7 @@ export function PayPanel({ target, options, defaultPhone, onBack }: { target: Pa
       </form>
     );
   }
-  if (manual && target.kind !== 'existing') {
+  if (manual) {
     return (
       <form onSubmit={sendManual} noValidate className={`${card} flex flex-col gap-5`} data-testid="member-pay-manual">
         {Summary}
