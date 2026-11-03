@@ -18,7 +18,7 @@ import { Dialog, DialogFooter } from '@/components/dialog';
 import { useVendor } from '@/components/vendor-context';
 import { useToast } from '@/components/ui/toast';
 import { useApp } from '../../../../app/providers';
-import { AgingTiles, CreditBadges, linkCls, MoneyTile, OverdueBadge, rateLimitText, SourceBadge, TILE_GRID, useOnline } from './bits';
+import { AgingTiles, CreditBadges, linkCls, RefundBadges, MoneyTile, OverdueBadge, rateLimitText, SourceBadge, TILE_GRID, useOnline } from './bits';
 import { CustomerFormDialog } from './customer-form-dialog';
 import { CustomerSaleDialog } from './customer-sale-dialog';
 import { PaymentDialog } from './payment-dialog';
@@ -362,6 +362,7 @@ export function CustomerProfile({
                       <span className="flex flex-wrap items-center gap-2">
                         {s.status === 'voided' && <Badge tone="gray">{t('vendor.sales.voidedBadge')}</Badge>}
                         <CreditBadges sale={s} />
+                        <RefundBadges sale={s} />
                         <span className={`whitespace-nowrap font-semibold tabular-nums ${s.status === 'voided' ? 'line-through text-[var(--color-fg-quaternary)]' : ''}`}>{money(s.totalTzs)}</span>
                       </span>
                     </li>

@@ -71,6 +71,18 @@ export const isBucket = (b: string): b is AgingBucket => (AGING_BUCKETS as reado
 export const linkCls = 'inline-flex min-h-11 items-center font-semibold text-[var(--color-brand-700)] underline-offset-4 hover:underline';
 
 /** Pay later / owes / paid off / voided badges of a sale row. */
+/**
+ * S7: Part refunded / Refunded on a completed sale (whatever the flag: refunds already made stay visible). Shared by
+ * the sales list and detail and the customer screens, so a fully refunded pay-later sale never reads "Pay later" alone.
+ */
+export function RefundBadges({ sale }: { sale: { status: string; refundState?: string } }) {
+  const { t } = useApp();
+  if (sale.status !== 'completed') return null;
+  if (sale.refundState === 'partial') return <Badge tone="info"><span data-testid="badge-part-refunded">{t('vendor.refunds.badgePartial')}</span></Badge>;
+  if (sale.refundState === 'full') return <Badge tone="gray"><span data-testid="badge-refunded">{t('vendor.refunds.badgeFull')}</span></Badge>;
+  return null;
+}
+
 export function CreditBadges({ sale }: { sale: Pick<VendorSaleRow, 'status' | 'kind' | 'balanceTzs'> & { refundState?: string; refundedTzs?: number; balanceReducedTzs?: number } }) {
   const { t } = useApp();
   if (sale.kind !== 'credit') return null;
