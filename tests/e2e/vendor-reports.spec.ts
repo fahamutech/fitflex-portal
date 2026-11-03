@@ -99,7 +99,13 @@ const profit = (req: Request) => ({
   uncosted: { lineCount: 1, qty: 2, revenueTzs: 20000, netExVatTzs: 20000 }, hasVat: true,
   buckets: [{ start: MONTH_START, end: MONTH_START, netExVatTzs: 433000, commissionTzs: 40000, costTzs: 270000, profitTzs: 123000, marginPct: 28.4, uncostedRevenueTzs: 20000 }],
   byChannel: { app: { netExVatTzs: 0, commissionTzs: 0, costTzs: 0, profitTzs: 0, marginPct: null }, walkIn: { netExVatTzs: 0, commissionTzs: 0, costTzs: 0, profitTzs: 0, marginPct: null } },
-  byProduct: [{ productId: 'p1', variant: null, name: 'Whey Protein', removed: false, units: 10, netExVatTzs: 433000, commissionTzs: 40000, costTzs: 270000, profitTzs: 123000, marginPct: 28.4 }],
+  byProduct: [
+    { productId: 'p1', variant: null, name: 'Whey Protein', removed: false, units: 10, netExVatTzs: 400000, commissionTzs: 40000, costTzs: 260000, profitTzs: 100000, marginPct: 25 },
+    // A mixed line the backend now answers with null profit (UAT D1).
+    { productId: 'p6', variant: null, name: 'Bands', removed: false, units: 1, netExVatTzs: 33000, commissionTzs: 0, costTzs: null, profitTzs: null, marginPct: null },
+    { productId: 'p8', variant: null, name: 'Socks', removed: false, units: 1, netExVatTzs: 0, commissionTzs: 0, costTzs: 0, profitTzs: 0, marginPct: null },
+    { productId: 'p9', variant: null, name: 'Towel', removed: false, units: 2, netExVatTzs: 10000, commissionTzs: 0, costTzs: 10000, profitTzs: 0, marginPct: 0 },
+  ],
   uncostedProducts: [{ productId: 'p2', variant: null, name: 'Gloves', removed: false, units: 2, revenueTzs: 20000 }],
 });
 const payouts = (req: Request) => ({
@@ -192,7 +198,7 @@ test.describe('gating', () => {
     const calls = await mockApi(page, base({ 'GET /vendor/me': { json: me({ userType: 'vendor_staff', vendorRole: 'orders_manager', permissions: ['orders'], tools: tools({ canSeeCost: false, canSeeOrderMoney: false }) }) } }));
     await page.goto('/vendor/reports/');
     await expect(page).toHaveURL(/\/vendor\/$/);
-    await expect(page.getByText("You don't have access to that.")).toBeVisible();
+    await expect(page.getByText("You don't have access to this report.")).toBeVisible();
     await expect(page.getByRole('link', { name: 'Reports', exact: true })).toHaveCount(0);
     expect(reportCalls(calls)).toHaveLength(0);
     expect(calls.outside).toEqual([]);
@@ -223,7 +229,7 @@ test.describe('gating', () => {
     }));
     await page.goto('/vendor/reports/?view=profit');
     await expect(page.getByText("You don't have access to this report.")).toBeVisible();
-    await expect(page).toHaveURL(/\/vendor\/reports\/$/);
+    await expect(page).toHaveURL(/\/vendor\/reports\/\?view=overview$/);
     await expect(page.getByTestId('ov-net')).toContainText('TSh 470,000');
     await expect(page.getByTestId('ov-profit')).toHaveCount(0);
     await expect(page.getByTestId('ov-owed')).toHaveCount(0);
@@ -260,7 +266,7 @@ test.describe('gating', () => {
     await signedInAs(page, VENDOR);
     const calls = await mockApi(page, base({ 'GET /vendor/me': { json: me({ tools: tools({ stockLedger: false }) }) } }));
     await page.goto('/vendor/reports/?view=stock');
-    await expect(page).toHaveURL(/\/vendor\/reports\/$/);
+    await expect(page).toHaveURL(/\/vendor\/reports\/\?view=overview$/);
     await expect(page.getByRole('button', { name: 'Stock value', exact: true })).toHaveCount(0);
     expect(reportCalls(calls, 'stock-value')).toHaveLength(0);
   });
@@ -273,7 +279,7 @@ test.describe('views', () => {
     await page.goto('/vendor/reports/');
     await expect(page.getByTestId('report-header-line')).toContainText('(so far) · All sales · Updated 14:05');
     await expect(page.getByTestId('ov-net')).toContainText('TSh 470,000');
-    await expect(page.getByTestId('ov-net')).toContainText('Gross TSh 520,000 · Discounts TSh 20,000');
+    await expect(page.getByTestId('ov-net')).toContainText('Gross TSh 520,000 · Discounts −TSh 20,000 · Refunds −TSh 30,000');
     await expect(page.getByTestId('ov-profit')).toContainText('TSh 123,000');
     await expect(page.getByTestId('ov-owed')).toContainText('TSh 50,000');
     await expect(page.getByTestId('ov-chart')).toHaveAttribute('aria-label', /Net sales by day, .*Highest: .*TSh 470,000\. Total TSh 470,000\. Table below\./);
@@ -283,7 +289,7 @@ test.describe('views', () => {
     await expect(page.getByTestId('ov-slow')).toHaveText('Slow sellers: 3');
     await expect(page.getByTestId('overview-methods-you')).toContainText('Cash');
     await expect(page.getByTestId('overview-methods-fitflex')).toContainText('M-Pesa');
-    await expect(page.getByTestId('ov-payouts')).toContainText('− TSh 20,000');
+    await expect(page.getByTestId('ov-payouts')).toContainText('−TSh 20,000');
     const first = reportCalls(calls, 'summary')[0];
     expect(first.search.get('from')).toBe(MONTH_START);
     expect(first.search.get('to')).toBe(TODAY);
@@ -295,10 +301,10 @@ test.describe('views', () => {
     const calls = await mockApi(page, base());
     await page.goto('/vendor/reports/?view=sales');
     await expect(page.getByTestId('sales-net')).toContainText('TSh 470,000');
-    await expect(page.getByTestId('sales-refunds')).toContainText('− TSh 30,000');
+    await expect(page.getByTestId('sales-refunds')).toContainText('−TSh 30,000');
     await expect(page.getByTestId('sales-vat')).toHaveCount(0);
     await expect(page.getByTestId('sales-count')).toContainText('10');
-    await expect(page.getByTestId('sales-voided')).toHaveText('Voided (not counted): 1 sales · TSh 15,000');
+    await expect(page.getByTestId('sales-voided')).toHaveText('Voided (not counted): 1 sale · TSh 15,000');
     await expect(page.getByTestId('sales-voided').getByRole('link')).toHaveAttribute('href', /\/vendor\/sales\/\?status=voided/);
     const footer = page.getByTestId('sales-total-row');
     await expect(footer).toContainText('TSh 170,000');
@@ -336,7 +342,7 @@ test.describe('views', () => {
     await page.goto('/vendor/reports/?view=stock');
     await expect(page.getByTestId('stock-as-of')).toHaveText('As of 14:05 today. The period you picked does not apply.');
     await expect(page.getByTestId('stock-cost')).toContainText('TSh 500,000');
-    await expect(page.getByTestId('stock-cost-unknown')).toHaveText('1 products in stock have no cost price, so they are not in the cost value.');
+    await expect(page.getByTestId('stock-cost-unknown')).toHaveText('1 product in stock has no cost price, so it is not in the cost value.');
     await expect(page.getByTestId('stock-table').getByText('Unknown')).toBeVisible();
     await expect(page.getByRole('button', { name: 'This month', exact: true })).toBeDisabled();
     const call = reportCalls(calls, 'stock-value')[0];
@@ -366,7 +372,9 @@ test.describe('views', () => {
     await page.goto('/vendor/reports/?view=payouts');
     await expect(page.getByTestId('payouts-basis')).toHaveText('App orders only. Counted by delivery date, the same as your payout statements.');
     await expect(page.getByTestId('payouts-receive')).toContainText('TSh 180,000');
-    await expect(page.getByTestId('payouts-not-delivered')).toContainText('1 orders');
+    await expect(page.getByTestId('payouts-not-delivered')).toContainText('1 order');
+    await expect(page.getByTestId('payouts-not-delivered')).not.toContainText('1 orders');
+    await expect(page.getByTestId('payouts-paid')).toContainText('2 orders');
     const weeks = page.getByTestId('payouts-week');
     await expect(weeks.nth(0)).toContainText('Paid out');
     await expect(weeks.nth(0).getByRole('link', { name: 'Open statement' })).toHaveAttribute('href', '/vendor/payouts/?id=vst_1');
@@ -385,7 +393,7 @@ test.describe('views', () => {
     await expect(page.getByTestId('cust-aging')).toContainText('Not due yet TSh 30,000');
     await page.getByRole('button', { name: 'Payment methods', exact: true }).click();
     await expect(page.getByTestId('methods-you')).toContainText('Cash after change');
-    await expect(page.getByTestId('methods-you')).toContainText('60%');
+    await expect(page.getByTestId('methods-you')).toContainText('60.0%');
     await expect(page.getByTestId('methods-fitflex')).toContainText('M-Pesa');
     await expect(page.getByTestId('methods-you')).toContainText('FitFlex does not handle this money');
   });
@@ -440,12 +448,13 @@ test.describe('period and URL', () => {
     await signedInAs(page, VENDOR);
     const calls = await mockApi(page, base());
     await page.goto(`/vendor/reports/?view=nope&from=2026-02-30&to=${TODAY}&channel=web&groupBy=year`);
-    await expect(page).toHaveURL(/\/vendor\/reports\/$/);
+    // UAT D13: rewritten to the values in use, not left behind or dropped.
+    await expect(page).toHaveURL(new RegExp(`\\?view=overview&from=${MONTH_START}&to=${TODAY}&channel=all&groupBy=day$`));
     await expect(page.getByTestId('ov-net')).toBeVisible();
     const last = reportCalls(calls, 'summary').at(-1)!;
     expect(last.search.get('from')).toBe(MONTH_START);
-    expect(last.search.get('channel')).toBeNull();
-    expect(last.search.get('groupBy')).toBeNull();
+    expect(last.search.get('channel')).toBeNull(); // "all" is never sent
+    expect(last.search.get('groupBy')).toBe('day');
   });
 
   test('changing the period quickly renders only the latest answer', async ({ page }) => {
@@ -453,10 +462,11 @@ test.describe('period and URL', () => {
     const y = addDays(TODAY, -1);
     await mockApi(page, base({
       'GET /vendor/reports/sales': req => {
-        const from = new URL(req.url()).searchParams.get('from');
+        const q = new URL(req.url()).searchParams;
         const body = sales(req);
-        // Yesterday's answer is slow and would say 999; today's answer is fast.
-        return from === y ? { delayMs: 1500, json: { ...body, totals: { ...body.totals, netTzs: 999 } } } : { json: body };
+        // Yesterday's answer is slow and would say 999; today's answer is fast. Check `to` as well: on the 2nd of a
+        // month, "This month" also starts yesterday.
+        return q.get('from') === y && q.get('to') === y ? { delayMs: 1500, json: { ...body, totals: { ...body.totals, netTzs: 999 } } } : { json: body };
       },
     }));
     await page.goto('/vendor/reports/?view=sales');
@@ -546,13 +556,13 @@ test.describe('review fixes', () => {
     await expect(page.getByTestId('sales-net')).toBeVisible();
     await page.getByTestId('report-export').click();
     await page.getByTestId('export-sales').click();
-    await expect(page.getByTestId('report-export-notice')).toHaveText("You've downloaded too often. Try again in 2 minute(s).");
+    await expect(page.getByTestId('report-export-notice')).toHaveText("You've downloaded too often. Try again in 2 minutes.");
     retryAfter = 5;
     await page.getByTestId('export-sales').click();
-    await expect(page.getByTestId('report-export-notice')).toHaveText("You've downloaded too often. Try again in 1 minute(s).");
+    await expect(page.getByTestId('report-export-notice')).toHaveText("You've downloaded too often. Try again in 1 minute.");
     retryAfter = undefined;
     await page.getByTestId('export-sales').click();
-    await expect(page.getByTestId('report-export-notice')).toHaveText("You've downloaded too often. Try again in 1 minute(s).");
+    await expect(page.getByTestId('report-export-notice')).toHaveText("You've downloaded too often. Try again in 1 minute.");
     await page.getByTestId('export-overview').click();
     await expect(page.getByTestId('report-export-notice')).toHaveText("The PDF can't be made right now. Try again later, or download a CSV instead.");
     expect(calls.outside).toEqual([]);
@@ -605,6 +615,287 @@ test.describe('review fixes', () => {
     await page.getByTestId('export-sales').click();
     // slug(): NFKD, drop non-word characters, lower case, spaces → "-".
     expect((await download).suggestedFilename()).toBe(`rehema-ali-co-ltd_sales_${MONTH_START}${MONTH_START === TODAY ? '' : `_${TODAY}`}.csv`);
+  });
+});
+
+test.describe('S6 UAT fixes', () => {
+  test('D1: "No cost price" only when profit is null; a real 0 is "TSh 0"; D12: margin "25.0%"', async ({ page }) => {
+    await signedInAs(page, VENDOR);
+    await mockApi(page, base({
+      'GET /vendor/reports/products': req => ({ json: { ...products(req), nextCursor: null, rows: [
+        prodRow({ profitTzs: 5000 }),
+        prodRow({ productId: 'p2', name: 'Gloves', profitTzs: null }),
+        prodRow({ productId: 'p3', name: 'Mat', profitTzs: 0 }),
+      ] } }),
+    }));
+    await page.goto('/vendor/reports/?view=products');
+    const rows = page.getByTestId('products-table').getByTestId('product-row');
+    await expect(rows).toHaveCount(3);
+    await expect(rows.nth(0)).toContainText('TSh 5,000');
+    await expect(rows.nth(1).getByTestId('profit-unknown')).toHaveText('—No cost price');
+    // A genuine zero profit stays a figure.
+    await expect(rows.nth(2).getByTestId('profit-unknown')).toHaveCount(0);
+    await expect(rows.nth(2).getByRole('cell').last()).toHaveText('TSh 0');
+
+    await page.getByRole('button', { name: 'Profit', exact: true }).click();
+    const byProduct = page.getByTestId('profit-products');
+    await expect(byProduct).toContainText('25.0%');
+    const unknown = byProduct.getByTestId('profit-unknown');
+    await expect(unknown).toHaveCount(1); // profit null (Bands) only: margin null alone is not "no cost price"
+    await expect(unknown.nth(0)).toHaveText('—No cost price');
+    // Zero profit on a costed line (Towel) is "TSh 0".
+    await expect(byProduct.getByRole('row', { name: /Towel/ }).getByTestId('profit-product-profit')).toHaveText('TSh 0');
+  });
+
+  test('D1 in Swahili: "Hakuna bei ya kununua"', async ({ page }) => {
+    await signedInAs(page, VENDOR, 'sw');
+    await mockApi(page, base({
+      'GET /vendor/reports/products': req => ({ json: { ...products(req), nextCursor: null, rows: [prodRow({ profitTzs: null })] } }),
+    }));
+    await page.goto('/vendor/reports/?view=products');
+    await expect(page.getByTestId('products-table').getByTestId('profit-unknown')).toHaveText('—Hakuna bei ya kununua');
+  });
+
+  test('D2: hasEverSold false → first-use message with Record a sale / Add products; absent → the period message', async ({ page }) => {
+    await signedInAs(page, VENDOR);
+    let ever: boolean | undefined = false;
+    const empty = { ...salesTotals, grossTzs: 0, discountTzs: 0, refundTzs: 0, netTzs: 0, saleCount: 0, orderCount: 0, itemsSold: 0, voided: { count: 0, totalTzs: 0 } };
+    await mockApi(page, base({
+      'GET /vendor/reports/summary': req => ({ json: { ...summary(req), ...(ever === undefined ? {} : { hasEverSold: ever }), sales: { ...empty, buckets: [] }, topProducts: [] } }),
+    }));
+    await page.goto('/vendor/reports/');
+    await expect(page.getByTestId('report-empty-first')).toContainText('Your reports fill up as you sell in the app or record shop sales.');
+    await expect(page.getByTestId('report-empty-sale')).toHaveText('Record a sale');
+    await expect(page.getByTestId('report-empty-sale')).toHaveAttribute('href', '/vendor/sales/');
+    await expect(page.getByTestId('report-empty-products')).toHaveText('Add products');
+    ever = undefined;
+    await page.getByRole('button', { name: 'Yesterday', exact: true }).click();
+    await expect(page.getByTestId('report-empty')).toContainText('No sales in');
+    await expect(page.getByTestId('report-empty-first')).toHaveCount(0);
+  });
+
+  test('D2: the actions follow permissions (reports-only staff get the message without actions)', async ({ page }) => {
+    await signedInAs(page, STAFF);
+    const empty = { ...salesTotals, grossTzs: 0, discountTzs: 0, refundTzs: 0, netTzs: 0, saleCount: 0, orderCount: 0, itemsSold: 0, voided: { count: 0, totalTzs: 0 } };
+    await mockApi(page, base({
+      'GET /vendor/me': { json: reportsOnly() },
+      'GET /vendor/reports/summary': req => ({ json: { ...summary(req, {}), hasEverSold: false, sales: { ...empty, buckets: [] }, topProducts: [] } }),
+    }));
+    await page.goto('/vendor/reports/');
+    await expect(page.getByTestId('report-empty-first')).toBeVisible();
+    await expect(page.getByTestId('report-empty-sale')).toHaveCount(0);
+    await expect(page.getByTestId('report-empty-products')).toHaveCount(0);
+  });
+
+  test('D3: Payment methods at 375px are cards, nothing clipped, no sideways scroll', async ({ page }) => {
+    await page.setViewportSize({ width: 375, height: 800 });
+    await signedInAs(page, VENDOR);
+    await mockApi(page, base());
+    await page.goto('/vendor/reports/?view=methods');
+    const cards = page.getByTestId('methods-you-cards');
+    await expect(cards).toBeVisible();
+    await expect(cards.getByRole('listitem')).toHaveCount(2);
+    await expect(cards).toContainText('Cash after change');
+    await expect(cards).toContainText('TSh 120,000');
+    await expect(cards).toContainText('60.0%');
+    await expect(page.getByTestId('methods-you').getByRole('table')).toBeHidden();
+    const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+    expect(overflow).toBeLessThanOrEqual(0);
+    for (const item of await cards.getByRole('listitem').all()) {
+      const box = await item.boundingBox();
+      expect(box!.x).toBeGreaterThanOrEqual(0);
+      expect(box!.x + box!.width).toBeLessThanOrEqual(375);
+    }
+  });
+
+  test('D7: "Add cost prices" (≥44px) opens the products list filtered to no cost price', async ({ page }) => {
+    await signedInAs(page, VENDOR);
+    await mockApi(page, base({
+      'GET /vendor/products': { json: [
+        { id: 'p1', name: 'Whey Protein', priceTzs: 20000, stock: 40, status: 'active', approvalStatus: 'approved', costTzs: 12500 },
+        { id: 'p2', name: 'Gloves', priceTzs: 20000, stock: 5, status: 'active', approvalStatus: 'approved', costTzs: null },
+        { id: 'p7', name: 'Shirt', priceTzs: 15000, stock: 6, status: 'active', approvalStatus: 'approved', costTzs: null,
+          variants: [{ name: 'M', stock: 3, costTzs: 7000, effectiveCostTzs: 7000 }, { name: 'L', stock: 3, costTzs: 8000, effectiveCostTzs: 8000 }] },
+      ] },
+    }));
+    await page.goto('/vendor/reports/?view=stock');
+    const link = page.getByTestId('report-add-cost');
+    await expect(link).toHaveAttribute('href', '/vendor/products/?filter=noCost');
+    expect((await link.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+    await link.click();
+    await expect(page).toHaveURL(/\/vendor\/products\/\?filter=noCost$/);
+    await expect(page.getByRole('button', { name: 'No cost price (1)' })).toHaveAttribute('aria-pressed', 'true');
+    await expect(page.getByText('Gloves').first()).toBeVisible();
+    await expect(page.getByText('Whey Protein')).toHaveCount(0);
+    await expect(page.getByText('Shirt')).toHaveCount(0); // every variant has its own cost
+    await page.getByRole('button', { name: 'All products', exact: true }).click();
+    await expect(page.getByText('Whey Protein').first()).toBeVisible();
+  });
+
+  test('D8 in Swahili: staff without `reports` get the reports wording', async ({ page }) => {
+    await signedInAs(page, STAFF, 'sw');
+    await mockApi(page, base({ 'GET /vendor/me': { json: me({ userType: 'vendor_staff', vendorRole: 'orders_manager', permissions: ['orders'], tools: tools({ canSeeCost: false, canSeeOrderMoney: false }) }) } }));
+    await page.goto('/vendor/reports/?view=sales');
+    await expect(page).toHaveURL(/\/vendor\/$/);
+    await expect(page.getByText('Huna ruhusa ya kuona ripoti hii.')).toBeVisible();
+  });
+
+  test('D10: one sale, one unit, one order, one item', async ({ page }) => {
+    await signedInAs(page, VENDOR);
+    await mockApi(page, base({
+      'GET /vendor/reports/summary': req => ({ json: { ...summary(req), topProducts: [{ productId: 'p1', variant: null, name: 'Whey Protein', removed: false, unitsSold: 1, netRevenueTzs: 30000 }] } }),
+      'GET /vendor/reports/customers': req => ({ json: { ...customers(req), creditSales: { count: 1, totalTzs: 30000 } } }),
+      'GET /vendor/reports/profit': req => ({ json: { ...profit(req), uncosted: { lineCount: 1, qty: 1, revenueTzs: 5000, netExVatTzs: 5000 } } }),
+    }));
+    await page.goto('/vendor/reports/');
+    await expect(page.getByTestId('ov-top')).toContainText('1 unit');
+    await expect(page.getByTestId('ov-top')).not.toContainText('1 units');
+    await page.getByRole('button', { name: 'Customers and money owed', exact: true }).click();
+    await expect(page.getByTestId('cust-credit')).toContainText('1 sale');
+    await expect(page.getByTestId('cust-credit')).not.toContainText('1 sales');
+    await page.getByRole('button', { name: 'Profit', exact: true }).click();
+    await expect(page.getByTestId('profit-uncosted')).toHaveText('Sold without a cost price: 1 item · TSh 5,000. Not in profit.');
+  });
+});
+
+test.describe('S6 retest fixes', () => {
+  const DAY = addDays(TODAY, -3);
+  const NEXT = addDays(TODAY, -2);
+  const label = '—No cost price';
+
+  test('N1: profit null shows "—" + "No cost price" on the card, by-period row and Total; never "Profit TSh 0"', async ({ page }) => {
+    await signedInAs(page, VENDOR);
+    await mockApi(page, base({
+      'GET /vendor/reports/profit': req => ({ json: {
+        ...head(req, { groupBy: 'day' }),
+        totals: { netExVatTzs: 0, commissionTzs: 0, costTzs: 0, profitTzs: null, marginPct: null },
+        uncosted: { lineCount: 1, qty: 2, revenueTzs: 40000, netExVatTzs: 40000 }, hasVat: false,
+        buckets: [{ start: DAY, end: DAY, netExVatTzs: 0, commissionTzs: 0, costTzs: 0, profitTzs: null, marginPct: null, uncostedRevenueTzs: 40000 }],
+        byChannel: { app: { netExVatTzs: 0, commissionTzs: 0, costTzs: 0, profitTzs: null, marginPct: null }, walkIn: { netExVatTzs: 0, commissionTzs: 0, costTzs: 0, profitTzs: null, marginPct: null } },
+        byProduct: [], uncostedProducts: [{ productId: 'p2', variant: null, name: 'Gloves', removed: false, units: 2, revenueTzs: 40000 }],
+      } }),
+    }));
+    await page.goto(`/vendor/reports/?view=profit&from=${DAY}&to=${DAY}`);
+    const card = page.getByTestId('profit-profit');
+    await expect(card.getByTestId('profit-unknown')).toHaveText(label);
+    await expect(card).not.toContainText('TSh 0');
+    await expect(card).not.toContainText('On items with a cost price');
+    await expect(page.getByTestId('profit-margin')).toContainText('—');
+    await expect(page.getByTestId('profit-bucket-profit').getByTestId('profit-unknown')).toHaveText(label);
+    await expect(page.getByTestId('profit-total-profit').getByTestId('profit-unknown')).toHaveText(label);
+    await expect(page.getByTestId('profit-chart')).toHaveCount(0); // its summary could only say "TSh 0"
+    await expect(page.getByTestId('profit-uncosted')).toContainText('TSh 40,000');
+  });
+
+  test('N1: the Overview card, in Swahili', async ({ page }) => {
+    await signedInAs(page, VENDOR, 'sw');
+    await mockApi(page, base({
+      'GET /vendor/reports/summary': req => { const s = summary(req); return { json: { ...s, profit: { ...s.profit, profitTzs: null, marginPct: null } } }; },
+    }));
+    await page.goto('/vendor/reports/');
+    await expect(page.getByTestId('ov-profit').getByTestId('profit-unknown')).toHaveText('—Hakuna bei ya kununua');
+    await expect(page.getByTestId('ov-profit')).not.toContainText('TSh 0');
+  });
+
+  test('N1: a null bucket next to a costed one stays "—" and the chart summary does not count it', async ({ page }) => {
+    await signedInAs(page, VENDOR);
+    await mockApi(page, base({
+      'GET /vendor/reports/profit': req => { const p = profit(req); return { json: { ...p, buckets: [
+        { start: DAY, end: DAY, netExVatTzs: 0, commissionTzs: 0, costTzs: 0, profitTzs: null, marginPct: null, uncostedRevenueTzs: 20000 },
+        { ...p.buckets[0], start: NEXT, end: NEXT, profitTzs: -5000, marginPct: -12.5 },
+      ] } }; },
+    }));
+    await page.goto(`/vendor/reports/?view=profit&from=${DAY}&to=${NEXT}`);
+    await expect(page.getByTestId('profit-bucket-profit').nth(0).getByTestId('profit-unknown')).toHaveText(label);
+    await expect(page.getByTestId('profit-bucket-profit').nth(1)).toHaveText('−TSh 5,000');
+    await expect(page.getByTestId('profit-chart')).toHaveAttribute('aria-label', /Highest: .*−TSh 5,000\. Total −TSh 5,000\./);
+  });
+
+  test('N3: a costed product that nets to zero (profit 0, margin null) is "TSh 0" and "—", with no "No cost price"', async ({ page }) => {
+    await signedInAs(page, VENDOR);
+    await mockApi(page, base({
+      'GET /vendor/reports/products': req => ({ json: { ...products(req), nextCursor: null, rows: [prodRow({ profitTzs: 0, marginPct: null })] } }),
+    }));
+    await page.goto('/vendor/reports/?view=profit');
+    const row = page.getByTestId('profit-products').getByRole('row', { name: /Socks/ });
+    await expect(row.getByTestId('profit-product-profit')).toHaveText('TSh 0');
+    await expect(row.getByRole('cell').last()).toHaveText('—');
+    await expect(row.getByTestId('profit-unknown')).toHaveCount(0);
+    await page.getByRole('button', { name: 'Products', exact: true }).click();
+    const product = page.getByTestId('products-table').getByTestId('product-row');
+    await expect(product.getByRole('cell').last()).toHaveText('TSh 0');
+    await expect(product.getByTestId('profit-unknown')).toHaveCount(0);
+  });
+
+  test('N3: totals that net to zero are not "no sales"', async ({ page }) => {
+    await signedInAs(page, VENDOR);
+    await mockApi(page, base({
+      'GET /vendor/reports/profit': req => { const p = profit(req); return { json: { ...p,
+        totals: { netExVatTzs: 0, commissionTzs: 0, costTzs: 0, profitTzs: 0, marginPct: null }, uncosted: { lineCount: 0, qty: 0, revenueTzs: 0, netExVatTzs: 0 }, uncostedProducts: [],
+      } }; },
+    }));
+    await page.goto('/vendor/reports/?view=profit');
+    await expect(page.getByTestId('profit-profit')).toContainText('TSh 0');
+    await expect(page.getByTestId('profit-profit').getByTestId('profit-unknown')).toHaveCount(0);
+    await expect(page.getByTestId('profit-margin')).toContainText('—');
+    await expect(page.getByTestId('report-empty')).toHaveCount(0);
+  });
+
+  for (const bad of ['2026-99-99', '2026-13-01', '2026-02-30', '0000-00-00']) {
+    test(`N4: impossible date ${bad} falls back and is rewritten, with no crash`, async ({ page }) => {
+      await signedInAs(page, VENDOR);
+      const errors: string[] = [];
+      page.on('pageerror', e => errors.push(e.message));
+      const calls = await mockApi(page, base());
+      await page.goto(`/vendor/reports/?from=${bad}&to=${bad}`);
+      await expect(page).toHaveURL(new RegExp(`\\?from=${MONTH_START}&to=${TODAY}$`));
+      await expect(page.getByTestId('ov-net')).toContainText('TSh 470,000');
+      await expect(page.getByText('Something went wrong')).toHaveCount(0);
+      expect(errors).toEqual([]);
+      expect(reportCalls(calls, 'summary').every(c => c.search.get('from') === MONTH_START)).toBe(true);
+    });
+  }
+
+  test('N5: reversals show their real amount and each column adds up to its Total', async ({ page }) => {
+    await signedInAs(page, VENDOR);
+    const figures = (netExVatTzs: number, commissionTzs: number, costTzs: number, marginPct: number | null) => ({ netExVatTzs, commissionTzs, costTzs, profitTzs: netExVatTzs - commissionTzs - costTzs, marginPct });
+    await mockApi(page, base({
+      'GET /vendor/reports/profit': req => ({ json: { ...profit(req),
+        totals: figures(240000, 24000, 170000, 19.2),
+        uncosted: { lineCount: 0, qty: 0, revenueTzs: 0, netExVatTzs: 0 },
+        buckets: [
+          { ...figures(300000, 30000, 200000, 23.3), start: DAY, end: DAY, uncostedRevenueTzs: 0 },
+          // The UAT's refund day: net −60,000, commission −6,000, cost −30,000.
+          { ...figures(-60000, -6000, -30000, -40), start: NEXT, end: NEXT, uncostedRevenueTzs: 0 },
+        ],
+      } }),
+    }));
+    await page.goto(`/vendor/reports/?view=profit&from=${DAY}&to=${NEXT}`);
+    const rows = page.getByTestId('profit-table').locator('tbody tr');
+    const cells = (i: number) => rows.nth(i).getByRole('cell');
+    await expect(cells(0)).toHaveText(['TSh 300,000', '−TSh 30,000', '−TSh 200,000', 'TSh 70,000', '23.3%', 'TSh 0']);
+    await expect(cells(1)).toHaveText(['−TSh 60,000', 'TSh 6,000', 'TSh 30,000', '−TSh 24,000', '−40.0%', 'TSh 0']);
+    await expect(page.getByTestId('profit-table').locator('tfoot tr').getByRole('cell'))
+      .toHaveText(['TSh 240,000', '−TSh 24,000', '−TSh 170,000', 'TSh 46,000', '19.2%', 'TSh 0']);
+    expect(await page.locator('main').innerText()).not.toMatch(/-TSh|TSh\s*-|-\d/);
+  });
+
+  test('N5: negative net sales and unit counts use U+2212', async ({ page }) => {
+    await signedInAs(page, VENDOR);
+    await mockApi(page, base({
+      'GET /vendor/reports/products': req => ({ json: { ...products(req), nextCursor: null, totals: { unitsSold: -3, netRevenueTzs: -60000 },
+        rows: [prodRow({ unitsSold: -3, appUnits: -3, walkInUnits: 0, netRevenueTzs: -60000, profitTzs: -30000 })] } }),
+      'GET /vendor/reports/sales': req => { const s = sales(req); return { json: { ...s, totals: { ...s.totals, netTzs: -60000, itemsSold: -3 } } }; },
+    }));
+    await page.goto('/vendor/reports/?view=products');
+    const row = page.getByTestId('products-table').getByTestId('product-row');
+    await expect(row.getByRole('cell').nth(0)).toContainText('−3');
+    await expect(row.getByRole('cell').nth(1)).toHaveText('−TSh 60,000');
+    await expect(row.getByRole('cell').last()).toHaveText('−TSh 30,000');
+    await expect(page.getByTestId('products-total-row')).toContainText('−TSh 60,000');
+    await page.getByRole('button', { name: 'Sales', exact: true }).click();
+    await expect(page.getByTestId('sales-net')).toContainText('−TSh 60,000');
+    await expect(page.getByTestId('sales-items')).toContainText('−3');
   });
 });
 

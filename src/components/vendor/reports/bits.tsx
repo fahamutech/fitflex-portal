@@ -2,11 +2,12 @@
 // Shared pieces of the vendor Reports page (S6): the data hook (latest request wins, one failure per view), the
 // header line, small figure tiles, states and the bar chart with its spoken summary. Every label is an i18n key.
 import { ReactNode, useCallback, useEffect, useRef, useState } from 'react';
+import Link from 'next/link';
 import { Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { BarChart3 } from 'lucide-react';
-import { money } from '@/lib/admin-utils';
+import { formatNumber, money } from '@/lib/admin-utils';
 import type { MessageKey } from '@/lib/i18n';
-import { errorBody, errorCode, fmt } from '@/lib/vendor';
+import { canWalkInSales, errorBody, errorCode, fmt } from '@/lib/vendor';
 import {
   bucketWords, channelKey, reportClock, periodWords, rangeProblemKey, reportsApi,
   type ReportGroupBy, type ReportHead, type ReportOf, type ReportQuery, type ReportView,
@@ -119,9 +120,47 @@ export function Figure({ label, value, sub, testId, strong = false }: { label: s
 }
 export const figureGrid = 'grid gap-3 grid-cols-2 lg:grid-cols-4';
 
-/** A minus sign and the word for money going out (refunds, commission); never red alone (§0.4). */
-export const minus = (n: number) => (n > 0 ? `− ${money(n)}` : money(0));
-export const pct = (n: number | null | undefined) => (n == null ? '—' : `${n}%`);
+const MINUS = '\u2212';
+/** Money, with one negative format on every report: "−TSh 60,000" (U+2212; the shared money() would print a hyphen). */
+export const tsh = (n: number | null | undefined) => {
+  const v = Number(n || 0);
+  return v < 0 ? `${MINUS}${money(-v)}` : money(v);
+};
+/**
+ * A figure taken off (discounts, refunds, commission, cost), shown signed: 39,000 → "−TSh 39,000". A reversal comes
+ * back from the server negative and adds back, −30,000 → "TSh 30,000", so a column always adds up to its Total.
+ */
+export const minus = (n: number | null | undefined) => tsh(-Number(n || 0));
+/** A count of units or sales: "1,234", and "−3" when refunds outweigh sales in the period. */
+export const qty = (n: number | null | undefined) => (n != null && Number(n) < 0 ? `${MINUS}${formatNumber(-Number(n))}` : formatNumber(n));
+/** A percentage with one decimal, "25.0%", "−12.5%" (UAT D12); "—" when there is none. */
+export const pct = (n: number | null | undefined) => {
+  if (n == null || !Number.isFinite(Number(n))) return '—';
+  const text = `${Math.abs(Number(n)).toFixed(1)}%`;
+  return Number(n) < 0 && text !== '0.0%' ? `${MINUS}${text}` : text;
+};
+
+/** "1 sale" / "3 sales" (UAT D10): the one-key for n = 1, else the many-key; {n} and the other values filled in. */
+export function plural(t: (k: MessageKey) => string, n: number, one: MessageKey, many: MessageKey, vars: Record<string, string | number> = {}) {
+  return fmt(t(Math.abs(n) === 1 ? one : many), { n, ...vars });
+}
+
+/**
+ * A profit figure, on every card, row and total (retest N1, N3). profitTzs null alone means no cost price: "—" +
+ * "No cost price". 0 is a real zero profit, "TSh 0", even when marginPct is null (a costed product that nets to zero).
+ */
+export function ProfitCell({ row }: { row: { profitTzs?: number | null } }) {
+  const { t } = useApp();
+  if (row.profitTzs === null) {
+    return (
+      <span data-testid="profit-unknown">
+        <span aria-hidden="true">—</span>
+        <span className="block text-xs font-normal text-[var(--color-fg-quaternary)]">{t('vendor.reports.profit.noCostHeading')}</span>
+      </span>
+    );
+  }
+  return <>{row.profitTzs === undefined ? '—' : tsh(row.profitTzs)}</>;
+}
 
 export function ViewLoading({ cards = 4 }: { cards?: number }) {
   const { t } = useApp();
@@ -140,8 +179,29 @@ export function ViewFailed({ onRetry }: { onRetry: () => void }) {
   const { t } = useApp();
   return <ErrorState title={t('vendor.reports.failed')} onRetry={onRetry} retryLabel={t('common.tryAgain')} />;
 }
-export function NoSales({ from, to, onTryPeriod }: { from: string; to: string; onTryPeriod: () => void }) {
+export function NoSales({ from, to, onTryPeriod, hasEverSold }: { from: string; to: string; onTryPeriod: () => void; hasEverSold?: boolean }) {
   const { t, locale } = useApp();
+  const vendor = useVendor();
+  // UAT D2: a vendor who has never sold sees the first-use message with the actions their permissions allow.
+  // Only when the server says so (hasEverSold === false); absent → the period message as before.
+  if (hasEverSold === false) {
+    const sales = canWalkInSales(vendor.me);
+    const products = vendor.can('products');
+    return (
+      <div data-testid="report-empty-first">
+        <EmptyState
+          icon={<BarChart3 />}
+          title={t('vendor.reports.emptyFirst')}
+          action={(sales || products) ? (
+            <div className="flex flex-wrap justify-center gap-2">
+              {sales && <Link href="/vendor/sales/" className={actionLinkCls} data-testid="report-empty-sale">{t('vendor.reports.recordSale')}</Link>}
+              {products && <Link href="/vendor/products/" className={actionLinkCls} data-testid="report-empty-products">{t('vendor.reports.addProducts')}</Link>}
+            </div>
+          ) : undefined}
+        />
+      </div>
+    );
+  }
   return (
     <div data-testid="report-empty">
       <EmptyState
@@ -165,7 +225,7 @@ export function ViewState<T>({ value, onRetry, children, cards }: { value: Loade
 
 // ── Chart ──
 
-export type ChartRow = { start: string; end: string; app?: number; shop?: number; value?: number };
+export type ChartRow = { start: string; end: string; app?: number; shop?: number; value?: number | null };
 const APP_FILL = 'var(--color-brand-600)';
 const SHOP_FILL = 'var(--color-gray-400)';
 const GRID = 'var(--color-border-secondary)';
@@ -180,23 +240,24 @@ export function ReportBarChart({
 }: { rows: ChartRow[]; groupBy: ReportGroupBy | undefined; from: string; to: string; figureKey: MessageKey; twoSeries: boolean; testId?: string }) {
   const { t, locale } = useApp();
   const total = (r: ChartRow) => (twoSeries ? (r.app ?? 0) + (r.shop ?? 0) : r.value ?? 0);
-  const top = rows.reduce<ChartRow | null>((best, r) => (!best || total(r) > total(best) ? r : best), null);
-  const sum = rows.reduce((s, r) => s + total(r), 0);
+  // A bucket without a figure (profit with no cost price) has no bar and is not a 0 in the summary.
+  const known = rows.filter(r => twoSeries || r.value != null);
+  const top = known.reduce<ChartRow | null>((best, r) => (!best || total(r) > total(best) ? r : best), null);
+  const sum = known.reduce((s, r) => s + total(r), 0);
   const groupWord = t(`vendor.reports.group.${groupBy ?? 'day'}` as MessageKey).toLowerCase();
   const summary = fmt(t('vendor.reports.chartSummary'), {
     figure: t(figureKey), group: groupWord, period: periodWords(from, to, locale),
-    date: top ? bucketWords(top.start, top.end, groupBy, locale) : '—', amount: money(top ? total(top) : 0), total: money(sum),
+    date: top ? bucketWords(top.start, top.end, groupBy, locale) : '—', amount: tsh(top ? total(top) : 0), total: tsh(sum),
   });
   const data = rows.map(r => ({ ...r, label: bucketWords(r.start, r.end, groupBy, locale) }));
-  const tsh = (v: unknown) => money(Number(v));
-  return (
+    return (
     <div role="img" tabIndex={0} aria-label={summary} className="h-[200px] w-full sm:h-[260px]" data-testid={testId}>
       <ResponsiveContainer width="100%" height="100%">
         <BarChart data={data} margin={{ top: 8, right: 8, bottom: 0, left: 8 }}>
           <CartesianGrid stroke={GRID} vertical={false} />
           <XAxis dataKey="label" tick={{ fill: INK, fontSize: 12 }} tickLine={false} axisLine={false} minTickGap={12} />
-          <YAxis tick={{ fill: INK, fontSize: 12 }} tickLine={false} axisLine={false} width={72} tickFormatter={v => new Intl.NumberFormat('en-US').format(Number(v))} />
-          <Tooltip formatter={tsh} cursor={{ fill: 'var(--color-bg-tertiary)' }} />
+          <YAxis tick={{ fill: INK, fontSize: 12 }} tickLine={false} axisLine={false} width={72} tickFormatter={v => qty(Number(v))} />
+          <Tooltip formatter={v => tsh(Number(v))} cursor={{ fill: 'var(--color-bg-tertiary)' }} />
           {twoSeries ? (
             <>
               <Legend />
@@ -212,6 +273,10 @@ export function ReportBarChart({
 
 export const numCell = 'whitespace-nowrap text-right tabular-nums';
 export const linkCls = 'inline-flex min-h-11 items-center text-sm font-semibold text-[var(--color-brand-700)] underline-offset-4 hover:underline';
+/** A link styled as a secondary button (≥44px). */
+export const actionLinkCls = 'inline-flex min-h-11 items-center justify-center rounded-[var(--radius-lg)] border border-[var(--color-border-primary)] bg-[var(--color-bg-primary)] px-4 text-sm font-semibold text-[var(--color-fg-secondary)] hover:bg-[var(--color-bg-secondary)]';
+/** A link inside an Alert: underlined, with a tap target of at least 44px (UAT D7). */
+export const alertLinkCls = 'inline-flex min-h-11 items-center font-semibold underline underline-offset-4';
 /** "Product · variant" with "(removed)". */
 export function productLabel(row: { name: string | null; variant: string | null; removed: boolean }, t: (k: MessageKey) => string) {
   const name = row.name || '—';

@@ -40,7 +40,7 @@ export function ExportDialog({ open, onClose, views, query }: { open: boolean; o
       else if (code === 'rate_limited') {
         const seconds = Number(errorBody<{ retryAfterSeconds?: number }>(err)?.retryAfterSeconds);
         const minutes = Math.max(1, Math.ceil((Number.isFinite(seconds) ? seconds : 60) / 60));
-        setNotice(fmt(t('vendor.reports.rateLimited'), { n: minutes }));
+        setNotice(fmt(t(minutes === 1 ? 'vendor.reports.rateLimitedOne' : 'vendor.reports.rateLimited'), { n: minutes }));
       }
       else if (code === 'pdf_unavailable') setNotice(t('vendor.reports.pdfUnavailable'));
       else if (code === 'cost_not_allowed' || code === 'payout_not_allowed') { toast.error(t('vendor.reports.noAccess')); void vendor.refresh(); }

@@ -67,19 +67,21 @@ function ReportsInner() {
   // Rewrite what was invalid (replace). A section this person may not open: Overview with "no access".
   const fixed = useRef<string | null>(null);
   useEffect(() => {
+    // UAT D13: an invalid value is replaced by the value actually in use (This month, all, auto grouping…),
+    // so the address always says what the page shows.
     const patch: Record<string, string | null> = {};
-    if (rawView != null && rawView !== view) patch.view = view === 'overview' ? null : view;
-    if (hasRange && !rangeOk) { patch.from = null; patch.to = null; }
-    if (rawChannel != null && rawChannel !== channel) patch.channel = null;
-    if (rawGroup != null && !groupOk) patch.groupBy = null;
-    if (rawSort != null && rawSort !== sort) patch.sort = null;
+    if (rawView != null && rawView !== view) patch.view = view;
+    if (hasRange && !rangeOk) { patch.from = from; patch.to = to; }
+    if (rawChannel != null && rawChannel !== channel) patch.channel = channel;
+    if (rawGroup != null && !groupOk) patch.groupBy = autoGroupBy(from, to);
+    if (rawSort != null && rawSort !== sort) patch.sort = sort;
     if (!Object.keys(patch).length) return;
     const sig = params.toString();
     if (fixed.current === sig) return;
     fixed.current = sig;
     if (knownView && knownView !== view) toast.error(t('vendor.reports.noAccess'));
     setParams(patch);
-  }, [rawView, view, knownView, hasRange, rangeOk, rawChannel, channel, rawGroup, groupOk, rawSort, sort, params, setParams, toast, t]);
+  }, [rawView, view, knownView, hasRange, rangeOk, from, to, rawChannel, channel, rawGroup, groupOk, rawSort, sort, params, setParams, toast, t]);
 
   // ── Controls ──
   const [walkInSeen, setWalkInSeen] = useState(false);

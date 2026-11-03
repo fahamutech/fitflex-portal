@@ -1,14 +1,13 @@
 'use client';
 // Overview (§4) and Sales (§5) of the vendor Reports page (S6). Server figures only.
 import Link from 'next/link';
-import { money, formatNumber } from '@/lib/admin-utils';
 import { fmt, payLabel, saleMethodLabel } from '@/lib/vendor';
 import { bucketWords, type ReportQuery, type SalesReport, type SummaryReport } from '@/lib/vendor-reports';
 import { Alert, Card, CardContent, CardHeader, Table, TBody, Td, Th, THead, Tr } from '@/components/shared';
 import { useVendor } from '@/components/vendor-context';
 import { useApp } from '../../../../app/providers';
 import {
-  Figure, figureGrid, HeaderLine, minus, NoSales, numCell, productLabel, ReportBarChart, useReport, useWalkInSeen, ViewState,
+  Figure, figureGrid, HeaderLine, minus, pct, plural, ProfitCell, qty, tsh, NoSales, numCell, productLabel, ReportBarChart, useReport, useWalkInSeen, ViewState,
 } from './bits';
 
 /** walkInShown: the Shop channel shows (tool on, or the server saw walk-in data in the period). */
@@ -26,7 +25,7 @@ function MethodsCompact({ data }: { data: SummaryReport['methods'] }) {
         <ul className="space-y-1 text-sm">
           {rows.map(r => (
             <li key={r.label} className="flex justify-between gap-3">
-              <span>{r.label}</span><span className="tabular-nums">{money(r.amountTzs)} · {r.sharePct}%</span>
+              <span>{r.label}</span><span className="tabular-nums">{tsh(r.amountTzs)} · {pct(r.sharePct)}</span>
             </li>
           ))}
         </ul>
@@ -50,17 +49,17 @@ export function OverviewView({ query, onTryPeriod, onWalkIn }: ViewProps) {
       {d => {
         const s = d.sales;
         const cards = [
-          <Figure key="net" strong testId="ov-net" label={t('vendor.reports.net')} value={money(s.netTzs)}
-            sub={fmt(t('vendor.reports.grossShort'), { g: money(s.grossTzs), d: money(s.discountTzs) })} />,
-          <Figure key="items" testId="ov-items" label={t('vendor.reports.itemsSold')} value={formatNumber(s.itemsSold)} />,
-          ...(d.profit ? [<Figure key="profit" testId="ov-profit" label={t('vendor.reports.profit')} value={money(d.profit.profitTzs)} sub={t('vendor.reports.profitHint')} />] : []),
-          ...(d.customers ? [<Figure key="owed" testId="ov-owed" label={t('vendor.owed.title')} value={money(d.customers.owedTzs)} />] : []),
-          <Figure key="count" testId="ov-count" label={t('vendor.reports.salesCount')} value={formatNumber(s.saleCount + s.orderCount)} />,
+          <Figure key="net" strong testId="ov-net" label={t('vendor.reports.net')} value={tsh(s.netTzs)}
+            sub={fmt(t('vendor.reports.grossLine'), { g: tsh(s.grossTzs), d: minus(s.discountTzs), r: minus(s.refundTzs) })} />,
+          <Figure key="items" testId="ov-items" label={t('vendor.reports.itemsSold')} value={qty(s.itemsSold)} />,
+          ...(d.profit ? [<Figure key="profit" testId="ov-profit" label={t('vendor.reports.profit')} value={<ProfitCell row={d.profit} />} sub={d.profit.profitTzs === null ? undefined : t('vendor.reports.profitHint')} />] : []),
+          ...(d.customers ? [<Figure key="owed" testId="ov-owed" label={t('vendor.owed.title')} value={tsh(d.customers.owedTzs)} />] : []),
+          <Figure key="count" testId="ov-count" label={t('vendor.reports.salesCount')} value={qty(s.saleCount + s.orderCount)} />,
         ].slice(0, 4);
         return (
           <div className="space-y-4">
             <HeaderLine head={d} view="overview" />
-            {salesEmpty(s) ? <NoSales from={d.from} to={d.to} onTryPeriod={onTryPeriod} /> : (
+            {salesEmpty(s) ? <NoSales from={d.from} to={d.to} hasEverSold={d.hasEverSold} onTryPeriod={onTryPeriod} /> : (
               <>
                 <div className={figureGrid}>{cards}</div>
                 <div className="grid gap-4 lg:grid-cols-3">
@@ -70,7 +69,7 @@ export function OverviewView({ query, onTryPeriod, onWalkIn }: ViewProps) {
                       <ReportBarChart rows={s.buckets.map(b => ({ start: b.start, end: b.end, value: b.netTzs }))} groupBy={d.groupBy} from={d.from} to={d.to} figureKey="vendor.reports.net" twoSeries={false} testId="ov-chart" />
                       <Table aria-label={t('vendor.reports.sales.table')} data-testid="ov-buckets">
                         <THead><Tr><Th>{t('vendor.reports.period')}</Th><Th className="!text-right">{t('vendor.reports.net')}</Th></Tr></THead>
-                        <TBody>{s.buckets.map(b => <Tr key={b.start}><Th scope="row" className="!font-normal">{bucketWords(b.start, b.end, d.groupBy, locale)}</Th><Td className={numCell}>{money(b.netTzs)}</Td></Tr>)}</TBody>
+                        <TBody>{s.buckets.map(b => <Tr key={b.start}><Th scope="row" className="!font-normal">{bucketWords(b.start, b.end, d.groupBy, locale)}</Th><Td className={numCell}>{tsh(b.netTzs)}</Td></Tr>)}</TBody>
                       </Table>
                     </CardContent>
                   </Card>
@@ -81,7 +80,7 @@ export function OverviewView({ query, onTryPeriod, onWalkIn }: ViewProps) {
                         {d.topProducts.map(p => (
                           <li key={`${p.productId}:${p.variant ?? ''}`} className="flex justify-between gap-3">
                             <span className="[overflow-wrap:anywhere]">{productLabel(p, t)}</span>
-                            <span className="shrink-0 text-right tabular-nums">{money(p.netRevenueTzs)}<span className="block text-xs text-[var(--color-fg-quaternary)]">{fmt(t('vendor.reports.unitsN'), { n: formatNumber(p.unitsSold) })}</span></span>
+                            <span className="shrink-0 text-right tabular-nums">{tsh(p.netRevenueTzs)}<span className="block text-xs text-[var(--color-fg-quaternary)]">{plural(t, p.unitsSold, 'vendor.reports.unitsOne', 'vendor.reports.unitsN', { n: qty(p.unitsSold) })}</span></span>
                           </li>
                         ))}
                       </ol>
@@ -98,11 +97,11 @@ export function OverviewView({ query, onTryPeriod, onWalkIn }: ViewProps) {
                     <CardHeader><h3 className="text-base font-semibold">{t('vendor.reports.view.payouts')}</h3></CardHeader>
                     <CardContent className="space-y-2 text-sm">
                       <dl className="grid gap-2 sm:grid-cols-3">
-                        <div><dt className="text-[var(--color-fg-quaternary)]">{t('vendor.reports.gross')}</dt><dd className="tabular-nums font-semibold">{money(d.payouts.grossTzs)}</dd></div>
+                        <div><dt className="text-[var(--color-fg-quaternary)]">{t('vendor.reports.gross')}</dt><dd className="tabular-nums font-semibold">{tsh(d.payouts.grossTzs)}</dd></div>
                         <div><dt className="text-[var(--color-fg-quaternary)]">{t('vendor.reports.commission')}</dt><dd className="tabular-nums font-semibold">{minus(d.payouts.commissionTzs)}</dd></div>
-                        <div><dt className="text-[var(--color-fg-quaternary)]">{t('vendor.reports.youReceive')}</dt><dd className="tabular-nums font-semibold">{money(d.payouts.payoutTzs)}</dd></div>
+                        <div><dt className="text-[var(--color-fg-quaternary)]">{t('vendor.reports.youReceive')}</dt><dd className="tabular-nums font-semibold">{tsh(d.payouts.payoutTzs)}</dd></div>
                       </dl>
-                      <p className="text-[var(--color-fg-tertiary)]">{t('vendor.reports.payouts.paidOut')}: {money(d.payouts.paidOutTzs)} · {t('vendor.reports.payouts.waiting')}: {money(d.payouts.waitingTzs)}</p>
+                      <p className="text-[var(--color-fg-tertiary)]">{t('vendor.reports.payouts.paidOut')}: {tsh(d.payouts.paidOutTzs)} · {t('vendor.reports.payouts.waiting')}: {tsh(d.payouts.waitingTzs)}</p>
                       <p className="text-xs text-[var(--color-fg-quaternary)]">{t('vendor.reports.payouts.basis')}</p>
                     </CardContent>
                   </Card>
@@ -129,21 +128,21 @@ export function SalesView({ query, onTryPeriod, onWalkIn, walkInShown }: ViewPro
         const vat = s.vatIncludedTzs > 0;
         const count = (b: { app: { count: number }; walkIn: { count: number } }) => b.app.count + b.walkIn.count;
         const total = d.byChannel.app.netTzs + d.byChannel.walkIn.netTzs;
-        const share = (n: number) => (total ? `${Math.round((n * 1000) / total) / 10}%` : '—');
-        const voidedText = fmt(t('vendor.reports.voided'), { n: s.voided.count, amount: money(s.voided.totalTzs) });
+        const share = (n: number) => pct(total ? Math.round((n * 1000) / total) / 10 : null);
+        const voidedText = plural(t, s.voided.count, 'vendor.reports.voidedOne', 'vendor.reports.voided', { amount: tsh(s.voided.totalTzs) });
         return (
           <div className="space-y-4">
             <HeaderLine head={d} view="sales" />
-            {salesEmpty(s) ? <NoSales from={d.from} to={d.to} onTryPeriod={onTryPeriod} /> : (
+            {salesEmpty(s) ? <NoSales from={d.from} to={d.to} hasEverSold={d.hasEverSold} onTryPeriod={onTryPeriod} /> : (
               <>
                 <div className="grid gap-3 grid-cols-2 lg:grid-cols-4 xl:grid-cols-7" data-testid="sales-strip">
-                  <Figure label={t('vendor.reports.gross')} value={money(s.grossTzs)} testId="sales-gross" />
+                  <Figure label={t('vendor.reports.gross')} value={tsh(s.grossTzs)} testId="sales-gross" />
                   <Figure label={t('vendor.reports.discounts')} value={minus(s.discountTzs)} testId="sales-discounts" />
                   <Figure label={t('vendor.reports.refunds')} value={minus(s.refundTzs)} testId="sales-refunds" />
-                  <Figure strong label={t('vendor.reports.net')} value={money(s.netTzs)} testId="sales-net" />
-                  {vat && <Figure label={t('vendor.reports.vatIncluded')} value={money(s.vatIncludedTzs)} testId="sales-vat" />}
-                  <Figure label={t('vendor.reports.salesCount')} value={formatNumber(s.saleCount + s.orderCount)} testId="sales-count" />
-                  <Figure label={t('vendor.reports.itemsSold')} value={formatNumber(s.itemsSold)} testId="sales-items" />
+                  <Figure strong label={t('vendor.reports.net')} value={tsh(s.netTzs)} testId="sales-net" />
+                  {vat && <Figure label={t('vendor.reports.vatIncluded')} value={tsh(s.vatIncludedTzs)} testId="sales-vat" />}
+                  <Figure label={t('vendor.reports.salesCount')} value={qty(s.saleCount + s.orderCount)} testId="sales-count" />
+                  <Figure label={t('vendor.reports.itemsSold')} value={qty(s.itemsSold)} testId="sales-items" />
                 </div>
                 {s.voided.count > 0 && (
                   <Alert tone="info" className="!font-normal">
@@ -181,28 +180,28 @@ export function SalesView({ query, onTryPeriod, onWalkIn, walkInShown }: ViewPro
                     {d.buckets.map(b => (
                       <Tr key={b.start}>
                         <Th scope="row" className="!font-normal whitespace-nowrap">{bucketWords(b.start, b.end, d.groupBy, locale)}</Th>
-                        {shop && <Td className={numCell}>{money(b.app.netTzs)}</Td>}
-                        {shop && <Td className={numCell}>{money(b.walkIn.netTzs)}</Td>}
-                        <Td className={numCell}>{money(b.app.grossTzs + b.walkIn.grossTzs)}</Td>
+                        {shop && <Td className={numCell}>{tsh(b.app.netTzs)}</Td>}
+                        {shop && <Td className={numCell}>{tsh(b.walkIn.netTzs)}</Td>}
+                        <Td className={numCell}>{tsh(b.app.grossTzs + b.walkIn.grossTzs)}</Td>
                         <Td className={numCell}>{minus(b.app.discountTzs + b.walkIn.discountTzs)}</Td>
                         <Td className={numCell}>{minus(b.app.refundTzs + b.walkIn.refundTzs)}</Td>
-                        <Td className={`${numCell} font-semibold`}>{money(b.netTzs)}</Td>
-                        {vat && <Td className={numCell}>{money(b.app.vatIncludedTzs + b.walkIn.vatIncludedTzs)}</Td>}
-                        <Td className={numCell}>{formatNumber(count(b))}</Td>
+                        <Td className={`${numCell} font-semibold`}>{tsh(b.netTzs)}</Td>
+                        {vat && <Td className={numCell}>{tsh(b.app.vatIncludedTzs + b.walkIn.vatIncludedTzs)}</Td>}
+                        <Td className={numCell}>{qty(count(b))}</Td>
                       </Tr>
                     ))}
                   </TBody>
                   <tfoot>
                     <Tr data-testid="sales-total-row">
                       <Th scope="row">{t('vendor.owed.totalRow')}</Th>
-                      {shop && <Td className={numCell}>{money(d.byChannel.app.netTzs)}</Td>}
-                      {shop && <Td className={numCell}>{money(d.byChannel.walkIn.netTzs)}</Td>}
-                      <Td className={numCell}>{money(s.grossTzs)}</Td>
+                      {shop && <Td className={numCell}>{tsh(d.byChannel.app.netTzs)}</Td>}
+                      {shop && <Td className={numCell}>{tsh(d.byChannel.walkIn.netTzs)}</Td>}
+                      <Td className={numCell}>{tsh(s.grossTzs)}</Td>
                       <Td className={numCell}>{minus(s.discountTzs)}</Td>
                       <Td className={numCell}>{minus(s.refundTzs)}</Td>
-                      <Td className={`${numCell} font-semibold`}>{money(s.netTzs)}</Td>
-                      {vat && <Td className={numCell}>{money(s.vatIncludedTzs)}</Td>}
-                      <Td className={numCell}>{formatNumber(s.saleCount + s.orderCount)}</Td>
+                      <Td className={`${numCell} font-semibold`}>{tsh(s.netTzs)}</Td>
+                      {vat && <Td className={numCell}>{tsh(s.vatIncludedTzs)}</Td>}
+                      <Td className={numCell}>{qty(s.saleCount + s.orderCount)}</Td>
                     </Tr>
                   </tfoot>
                 </Table>
@@ -214,7 +213,7 @@ export function SalesView({ query, onTryPeriod, onWalkIn, walkInShown }: ViewPro
                         {([['app', d.byChannel.app], ['walkIn', d.byChannel.walkIn]] as const).map(([k, c]) => (
                           <div key={k}>
                             <dt className="font-semibold">{t(k === 'app' ? 'vendor.reports.channel.app' : 'vendor.reports.channel.walkIn')}</dt>
-                            <dd className="tabular-nums">{money(c.netTzs)} · {t('vendor.reports.share')} {share(c.netTzs)} · {fmt(t('vendor.reports.countN'), { n: formatNumber(c.count) })}</dd>
+                            <dd className="tabular-nums">{tsh(c.netTzs)} · {t('vendor.reports.share')} {share(c.netTzs)} · {plural(t, c.count, 'vendor.reports.countOne', 'vendor.reports.countN', { n: qty(c.count) })}</dd>
                           </div>
                         ))}
                       </dl>
