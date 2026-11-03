@@ -258,14 +258,16 @@ function OrderDetail({ id, onBack, onUpdated }: { id: string; onBack: () => void
   const [moveError, setMoveError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const headingRef = useRef<HTMLHeadingElement>(null);
+  /** Set by load(); the heading takes focus once it has rendered (a timer can fire before the commit in production builds). */
+  const focusPending = useRef(false);
 
   const load = useCallback(async (focus = true) => {
     if (!token) return;
     setState(s => (s === 'ready' ? s : 'loading'));
     try {
       const o = await api.vendorOrder(token, id);
+      if (focus) focusPending.current = true;
       setOrder(o); setState('ready');
-      if (focus) setTimeout(() => headingRef.current?.focus(), 0);
     } catch (err) {
       if (vendor.handleError(err)) return;
       setState(errorCode(err) === 'order_not_found' || (err as { status?: number }).status === 404 ? 'notFound' : 'error');
@@ -273,6 +275,11 @@ function OrderDetail({ id, onBack, onUpdated }: { id: string; onBack: () => void
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token, id]);
   useEffect(() => { setNotice(null); void load(); }, [load]);
+  useEffect(() => {
+    if (state !== 'ready' || !order || !focusPending.current) return;
+    focusPending.current = false;
+    headingRef.current?.focus();
+  }, [state, order]);
 
   // A refused move: say why, and reload the order so stale buttons disappear (the list row follows).
   const MOVE_CONFLICTS: Record<string, MessageKey> = {
