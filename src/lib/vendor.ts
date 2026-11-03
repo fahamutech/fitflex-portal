@@ -270,8 +270,9 @@ export function splitRefund(amountTzs: number, sale: { kind?: string; balanceTzs
 /**
  * UAT L-3: how a completed pay-later sale with nothing owed reads (the server's document status rules):
  * every unit refunded → refunded (the Refunded badge already says it); the balance cleared with a refund's help →
- * settled (balanceReducedTzs when sent; list rows only carry refundedTzs, and on a pay-later sale a refund takes
- * the balance first); otherwise really paid off by payments → paidOff. null = still owed, or not pay later.
+ * settled (balanceReducedTzs > 0 when sent — the sale view, and list / customer-profile rows from functions#321;
+ * only when it is absent, refundedTzs > 0, as on a pay-later sale a refund takes the balance first); otherwise really
+ * paid off by payments → paidOff. null = still owed, or not pay later.
  */
 export function creditClearedAs(sale: { kind?: string; status: string; balanceTzs?: number; refundState?: string; refundedTzs?: number; balanceReducedTzs?: number }) {
   if (sale.kind !== 'credit' || sale.status !== 'completed' || Number(sale.balanceTzs) > 0) return null;

@@ -173,6 +173,7 @@ function SalesInner() {
       ...(typeof sale.balanceTzs === 'number' ? { balanceTzs: sale.balanceTzs } : {}),
       ...(typeof sale.refundedTzs === 'number' ? { refundedTzs: sale.refundedTzs } : {}),
       ...(sale.refundState ? { refundState: sale.refundState } : {}),
+      ...(typeof sale.balanceReducedTzs === 'number' ? { balanceReducedTzs: sale.balanceReducedTzs } : {}),
     } : s)));
     if (!token) return;
     const id = requestId.current;

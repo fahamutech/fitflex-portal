@@ -368,6 +368,9 @@ test.describe('UAT fixes (S7 UAT on RC)', () => {
         credit({ id: 's5', number: 'R-000005', refundedTzs: 20000, refundState: 'full' }),
         credit({ id: 's6', number: 'R-000006', refundedTzs: 3333, refundState: 'partial' }),
         credit({ id: 's7', number: 'R-000007', refundedTzs: 0, refundState: 'none' }),
+        // functions#321 rows: balanceReducedTzs decides. Paid off by payments, refunded afterwards → still Paid off.
+        credit({ id: 's8', number: 'R-000008', refundedTzs: 3333, refundState: 'partial', balanceReducedTzs: 0 }),
+        credit({ id: 's9', number: 'R-000009', refundedTzs: 3333, refundState: 'partial', balanceReducedTzs: 3333 }),
       ], nextCursor: null, summary: { count: 3, totalTzs: 60000, voidedCount: 0, byMethod: [] } } },
       'GET /vendor/sales/sale_1': { json: { sale: sale({ kind: 'credit', balanceTzs: 0, balanceReducedTzs: 3333, refundedTzs: 3333, refundState: 'partial', customer: { id: 'cus_1', name: 'Neema', forgotten: false }, lines: [line({ refundedQty: 1, refundableQty: 2, refundedTzs: 3333 }), shaker()] }) } },
     }));
@@ -379,6 +382,10 @@ test.describe('UAT fixes (S7 UAT on RC)', () => {
     await expect(row('s6')).toContainText('Settled by credit note');
     await expect(row('s6')).not.toContainText('Paid off');
     await expect(row('s7')).toContainText('Paid off');
+    await expect(row('s8')).toContainText('Paid off');
+    await expect(row('s8')).not.toContainText('Settled by credit note');
+    await expect(row('s9')).toContainText('Settled by credit note');
+    await expect(row('s9')).not.toContainText('Paid off');
     await openSale(page);
     await expect(page.getByTestId('sale-settled')).toHaveText('Settled by credit note');
     await expect(page.getByTestId('sale-credit')).not.toContainText('Paid off');
