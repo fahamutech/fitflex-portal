@@ -206,7 +206,7 @@ function UndoDialog({ refund, sale, onClose, onDone }: { refund: VendorRefund; s
         return;
       }
       const code = errorCode(err);
-      if (code === 'reason_required' || code === 'reason_too_long') { setReasonError(t('vendor.refunds.reasonMissing')); return; }
+      if (code === 'reason_required' || code === 'reason_too_long') { setReasonError(t(code === 'reason_too_long' ? 'vendor.refunds.reasonTooLong' : 'vendor.refunds.reasonMissing')); return; }
       if (code === 'rate_limited') { setError(t('vendor.refunds.err.tooFast')); return; }
       if (code === 'already_reverted') {
         // A retry after a lost answer: the first request did it (functions#318 review). Either way, show the undone state.

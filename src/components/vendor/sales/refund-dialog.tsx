@@ -34,12 +34,15 @@ const sold = (l: Line) => l.qty;
 const refundedOf = (l: Line) => Number(l.refundedQty ?? 0);
 const refundableOf = (l: Line) => (l.id ? Number(l.refundableQty ?? Math.max(0, l.qty - refundedOf(l))) : 0);
 const lineNetOf = (l: Line) => Number(l.lineNetTzs ?? l.lineTotalTzs);
-/** The VAT already given back on a line, assuming the cumulative rule (display only). */
+/**
+ * M-3 VAT given back by refunding `q` more (display only). Uses the server's refundedVatTzs when sent; else estimates
+ * what active refunds already gave back with the cumulative rule.
+ */
 const vatPreview = (l: Line, q: number) => {
   const vat = Number(l.vatTzs ?? 0);
   if (!vat || q <= 0) return 0;
   const a = refundedOf(l);
-  const before = refundShare(vat, sold(l), 0, 0, a);
+  const before = typeof l.refundedVatTzs === 'number' ? l.refundedVatTzs : refundShare(vat, sold(l), 0, 0, a);
   return refundShare(vat, sold(l), a, before, q);
 };
 
@@ -219,11 +222,11 @@ export function RefundDialog({
         backToChoose(id ? `refund-restock-${id}` : 'heading');
         return;
       }
-      if (code === 'method_required' || code === 'invalid_method') { setFieldError({ method: t('vendor.refunds.method') }); backToChoose(`refund-method-${method}`); return; }
+      if (code === 'method_required' || code === 'invalid_method') { setFieldError({ method: t('vendor.refunds.methodMissing') }); backToChoose(`refund-method-${method}`); return; }
       if (code === 'reference_required' || code === 'reference_too_long') {
         setFieldError({ reference: t('vendor.pos.referenceRequired') }); backToChoose('reference'); return;
       }
-      if (code === 'reason_required' || code === 'reason_too_long') { setFieldError({ reason: t('vendor.refunds.reasonMissing') }); backToChoose('reason'); return; }
+      if (code === 'reason_required' || code === 'reason_too_long') { setFieldError({ reason: t(code === 'reason_too_long' ? 'vendor.refunds.reasonTooLong' : 'vendor.refunds.reasonMissing') }); backToChoose('reason'); return; }
       if (code === 'client_ref_reused') { clientRef.current = null; setBanner({ tone: 'error', text: t('vendor.refunds.err.server'), retry: true }); return; }
       if (code === 'rate_limited') { setBanner({ tone: 'warning', text: t('vendor.refunds.err.tooFast'), retry: true }); return; }
       if (code === 'refund_not_allowed') { toast.error(t('vendor.refunds.askOwner')); onClose(); return; }

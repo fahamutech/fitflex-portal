@@ -372,7 +372,7 @@ export const api = {
     request<{ refund: VendorRefund; sale: VendorSale }>(`/vendor/sales/${encodeURIComponent(saleId)}/refunds`, { method: 'POST', body: JSON.stringify(body) }, token),
   vendorRevertRefund: (token: string, refundId: string, reason: string) =>
     request<{ refund: VendorRefund; sale: VendorSale }>(`/vendor/refunds/${encodeURIComponent(refundId)}/revert`, { method: 'POST', body: JSON.stringify({ reason }) }, token),
-  /** Readable with walk-in sales on even when the refunds tool is off (refunds already made stay visible, read only). */
+  /** Needs the refunds tool (404 feature_disabled when off). One refund by id (vendorRefund) stays readable with it off. */
   vendorRefunds: (token: string, query: { from?: string; to?: string; saleId?: string; status?: 'active' | 'reverted' | 'all'; limit?: number; cursor?: string | null } = {}) =>
     request<{ refunds: VendorRefundRow[]; nextCursor: string | null }>(`/vendor/refunds${qs({ ...query, limit: query.limit ?? 50 })}`, {}, token),
   vendorRefund: (token: string, refundId: string) =>
@@ -2571,6 +2571,8 @@ export interface VendorSale {
     refundedQty?: number;
     refundableQty?: number;
     refundedTzs?: number;
+    /** S7 (functions#318 round 3): VAT already given back by active refunds; older answers omit it. */
+    refundedVatTzs?: number;
   }>;
   payments: Array<{ method: string; amountTzs: number; reference: string | null }>;
   /** S7 (returned whatever the flags): Σ active refunds; Σ lineNet − refundedTzs; totalTzs − refundedTzs. */

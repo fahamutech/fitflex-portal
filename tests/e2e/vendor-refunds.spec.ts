@@ -310,6 +310,50 @@ test.describe('refund dialog', () => {
   });
 });
 
+test.describe('refund dialog (round 2)', () => {
+  test('VAT preview uses the server refundedVatTzs when sent, else the estimate', async ({ page }) => {
+    await signedInAs(page, VENDOR);
+    let withCounter = true;
+    const vatLine = () => line({ vatTzs: 1525, vatCode: 'A', refundedQty: 1, refundableQty: 2, refundedTzs: 3333, ...(withCounter ? { refundedVatTzs: 500 } : {}) });
+    await mockApi(page, base({ 'GET /vendor/sales/sale_1': () => ({ json: { sale: sale({ lines: [vatLine(), shaker()], refundedTzs: 3333, refundState: 'partial' }) } }) }));
+    await openSale(page);
+    await page.getByTestId('sale-refund').click();
+    const dialog = page.getByTestId('refund-dialog');
+    await dialog.getByRole('button', { name: 'Refund one more Whey 1kg' }).click();
+    // floor(1525 × 2 / 3) − 500 = 516 (the estimate would say 508).
+    await expect(dialog.getByTestId('refund-summary')).toContainText('Includes VAT TSh 516');
+    withCounter = false;
+    await page.keyboard.press('Escape');
+    await dialog.getByTestId('refund-leave').click();
+    await page.getByTestId('sale-refund').click();
+    await page.getByTestId('refund-dialog').getByRole('button', { name: 'Refund one more Whey 1kg' }).click();
+    await expect(page.getByTestId('refund-dialog').getByTestId('refund-summary')).toContainText('Includes VAT TSh 508');
+  });
+
+  test('method_required and reason_too_long show their own messages', async ({ page }) => {
+    await signedInAs(page, VENDOR);
+    let n = 0;
+    await mockApi(page, base({
+      'POST /vendor/sales/sale_1/refunds': () => {
+        n += 1;
+        return n === 1 ? { status: 400, json: { error: 'method_required' } } : { status: 400, json: { error: 'reason_too_long', max: 200 } };
+      },
+    }));
+    await openSale(page);
+    await page.getByTestId('sale-refund').click();
+    const dialog = page.getByTestId('refund-dialog');
+    await dialog.getByRole('button', { name: 'Refund one more Whey 1kg' }).click();
+    await dialog.getByTestId('refund-reason-wrong').click();
+    await dialog.getByTestId('refund-review').click();
+    await dialog.getByTestId('refund-confirm-button').click();
+    await expect(dialog).toContainText('Choose how you give the money back.');
+    await dialog.getByTestId('refund-review').click();
+    await dialog.getByTestId('refund-confirm-button').click();
+    await expect(dialog).toContainText('The reason is too long (200 characters at most).');
+    await expect(dialog.getByTestId('refund-reason')).toBeFocused();
+  });
+});
+
 test.describe('undo', () => {
   test('needs a reason; insufficient_stock explains; already_reverted after a lost answer counts as done', async ({ page }) => {
     await signedInAs(page, VENDOR);
@@ -359,7 +403,7 @@ test.describe('undo', () => {
     await page.getByTestId('refund-undo-vrf_1').filter({ visible: true }).click();
     await page.getByTestId('refund-undo-reason').fill('Mistake');
     await page.getByTestId('refund-undo-confirm').click();
-    await expect(page.getByTestId('refund-undo-dialog')).toContainText('Too many refunds at once. Wait a moment and try again.');
+    await expect(page.getByTestId('refund-undo-dialog')).toContainText('Too many tries. Wait a minute and try again.');
   });
 
   test('a void refused with 409 has_refunds says so and reloads', async ({ page }) => {

@@ -280,7 +280,10 @@ export function refundErrorKey(code: string | null): MessageKey {
     case 'reference_required': return 'vendor.pos.referenceRequired';
     case 'feature_disabled': return 'vendor.refunds.unavailable';
     case 'refund_not_found': return 'vendor.refunds.notFound';
-    case 'reason_required': case 'reason_too_long': return 'vendor.refunds.reasonMissing';
+    case 'reason_required': return 'vendor.refunds.reasonMissing';
+    case 'reason_too_long': return 'vendor.refunds.reasonTooLong';
+    case 'method_required': return 'vendor.refunds.methodMissing';
+    case 'rate_limited': return 'vendor.refunds.err.tooFast';
     default: return 'vendor.refunds.err.server';
   }
 }
