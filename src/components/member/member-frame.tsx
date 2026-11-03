@@ -5,16 +5,23 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { Globe, LogOut, QrCode } from 'lucide-react';
+import { Globe, QrCode, UserRound } from 'lucide-react';
 import { useApp } from '../../../app/providers';
-import { MEMBER_PORTAL } from '@/lib/flags';
-import { clearSession, loadSession, MEMBER_ROUTES, setOnSessionEnded, type MemberSession } from '@/lib/member-api';
+import { EVENTS_MODULE, MEMBER_PORTAL } from '@/lib/flags';
+import { loadSession, MEMBER_ROUTES, setOnSessionEnded, type MemberSession } from '@/lib/member-api';
 import type { MessageKey } from '@/lib/i18n';
 import { BrandLogo } from '@/components/brand-logo';
 
+// Events appear only in builds with the events module (NEXT_PUBLIC_EVENTS_MODULE), as on the staff side.
 const NAV: Array<{ href: string; key: MessageKey }> = [
   { href: MEMBER_ROUTES.home, key: 'member.nav.today' },
   { href: MEMBER_ROUTES.pass, key: 'member.nav.pass' },
+  { href: MEMBER_ROUTES.gyms, key: 'member.nav.gyms' },
+  { href: MEMBER_ROUTES.trainers, key: 'member.nav.trainers' },
+  { href: MEMBER_ROUTES.challenges, key: 'member.nav.challenges' },
+  ...(EVENTS_MODULE ? [{ href: MEMBER_ROUTES.events, key: 'member.nav.events' as MessageKey }] : []),
+  { href: MEMBER_ROUTES.activity, key: 'member.nav.activity' },
+  { href: MEMBER_ROUTES.orders, key: 'member.nav.orders' },
 ];
 
 export const card = 'rounded-3xl border border-[#1e293b] bg-[#0f172a] p-6';
@@ -48,8 +55,11 @@ export function MemberFrame({ testId, needsSession = true, children }: {
     if (MEMBER_PORTAL && needsSession && session === null) router.replace(MEMBER_ROUTES.signin);
   }, [needsSession, session, router]);
 
-  const signOut = () => { clearSession(); setSession(null); router.replace(MEMBER_ROUTES.signin); };
   const here = (pathname || '').replace(/\/?$/, '/');
+  // On a phone the page links scroll sideways: keep the current one in view.
+  useEffect(() => {
+    document.querySelector<HTMLElement>('[data-member-mobile-nav] [aria-current="page"]')?.scrollIntoView({ block: 'nearest', inline: 'center' });
+  }, [here, session]);
   const showNav = MEMBER_PORTAL && !!session && needsSession;
 
   return (
@@ -61,7 +71,7 @@ export function MemberFrame({ testId, needsSession = true, children }: {
             <span>FitFlex</span>
           </Link>
           {showNav && (
-            <nav aria-label={t('member.nav.label')} className="ml-4 hidden gap-1 sm:flex">
+            <nav aria-label={t('member.nav.label')} className="ml-4 hidden gap-1 xl:flex">
               {NAV.map(n => (
                 <Link key={n.href} href={n.href} aria-current={here === n.href ? 'page' : undefined}
                   className={`rounded-full px-4 py-2 text-sm font-semibold ${here === n.href ? 'bg-[#1e293b] text-[#f1f5f9]' : 'text-[#aab4c4] hover:text-[#f1f5f9]'}`}>
@@ -82,18 +92,18 @@ export function MemberFrame({ testId, needsSession = true, children }: {
               <Globe aria-hidden="true" className="h-4 w-4" /><span aria-hidden="true">{locale === 'sw' ? 'SW' : 'EN'}</span>
             </button>
             {showNav && (
-              <button type="button" onClick={signOut} data-testid="member-sign-out"
-                className="inline-flex min-h-11 items-center gap-1.5 rounded-full px-3 text-sm text-[#cbd5e1] hover:bg-[#1e293b]">
-                <LogOut aria-hidden="true" className="h-4 w-4" /><span className="hidden sm:inline">{t('member.nav.signOut')}</span>
-              </button>
+              <Link href={MEMBER_ROUTES.me} aria-label={t('member.nav.me')} aria-current={here === MEMBER_ROUTES.me ? 'page' : undefined} data-testid="member-nav-me"
+                className={`inline-flex h-11 w-11 items-center justify-center rounded-full border ${here === MEMBER_ROUTES.me ? 'border-[#c8f04a]' : 'border-[#334155]'} hover:bg-[#1e293b]`}>
+                <UserRound aria-hidden="true" className="h-5 w-5" />
+              </Link>
             )}
           </div>
         </div>
         {showNav && (
-          <nav aria-label={t('member.nav.label')} className="flex gap-1 px-4 pb-2 sm:hidden">
+          <nav aria-label={t('member.nav.label')} data-member-mobile-nav="" className="flex gap-1 overflow-x-auto px-4 pb-2 xl:hidden">
             {NAV.map(n => (
               <Link key={n.href} href={n.href} aria-current={here === n.href ? 'page' : undefined}
-                className={`rounded-full px-4 py-2 text-sm font-semibold ${here === n.href ? 'bg-[#1e293b]' : 'text-[#aab4c4]'}`}>{t(n.key)}</Link>
+                className={`whitespace-nowrap rounded-full px-4 py-2 text-sm font-semibold ${here === n.href ? 'bg-[#1e293b]' : 'text-[#aab4c4]'}`}>{t(n.key)}</Link>
             ))}
           </nav>
         )}

@@ -5,7 +5,7 @@ import { QrCode } from 'lucide-react';
 import { useApp } from '../providers';
 import { LoadError, Loading, MemberFrame, PageTitle, card, ghostBtn, linkCls, muted, primaryBtn } from '@/components/member/member-frame';
 import { fmt, isActive, nameOf, tierLabel } from '@/components/member/member-shared';
-import { formatDate, formatTzs, MEMBER_ROUTES, memberApi, type Checkin, type MeResponse, type Pass } from '@/lib/member-api';
+import { eatToday, formatDate, formatTzs, MEMBER_ROUTES, memberApi, type Checkin, type MeResponse, type Pass, type ShopOrder, type TrainerBooking } from '@/lib/member-api';
 
 export default function MemberTodayPage() {
   return <MemberFrame testId="member-today-page">{() => <Today />}</MemberFrame>;
@@ -16,13 +16,20 @@ function Today() {
   const [me, setMe] = useState<MeResponse | null>(null);
   const [passes, setPasses] = useState<Pass[]>([]);
   const [visits, setVisits] = useState<Checkin[]>([]);
+  const [sessions, setSessions] = useState<TrainerBooking[]>([]);
+  const [pickups, setPickups] = useState<ShopOrder[]>([]);
   const [state, setState] = useState<'loading' | 'ready' | 'error'>('loading');
 
   const load = useCallback(async () => {
     setState('loading');
     try {
-      const [m, p, c] = await Promise.all([memberApi.me(), memberApi.passes().catch(() => []), memberApi.checkins().catch(() => [])]);
-      setMe(m); setPasses(p); setVisits(c.slice(0, 5)); setState('ready');
+      const [m, p, c, b, o] = await Promise.all([memberApi.me(), memberApi.passes().catch(() => []), memberApi.checkins().catch(() => []),
+        memberApi.myBookings().catch(() => []), memberApi.shopOrders().catch(() => [])]);
+      const today = eatToday();
+      setMe(m); setPasses(p); setVisits(c.slice(0, 5));
+      setSessions(b.filter(x => x.status === 'confirmed' && x.date >= today).sort((x, y) => `${x.date}${x.slot}`.localeCompare(`${y.date}${y.slot}`)).slice(0, 3));
+      setPickups(o.filter(x => x.status === 'ready_for_pickup'));
+      setState('ready');
     } catch { setState('error'); }
   }, []);
   useEffect(() => { void load(); }, [load]);
@@ -75,6 +82,26 @@ function Today() {
             <h2 id="today-pending" className="text-lg font-extrabold">{t('member.today.pendingTitle')}</h2>
             <p>{fmt(t('member.today.pendingBody'), { amount: formatTzs(pending.amountTzs, locale), tier: tierLabel(pending.tier, passes) })}</p>
             <Link href={MEMBER_ROUTES.pass} className={`${ghostBtn} self-start`}>{t('member.today.pendingOpen')}</Link>
+          </section>
+        )}
+
+        {(sessions.length > 0 || pickups.length > 0) && (
+          <section aria-labelledby="today-next" className={`${card} flex flex-col gap-1`} data-testid="member-today-next">
+            <h2 id="today-next" className="mb-2 text-sm font-semibold uppercase tracking-wider text-[#94a3b8]">{t('member.today.nextTitle')}</h2>
+            <ul className="divide-y divide-[#1e293b]">
+              {pickups.map(o => (
+                <li key={o.id} className="flex flex-wrap justify-between gap-2 py-2.5">
+                  <span className="font-semibold">{t('member.orders.status.ready_for_pickup')}: {o.items.map(i => i.name).filter(Boolean).join(', ')}</span>
+                  <Link href={MEMBER_ROUTES.orders} className={linkCls}>{t('member.today.pendingOpen')}</Link>
+                </li>
+              ))}
+              {sessions.map(b => (
+                <li key={b.id} className="flex flex-wrap justify-between gap-2 py-2.5">
+                  <span className="font-semibold">{b.trainer?.displayName ?? '—'}{b.gym?.name ? ` · ${b.gym.name}` : ''}</span>
+                  <span className={`${muted} tabular-nums`}>{formatDate(`${b.date}T12:00:00+03:00`, locale)} · {b.slot}</span>
+                </li>
+              ))}
+            </ul>
           </section>
         )}
 
