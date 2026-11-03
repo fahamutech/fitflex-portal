@@ -7,7 +7,7 @@ import { api, type VendorRefund, type VendorSale, type VendorSaleRow, type Vendo
 import { money } from '@/lib/admin-utils';
 import type { MessageKey } from '@/lib/i18n';
 import {
-  addDays, canCustomers, customerName, documentsOn, eatDateTime, eatToday, errorBody, errorCode, fmt, isRefusal, itemsKey, mayRefundSale, mayVoidSale, receiptDay,
+  addDays, canCustomers, creditClearedAs, customerName, documentsOn, eatDateTime, eatToday, errorBody, errorCode, fmt, isRefusal, itemsKey, mayRefundSale, mayVoidSale, receiptDay,
   recordedOffline, refundsOn, saleMethodLabel, saleMethodsLabel, saleReceiptText,
 } from '@/lib/vendor';
 import { RefundDialog } from '@/components/vendor/sales/refund-dialog';
@@ -173,6 +173,7 @@ function SalesInner() {
       ...(typeof sale.balanceTzs === 'number' ? { balanceTzs: sale.balanceTzs } : {}),
       ...(typeof sale.refundedTzs === 'number' ? { refundedTzs: sale.refundedTzs } : {}),
       ...(sale.refundState ? { refundState: sale.refundState } : {}),
+      ...(typeof sale.balanceReducedTzs === 'number' ? { balanceReducedTzs: sale.balanceReducedTzs } : {}),
     } : s)));
     if (!token) return;
     const id = requestId.current;
@@ -597,7 +598,9 @@ function SaleDetail({ id, onBack, onUpdated }: { id: string; onBack: () => void;
               {s.dueDate && <div className={row}><span>{t('vendor.receipt.dueBy')}</span><span className="whitespace-nowrap">{receiptDay(s.dueDate, locale)}</span></div>}
               {s.status === 'completed' && (Number(s.balanceTzs) > 0
                 ? <div className={`${row} font-semibold`}><span>{t('vendor.pay.stillOwed')}</span><span className="whitespace-nowrap tabular-nums" data-testid="sale-balance">{money(s.balanceTzs)}</span></div>
-                : <p><Badge tone="success">{t('vendor.sales.paidOffBadge')}</Badge></p>)}
+                : creditClearedAs(s) === 'paidOff' ? <p><Badge tone="success">{t('vendor.sales.paidOffBadge')}</Badge></p>
+                : creditClearedAs(s) === 'settled' ? <p data-testid="sale-settled"><Badge tone="gray">{t('vendor.documents.status.settled_by_credit_note')}</Badge></p>
+                : null)}
               {(s.allocations ?? []).length > 0 && (
                 <div className="space-y-1 pt-1" data-testid="sale-allocations">
                   <p className="font-medium">{t('vendor.sales.customerPayments')}</p>

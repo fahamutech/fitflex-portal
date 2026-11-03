@@ -80,7 +80,8 @@ export function RefundDialog({
   const headingRef = useRef<HTMLHeadingElement>(null);
   const reasonRef = useRef<HTMLTextAreaElement>(null);
   const referenceRef = useRef<HTMLInputElement>(null);
-  const focusNext = useRef<string | null>('heading');
+  // UAT L-10: on open the dialog itself has focus (Dialog focuses its labelled panel); step changes focus the step heading.
+  const focusNext = useRef<string | null>(null);
 
   // ── Always read the sale again on open: the counters must be fresh (§4.6, §5.4) ──
   const fetchSale = useCallback(async () => {
@@ -107,12 +108,17 @@ export function RefundDialog({
   // Focus after render (never from timers): heading on open and on step change, first invalid field after an error.
   useEffect(() => {
     const target = focusNext.current;
-    if (!target || load !== 'ready') return;
+    // Wait until saving has ended: a disabled field can't take focus (UAT L-4: it fell to Close).
+    if (!target || load !== 'ready' || busy) return;
     focusNext.current = null;
     if (target === 'heading') headingRef.current?.focus();
     else if (target === 'reason') reasonRef.current?.focus();
     else if (target === 'reference') referenceRef.current?.focus();
-    else document.getElementById(target)?.focus();
+    else {
+      // Lines render twice (table from @xl, cards below): focus the copy that is showing (UAT L-4).
+      const el = [`${target}-t`, `${target}-c`].map(id => document.getElementById(id)).find(x => x && x.offsetParent !== null) ?? document.getElementById(target);
+      el?.focus();
+    }
   });
 
   const lines = sale?.lines ?? [];
@@ -197,7 +203,7 @@ export function RefundDialog({
     } catch (err) {
       if (!isRefusal(err)) {
         // No answer (or 5xx): the dialog stays on Confirm; Try again sends the same clientRef.
-        setBanner({ tone: 'error', text: t(err instanceof ApiError && err.status >= 500 ? 'vendor.refunds.err.server' : 'vendor.refunds.offline'), retry: true });
+        setBanner({ tone: 'error', text: t(err instanceof ApiError && err.status >= 500 ? 'vendor.refunds.err.server' : 'vendor.refunds.err.unconfirmed'), retry: true });
         return;
       }
       const code = errorCode(err);
@@ -256,7 +262,7 @@ export function RefundDialog({
     <div role="alert" aria-live="assertive" data-testid="refund-banner"><Alert tone={banner.tone}>{banner.text}</Alert></div>
   );
 
-  const stepper = (l: Line) => {
+  const stepper = (l: Line, at: 't' | 'c') => {
     const id = l.id!;
     const n = qty[id] ?? 0;
     const max = refundableOf(l);
@@ -265,25 +271,25 @@ export function RefundDialog({
       <div className="flex items-center gap-1">
         <Button type="button" variant="secondary" className="min-h-11 w-11 shrink-0 px-0" onClick={() => setLineQty(l, n - 1)} disabled={busy || n <= 0}
           aria-label={fmt(t('vendor.refunds.decrease'), { name })} data-testid={`refund-dec-${id}`}><Minus aria-hidden="true" className="h-4 w-4" /></Button>
-        <Input id={`refund-qty-${id}`} type="number" inputMode="numeric" min={0} max={max} step={1} value={n} disabled={busy}
+        <Input id={`refund-qty-${id}-${at}`} type="number" inputMode="numeric" min={0} max={max} step={1} value={n} disabled={busy}
           onChange={e => setLineQty(l, Number(e.target.value))}
-          aria-label={fmt(t('vendor.refunds.qtyLabel'), { name })} aria-describedby={`refund-qty-${id}-value`}
+          aria-label={fmt(t('vendor.refunds.qtyLabel'), { name })} aria-describedby={`refund-qty-${id}-value-${at}`}
           aria-invalid={exceeded.has(id) || undefined}
           className={`min-h-11 w-16 text-center tabular-nums ${exceeded.has(id) ? 'border-[var(--color-warning-600)]' : ''}`} data-testid={`refund-qty-${id}`} />
-        <span id={`refund-qty-${id}-value`} className="sr-only">{fmt(t('vendor.refunds.a11y.qtyValue'), { qty: n, refundable: max })}</span>
+        <span id={`refund-qty-${id}-value-${at}`} className="sr-only">{fmt(t('vendor.refunds.a11y.qtyValue'), { qty: n, refundable: max })}</span>
         <Button type="button" variant="secondary" className="min-h-11 w-11 shrink-0 px-0" onClick={() => setLineQty(l, n + 1)} disabled={busy || n >= max}
           aria-label={fmt(t('vendor.refunds.increase'), { name })} data-testid={`refund-inc-${id}`}><Plus aria-hidden="true" className="h-4 w-4" /></Button>
       </div>
     );
   };
-  const restockSwitch = (l: Line) => {
+  const restockSwitch = (l: Line, at: 't' | 'c') => {
     const id = l.id!;
     if ((qty[id] ?? 0) <= 0) return null;
     const gone = restockGone.has(id);
     const on = !gone && restock[id] !== false;
     return (
       <div className="space-y-1">
-        <Checkbox id={`refund-restock-${id}`} role="switch" aria-checked={on} checked={on} disabled={busy || gone}
+        <Checkbox id={`refund-restock-${id}-${at}`} role="switch" className="h-6 w-6" aria-checked={on} checked={on} disabled={busy || gone}
           onChange={e => setRestock(cur => ({ ...cur, [id]: e.target.checked }))}
           label={t('vendor.refunds.restock')} aria-label={fmt(t('vendor.refunds.a11y.restock'), { name: lineName(l) })} data-testid={`refund-restock-${id}`} />
         {gone
@@ -318,8 +324,8 @@ export function RefundDialog({
                   <Th scope="row" className="!font-medium [overflow-wrap:anywhere]">{lineName(l)}{lineNote(l)}</Th>
                   <Td className="text-right tabular-nums">{sold(l)}</Td>
                   <Td className="text-right tabular-nums">{refundedOf(l)}</Td>
-                  <Td>{refundableOf(l) > 0 && !voided ? stepper(l) : <span className="text-[var(--color-fg-tertiary)]">{t('vendor.refunds.lineAllDone')}</span>}</Td>
-                  <Td>{l.id && restockSwitch(l)}</Td>
+                  <Td>{refundableOf(l) > 0 && !voided ? stepper(l, 't') : <span className="text-[var(--color-fg-tertiary)]">{t('vendor.refunds.lineAllDone')}</span>}</Td>
+                  <Td>{l.id && restockSwitch(l, 't')}</Td>
                   <Td className="whitespace-nowrap text-right tabular-nums">{l.id && (qty[l.id] ?? 0) > 0 ? money(preview.per[l.id]) : '—'}</Td>
                 </Tr>
               ))}
@@ -335,8 +341,8 @@ export function RefundDialog({
               </div>
               <p className="text-[var(--color-fg-tertiary)]">{fmt(t('vendor.refunds.soldRefunded'), { sold: sold(l), refunded: refundedOf(l) })}</p>
               {lineNote(l)}
-              {refundableOf(l) > 0 && !voided ? stepper(l) : <p className="text-[var(--color-fg-tertiary)]">{t('vendor.refunds.lineAllDone')}</p>}
-              {l.id && restockSwitch(l)}
+              {refundableOf(l) > 0 && !voided ? stepper(l, 'c') : <p className="text-[var(--color-fg-tertiary)]">{t('vendor.refunds.lineAllDone')}</p>}
+              {l.id && restockSwitch(l, 'c')}
             </li>
           ))}
         </ul>

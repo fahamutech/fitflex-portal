@@ -2500,6 +2500,8 @@ export interface VendorSaleRow {
   /** S7: Σ active refunds, and none | partial | full. Older servers omit them. */
   refundedTzs?: number;
   refundState?: VendorRefundState;
+  /** S7 (functions#321): taken off the pay-later balance by active refunds (list and customer-profile rows). */
+  balanceReducedTzs?: number;
 }
 /** Completed sales over the whole from/to/createdBy range (not the page, not the status filter); cash net of change. */
 export interface VendorSaleSummary {

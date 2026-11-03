@@ -267,6 +267,20 @@ export function splitRefund(amountTzs: number, sale: { kind?: string; balanceTzs
   const balanceReducedTzs = sale.kind === 'credit' ? Math.min(amountTzs, Math.max(0, Number(sale.balanceTzs || 0))) : 0;
   return { balanceReducedTzs, paidOutTzs: amountTzs - balanceReducedTzs };
 }
+/**
+ * UAT L-3: how a completed pay-later sale with nothing owed reads (the server's document status rules):
+ * every unit refunded → refunded (the Refunded badge already says it); the balance cleared with a refund's help →
+ * settled (balanceReducedTzs > 0 when sent — the sale view, and list / customer-profile rows from functions#321;
+ * only when it is absent, refundedTzs > 0, as on a pay-later sale a refund takes the balance first); otherwise really
+ * paid off by payments → paidOff. null = still owed, or not pay later.
+ */
+export function creditClearedAs(sale: { kind?: string; status: string; balanceTzs?: number; refundState?: string; refundedTzs?: number; balanceReducedTzs?: number }) {
+  if (sale.kind !== 'credit' || sale.status !== 'completed' || Number(sale.balanceTzs) > 0) return null;
+  if (sale.refundState === 'full') return 'refunded' as const;
+  const reduced = typeof sale.balanceReducedTzs === 'number' ? sale.balanceReducedTzs > 0 : Number(sale.refundedTzs ?? 0) > 0;
+  return reduced ? 'settled' as const : 'paidOff' as const;
+}
+
 /** §8.5: a refund or undo refusal → its message. The raw code is never shown. */
 export function refundErrorKey(code: string | null): MessageKey {
   switch (code) {

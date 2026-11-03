@@ -125,7 +125,8 @@ export function RefundsCard({
                   <Td className="text-right">{amount(r)}</Td>
                   <Td className="whitespace-nowrap text-right tabular-nums">{r.detail ? money(r.detail.paidOutTzs) : '—'}</Td>
                   <Td>{method(r)}</Td>
-                  <Td className="text-right tabular-nums">{restockedUnits(r.detail) ?? '—'}</Td>
+                  {/* UAT L-9: an undone refund's units were taken out of stock again. */}
+                  <Td className="text-right tabular-nums">{r.status === 'reverted' ? <span className="text-[var(--color-fg-tertiary)]">{statusWord(r)}</span> : restockedUnits(r.detail) ?? '—'}</Td>
                   <Td><Badge tone="gray">{statusWord(r)}</Badge></Td>
                   <Td>{undoButton(r)}</Td>
                 </Tr>
@@ -144,7 +145,7 @@ export function RefundsCard({
                 <span>{eatDateTime(r.refundedAt, locale)}</span>
                 <span aria-hidden="true">·</span>{amount(r)}
                 {r.detail && r.detail.paidOutTzs > 0 && <><span aria-hidden="true">·</span><span>{method(r)}</span></>}
-                {(restockedUnits(r.detail) ?? 0) > 0 && <><span aria-hidden="true">·</span><span>{fmt(t('vendor.refunds.unitsBack'), { n: restockedUnits(r.detail) ?? 0 })}</span></>}
+                {r.status !== 'reverted' && (restockedUnits(r.detail) ?? 0) > 0 && <><span aria-hidden="true">·</span><span>{fmt(t('vendor.refunds.unitsBack'), { n: restockedUnits(r.detail) ?? 0 })}</span></>}
               </p>
               {undoButton(r, true)}
             </li>
