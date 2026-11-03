@@ -30,8 +30,8 @@ function Trainers({ session }: { session: MemberSession | null }) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [paying, setPaying] = useState<PayTarget | null>(null);
 
-  const load = useCallback(async () => {
-    setState('loading');
+  const load = useCallback(async (silent = false) => {
+    if (!silent) setState('loading');
     try {
       const [tr, bk, op] = await Promise.all([memberApi.trainers(), memberApi.myBookings().catch(() => []), memberApi.paymentOptions().catch(() => null)]);
       setTrainers(tr.filter(x => x.bookable !== false)); setBookings(bk); setOptions(op); setState('ready');
@@ -49,12 +49,12 @@ function Trainers({ session }: { session: MemberSession | null }) {
   const gymName = gymFilter ? trainers.flatMap(x => x.gyms ?? []).find(g => g.id === gymFilter)?.name : null;
 
   if (state === 'loading') return <Loading />;
-  if (state === 'error') return <LoadError onRetry={load} />;
+  if (state === 'error') return <LoadError onRetry={() => void load()} />;
   if (paying) {
     return (
       <div className="mx-auto max-w-xl">
         <PageTitle title={t('member.trainers.title')} />
-        <PayPanel target={paying} options={options} defaultPhone={session?.user.phone ?? ''} onBack={() => { setPaying(null); void load(); }} />
+        <PayPanel target={paying} options={options} defaultPhone={session?.user.phone ?? ''} onBack={() => { setPaying(null); void load(true); }} />
       </div>
     );
   }
@@ -97,7 +97,7 @@ function Trainers({ session }: { session: MemberSession | null }) {
           )}
         </div>
         {selected
-          ? <BookingPanel key={selected.id} trainer={selected} options={options} preferredGym={gymFilter} onPay={setPaying} onBooked={load} />
+          ? <BookingPanel key={selected.id} trainer={selected} options={options} preferredGym={gymFilter} onPay={setPaying} onBooked={() => void load(true)} />
           : <p className={`${card} ${muted}`}>{t('member.trainers.selectHint')}</p>}
       </div>
       <div className="mt-4">

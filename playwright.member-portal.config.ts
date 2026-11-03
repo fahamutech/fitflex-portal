@@ -3,7 +3,7 @@ import { defineConfig, devices } from '@playwright/test';
 /**
  * Member portal specs (tests/e2e/member-portal.spec.ts) run against a mocked API: no backend is started.
  * NEXT_PUBLIC_MEMBER_PORTAL is inlined when the portal is built: MEMBER_PORTAL_FLAG=true (default) serves the flag-on
- * specs on port 3125; MEMBER_PORTAL_FLAG=false serves the flag-off spec on port 3126.
+ * specs on port 3125 (with the events module on too); MEMBER_PORTAL_FLAG=false serves the flag-off spec on port 3126.
  *
  *   npx playwright test --config playwright.member-portal.config.ts
  *   MEMBER_PORTAL_FLAG=false npx playwright test --config playwright.member-portal.config.ts
@@ -21,7 +21,7 @@ export default defineConfig({
   retries: 0,
   use: { baseURL: `http://localhost:${portalPort}`, trace: 'on-first-retry' },
   webServer: {
-    command: `NEXT_PUBLIC_API_BASE=${apiURL} NEXT_PUBLIC_MEMBER_PORTAL=${flagOn ? 'true' : 'false'} NEXT_DIST_DIR=.next-dev-member-${flagOn ? 'on' : 'off'} npx next dev -p ${portalPort}`,
+    command: `NEXT_PUBLIC_API_BASE=${apiURL} NEXT_PUBLIC_MEMBER_PORTAL=${flagOn ? 'true' : 'false'} NEXT_PUBLIC_EVENTS_MODULE=${flagOn ? 'true' : 'false'} NEXT_DIST_DIR=.next-dev-member-${flagOn ? 'on' : 'off'} npx next dev -p ${portalPort}`,
     port: portalPort,
     reuseExistingServer: true,
     timeout: 120_000,

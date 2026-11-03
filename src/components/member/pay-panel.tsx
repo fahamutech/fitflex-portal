@@ -8,7 +8,7 @@ import { CheckCircle2 } from 'lucide-react';
 import { useApp } from '../../../app/providers';
 import { card, ghostBtn, input, muted, primaryBtn } from './member-frame';
 import { fmt } from './member-shared';
-import { canPayByMobileMoney, formatTzs, MEMBER_ROUTES, MemberApiError, memberApi, type MemberCode, type PaymentOptions } from '@/lib/member-api';
+import { MEMBER_PASSTHROUGH, canPayByMobileMoney, formatTzs, MEMBER_ROUTES, MemberApiError, memberApi, type MemberCode, type PaymentOptions } from '@/lib/member-api';
 import { ERROR_KEYS, type CheckinCode } from '@/lib/web-checkin';
 import type { MessageKey } from '@/lib/i18n';
 
@@ -18,7 +18,7 @@ import type { MessageKey } from '@/lib/i18n';
  * transaction ID when the request is created).
  */
 export interface PayTarget {
-  label: string; amountTzs: number; product: 'FITFLEX_PASS' | 'TRAINER_SERVICE'; paymentId?: string;
+  label: string; amountTzs: number; product: 'FITFLEX_PASS' | 'TRAINER_SERVICE' | 'EVENT_ORDER'; paymentId?: string;
   create?: (extra?: { reference: string; payerPhone: string }) => Promise<string>; manual?: boolean;
   doneTitleKey?: MessageKey; doneBody?: string; doneHref?: string;
 }
@@ -32,10 +32,7 @@ export function errorKey(code: MemberCode): MessageKey {
   const own = `member.err.${code}` as MessageKey;
   return (MEMBER_ERR.has(code) ? own : ERROR_KEYS[code as CheckinCode]) ?? 'web.checkin.err.unknown';
 }
-const MEMBER_ERR = new Set<string>(['payment_already_pending', 'no_active_pass', 'payment_reference_required', 'payment_reference_invalid',
-  'payment_reference_duplicate', 'payer_phone_required', 'payer_phone_invalid', 'invalid_phone', 'feature_disabled', 'payment_not_pending',
-  'active_subscription_required', 'slot_already_booked', 'slot_in_past', 'slot_not_available', 'trainer_unavailable',
-  'trainer_not_available_at_gym', 'cannot_book_own_sessions']);
+const MEMBER_ERR = MEMBER_PASSTHROUGH;
 
 export function PayPanel({ target, options, defaultPhone, onBack }: { target: PayTarget; options: PaymentOptions | null; defaultPhone: string; onBack: () => void }) {
   const { t, locale } = useApp();

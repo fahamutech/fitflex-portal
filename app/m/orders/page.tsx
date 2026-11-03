@@ -48,7 +48,7 @@ function Orders() {
   const active = orders.filter(o => !isClosed(o));
   const past = orders.filter(isClosed);
   const list = tab === 'active' ? active : past;
-  const tabCls = (on: boolean) => `min-h-11 border-b-[3px] px-4 text-[15px] ${on ? 'border-[#c8f04a] font-bold text-[#f1f5f9]' : 'border-transparent text-[#aab4c4]'}`;
+  const tabCls = (on: boolean) => `min-h-11 whitespace-nowrap border-b-[3px] px-4 text-[15px] ${on ? 'border-[#c8f04a] font-bold text-[#f1f5f9]' : 'border-transparent text-[#aab4c4]'}`;
 
   return (
     <>

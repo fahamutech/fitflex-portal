@@ -8,6 +8,7 @@ import { normaliseError, type CheckinCode } from './web-checkin';
 export const MEMBER_ROUTES = {
   home: '/m/', signin: '/m/signin/', pass: '/m/pass/', checkIn: '/m/check-in/',
   gyms: '/m/gyms/', trainers: '/m/trainers/', orders: '/m/orders/',
+  activity: '/m/activity/', challenges: '/m/challenges/', events: '/m/events/', me: '/m/me/',
 } as const;
 const SESSION_KEY = 'ff_member_session';
 const TIMEOUT_MS = 15_000;
@@ -54,11 +55,18 @@ export interface PayReply { state: PayState; reason?: string; paymentRequest?: P
 export type MemberCode = CheckinCode | 'not_member' | 'payment_already_pending' | 'no_active_pass' | 'payment_reference_required'
   | 'payment_reference_invalid' | 'payment_reference_duplicate' | 'payer_phone_required' | 'payer_phone_invalid' | 'invalid_phone'
   | 'feature_disabled' | 'payment_not_pending' | 'too_many_attempts' | 'active_subscription_required'
-  | 'slot_already_booked' | 'slot_in_past' | 'slot_not_available' | 'trainer_unavailable' | 'trainer_not_available_at_gym' | 'cannot_book_own_sessions';
-const MEMBER_PASSTHROUGH = new Set<string>(['payment_already_pending', 'no_active_pass', 'payment_reference_required', 'payment_reference_invalid',
+  | 'slot_already_booked' | 'slot_in_past' | 'slot_not_available' | 'trainer_unavailable' | 'trainer_not_available_at_gym' | 'cannot_book_own_sessions'
+  | 'challenge_closed' | 'challenge_paused' | 'team_required' | 'gym_required' | 'not_your_gym' | 'already_joined' | 'not_joined' | 'gym_owner_has_checkin_activity' | 'trainer_has_bookings'
+  | 'organizer_owner' | 'account_deletion_failed' | 'invalid_field' | 'event_not_open' | 'registration_closed' | 'hold_limit_reached'
+  | 'already_registered' | 'sold_out' | 'waitlist_full' | 'not_sold_out' | 'price_changed' | 'consent_version_stale' | 'participant_invalid' | 'validation_failed' | 'hold_expired' | 'waitlist_unavailable' | 'verification_required';
+/** Codes with their own member.err.* message (src/lib/i18n-member.ts). */
+export const MEMBER_PASSTHROUGH: ReadonlySet<string> = new Set<string>(['payment_already_pending', 'no_active_pass', 'payment_reference_required', 'payment_reference_invalid',
   'payment_reference_duplicate', 'payer_phone_required', 'payer_phone_invalid', 'invalid_phone', 'feature_disabled', 'payment_not_pending',
   'active_subscription_required', 'slot_already_booked', 'slot_in_past', 'slot_not_available', 'trainer_unavailable',
-  'trainer_not_available_at_gym', 'cannot_book_own_sessions']);
+  'trainer_not_available_at_gym', 'cannot_book_own_sessions', 'challenge_closed', 'challenge_paused', 'team_required', 'gym_required', 'not_your_gym', 'already_joined', 'not_joined',
+  'gym_owner_has_checkin_activity', 'trainer_has_bookings', 'organizer_owner', 'account_deletion_failed', 'invalid_field',
+  'event_not_open', 'registration_closed', 'hold_limit_reached', 'already_registered', 'sold_out', 'waitlist_full', 'not_sold_out',
+  'price_changed', 'consent_version_stale', 'participant_invalid', 'validation_failed', 'hold_expired', 'waitlist_unavailable', 'verification_required']);
 
 export class MemberApiError extends Error {
   constructor(public status: number, public code: MemberCode) { super(code); }
@@ -90,11 +98,11 @@ export function clearSession() {
 
 // ── HTTP ──────────────────────────────────────────────────────────────────────────────────────────────────────────
 interface Reply { status: number; body: Record<string, unknown> | null }
-async function call(method: 'GET' | 'POST' | 'PUT' | 'DELETE', path: string, opts: { body?: unknown; bearer?: string | null } = {}): Promise<Reply> {
+async function call(method: 'GET' | 'POST' | 'PUT' | 'DELETE', path: string, opts: { body?: unknown; bearer?: string | null; headers?: Record<string, string> } = {}): Promise<Reply> {
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), TIMEOUT_MS);
   try {
-    const headers: Record<string, string> = {};
+    const headers: Record<string, string> = { ...(opts.headers ?? {}) };
     if (opts.body !== undefined) headers['Content-Type'] = 'application/json';
     if (opts.bearer) headers.Authorization = `Bearer ${opts.bearer}`;
     const res = await fetch(`${API_BASE}${path}`, {
@@ -117,10 +125,10 @@ function codeOf(r: Reply): MemberCode {
 }
 
 /** Signed-in request. A 401 ends the member session (never the staff one). */
-async function authed<T>(method: 'GET' | 'POST' | 'PUT' | 'DELETE', path: string, body?: unknown): Promise<T> {
+async function authed<T>(method: 'GET' | 'POST' | 'PUT' | 'DELETE', path: string, body?: unknown, headers?: Record<string, string>): Promise<T> {
   const s = loadSession();
   if (!s) throw new MemberApiError(401, 'unauthorized');
-  const r = await call(method, path, { body, bearer: s.token });
+  const r = await call(method, path, { body, bearer: s.token, headers });
   if (r.status === 401) { clearSession(); onEnded?.(); throw new MemberApiError(401, 'unauthorized'); }
   if (r.status < 200 || r.status >= 300) throw new MemberApiError(r.status, codeOf(r));
   return r.body as T;
@@ -180,7 +188,7 @@ export function canPayPassByMobileMoney(o: PaymentOptions | null): boolean {
  * Whether mobile money can pay this product now. Without the `mobileMoney` key (TUNZAA_TRAINER_PRODUCTS off) only
  * passes and gym plans are payable this way; trainer sessions then are not.
  */
-export function canPayByMobileMoney(o: PaymentOptions | null, product: 'FITFLEX_PASS' | 'TRAINER_SERVICE'): boolean {
+export function canPayByMobileMoney(o: PaymentOptions | null, product: 'FITFLEX_PASS' | 'TRAINER_SERVICE' | 'EVENT_ORDER'): boolean {
   if (!o?.enabled) return false;
   if (!o.mobileMoney) return product === 'FITFLEX_PASS';
   return o.mobileMoney.products.includes(product);
@@ -202,3 +210,92 @@ export function formatDate(iso: string | null | undefined, locale: 'en' | 'sw', 
     day: 'numeric', month: 'short', year: 'numeric', ...(withTime ? { hour: '2-digit', minute: '2-digit' } : {}), timeZone: 'Africa/Dar_es_Salaam',
   }).format(d);
 }
+
+// ── Slice 3: activity, challenges, events, account ────────────────────────────────────────────────────────────────
+export interface Activity {
+  id: string; type: string; source?: string | null; startedAt: string; durationMinutes?: number | null; activeMinutes?: number | null;
+  distanceKm?: number | null; steps?: number | null; calories?: number | null; movingSeconds?: number | null; elevationGainM?: number | null;
+  hasRoute?: boolean; notes?: string | null; deviceName?: string | null; workoutId?: string | null;
+}
+export interface Workout { id: string; name?: string | null; status: string; scheduledDate?: string | null; completedAt?: string | null; durationMinutes?: number | null }
+export type RoutePoint = [number, number, number | null, number, number | null];
+export interface Challenge {
+  id: string; name: string; description?: string | null; type: string; target: number; startDate: string; endDate: string;
+  mode: 'individual' | 'teams' | 'gym_vs_gym' | 'department' | string; phase: 'upcoming' | 'active' | 'ended' | 'cancelled' | string;
+  joined: boolean; leaderboardOptIn: boolean; participantCount: number; rewards?: unknown; status?: string;
+  teams: Array<{ id: string; name: string; gymId?: string | null }>; creator?: { type: string; id: string; name: string | null } | null;
+}
+export interface Leaderboard {
+  individuals: Array<{ rank: number; name: string; progress: number; fraction: number; completed: boolean; you?: boolean }>;
+  you?: { optedIn: boolean; rank: number; of: number; progress: number };
+  teamStandings?: Array<{ teamId?: string; name: string; rank?: number; fraction?: number; progress?: number }>;
+}
+export interface CommsPrefs {
+  inAppMarketing: boolean; pushMarketing: boolean; whatsappMarketing: boolean; smsMarketing: boolean;
+  whatsappAvailable: boolean; smsAvailable: boolean; locale?: string | null;
+}
+
+export const memberApi3 = {
+  activities: () => authed<Activity[] | { activities: Activity[] }>('GET', '/me/activities').then(r => Array.isArray(r) ? r : (r.activities ?? [])),
+  activityRoute: (id: string) => authed<{ route: { segments: RoutePoint[][] } }>('GET', `/me/activities/${encodeURIComponent(id)}/route`).then(r => r.route?.segments ?? []),
+  deleteActivity: (id: string) => authed<unknown>('DELETE', `/me/activities/${encodeURIComponent(id)}`),
+  workouts: () => authed<Workout[] | { workouts: Workout[] }>('GET', '/me/workouts').then(r => Array.isArray(r) ? r : (r.workouts ?? [])),
+  challenges: () => authed<{ challenges: Challenge[] }>('GET', '/me/challenges').then(r => r.challenges ?? []),
+  challenge: (id: string) => authed<Challenge | { challenge: Challenge }>('GET', `/challenges/${encodeURIComponent(id)}`).then(r => ('challenge' in r && r.challenge ? r.challenge : r) as Challenge),
+  joinChallenge: (id: string, body: { teamId?: string; gymId?: string; leaderboardOptIn: boolean }) => authed<unknown>('POST', `/challenges/${encodeURIComponent(id)}/join`, body),
+  leaveChallenge: (id: string) => authed<unknown>('POST', `/challenges/${encodeURIComponent(id)}/leave`),
+  setLeaderboardOptIn: (id: string, optIn: boolean) => authed<unknown>('PUT', `/challenges/${encodeURIComponent(id)}/leaderboard-opt-in`, { optIn }),
+  leaderboard: (id: string) => authed<Leaderboard>('GET', `/challenges/${encodeURIComponent(id)}/leaderboard`),
+  saveProfile: (body: { displayName?: string; email?: string }) => authed<unknown>('POST', '/me/profile', body),
+  commsPrefs: () => authed<{ preferences: CommsPrefs } | CommsPrefs>('GET', '/me/communication-preferences').then(r => ('preferences' in r ? r.preferences : r) as CommsPrefs),
+  setCommsPrefs: (body: Partial<Pick<CommsPrefs, 'inAppMarketing' | 'pushMarketing' | 'whatsappMarketing' | 'smsMarketing'>> & { locale?: string }) =>
+    authed<unknown>('PUT', '/me/communication-preferences', body),
+  deleteAccount: () => authed<{ ok: boolean }>('DELETE', '/me'),
+};
+
+// ── Events (module behind EVENTS_MODULE on the server and NEXT_PUBLIC_EVENTS_MODULE here) ─────────────────────────
+export interface EventsOptions { discovery: boolean; registration: boolean; payment?: 'none' | 'manual' | 'provider'; waitlist?: boolean; consentTextVersion?: string }
+export interface EventSummary {
+  id: string; slug?: string; title: string; type?: string; startsAt: string; timezone?: string; availability: string;
+  venue?: { name?: string | null; city?: string | null } | null; heroThumbUrl?: string | null; fromPriceTzs?: number | null; distancesM?: number[];
+  organizer?: { name: string; verified?: boolean } | null;
+}
+export interface TicketType { id: string; name: string; priceTzs: number; availability: string; waitlist?: { state: string } | null }
+export interface EventCategory { id: string; name: string; distanceM?: number | null; startsAt?: string | null; availability: string; remaining?: number | null; ticketTypes: TicketType[] }
+export interface EventDetail extends EventSummary {
+  description?: { en?: string | null; sw?: string | null } | null; heroImageUrl?: string | null; categories: EventCategory[];
+  venue?: { name?: string | null; city?: string | null; address?: string | null } | null; terms?: string | null; refundPolicy?: unknown;
+}
+export interface Participant {
+  ticketTypeId: string; firstName: string; lastName: string; phone?: string; dateOfBirth?: string;
+  emergencyContact?: { name: string; phone: string }; kitSize?: string; consentBasis: 'self';
+}
+export type FieldPolicy = 'required' | 'optional' | 'off';
+export interface EventQuote {
+  valid: boolean; quote: { currency: string; subtotalTzs: number; discountTzs: number; feesTzs: number; totalTzs: number; feeLabel?: string | null };
+  participants: Array<{ index: number; ok: boolean; problems: Array<{ field: string; code: string }> }>; problems: Array<{ code: string }>;
+  fields?: Record<string, FieldPolicy>; termsVersion?: string; consentText?: { version: string; self: string };
+}
+export interface EventOrder { id: string; reference: string; status: string; totalTzs: number; holdExpiresAt?: string | null }
+export interface EventTicket { registrationId: string; ticketId?: string | null; displayCode?: string | null; state: string; event: EventSummary; category?: { name: string } | null; ticketType?: { name: string } | null }
+
+export function newIdempotencyKey(): string {
+  const r = typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  return `m-${r}`;
+}
+
+export const eventsApi = {
+  options: () => authed<EventsOptions>('GET', '/events/options'),
+  list: () => authed<{ items: EventSummary[] }>('GET', '/events?sort=soonest&limit=30').then(r => r.items ?? []),
+  detail: (id: string) => authed<EventDetail>('GET', `/events/${encodeURIComponent(id)}`),
+  quote: (body: { eventId: string; lines: Array<{ ticketTypeId: string; quantity: number }>; participants: Participant[] }) =>
+    authed<EventQuote>('POST', '/me/event-orders/quote', body),
+  place: (key: string, body: { eventId: string; lines: Array<{ ticketTypeId: string; quantity: number }>; participants: Participant[]; acceptedTerms: true; consentTextVersion?: string; expectedTotalTzs: number }) =>
+    authed<{ order: EventOrder }>('POST', '/me/event-orders', body, { 'Idempotency-Key': key }),
+  startPayment: (orderId: string, key: string, body: { reference?: string; payerPhone?: string }) =>
+    authed<{ next: { payment: string; paymentRequestId?: string | null }; order: EventOrder }>('POST', `/me/event-orders/${encodeURIComponent(orderId)}/payment`, body, { 'Idempotency-Key': key }),
+  tickets: () => authed<{ items: EventTicket[] }>('GET', '/me/event-tickets').then(r => r.items ?? []),
+  ticket: (registrationId: string) => authed<{ ticket: { displayCode: string; state: string }; qrPayload: string }>('GET', `/me/event-registrations/${encodeURIComponent(registrationId)}/ticket`),
+  joinWaitlist: (eventId: string, body: { ticketTypeId: string; participants: Participant[]; consent: { accepted: true; textVersion?: string } }) =>
+    authed<{ entry: { id: string; position?: number | null } }>('POST', `/me/events/${encodeURIComponent(eventId)}/waitlist`, body),
+};
