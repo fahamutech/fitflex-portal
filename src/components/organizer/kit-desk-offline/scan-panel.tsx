@@ -11,6 +11,7 @@ import { Dialog, DialogFooter } from '@/components/dialog';
 import { QrScanner, type QrScannerState } from '@/components/qr-scanner';
 import { checkBib, bibCount, type BibCheck, type DeskRow, type ScanDecision } from './desk-logic';
 import type { KitDeskApi } from './use-kit-desk';
+import { useFocusAfterRender } from '@/lib/use-focus-after-render';
 import { useApp } from '../../../../app/providers';
 
 type Tone = 'success' | 'warning' | 'error' | 'info';
@@ -81,6 +82,7 @@ export function ScanPanel({ desk, timezone, readOnly }: { desk: KitDeskApi; time
   const confirmRef = useRef<HTMLButtonElement>(null);
   const manualRef = useRef<HTMLInputElement>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const focusAfterRender = useFocusAfterRender();
   const textRef = useRef('');
 
   const pointId = meta.pointId;
@@ -93,7 +95,7 @@ export function ScanPanel({ desk, timezone, readOnly }: { desk: KitDeskApi; time
   function reset(focus = true) {
     if (timer.current) { clearTimeout(timer.current); timer.current = null; }
     setShown(null); setSaved(null); setBib(''); textRef.current = '';
-    if (focus) setTimeout(() => manualRef.current?.focus(), 0);
+    if (focus) focusAfterRender(() => manualRef.current);
   }
   useEffect(() => {
     const h = (e: KeyboardEvent) => { if (e.key === 'Escape' && shown && !manualFor) reset(); };
@@ -109,7 +111,7 @@ export function ScanPanel({ desk, timezone, readOnly }: { desk: KitDeskApi; time
     try {
       const out = await desk.decide(v, fromCamera);
       textRef.current = v; setBib(''); setShown(out);
-      setTimeout(() => (out.kind === 'valid' ? confirmRef.current : headingRef.current)?.focus(), 60);
+      focusAfterRender(() => (out.kind === 'valid' ? confirmRef.current : headingRef.current));
     } finally { busyRef.current = false; }
   }
   const onCameraState = (s: QrScannerState) => {
