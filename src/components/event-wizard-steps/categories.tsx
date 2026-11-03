@@ -2,6 +2,7 @@
 import { fmt, newCategory, type CategoryForm } from '@/lib/events';
 import { Button, Checkbox } from '@/components/shared';
 import { CountedTextarea, DateField, RowCard, TextField, useErrorText, useFocusNewRow, type StepProps } from './fields';
+import { useFocusAfterRender } from '@/lib/use-focus-after-render';
 import { useApp } from '../../../app/providers';
 
 /** Step 3 Categories (spec §6.2): 1–12 repeatable rows. */
@@ -9,11 +10,12 @@ export function CategoriesStep({ form, update, errors, readOnly }: StepProps) {
   const { t } = useApp();
   const errText = useErrorText();
   useFocusNewRow(form.categories);
+  const focusAfterRender = useFocusAfterRender();
   const set = (i: number, patch: Partial<CategoryForm>) => update(f => ({ categories: f.categories.map((c, j) => (j === i ? { ...c, ...patch } : c)) }));
   const remove = (i: number) => {
     update(f => ({ categories: f.categories.filter((_, j) => j !== i) }));
     const prev = form.categories[i - 1];
-    setTimeout(() => { (prev ? document.querySelector<HTMLElement>(`[data-row="${prev.uid}"] input`) : document.querySelector<HTMLElement>('[data-testid="ev-add-category"]'))?.focus(); }, 0);
+    focusAfterRender(() => (prev ? document.querySelector<HTMLElement>(`[data-row="${prev.uid}"] input`) : document.querySelector<HTMLElement>('[data-testid="ev-add-category"]')));
   };
   const name = (c: CategoryForm, i: number) => c.name.trim() || fmt(t('events.categories.unnamed'), { n: i + 1 });
   return (

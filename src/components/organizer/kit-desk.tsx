@@ -13,6 +13,7 @@ import { QrScanner, type QrScannerState } from '@/components/qr-scanner';
 import { EventsUnavailable, OrganizerForbidden, PageError } from '@/components/organizer/page-states';
 import { ManualHandoverDialog, ReasonDialog } from '@/components/organizer/ops-dialogs';
 import { useEventsOptions } from '@/components/events-options';
+import { useFocusAfterRender } from '@/lib/use-focus-after-render';
 import { useApp } from '../../../app/providers';
 import Link from 'next/link';
 
@@ -94,6 +95,7 @@ export function KitDesk({ doc, role, readOnly, onOpenRegistration, embedded = fa
   const confirmRef = useRef<HTMLButtonElement>(null);
   const manualRef = useRef<HTMLInputElement>(null);
   const clearTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const focusAfterRender = useFocusAfterRender();
 
   const status = doc.status;
   const open = OPEN_STATUSES.has(status);
@@ -140,7 +142,7 @@ export function KitDesk({ doc, role, readOnly, onOpenRegistration, embedded = fa
   function reset(focusManual = true) {
     if (clearTimer.current) { clearTimeout(clearTimer.current); clearTimer.current = null; }
     setPhase('idle'); setShown(null); setPayload(''); setSaveFailed(false); setOverrideMissing(false); keyRef.current = null;
-    if (focusManual) setTimeout(() => manualRef.current?.focus(), 0);
+    if (focusManual) focusAfterRender(() => manualRef.current);
   }
   // Esc cancels the current result (§8.3 keyboard).
   useEffect(() => {
@@ -152,7 +154,7 @@ export function KitDesk({ doc, role, readOnly, onOpenRegistration, embedded = fa
 
   function show(next: Shown) {
     setShown(next); setPhase('result'); setSaveFailed(false); setOverrideMissing(false); keyRef.current = null;
-    setTimeout(() => (next.result === 'valid' && next.canCollect ? confirmRef.current : headingRef.current)?.focus(), 60);
+    focusAfterRender(() => (next.result === 'valid' && next.canCollect ? confirmRef.current : headingRef.current));
   }
 
   /** Verify a payload. `fromCamera`: anything that is not an event ticket is refused locally (§4.7, AC-B5). */

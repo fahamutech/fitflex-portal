@@ -367,14 +367,16 @@ function SaleDetail({ id, onBack, onUpdated }: { id: string; onBack: () => void;
   const [blockers, setBlockers] = useState<Array<{ id: string; number: string }> | null>(null);
   const [busy, setBusy] = useState(false);
   const headingRef = useRef<HTMLHeadingElement>(null);
+  /** Set by load(); the heading takes focus once it has rendered (a timer can fire before the commit in production builds). */
+  const focusPending = useRef(false);
 
   const load = useCallback(async (focus = true) => {
     if (!token) return;
     setState(s => (s === 'ready' ? s : 'loading'));
     try {
       const res = await api.vendorSale(token, id);
+      if (focus) focusPending.current = true;
       setSale(res.sale); setState('ready');
-      if (focus) setTimeout(() => headingRef.current?.focus(), 0);
     } catch (err) {
       if (errorCode(err) === 'sale_not_found') { setState('notFound'); return; }
       if (vendor.handleError(err)) return;
@@ -383,6 +385,11 @@ function SaleDetail({ id, onBack, onUpdated }: { id: string; onBack: () => void;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token, id]);
   useEffect(() => { setNotice(null); void load(); }, [load]);
+  useEffect(() => {
+    if (state !== 'ready' || !sale || !focusPending.current) return;
+    focusPending.current = false;
+    headingRef.current?.focus();
+  }, [state, sale]);
 
   const business = vendor.me?.businessName || t('vendor.shell.unnamed');
 

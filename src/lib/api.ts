@@ -1058,8 +1058,9 @@ export const api = {
   gymOwnerRefs: (token: string) => request<GymOwnerRef[]>('/admin/gym-owners?refs=true', {}, token),
   saveGymOwner: (token: string, owner: Partial<GymOwner>) =>
     request<GymOwner>('/admin/gym-owners', { method: 'POST', body: JSON.stringify(owner) }, token),
-  deleteGymOwner: (token: string, id: string) =>
-    request<{ ok: boolean; owner: GymOwner }>(`/admin/gym-owners/${id}`, { method: 'DELETE' }, token),
+  /** `reason` is sent in the body only (the server ignores a ?reason= query). */
+  deleteGymOwner: (token: string, id: string, reason?: string) =>
+    request<{ ok: boolean; owner: GymOwner }>(`/admin/gym-owners/${id}`, reason ? { method: 'DELETE', body: JSON.stringify({ reason }) } : { method: 'DELETE' }, token),
   adminTrainers: (token: string) => request<TrainerProfile[]>('/admin/trainers', {}, token),
   /** View only, audited server-side: call only when an admin opens this trainer's personal details. `id` is the trainer profile id. */
   adminTrainerPersonalDetails: (token: string, id: string) =>
@@ -1136,8 +1137,9 @@ export const api = {
   members: (token: string) => request<MemberSummary[]>('/admin/members', {}, token),
   saveMember: (token: string, member: Partial<MemberSummary>) =>
     request<MemberSummary>('/admin/members', { method: 'POST', body: JSON.stringify(member) }, token),
-  setMemberStatus: (token: string, id: string, status: 'active' | 'suspended') =>
-    request<MemberSummary>(`/admin/members/${id}/status`, { method: 'POST', body: JSON.stringify({ status }) }, token),
+  /** `reason` goes in the body; the server requires one to suspend only while ADMIN_REASONS_REQUIRED is on. */
+  setMemberStatus: (token: string, id: string, status: 'active' | 'suspended', reason?: string) =>
+    request<MemberSummary>(`/admin/members/${id}/status`, { method: 'POST', body: JSON.stringify(reason ? { status, reason } : { status }) }, token),
   memberPayments: (token: string, memberId: string) =>
     request<PaymentRequest[]>(`/admin/members/${memberId}/payments`, {}, token),
   adminMemberQr: (token: string, memberId: string) =>
@@ -1172,7 +1174,8 @@ export const api = {
     request<Invoice>(`/admin/invoices/${id}`, { method: 'PUT', body: JSON.stringify(data) }, token),
   periodDistribution: (token: string) => request<PeriodDistribution[]>('/admin/distributions/periods', {}, token),
   getSettings: (token: string) => request<PlatformSettings>('/admin/settings', {}, token),
-  updateSettings: (token: string, data: Partial<PlatformSettings>) =>
+  /** `reason` goes in the body (ADMIN_REASONS_REQUIRED: required when tiers, bands, period, model, currency or manualPayment change). */
+  updateSettings: (token: string, data: Partial<PlatformSettings> & { reason?: string }) =>
     request<PlatformSettings>('/admin/settings', { method: 'PUT', body: JSON.stringify(data) }, token),
   paymentOptions: (token: string) => request<PaymentOptions>('/payments/options', {}, token),
   getSpecialties: () => request<string[]>('/settings/specialties'),
