@@ -543,9 +543,12 @@ export function Shell({ children }: { children: ReactNode }) {
   const vendorBounceQuiet = !!vendorArea?.quietWhenOff && !!vendorArea.tool && vendor.me?.tools?.[vendorArea.tool] !== true;
   // The public gym page (/g, opened from a gym's QR code) is for everyone, signed in or not: no redirect, no sidebar.
   const isPublicGymPage = path === '/g' || path.startsWith('/g/');
+  // The member portal (/m) has its own session, its own frame and its own sign-in: the staff shell stays out of it.
+  const isMemberArea = path === '/m' || path.startsWith('/m/');
   const redirectTo = ((): string | null => {
     if (!ready) return null;
     if (isPublicGymPage) return null;
+    if (isMemberArea) return null;
     if (!token) return path !== '/login' && path !== '/' ? '/login' : null;
 
     // A business (vendor or vendor staff) only ever sees /vendor; nobody else does.
@@ -619,6 +622,9 @@ export function Shell({ children }: { children: ReactNode }) {
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
   }, [mobileOpen]);
+
+  // Member portal: no staff header, nav or redirects (the member frame draws its own).
+  if (isMemberArea) return <>{children}</>;
 
   // Authentication is restored from localStorage after mount. Keep the server
   // and the first client render identical so React never hydrates the public

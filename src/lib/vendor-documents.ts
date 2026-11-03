@@ -9,8 +9,9 @@ import { fmt, receiptDateTime, receiptDay, saleMethodLabel } from '@/lib/vendor'
 // ── Documents ──
 
 /** The document kinds the routes take (`/vendor/documents/:docType/:docId`, link lists). */
-export type DocKind = 'sale' | 'payment' | 'statement' | 'order';
-export const DOC_KINDS: readonly DocKind[] = ['sale', 'payment', 'statement', 'order'];
+export type DocKind = 'sale' | 'payment' | 'statement' | 'order' | 'credit_note';
+/** credit_note (S7): a refund on a walk-in sale; its id is the refund id. */
+export const DOC_KINDS: readonly DocKind[] = ['sale', 'payment', 'statement', 'order', 'credit_note'];
 export const isDocKind = (v: string | null | undefined): v is DocKind => !!v && (DOC_KINDS as readonly string[]).includes(v);
 export type DocLang = 'en' | 'sw';
 export type DocPaper = 'a4' | '80mm';
@@ -18,13 +19,27 @@ export type DocPaper = 'a4' | '80mm';
 /** What the document JSON calls itself. */
 export type DocType = 'receipt' | 'invoice' | 'payment_receipt' | 'statement' | 'order_invoice' | 'credit_note';
 
+/**
+ * A document's status. S7 adds refunded (every unit refunded) and settled_by_credit_note (a pay-later sale whose
+ * balance a credit note cleared) on receipts / invoices, and issued on a credit note.
+ */
+export type DocStatus = 'paid' | 'pay_later' | 'paid_in_full' | 'cancelled' | 'issued' | 'refunded' | 'settled_by_credit_note';
+const DOC_STATUSES: readonly string[] = ['paid', 'pay_later', 'paid_in_full', 'cancelled', 'issued', 'refunded', 'settled_by_credit_note'];
+/** The status badge's words; an unknown status shows no badge (null). */
+export const docStatusKey = (status: string | null | undefined): MessageKey | null =>
+  (status && DOC_STATUSES.includes(status) ? `vendor.documents.status.${status}` as MessageKey : null);
+export const docStatusTone = (status: string | null | undefined): 'success' | 'warning' | 'gray' | 'info' =>
+  (status === 'paid' || status === 'paid_in_full' ? 'success' : status === 'pay_later' ? 'warning' : status === 'issued' ? 'info' : 'gray');
+
 /** GET /vendor/documents/:docType/:docId?format=json → { doc }. Never phone, email, address, cost, commission or payout. */
 export interface VendorDocument {
   docType: DocType;
   number: string | null;
-  saleRef?: string | null;
+  /** The R- of a credit invoice; for a credit note (S7) an object with the sale's receipt / invoice number. */
+  saleRef?: string | { number: string; invoiceNumber?: string | null; soldAt?: string | null } | null;
   orderShortRef?: string | null;
-  status: 'paid' | 'pay_later' | 'paid_in_full' | 'cancelled' | null;
+  /** issued: a credit note in force (S7); cancelled: voided sale or undone refund. */
+  status: DocStatus | null;
   issuedAt: string;
   lang: DocLang;
   seller: { businessName: string | null; logoUrl: string | null; address: string | null; contactNumber: string | null; tin?: string | null; vrn?: string | null };
@@ -32,14 +47,21 @@ export interface VendorDocument {
   customer?: { name: string | null } | null;
   servedBy?: { firstName: string | null } | null;
   dueDate?: string | null;
-  lines: Array<{ name: string; variant: string | null; qty: number; unitPriceTzs: number; discountTzs: number; amountTzs: number; vatCode?: string | null }>;
-  subtotalTzs: number;
-  discountsTzs: number;
+  lines: Array<{ name: string; variant: string | null; qty: number; unitPriceTzs?: number; discountTzs?: number; amountTzs: number; vatCode?: string | null }>;
+  /** Absent on a credit note. */
+  subtotalTzs?: number;
+  discountsTzs?: number;
   totalTzs: number;
   vatIncludedTzs: number;
   vatSummary: Array<{ code: string; ratePct: number | null; netTzs: number; vatTzs: number }>;
-  payments: Array<{ method: string; reference?: string | null; amountTzs: number }>;
-  changeTzs: number;
+  payments?: Array<{ method: string; reference?: string | null; amountTzs: number }>;
+  changeTzs?: number;
+  /** S7 credit note: taken off a pay-later balance, and money paid back (null when none). */
+  balanceReducedTzs?: number;
+  paidOut?: { method: string; reference?: string | null; amountTzs: number } | null;
+  /** S7 receipt / invoice: its active credit notes and the total after them. */
+  refunds?: Array<{ number: string; refundedAt: string; amountTzs: number }>;
+  totalAfterRefundsTzs?: number;
   paidNowTzs?: number;
   liveStatus?: { asOf: string; balanceTzs: number; paidInFullAt?: string | null; paidWith: string[] } | null;
   paidTowards?: Array<{ number: string; amountTzs: number }>;
@@ -89,6 +111,7 @@ export function sharePath(kind: DocKind, id: string, customerId?: string | null)
   if (kind === 'sale') return `/vendor/sales/${e(id)}/share`;
   if (kind === 'order') return `/vendor/orders/${e(id)}/share`;
   if (kind === 'statement') return `/vendor/customers/${e(id)}/statement/share`;
+  if (kind === 'credit_note') return `/vendor/refunds/${e(id)}/share`;
   return customerId ? `/vendor/customers/${e(customerId)}/payments/${e(id)}/share` : null;
 }
 
@@ -129,15 +152,17 @@ export const documentsApi = {
 
 /** The vendor permissions that open a kind (§0.3; the server checks the exact one per document). */
 export const KIND_PERMISSIONS: Record<DocKind, readonly string[]> = {
-  sale: ['sales', 'customers'], payment: ['customers'], statement: ['customers'], order: ['orders'],
+  sale: ['sales', 'customers'], payment: ['customers'], statement: ['customers'], order: ['orders'], credit_note: ['sales'],
 };
 export const mayOpenKind = (kind: DocKind, permissions: readonly string[] | null | undefined) =>
   KIND_PERMISSIONS[kind].some(p => (permissions ?? []).includes(p));
 
 /** The document view's address (static export: query strings only). */
-export function documentHref(kind: DocKind, id: string, customerId?: string | null) {
-  return `/vendor/documents/${qs({ type: kind, id, customer: customerId ?? undefined })}`;
+export function documentHref(kind: DocKind, id: string, customerId?: string | null, saleId?: string | null) {
+  return `/vendor/documents/${qs({ type: kind, id, customer: customerId ?? undefined, sale: saleId ?? undefined })}`;
 }
+/** The sale reference of a document as text: the R- of a credit invoice, or a credit note's receipt / invoice. */
+export const saleRefNumber = (ref: VendorDocument['saleRef']) => (typeof ref === 'string' ? ref : ref ? (ref.invoiceNumber || ref.number) : null);
 
 /** The link in the other language, without making a new link (§2.2): the server's own rule for `?lang=`. */
 export function linkUrlFor(share: Pick<DocumentShare, 'url' | 'lang'>, lang: DocLang) {
@@ -168,13 +193,14 @@ const tsh = (n: number) => `TSh ${amountOnly(n)}`;
  * phone, email or address (the JSON has none). `url` adds the "View: {url}" line when a link exists.
  */
 export function documentText(doc: VendorDocument, opts: { locale: Locale; t: (k: MessageKey) => string; url?: string | null }) {
+  if (doc.docType === 'credit_note') return creditNoteText(doc, opts);
   const { t, locale } = opts;
   const rule = '-'.repeat(20);
   const title = t(docTitleKey(doc.docType));
   const out: string[] = [doc.seller.businessName || t('vendor.shell.unnamed'), doc.number ? `${title} ${doc.number}` : title];
   if (doc.statement) out.push(fmt(t('vendor.customers.asOf'), { date: receiptDay(doc.statement.asOf, locale) }));
   else out.push(receiptDateTime(doc.issuedAt, locale));
-  if (doc.saleRef) out.push(fmt(t('vendor.documents.saleRef'), { number: doc.saleRef }));
+  if (typeof doc.saleRef === 'string' && doc.saleRef) out.push(fmt(t('vendor.documents.saleRef'), { number: doc.saleRef }));
   if (doc.orderShortRef) out.push(fmt(t('vendor.orders.ref'), { ref: doc.orderShortRef }));
   if (doc.customer?.name) out.push(fmt(t('vendor.receipt.customer'), { name: doc.customer.name }));
   out.push(rule);
@@ -182,13 +208,19 @@ export function documentText(doc: VendorDocument, opts: { locale: Locale; t: (k:
     out.push(`${l.qty} x ${l.name}${l.variant ? ` (${l.variant})` : ''}  ${amountOnly(l.amountTzs)}${l.vatCode ? ` ${l.vatCode}` : ''}`);
   }
   if (doc.lines.length) {
-    out.push(rule, `${t('vendor.pos.subtotal')}  ${amountOnly(doc.subtotalTzs)}`);
-    if (doc.discountsTzs > 0) out.push(`${t('vendor.pos.discounts')}  -${amountOnly(doc.discountsTzs)}`);
+    out.push(rule, `${t('vendor.pos.subtotal')}  ${amountOnly(doc.subtotalTzs ?? 0)}`);
+    if ((doc.discountsTzs ?? 0) > 0) out.push(`${t('vendor.pos.discounts')}  -${amountOnly(doc.discountsTzs ?? 0)}`);
     out.push(`${t('vendor.pos.total')}  ${tsh(doc.totalTzs)}`);
     if (doc.vatIncludedTzs > 0) out.push(fmt(t('vendor.documents.includesVat'), { amount: tsh(doc.vatIncludedTzs) }));
   }
-  for (const p of doc.payments) out.push(`${saleMethodLabel(p.method, t)}${p.reference ? ` (${p.reference})` : ''}  ${amountOnly(p.amountTzs)}`);
-  if (doc.changeTzs > 0) out.push(`${t('vendor.pos.change')}  ${amountOnly(doc.changeTzs)}`);
+  for (const p of doc.payments ?? []) out.push(`${saleMethodLabel(p.method, t)}${p.reference ? ` (${p.reference})` : ''}  ${amountOnly(p.amountTzs)}`);
+  if ((doc.changeTzs ?? 0) > 0) out.push(`${t('vendor.pos.change')}  ${amountOnly(doc.changeTzs ?? 0)}`);
+  // S7 §6.3: active credit notes against the sale, then the total after them.
+  if (doc.refunds?.length) {
+    out.push(`${t('vendor.refunds.section')}:`);
+    for (const r of doc.refunds) out.push(`${r.number} ${receiptDay(eatDayIso(r.refundedAt), locale)}  -${amountOnly(r.amountTzs)}`);
+    if (typeof doc.totalAfterRefundsTzs === 'number') out.push(`${t('vendor.refunds.netAfter')}  ${tsh(doc.totalAfterRefundsTzs)}`);
+  }
   if (doc.paidTowards?.length) {
     out.push(`${t('vendor.pay.paidTowards')}:`);
     for (const a of doc.paidTowards) out.push(`${a.number}  ${amountOnly(a.amountTzs)}`);
@@ -204,6 +236,48 @@ export function documentText(doc: VendorDocument, opts: { locale: Locale; t: (k:
     out.push(`${t('vendor.statement.totalOwed')}  ${tsh(doc.statement.totalOwedTzs)}`);
   }
   out.push(rule, t('vendor.pos.notFiscal'));
+  if (opts.url) out.push(fmt(t('vendor.documents.textLinkLine'), { url: opts.url }));
+  return out.join('\n');
+}
+
+/** The EAT calendar day "YYYY-MM-DD" of a timestamp. */
+const eatDayIso = (iso: string | null | undefined) => {
+  const ms = Date.parse(iso ?? '');
+  return Number.isFinite(ms) ? new Date(ms + 3 * 3_600_000).toISOString().slice(0, 10) : null;
+};
+const RECEIPT_WIDTH = 32;
+/** "label      amount", padded to 32 characters where it fits (the S3 text rule). */
+const textRow = (label: string, amount: string) => (label.length + 1 + amount.length > RECEIPT_WIDTH
+  ? `${label}\n${amount.padStart(RECEIPT_WIDTH)}`
+  : `${label}${' '.repeat(RECEIPT_WIDTH - label.length - amount.length)}${amount}`);
+
+/**
+ * A credit note as text (S7 §6.4; documents off, or "Share as text"), in `t`'s language: business, number, the
+ * receipt / invoice it is for, date, lines, refund total, what was taken off the balance and what was paid back.
+ * Customer name only; never the reason, restock flags or cost (the JSON has none).
+ */
+export function creditNoteText(doc: VendorDocument, opts: { locale: Locale; t: (k: MessageKey) => string; url?: string | null }) {
+  const { t, locale } = opts;
+  const rule = '-'.repeat(20);
+  const business = doc.seller.businessName || t('vendor.shell.unnamed');
+  const out: string[] = [business, fmt(t('vendor.refunds.cnTitle'), { number: doc.number ?? '' })];
+  const ref = typeof doc.saleRef === 'object' && doc.saleRef ? doc.saleRef : null;
+  if (ref?.invoiceNumber) out.push(fmt(t('vendor.refunds.forInvoice'), { number: ref.invoiceNumber }));
+  else if (ref?.number) out.push(fmt(t('vendor.refunds.forReceipt'), { number: ref.number }));
+  out.push(receiptDateTime(doc.issuedAt, locale));
+  if (doc.customer?.name) out.push(fmt(t('vendor.receipt.customer'), { name: doc.customer.name }));
+  out.push(rule);
+  for (const l of doc.lines) {
+    out.push(`${l.qty} x ${l.name}${l.variant ? ` (${l.variant})` : ''}`, `${amountOnly(l.amountTzs)}${l.vatCode ? ` ${l.vatCode}` : ''}`.padStart(RECEIPT_WIDTH));
+  }
+  out.push(rule, textRow(t('vendor.refunds.total'), tsh(doc.totalTzs)));
+  if (doc.vatIncludedTzs > 0) out.push(fmt(t('vendor.documents.includesVat'), { amount: tsh(doc.vatIncludedTzs) }));
+  if ((doc.balanceReducedTzs ?? 0) > 0) out.push(textRow(t('vendor.refunds.takenOff'), amountOnly(doc.balanceReducedTzs ?? 0)));
+  if (doc.paidOut && doc.paidOut.amountTzs > 0) {
+    const method = saleMethodLabel(doc.paidOut.method, t);
+    out.push(textRow(`${fmt(t('vendor.refunds.refundedBy'), { method })}${doc.paidOut.reference ? ` (${doc.paidOut.reference})` : ''}`, amountOnly(doc.paidOut.amountTzs)));
+  } else if (!(doc.balanceReducedTzs ?? 0)) out.push(t('vendor.refunds.nothingPaidBack'));
+  out.push(rule, fmt(t('vendor.refunds.refundGivenBy'), { business }), t('vendor.pos.notFiscal'));
   if (opts.url) out.push(fmt(t('vendor.documents.textLinkLine'), { url: opts.url }));
   return out.join('\n');
 }

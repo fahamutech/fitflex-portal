@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { Inbox } from 'lucide-react';
 import { api, type LowStockRow, type VendorAgingPage, type VendorOrder, type VendorPayments, type VendorSaleSummary, type VendorStatementList } from '@/lib/api';
 import { money } from '@/lib/admin-utils';
-import { canCustomers, canWalkInSales, countsOf, eatDateTime, eatToday, fmt, isOpenOrder, itemsKey, payoutWhyKey, statusKey, statusTone, type OrderCounts } from '@/lib/vendor';
+import { canCustomers, canWalkInSales, countsOf, refundsOn, eatDateTime, eatToday, fmt, isOpenOrder, itemsKey, payoutWhyKey, statusKey, statusTone, type OrderCounts } from '@/lib/vendor';
 import { Badge, Button, Card, CardContent, CardHeader, EmptyState, PageHeader, Skeleton } from '@/components/shared';
 import { useVendor } from '@/components/vendor-context';
 import { reportAccess } from '@/lib/vendor-reports';
@@ -118,7 +118,10 @@ export default function VendorDashboardPage() {
           <Tile label={t('vendor.dash.shopSalesToday')} testId="dash-shop-sales">
             {shopSales.state === 'loading' ? loading : shopSales.state === 'failed' ? failed(retryShopSales) : (
               <>
-                {value(shopSales.data ? money(shopSales.data.totalTzs) : '—', 'dash-shop-sales-value')}
+                {/* S7 (AC-38): after refunds when the refunds tool is on. */}
+                {refundsOn(vendor.me) && typeof shopSales.data?.netTzs === 'number'
+                  ? <>{value(money(shopSales.data.netTzs), 'dash-shop-sales-value')}<p className="text-sm text-[var(--color-fg-quaternary)]" data-testid="dash-shop-sales-after">{t('vendor.dash.afterRefunds')}</p></>
+                  : value(shopSales.data ? money(shopSales.data.totalTzs) : '—', 'dash-shop-sales-value')}
                 <p className="mt-1 text-sm text-[var(--color-fg-quaternary)]">{t('vendor.dash.shopSalesHint')}</p>
                 <Link href="/vendor/sales/" className={linkCls}>{t('vendor.dash.viewAll')}</Link>
               </>
