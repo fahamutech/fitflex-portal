@@ -204,7 +204,9 @@ test.describe('refund dialog', () => {
     await page.getByTestId('sale-refund').click();
     const dialog = page.getByTestId('refund-dialog');
     await expect(dialog.getByTestId('refund-step-heading')).toHaveText('What is the customer bringing back?');
-    await expect(dialog.getByTestId('refund-step-heading')).toBeFocused();
+    // UAT L-10: the dialog (labelled by its title) has focus on open.
+    await expect(dialog).toBeFocused();
+    await expect(dialog).toHaveAccessibleName('Refund from R-000123');
     await expect(dialog.getByTestId('refund-money-notice')).toHaveText('FitFlex does not handle this money. Give it back to the customer yourself.');
     // Nothing picked yet: Review is disabled and says why.
     await expect(dialog.getByTestId('refund-review')).toBeDisabled();
@@ -259,7 +261,7 @@ test.describe('refund dialog', () => {
     await dialog.getByTestId('refund-reason-faulty').click();
     await dialog.getByTestId('refund-review').click();
     await dialog.getByTestId('refund-confirm-button').click();
-    await expect(dialog.getByTestId('refund-banner')).toHaveText('Refunds need an internet connection. Nothing was changed.');
+    await expect(dialog.getByTestId('refund-banner')).toHaveText("We couldn't confirm the refund. Try again — it won't be made twice.");
     await expect(dialog.getByTestId('refund-confirm-button')).toHaveText('Try again');
     await dialog.getByTestId('refund-confirm-button').click();
     await expect(page.getByText('Refund saved: CN-000004')).toBeVisible();
@@ -354,6 +356,99 @@ test.describe('refund dialog (round 2)', () => {
   });
 });
 
+test.describe('UAT fixes (S7 UAT on RC)', () => {
+  test('L-3: pay-later chips — Refunded, Settled by credit note, and Paid off only when payments paid it', async ({ page }) => {
+    await signedInAs(page, VENDOR);
+    const credit = (extra: Record<string, unknown>) => ({
+      id: 'x', number: 'R-0', soldAt: NOW, recordedAt: NOW, status: 'completed', totalTzs: 20000, itemCount: 2, methods: [], createdBy: { id: 'usr_vendor', name: 'Asha' },
+      hasOverride: false, discountTzs: 0, lateRecorded: false, kind: 'credit', balanceTzs: 0, dueDate: null, customer: { id: 'cus_1', name: 'Neema', forgotten: false }, ...extra,
+    });
+    await mockApi(page, base({
+      'GET /vendor/sales': { json: { sales: [
+        credit({ id: 's5', number: 'R-000005', refundedTzs: 20000, refundState: 'full' }),
+        credit({ id: 's6', number: 'R-000006', refundedTzs: 3333, refundState: 'partial' }),
+        credit({ id: 's7', number: 'R-000007', refundedTzs: 0, refundState: 'none' }),
+      ], nextCursor: null, summary: { count: 3, totalTzs: 60000, voidedCount: 0, byMethod: [] } } },
+      'GET /vendor/sales/sale_1': { json: { sale: sale({ kind: 'credit', balanceTzs: 0, balanceReducedTzs: 3333, refundedTzs: 3333, refundState: 'partial', customer: { id: 'cus_1', name: 'Neema', forgotten: false }, lines: [line({ refundedQty: 1, refundableQty: 2, refundedTzs: 3333 }), shaker()] }) } },
+    }));
+    await page.goto('/vendor/sales/');
+    const row = (id: string) => page.getByTestId(`sale-row-${id}`);
+    await expect(row('s5')).toContainText('Refunded');
+    await expect(row('s5')).not.toContainText('Paid off');
+    await expect(row('s5')).not.toContainText('Settled by credit note');
+    await expect(row('s6')).toContainText('Settled by credit note');
+    await expect(row('s6')).not.toContainText('Paid off');
+    await expect(row('s7')).toContainText('Paid off');
+    await openSale(page);
+    await expect(page.getByTestId('sale-settled')).toHaveText('Settled by credit note');
+    await expect(page.getByTestId('sale-credit')).not.toContainText('Paid off');
+  });
+
+  test('L-9: an undone refund does not say "back in stock"', async ({ page }) => {
+    await page.setViewportSize({ width: 375, height: 760 });
+    await signedInAs(page, VENDOR);
+    await mockApi(page, base({
+      'GET /vendor/sales/sale_1': { json: { sale: refundedSale('reverted') } },
+      'GET /vendor/refunds/vrf_1': { json: { refund: refund({ status: 'reverted', revertedAt: NOW, revertedBy: { id: 'usr_vendor', name: 'Rehema' }, revertReason: 'Mistake' }) } },
+    }));
+    await openSale(page);
+    const card = page.getByTestId('refund-card-vrf_1');
+    await expect(card).toContainText('Undone');
+    await expect(card).toContainText('TSh 3,333');
+    await expect(card).not.toContainText('back in stock');
+  });
+
+  test('L-4 at 375px: after refund_exceeds_sold focus is on the affected line, not Close', async ({ page }) => {
+    await page.setViewportSize({ width: 375, height: 760 });
+    await signedInAs(page, VENDOR);
+    await mockApi(page, base({
+      'POST /vendor/sales/sale_1/refunds': { status: 409, json: { error: 'refund_exceeds_sold', lines: [{ saleLineId: 'sln_whey', soldQty: 3, refundedQty: 2, refundableQty: 1 }] } },
+    }));
+    await openSale(page);
+    await page.getByTestId('sale-refund').click();
+    const dialog = page.getByTestId('refund-dialog');
+    await dialog.getByTestId('refund-all').click();
+    await dialog.getByTestId('refund-reason-faulty').click();
+    await dialog.getByTestId('refund-review').click();
+    await dialog.getByTestId('refund-confirm-button').click();
+    const qtyBox = dialog.getByTestId('refund-qty-sln_whey').filter({ visible: true });
+    await expect(qtyBox).toHaveValue('1');
+    await expect(qtyBox).toBeFocused();
+  });
+
+  test('L-8: Close is at least 44×44px; the restock box is at least 24px with a 44px label target', async ({ page }) => {
+    await signedInAs(page, VENDOR);
+    await mockApi(page, base());
+    await openSale(page);
+    await page.getByTestId('sale-refund').click();
+    const dialog = page.getByTestId('refund-dialog');
+    const close = await dialog.getByRole('button', { name: 'Close' }).first().boundingBox();
+    expect(close!.width).toBeGreaterThanOrEqual(44);
+    expect(close!.height).toBeGreaterThanOrEqual(44);
+    await dialog.getByRole('button', { name: 'Refund one more Whey 1kg' }).click();
+    const sw = dialog.getByRole('switch', { name: 'Put Whey 1kg back in stock' });
+    const box = await sw.boundingBox();
+    expect(box!.width).toBeGreaterThanOrEqual(24);
+    expect(box!.height).toBeGreaterThanOrEqual(24);
+    const label = await sw.locator('xpath=ancestor::label[1]').boundingBox();
+    expect(label!.height).toBeGreaterThanOrEqual(44);
+  });
+
+  test('L-5 in Swahili: a lost answer at Confirm reads Jaribu tena with the "won\'t be made twice" message', async ({ page }) => {
+    await signedInAs(page, VENDOR, 'sw');
+    await mockApi(page, base({ 'POST /vendor/sales/sale_1/refunds': 'abort' }));
+    await openSale(page);
+    await page.getByTestId('sale-refund').click();
+    const dialog = page.getByTestId('refund-dialog');
+    await dialog.getByTestId('refund-inc-sln_whey').filter({ visible: true }).click();
+    await dialog.getByTestId('refund-reason-faulty').click();
+    await dialog.getByTestId('refund-review').click();
+    await dialog.getByTestId('refund-confirm-button').click();
+    await expect(dialog.getByTestId('refund-banner')).toHaveText('Hatukuweza kuthibitisha marejesho. Jaribu tena — hayatafanywa mara mbili.');
+    await expect(dialog.getByTestId('refund-confirm-button')).toHaveText('Jaribu tena');
+  });
+});
+
 test.describe('undo', () => {
   test('needs a reason; insufficient_stock explains; already_reverted after a lost answer counts as done', async ({ page }) => {
     await signedInAs(page, VENDOR);
@@ -432,7 +527,9 @@ test.describe('layout, focus, language', () => {
     await openSale(page);
     await page.getByTestId('sale-refund').click();
     const dialog = page.getByTestId('refund-dialog');
-    await expect(dialog.getByTestId('refund-step-heading')).toBeFocused();
+    // UAT L-10: the dialog (labelled by its title) has focus on open.
+    await expect(dialog).toBeFocused();
+    await expect(dialog).toHaveAccessibleName('Refund from R-000123');
     const box = await dialog.boundingBox();
     expect(Math.round(box!.width)).toBe(375);
     const scroll = await page.evaluate(() => document.documentElement.scrollWidth);
