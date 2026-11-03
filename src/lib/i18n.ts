@@ -5717,6 +5717,7 @@ export const messages = {
     ...hrOrgMessages.en,
     ...eventsS6Messages.en,
     ...eventsS7Messages.en,
+    ...memberMessages.en,
     // ── Public gym page (/g, flag NEXT_PUBLIC_WEB_GYM_PROFILE); Swahili marked for native review ──
     // ── Browser gym check-in (/g/signin, /g/confirm, /g/done; flag NEXT_PUBLIC_WEB_QR_CHECKIN); Swahili marked for native review ──
     "web.checkin.visitHint": "Sign in with your FitFlex account to check in. Signing in does not prove you are at the gym.",
@@ -11556,6 +11557,7 @@ export const messages = {
     ...hrOrgMessages.sw,
     ...eventsS6Messages.sw,
     ...eventsS7Messages.sw,
+    ...memberMessages.sw,
     // ── Ukurasa wa gym wa umma (/g); Kiswahili kinasubiri mapitio ya mzungumzaji asilia ──
     // Browser gym check-in: Swahili is a DRAFT for native review
     "web.checkin.visitHint": "Ingia kwa akaunti yako ya FitFlex ili ujiandikishe. Kuingia kwenye akaunti hakuthibitishi kuwa uko gym.",
@@ -11678,6 +11680,7 @@ export const messages = {
 import { hrOrgMessages } from './i18n-hr-org';
 import { eventsS6Messages } from './i18n-events-s6';
 import { eventsS7Messages } from './i18n-events-s7';
+import { memberMessages } from './i18n-member';
 
 export type MessageKey = keyof typeof messages['en'];
 
