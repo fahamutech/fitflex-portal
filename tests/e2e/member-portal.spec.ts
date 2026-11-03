@@ -87,8 +87,9 @@ function base(): Mock {
     'GET /events/ev1': ok({ ...EVENT, categories: [{ id: 'c10', name: '10K', distanceM: 10000, availability: 'open', ticketTypes: [{ id: 'tt10', name: 'Standard', priceTzs: 35000, availability: 'open' }] },
       { id: 'c5', name: '5K', distanceM: 5000, availability: 'open', ticketTypes: [{ id: 'tt5', name: 'Fun run', priceTzs: 0, availability: 'open' }] }] }),
     'POST /me/event-orders/quote': (_n, b) => ok({ valid: true, quote: { currency: 'TZS', subtotalTzs: b.lines[0].ticketTypeId === 'tt5' ? 0 : 35000, discountTzs: 0, feesTzs: 0, totalTzs: b.lines[0].ticketTypeId === 'tt5' ? 0 : 35000 },
-      participants: [{ index: 0, ok: true, problems: [] }], problems: [], fields: { phone: 'required', dateOfBirth: 'off' }, consentText: { version: 'v3', self: 'I agree to take part.' } }),
-    'POST /me/event-orders': (_n, b) => ok({ order: { id: 'eo1', reference: 'EV-1', status: b.lines[0].ticketTypeId === 'tt5' ? 'confirmed' : 'awaiting_payment', totalTzs: b.lines[0].ticketTypeId === 'tt5' ? 0 : 35000 } }, 201),
+      participants: [{ index: 0, ok: true, problems: [] }], problems: [], fields: { phone: 'required', dateOfBirth: 'off' }, consentText: { version: 'v3', self: { en: 'I agree to take part.', sw: 'Ninakubali kushiriki.' } } }),
+    'POST /me/event-orders': (_n, b) => ok({ order: b.lines[0].ticketTypeId === 'tt5' ? { id: 'eo_free', reference: 'EV-2', status: 'awaiting_payment', totalTzs: 0 } : { id: 'eo1', reference: 'EV-1', status: 'awaiting_payment', totalTzs: 35000 } }, 201),
+    'POST /me/event-orders/eo_free/payment': ok({ next: { payment: 'none', paymentRequestId: null }, order: { id: 'eo_free', status: 'confirmed', totalTzs: 0 } }, 201),
     'POST /me/event-orders/eo1/payment': ok({ next: { payment: 'provider', paymentRequestId: 'pay_ev1' }, order: { id: 'eo1', status: 'awaiting_payment', totalTzs: 35000 } }, 201),
     'POST /me/payments/pay_ev1/mobile-money': ok({ state: 'in_progress' }, 202),
     'POST /me/payments/pay_ev1/mobile-money/refresh': ok({ state: 'completed' }),
@@ -211,12 +212,14 @@ test.describe('member portal, flag on', () => {
 
   test('manual payment mode: Lipa Namba, transaction ID sent with the request', async ({ page }) => {
     const h = await setup(page, {
-      'GET /payments/options': ok({ enabled: false, manual: { enabled: true, lipaNamba: '5123456', accountName: 'FITFLEX AFRICA', network: 'M-Pesa' } }),
+      'GET /payments/options': ok({ enabled: false, manual: { enabled: true, lipaNamba: '5123456', accountName: 'FITFLEX AFRICA', network: 'M-Pesa', instructions: { en: 'Use the business number.', sw: 'Tumia namba ya biashara.' }, referenceRequired: true, payerPhoneRequired: true } }),
     });
     await page.goto('/m/pass/');
     await page.getByTestId('member-pass-option-pro').check();
     await page.getByTestId('member-pass-continue').click();
     await expect(page.getByTestId('member-pay-manual')).toContainText('5123456');
+    // The server keeps the instructions as { en, sw } (shape from GET /payments/options).
+    await expect(page.getByTestId('member-pay-manual')).toContainText('Use the business number.');
     await page.getByTestId('member-pay-reference').fill('QGH7XK2L9P');
     await page.getByTestId('member-pay-manual-submit').click();
     await expect(page.getByTestId('member-pay-manual_done')).toBeVisible();
@@ -362,6 +365,8 @@ test.describe('member portal, flag on', () => {
     await page.getByTestId('member-event-ticket-tt10').check();
     await expect(page.getByTestId('member-event-first')).toHaveValue('Neema');
     await page.getByTestId('member-event-quote').click();
+    // Server texts come as { en, sw }.
+    await expect(page.getByTestId('member-event-consent')).toHaveText('I agree to take part.');
     await expect(page.getByTestId('member-event-register')).toBeDisabled();
     await page.getByTestId('member-event-terms').check();
     await page.getByTestId('member-event-register').click();
@@ -373,7 +378,7 @@ test.describe('member portal, flag on', () => {
       participants: [{ ticketTypeId: 'tt10', firstName: 'Neema', lastName: 'Mushi', consentBasis: 'self' }] });
   });
 
-  test('events: a free race confirms at once; tickets show the QR drawn in the page', async ({ page }) => {
+  test('events: a free race is confirmed by the payment step at once; tickets show the QR drawn in the page', async ({ page }) => {
     const h = await setup(page);
     await page.goto('/m/events/');
     await page.getByTestId('member-event-ev1').click();
@@ -382,13 +387,14 @@ test.describe('member portal, flag on', () => {
     await page.getByTestId('member-event-terms').check();
     await page.getByTestId('member-event-register').click();
     await expect(page.getByTestId('member-event-done')).toContainText(en['member.events.registeredTitle']);
+    expect(h.count('POST /me/event-orders/eo_free/payment')).toBe(1);
     expect(h.count('POST /me/event-orders/eo1/payment')).toBe(0);
     await page.getByTestId('member-events-tab-tickets').click();
     await page.getByTestId('member-event-show-reg1').click();
     await expect(page.getByTestId('member-event-qr').locator('svg')).toBeVisible();
   });
 
-  test('events: paid places are not sold on the web while event payments are off', async ({ page }) => {
+  test('events: nothing is registered on the web while the server\'s event payments are off', async ({ page }) => {
     const h = await setup(page, { 'GET /events/options': ok({ discovery: true, registration: true, payment: 'none' }) });
     await page.goto('/m/events/');
     await page.getByTestId('member-event-ev1').click();

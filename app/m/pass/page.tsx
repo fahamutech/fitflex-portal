@@ -105,8 +105,8 @@ function PassPage({ session }: { session: MemberSession | null }) {
           {pending && (
             <section className="flex flex-col gap-3 rounded-3xl border-2 border-[#ff8a6b] bg-[#0f172a] p-6" data-testid="member-pass-pending">
               <p>{fmt(t('member.pay.pendingExisting'), { amount: formatTzs(pending.amountTzs, locale), tier: tierLabel(pending.tier, passes) })}</p>
-              {/* A Lipa Namba payment already sent with its transaction ID: it waits for the team. */}
-              {pending.reference && pending.provider !== 'tunzaa'
+              {/* A Lipa Namba payment already sent with its transaction ID (memberReference): it waits for the team. */}
+              {(pending.memberReference || (pending.reference && pending.provider !== 'tunzaa'))
                 ? <p className={muted}>{t('member.pay.pendingManual')}</p>
                 : (
                   <button type="button" className="inline-flex min-h-11 items-center justify-center self-start rounded-full bg-[#c8f04a] px-5 text-sm font-extrabold text-[#020617]"

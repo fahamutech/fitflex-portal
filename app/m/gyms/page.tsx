@@ -122,7 +122,8 @@ function Gyms() {
 function GymDetail({ gym, fav, onFav, covered }: { gym: Gym; fav: boolean; onFav: () => void; covered: boolean | null }) {
   const { t } = useApp();
   const facilities = [...(gym.amenities ?? []), ...(gym.equipment ?? [])].slice(0, 12);
-  const maps = gym.coordinates ? `https://www.google.com/maps/dir/?api=1&destination=${gym.coordinates.lat},${gym.coordinates.lng}` : null;
+  const c = gym.coordinates;
+  const maps = c && Number.isFinite(c.lat) && Number.isFinite(c.lng) && (c.lat !== 0 || c.lng !== 0) ? `https://www.google.com/maps/dir/?api=1&destination=${c.lat},${c.lng}` : null;
   const image = gym.images?.[0];
   return (
     <section aria-labelledby="gym-detail" className={`${card} flex flex-col gap-4 lg:sticky lg:top-4`} data-testid="member-gym-detail">

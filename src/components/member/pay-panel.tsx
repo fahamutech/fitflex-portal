@@ -8,7 +8,7 @@ import { CheckCircle2 } from 'lucide-react';
 import { useApp } from '../../../app/providers';
 import { card, ghostBtn, input, muted, primaryBtn } from './member-frame';
 import { fmt } from './member-shared';
-import { MEMBER_PASSTHROUGH, canPayByMobileMoney, formatTzs, MEMBER_ROUTES, MemberApiError, memberApi, type MemberCode, type PaymentOptions } from '@/lib/member-api';
+import { MEMBER_PASSTHROUGH, canPayByMobileMoney, instructionsText, formatTzs, MEMBER_ROUTES, MemberApiError, memberApi, type MemberCode, type PaymentOptions } from '@/lib/member-api';
 import { ERROR_KEYS, type CheckinCode } from '@/lib/web-checkin';
 import type { MessageKey } from '@/lib/i18n';
 
@@ -186,7 +186,7 @@ export function PayPanel({ target, options, defaultPhone, onBack }: { target: Pa
           <div><dt className={`text-sm ${muted}`}>{t('member.pay.manualNumber')}</dt><dd className="font-mono text-xl font-bold">{manual.lipaNamba}</dd></div>
           <div><dt className={`text-sm ${muted}`}>{t('member.pay.manualName')}</dt><dd className="font-bold">{manual.accountName}{manual.network ? ` · ${manual.network}` : ''}</dd></div>
         </dl>
-        {manual.instructions && <p className={`text-sm ${muted}`}>{manual.instructions}</p>}
+        {instructionsText(manual, locale) && <p className={`text-sm ${muted}`}>{instructionsText(manual, locale)}</p>}
         {ErrorBox}
         <label className="flex flex-col gap-1.5 text-sm font-semibold">
           {t('member.pay.manualRef')}

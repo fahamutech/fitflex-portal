@@ -7,7 +7,7 @@ import { errorKey, PayPanel, type PayTarget } from '@/components/member/pay-pane
 import { fmt, revealPanel } from '@/components/member/member-shared';
 import { EVENTS_MODULE } from '@/lib/flags';
 import {
-  eventsApi, formatDate, formatTzs, MEMBER_ROUTES, MemberApiError, memberApi, newIdempotencyKey,
+  eventsApi, formatDate, formatTzs, instructionsText, localText, MEMBER_ROUTES, MemberApiError, memberApi, newIdempotencyKey,
   type EventDetail, type EventQuote, type EventsOptions, type EventSummary, type EventTicket, type MemberCode, type MemberSession,
   type Participant, type PaymentOptions, type TicketType,
 } from '@/lib/member-api';
@@ -40,8 +40,9 @@ function Events({ session }: { session: MemberSession | null }) {
     if (!EVENTS_MODULE) return;
     if (!silent) setState('loading');
     try {
-      const o = await eventsApi.options();
-      if (!o.discovery) { setState('off'); return; }
+      // A 404 on the probe means the module is not there (fail closed, like the staff portal).
+      const o = await eventsApi.options().catch(e => { if (e instanceof MemberApiError && e.status === 404) return null; throw e; });
+      if (!o?.discovery) { setState('off'); return; }
       const [e, tk, p] = await Promise.all([eventsApi.list(), o.registration ? eventsApi.tickets().catch(() => []) : Promise.resolve([]), memberApi.paymentOptions().catch(() => null)]);
       setOpts(o); setEvents(e); setTickets(tk); setPayOpts(p); setState('ready');
     } catch { setState('error'); }
@@ -146,7 +147,8 @@ function EventPanel({ id, opts, payOpts, session, onPay, onRegistered }: {
   });
   const body = () => ({ eventId: ev.id, lines: [{ ticketTypeId: ticketId, quantity: 1 }], participants: [participant()] });
   const total = quote?.quote.totalTzs ?? 0;
-  const paymentBlocked = total > 0 && (opts.payment ?? 'none') === 'none';
+  // With the server's event payments off ('none') no place can be confirmed, free ones included: nothing is held on the web.
+  const paymentBlocked = (opts.payment ?? 'none') === 'none';
   const problems = quote?.participants?.[0]?.problems ?? [];
 
   async function run(fn: () => Promise<void>) {
@@ -157,7 +159,12 @@ function EventPanel({ id, opts, payOpts, session, onPay, onRegistered }: {
   const register = () => run(async () => {
     if (!quote) return;
     const { order } = await eventsApi.place(orderKey.current, { ...body(), acceptedTerms: true, consentTextVersion: quote.consentText?.version ?? opts.consentTextVersion, expectedTotalTzs: quote.quote.totalTzs });
-    if (order.totalTzs === 0 || order.status === 'confirmed') { setDone('registered'); onRegistered(); return; }
+    if (order.status === 'confirmed') { setDone('registered'); onRegistered(); return; }
+    // A free place is confirmed by the payment step too (it answers next.payment "none" at once).
+    if (order.totalTzs === 0) {
+      await eventsApi.startPayment(order.id, newIdempotencyKey(), {});
+      setDone('registered'); onRegistered(); return;
+    }
     if (opts.payment === 'provider') {
       const r = await eventsApi.startPayment(order.id, newIdempotencyKey(), {});
       if (r.next.payment === 'none' || !r.next.paymentRequestId) { setDone('registered'); onRegistered(); return; }
@@ -210,6 +217,7 @@ function EventPanel({ id, opts, payOpts, session, onPay, onRegistered }: {
               <div><dt className={`text-sm ${muted}`}>{t('member.pay.manualName')}</dt><dd className="font-bold">{payOpts.manual.accountName}</dd></div>
             </dl>
           )}
+          {instructionsText(payOpts?.manual, locale) && <p className={`text-sm ${muted}`}>{instructionsText(payOpts?.manual, locale)}</p>}
           {errBox}
           <label className="flex flex-col gap-1.5 text-sm font-semibold">{t('member.pay.manualRef')}
             <input className={`${input} font-mono uppercase`} value={reference} onChange={e => setReference(e.target.value)} data-testid="member-event-reference" /></label>
@@ -265,7 +273,7 @@ function EventPanel({ id, opts, payOpts, session, onPay, onRegistered }: {
                 <span className="flex flex-col"><strong>{t('member.events.total')}</strong>{quote.quote.feesTzs > 0 && <span className={`text-sm ${muted}`}>{fmt(t('member.events.fees'), { amount: formatTzs(quote.quote.feesTzs, locale) })}</span>}</span>
                 <strong className="text-xl tabular-nums">{total === 0 ? t('member.events.free') : formatTzs(total, locale)}</strong>
               </div>
-              {quote.consentText?.self && <p className={`text-sm ${muted}`}>{quote.consentText.self}</p>}
+              {localText(quote.consentText?.self, locale) && <p className={`text-sm ${muted}`} data-testid="member-event-consent">{localText(quote.consentText?.self, locale)}</p>}
               <label className="flex items-start gap-3 text-sm"><input type="checkbox" checked={terms} onChange={e => setTerms(e.target.checked)} className="mt-0.5 h-5 w-5 flex-none accent-[#c8f04a]" data-testid="member-event-terms" />{t('member.events.terms')}</label>
               {paymentBlocked
                 ? <p className="rounded-xl bg-[#3a1d14] px-4 py-3 text-sm text-[#ffd2c4]" data-testid="member-event-pay-not-open">{t('member.events.payNotOpen')}</p>

@@ -17,11 +17,11 @@ const TIMEOUT_MS = 15_000;
 export interface MemberUser { id: string; userType: string; name?: string | null; displayName?: string | null; phone?: string | null; email?: string | null; publicId?: string | null }
 export interface MemberSession { token: string; user: MemberUser }
 export interface Subscription { id: string; tier: string | null; type: string; status: string; startedAt?: string | null; expiresAt?: string | null; renewsAt?: string | null; homeGym?: { id: string; name: string } | null }
-export interface PaymentRequest { id: string; tier: string | null; amountTzs: number; status: string; requestedAt: string; provider?: string | null; reference?: string | null; productType?: string | null; note?: string | null; gym?: { id: string; name: string } | null; eventName?: string | null }
+export interface PaymentRequest { id: string; tier: string | null; amountTzs: number; status: string; requestedAt: string; provider?: string | null; reference?: string | null; memberReference?: string | null; productType?: string | null; note?: string | null; gym?: { id: string; name: string } | null; eventName?: string | null }
 export interface MeResponse { user: MemberUser; subscription: Subscription | null; pendingPayment: PaymentRequest | null; pendingPayments?: PaymentRequest[]; visitsUsed: number; visitCap: number | null }
 export interface Pass { id: string; key: string; label: string; price: number; visitCap: number | null; visits?: number | null; gymAccess?: string | null }
 export interface UpgradeOption { tier: string; label: string; monthlyPrice: number; visits?: number | null; differenceTzs: number }
-export interface ManualPayment { enabled: boolean; lipaNamba?: string; accountName?: string; network?: string; instructions?: string; referenceRequired?: boolean; payerPhoneRequired?: boolean }
+export interface ManualPayment { enabled: boolean; lipaNamba?: string; accountName?: string; network?: string | null; instructions?: { en?: string | null; sw?: string | null } | null; referenceRequired?: boolean; payerPhoneRequired?: boolean }
 export interface PaymentOptions { enabled: boolean; provider?: string; environment?: string | null; manual?: ManualPayment; mobileMoney?: { products: string[] } }
 export interface MemberQr { token: string; expiresAt: string; rotatesEverySeconds: number }
 export interface Checkin { id: string; timestamp: string; status?: string; visitConsumed?: boolean; gym?: { id: string; name: string } | null }
@@ -199,6 +199,20 @@ export function eatToday(now = new Date()): string {
   return new Date(+now + 3 * 3600_000).toISOString().slice(0, 10);
 }
 
+/** A server text given as { en, sw } (or, in older answers, a plain string) in the page language. */
+export function localText(v: { en?: string | null; sw?: string | null } | string | null | undefined, locale: 'en' | 'sw'): string | null {
+  if (!v) return null;
+  if (typeof v === 'string') return v;
+  return (locale === 'sw' ? v.sw || v.en : v.en || v.sw) || null;
+}
+
+/** The admin's Lipa Namba instructions in the page language (the server stores { en, sw }). */
+export function instructionsText(m: ManualPayment | null | undefined, locale: 'en' | 'sw'): string | null {
+  const i = m?.instructions;
+  if (!i || typeof i !== 'object') return null;
+  return (locale === 'sw' ? i.sw || i.en : i.en || i.sw) || null;
+}
+
 export function formatTzs(n: number, locale: 'en' | 'sw'): string {
   return `TZS ${new Intl.NumberFormat(locale === 'sw' ? 'sw-TZ' : 'en-GB').format(Math.round(n))}`;
 }
@@ -274,7 +288,7 @@ export type FieldPolicy = 'required' | 'optional' | 'off';
 export interface EventQuote {
   valid: boolean; quote: { currency: string; subtotalTzs: number; discountTzs: number; feesTzs: number; totalTzs: number; feeLabel?: string | null };
   participants: Array<{ index: number; ok: boolean; problems: Array<{ field: string; code: string }> }>; problems: Array<{ code: string }>;
-  fields?: Record<string, FieldPolicy>; termsVersion?: string; consentText?: { version: string; self: string };
+  fields?: Record<string, FieldPolicy>; termsVersion?: string; consentText?: { version: string; self: { en?: string | null; sw?: string | null } | string };
 }
 export interface EventOrder { id: string; reference: string; status: string; totalTzs: number; holdExpiresAt?: string | null }
 export interface EventTicket { registrationId: string; ticketId?: string | null; displayCode?: string | null; state: string; event: EventSummary; category?: { name: string } | null; ticketType?: { name: string } | null }
