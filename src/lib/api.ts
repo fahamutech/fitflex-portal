@@ -366,6 +366,17 @@ export const api = {
   vendorSale: (token: string, id: string) => request<{ sale: VendorSale }>(`/vendor/sales/${encodeURIComponent(id)}`, {}, token),
   vendorVoidSale: (token: string, id: string, reason: string) =>
     request<{ sale: VendorSale }>(`/vendor/sales/${encodeURIComponent(id)}/void`, { method: 'POST', body: JSON.stringify({ reason }) }, token),
+  // S7 refunds on walk-in sales (functions#318). The client never sends amounts: the server computes them.
+  // 201 = made; 200 (Idempotent-Replay) = the same clientRef answered again with the stored refund.
+  vendorRefundSale: (token: string, saleId: string, body: VendorRefundInput) =>
+    request<{ refund: VendorRefund; sale: VendorSale }>(`/vendor/sales/${encodeURIComponent(saleId)}/refunds`, { method: 'POST', body: JSON.stringify(body) }, token),
+  vendorRevertRefund: (token: string, refundId: string, reason: string) =>
+    request<{ refund: VendorRefund; sale: VendorSale }>(`/vendor/refunds/${encodeURIComponent(refundId)}/revert`, { method: 'POST', body: JSON.stringify({ reason }) }, token),
+  /** Readable with walk-in sales on even when the refunds tool is off (refunds already made stay visible, read only). */
+  vendorRefunds: (token: string, query: { from?: string; to?: string; saleId?: string; status?: 'active' | 'reverted' | 'all'; limit?: number; cursor?: string | null } = {}) =>
+    request<{ refunds: VendorRefundRow[]; nextCursor: string | null }>(`/vendor/refunds${qs({ ...query, limit: query.limit ?? 50 })}`, {}, token),
+  vendorRefund: (token: string, refundId: string) =>
+    request<{ refund: VendorRefund }>(`/vendor/refunds/${encodeURIComponent(refundId)}`, {}, token),
   // ─── Vendor customers, pay-later balances, customer payments, aging (S4) ───
   vendorCustomers: (token: string, query: VendorCustomersQuery = {}) =>
     request<VendorCustomerPage>(`/vendor/customers${qs({ ...query, limit: query.limit ?? 50 })}`, {}, token),
@@ -2370,6 +2381,8 @@ export interface VendorTools {
   reports?: boolean;
   /** S6: this caller may see commission and payouts (the report App sales after commission). Missing = no. */
   canSeeOrderMoney?: boolean;
+  /** S7 (VENDOR_TOOLS + VENDOR_WALKIN_SALES + VENDOR_REFUNDS): make, undo and share refunds on walk-in sales. Missing = off. */
+  refunds?: boolean;
   [tool: string]: unknown;
 }
 
@@ -2484,6 +2497,9 @@ export interface VendorSaleRow {
   dueDate?: string | null;
   /** Never contact details. forgotten (being added on the backend): the app buyer deleted their account. */
   customer?: { id: string; name: string | null; forgotten?: boolean } | null;
+  /** S7: Σ active refunds, and none | partial | full. Older servers omit them. */
+  refundedTzs?: number;
+  refundState?: VendorRefundState;
 }
 /** Completed sales over the whole from/to/createdBy range (not the page, not the status filter); cash net of change. */
 export interface VendorSaleSummary {
@@ -2501,6 +2517,12 @@ export interface VendorSaleSummary {
   payLaterTzs?: number;
   /** S4, only for callers who also hold `customers`: completed pay-later sales in the range, still owed now. */
   owedTzs?: number;
+  /** S7: refunds made in the range (by refund date); refundTzs = refunds − undos in the range; netTzs = totalTzs − refundTzs. */
+  refundCount?: number;
+  refundTzs?: number;
+  netTzs?: number;
+  /** S7: money paid back (paidOutTzs) by method; byMethod stays money received. */
+  refundsByMethod?: Array<{ method: string; amountTzs: number }>;
 }
 export interface VendorSalePage { sales: VendorSaleRow[]; nextCursor: string | null; summary?: VendorSaleSummary | null }
 /** A walk-in sale (GET /vendor/sales/:id, POST …/void). Never carries cost. */
@@ -2529,6 +2551,9 @@ export interface VendorSale {
   /** recordedAt − soldAt > 5 min (the UI falls back to comparing them if absent). */
   lateRecorded: boolean;
   lines: Array<{
+    /** The sale line id (refunds name lines by it). */
+    id?: string;
+    productId?: string | null;
     nameSnapshot: string;
     variant: string | null;
     qty: number;
@@ -2538,8 +2563,25 @@ export interface VendorSale {
     priceChangedBy: VendorSalePerson;
     discountTzs: number;
     lineTotalTzs: number;
+    /** S5: VAT inside the line (stored, half-up per line). */
+    vatTzs?: number;
+    vatCode?: string | null;
+    /** S7: lineTotalTzs − its share of the sale discount (what the customer paid for it), and the active refund counters. */
+    lineNetTzs?: number;
+    refundedQty?: number;
+    refundableQty?: number;
+    refundedTzs?: number;
   }>;
   payments: Array<{ method: string; amountTzs: number; reference: string | null }>;
+  /** S7 (returned whatever the flags): Σ active refunds; Σ lineNet − refundedTzs; totalTzs − refundedTzs. */
+  refundedTzs?: number;
+  refundableTzs?: number;
+  netAfterRefundsTzs?: number;
+  refundState?: VendorRefundState;
+  /** S7: taken off the pay-later balance by active refunds. */
+  balanceReducedTzs?: number;
+  /** S7: every refund of the sale, active and undone, oldest first. */
+  refunds?: Array<{ id: string; number: string; status: VendorRefundStatus; refundedAt: string; amountTzs: number }>;
   /** S4 pay later. Older servers omit these. */
   customer?: { id: string; name: string | null; forgotten?: boolean } | null;
   dueDate?: string | null;
@@ -2549,6 +2591,59 @@ export interface VendorSale {
   paidAtSaleTzs?: number;
   /** Customer payments towards this sale; only for callers who also hold `customers`. */
   allocations?: Array<{ paymentId: string; number: string; amountTzs: number; receivedOn: string; voided: boolean }>;
+}
+
+// ─── Vendor refunds on walk-in sales (S7; functions#318) ───
+export type VendorRefundState = 'none' | 'partial' | 'full';
+export type VendorRefundStatus = 'active' | 'reverted';
+/** POST /vendor/sales/:id/refunds. Never amounts. */
+export interface VendorRefundInput {
+  clientRef: string;
+  lines: Array<{ saleLineId: string; qty: number; restock?: boolean }>;
+  reason: string;
+  method?: string;
+  reference?: string;
+}
+/** A refund (credit note CN-…) as GET /vendor/refunds/:id and the POSTs return it. Never cost. */
+export interface VendorRefund {
+  id: string;
+  number: string;
+  status: VendorRefundStatus;
+  saleId: string;
+  saleNumber: string;
+  saleInvoiceNumber: string | null;
+  saleKind: 'cash' | 'credit';
+  refundedAt: string;
+  createdBy: { id: string; name: string | null } | null;
+  reason: string;
+  method: string | null;
+  reference: string | null;
+  amountTzs: number;
+  balanceReducedTzs: number;
+  paidOutTzs: number;
+  vatTzs: number;
+  vatSummary: Array<{ code: string; ratePct: number | null; netTzs: number; vatTzs: number }>;
+  customer: { id: string; name: string | null; forgotten: boolean } | null;
+  lines: Array<{ saleLineId: string; productId: string | null; variant: string | null; nameSnapshot: string; qty: number; unitPriceTzs: number; amountTzs: number; vatTzs: number; vatCode: string | null; restock: boolean }>;
+  revertedBy: { id: string; name: string | null } | null;
+  revertedAt: string | null;
+  revertReason: string | null;
+}
+/** A row of GET /vendor/refunds (newest first). */
+export interface VendorRefundRow {
+  id: string;
+  number: string;
+  status: VendorRefundStatus;
+  refundedAt: string;
+  revertedAt: string | null;
+  saleId: string;
+  saleNumber: string;
+  amountTzs: number;
+  paidOutTzs: number;
+  balanceReducedTzs: number;
+  method: string | null;
+  restockedUnits: number;
+  createdBy: { id: string; name: string | null } | null;
 }
 
 // ─── Vendor customers (S4) ───

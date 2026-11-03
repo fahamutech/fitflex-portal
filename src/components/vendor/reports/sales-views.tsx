@@ -36,6 +36,17 @@ function MethodsCompact({ data }: { data: SummaryReport['methods'] }) {
     <div className="grid gap-4 sm:grid-cols-2">
       {group(t('vendor.reports.methods.byYou'), data.byYou.map(r => ({ label: saleMethodLabel(r.method, t), amountTzs: r.amountTzs, sharePct: r.sharePct })), 'overview-methods-you')}
       {group(t('vendor.reports.methods.viaFitFlex'), data.viaFitFlex.map(r => ({ label: payLabel(r.paymentMethod, t) || t('vendor.pos.method.other'), amountTzs: r.amountTzs, sharePct: r.sharePct })), 'overview-methods-fitflex')}
+      {/* S7: paid back on refunds, its own group without a share (never summed with money in). */}
+      {!!data.paidBack?.length && (
+        <div data-testid="overview-methods-paid-back">
+          <h4 className="mb-1 text-sm font-semibold text-[var(--color-fg-secondary)]">{t('vendor.reports.methods.paidBack')}</h4>
+          <ul className="space-y-1 text-sm">
+            {data.paidBack.map(r => (
+              <li key={r.method} className="flex justify-between gap-3"><span>{saleMethodLabel(r.method, t)}</span><span className="tabular-nums">{tsh(r.amountTzs)}</span></li>
+            ))}
+          </ul>
+        </div>
+      )}
     </div>
   );
 }

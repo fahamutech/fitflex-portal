@@ -233,6 +233,58 @@ export function mayVoidSale(
   return !!who.userId && sale.createdBy?.id === who.userId && eatDayOf(sale.soldAt) === eatToday(now);
 }
 
+// ── Refunds on walk-in sales (S7; spec docs/design/vendor-refunds-s7.md, functions#318) ──
+/**
+ * Refunds can be made, undone and shared (§0.2; fails closed): walk-in sales on AND the refunds tool on. With it off,
+ * refunds already made are still shown read only (the sale view carries them whatever the flag).
+ */
+export const refundsOn = (me: { tools?: VendorTools } | null | undefined) => !!me && me.tools?.walkInSales === true && me.tools?.refunds === true;
+type Who = { userId: string | null | undefined; userType: string | null | undefined; vendorRole: string | null | undefined };
+/**
+ * Q-1, the M2 rule (the server decides; this only hides the button): the vendor account and admin-role staff may
+ * refund any completed sale; other `sales` staff only a sale they recorded, on the EAT day it was sold.
+ */
+export function mayRefundSale(sale: { status: string; soldAt: string; createdBy: { id: string } | null }, who: Who, now = new Date()) {
+  return mayVoidSale(sale, who, now);
+}
+/** The same rule applied to the refund: own refund, on the EAT day it was made (owner and admin staff: any). */
+export function mayRevertRefund(refund: { status: string; refundedAt: string; createdBy: { id: string } | null }, who: Who, now = new Date()) {
+  if (refund.status !== 'active') return false;
+  if (who.userType === 'vendor' || who.vendorRole === 'admin') return true;
+  return !!who.userId && refund.createdBy?.id === who.userId && eatDayOf(refund.refundedAt) === eatToday(now);
+}
+/**
+ * M-2 (and M-3 on VAT): what refunding `q` more of a line gives back, for display only (the server's figures win).
+ * Rounds down; the last unit takes what is left; never below 0, never more than what is left.
+ */
+export function refundShare(total: number, sold: number, refundedQty: number, refundedSoFar: number, q: number) {
+  if (q <= 0) return 0;
+  if (refundedQty + q === sold) return total - refundedSoFar;
+  return Math.max(0, Math.min(total - refundedSoFar, Math.floor((total * (refundedQty + q)) / sold) - refundedSoFar));
+}
+/** M-4: a pay-later sale's balance comes off first; the rest is money the vendor gives back. */
+export function splitRefund(amountTzs: number, sale: { kind?: string; balanceTzs?: number }) {
+  const balanceReducedTzs = sale.kind === 'credit' ? Math.min(amountTzs, Math.max(0, Number(sale.balanceTzs || 0))) : 0;
+  return { balanceReducedTzs, paidOutTzs: amountTzs - balanceReducedTzs };
+}
+/** §8.5: a refund or undo refusal → its message. The raw code is never shown. */
+export function refundErrorKey(code: string | null): MessageKey {
+  switch (code) {
+    case 'refund_exceeds_sold': return 'vendor.refunds.err.exceeds';
+    case 'sale_voided': return 'vendor.refunds.err.saleVoided';
+    case 'restock_unavailable': return 'vendor.refunds.err.restockUnavailable';
+    case 'insufficient_stock': return 'vendor.refunds.err.revertStock';
+    case 'already_reverted': return 'vendor.refunds.err.alreadyReverted';
+    case 'customer_archived': return 'vendor.refunds.err.customerArchived';
+    case 'refund_not_allowed': case 'revert_not_allowed': return 'vendor.refunds.askOwner';
+    case 'reference_required': return 'vendor.pos.referenceRequired';
+    case 'feature_disabled': return 'vendor.refunds.unavailable';
+    case 'refund_not_found': return 'vendor.refunds.notFound';
+    case 'reason_required': case 'reason_too_long': return 'vendor.refunds.reasonMissing';
+    default: return 'vendor.refunds.err.server';
+  }
+}
+
 const RECEIPT_WIDTH = 32;
 const amountOnly = (n: number) => new Intl.NumberFormat('en-US').format(Number(n || 0));
 /** "label      amount", padded to 32 characters where it fits (WhatsApp on phones). */
