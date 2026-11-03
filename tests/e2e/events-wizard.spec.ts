@@ -204,6 +204,18 @@ test.describe('wizard', () => {
     await expect(page.getByText('This is too long.')).toBeVisible();
   });
 
+  test('focus follows a removed category and a step change (keyboard and screen-reader users)', async ({ page }) => {
+    await setupEvents(page, OWNER);
+    await page.goto('/organizer/events/?event=evt_1&step=categories');
+    // Removing a row moves focus to the row above it.
+    await page.getByRole('button', { name: 'Remove 10K' }).click();
+    await expect(page.getByTestId('ev-categories-0-name')).toBeFocused();
+    // Previous moves focus to the new step's heading.
+    await page.getByTestId('wizard-prev').click();
+    await expect(page.getByTestId('step-heading')).toContainText('Venue');
+    await expect(page.getByTestId('step-heading')).toBeFocused();
+  });
+
   test('cancel asks for a reason; a 409 has_registrations shows the ask-FitFlex copy (P-LC-5)', async ({ page }) => {
     const mock = await setupEvents(page, OWNER, { extra: [['POST', /\/organizer\/events\/evt_pub\/cancel$/, () => ({ status: 409, json: { error: 'has_registrations' } })]] });
     await page.goto('/organizer/events/?event=evt_pub');

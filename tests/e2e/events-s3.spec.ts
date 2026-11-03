@@ -30,6 +30,7 @@ test.describe('corporate bulk registration (§6.2, D18, D19)', () => {
     await expect(page.getByTestId('corp-event-card')).toContainText('Minimum age 16');
     await expect(page.getByTestId('corp-view-public')).toHaveAttribute('href', 'https://fitflex.test/e/arusha-trail-10k');
     await page.getByTestId('corp-next').click();
+    await expect(page.getByTestId('corp-step-heading')).toBeFocused();
     // Step 2: the help block lists what this event requires; the example downloads; the list is checked.
     await expect(page.getByTestId('roster-help')).toContainText('Required for this event: First name, Last name, Mobile number, Category, Date of birth');
     await expect(page.getByTestId('roster-help')).toContainText('21K Half Marathon have an age rule');
