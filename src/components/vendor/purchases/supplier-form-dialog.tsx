@@ -80,10 +80,13 @@ export function SupplierFormDialog({
     } catch (err) {
       if (!isRefusal(err)) { setAlert(t('vendor.purchases.err.server')); return; }
       const code = errorCode(err);
-      const b = errorBody<{ supplierId?: string; field?: string; max?: number }>(err);
+      const b = errorBody<{ supplierId?: string; existing?: { id?: string; name?: string }; field?: string; max?: number }>(err);
       if (code === 'duplicate_supplier') {
-        setErrors({ name: fmt(t('vendor.purchases.err.duplicateSupplier'), { name: form.name.trim() }) });
-        if (b?.supplierId) setDuplicate({ id: b.supplierId, name: form.name.trim() });
+        // UAT L-4: the existing supplier's own name and id (409 existing { id, name }); else the typed name and supplierId.
+        const name = b?.existing?.name?.trim() || form.name.trim();
+        const id = b?.existing?.id || b?.supplierId;
+        setErrors({ name: fmt(t('vendor.purchases.err.duplicateSupplier'), { name }) });
+        if (id) setDuplicate({ id, name });
       } else if (code === 'name_required' || code === 'name_too_long') setErrors({ name: t('vendor.suppliers.nameRequired') });
       else if (code === 'invalid_phone') setErrors({ phone: t('vendor.suppliers.phoneInvalid') });
       else if (code === 'invalid_email') setErrors({ email: t('vendor.suppliers.emailInvalid') });
@@ -101,7 +104,7 @@ export function SupplierFormDialog({
   }
 
   return (
-    <Dialog open={open} onClose={() => { if (!busy) onClose(); }} title={t(supplier ? 'vendor.suppliers.edit' : 'vendor.suppliers.add')} sheetOnMobile testId="supplier-form-dialog">
+    <Dialog focusTitle open={open} onClose={() => { if (!busy) onClose(); }} title={t(supplier ? 'vendor.suppliers.edit' : 'vendor.suppliers.add')} sheetOnMobile testId="supplier-form-dialog">
       <form className="space-y-4" onSubmit={e => { e.preventDefault(); void save(); }} noValidate data-testid="supplier-form">
         {alert && <Alert tone="error">{alert}</Alert>}
         {FIELDS.map(k => (

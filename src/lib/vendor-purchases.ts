@@ -195,14 +195,17 @@ export function coverPreview(instalments: readonly Instalment[], amount: number)
 export const paymentStateTone = (s: PaymentState, overdue: boolean) => (overdue ? 'warning' : s === 'paid' ? 'success' : s === 'part_paid' ? 'info' : 'gray') as 'warning' | 'success' | 'info' | 'gray';
 export const paymentStateKey = (s: PaymentState, overdue: boolean) => `vendor.purchases.state.${overdue ? 'overdue' : s}` as MessageKey;
 
+/** UAT L-1: the singular string (`<key>One`) when n is 1, else the plural; both exist in EN and SW. */
+export const plural = (t: (k: MessageKey) => string, key: string, n: number) => t((n === 1 ? `${key}One` : key) as MessageKey);
+
 /** An instalment's state in words (§4.5). */
 export function instalmentText(i: Instalment, t: (k: MessageKey) => string, money: (n: number) => string, now = new Date()) {
   if (i.state === 'paid') return t('vendor.purchases.inst.paid');
   if (i.state === 'part_paid') return fmt(t('vendor.purchases.inst.part'), { covered: money(i.coveredTzs), amount: money(i.amountTzs) });
-  if (i.state === 'overdue' || i.daysOverdue > 0) return fmt(t('vendor.purchases.inst.overdue'), { n: i.daysOverdue });
+  if (i.state === 'overdue' || i.daysOverdue > 0) return fmt(plural(t, 'vendor.purchases.inst.overdue', i.daysOverdue), { n: i.daysOverdue });
   // The server's daysOverdue is never negative (0 when not due yet): count the days ahead from the due date (EAT).
   const days = Math.round((Date.parse(`${i.dueDate}T00:00:00Z`) - Date.parse(`${eatToday(now)}T00:00:00Z`)) / 86_400_000);
-  return days <= 0 ? t('vendor.purchases.inst.dueToday') : fmt(t('vendor.purchases.inst.dueIn'), { n: days });
+  return days <= 0 ? t('vendor.purchases.inst.dueToday') : fmt(plural(t, 'vendor.purchases.inst.dueIn', days), { n: days });
 }
 
 /** §8.6: an S9 refusal → its message key. `context` picks the receive-specific wording where the spec has two. The raw code is never shown. */
