@@ -8,7 +8,7 @@ import { money } from '@/lib/admin-utils';
 import type { MessageKey } from '@/lib/i18n';
 import { eatToday, errorCode, fmt, receiptDay } from '@/lib/vendor';
 import { paymentStateKey, purchasesApi, type PayablesPage, type PurchasePage, type PurchaseRow, type PurchasesQuery, type SupplierRow } from '@/lib/vendor-purchases';
-import { Alert, Button, Card, Checkbox, EmptyState, ErrorState, Field, Input, Select, Skeleton, SkeletonTable, Spinner, Table, TBody, Td, Th, THead, Tr, useToast } from '@/components/shared';
+import { Alert, Button, Card, Checkbox, EmptyState, ErrorState, Field, Input, Select, SkeletonTable, Spinner, Table, TBody, Td, Th, THead, Tr, useToast } from '@/components/shared';
 import { useVendor } from '@/components/vendor-context';
 import { saveBlob } from '@/components/vendor/documents/share-menu';
 import { useApp } from '../../../../app/providers';
@@ -164,7 +164,7 @@ export function PurchasesView({ filters, onFilters, onOpen, onReceive }: {
   }
 
   const tile = (label: string, v: number | null | 'failed', testId: string) => (
-    <MoneyTile label={label} testId={testId} value={v === null ? <Skeleton className="h-6 w-20" /> : v === 'failed' ? '—' : money(v)} />
+    <MoneyTile label={label} testId={testId} value={v === null ? <span aria-hidden="true" className="inline-block h-6 w-20 animate-pulse rounded-[var(--radius-md)] bg-[var(--color-gray-200)] align-middle" /> : v === 'failed' ? '—' : money(v)} />
   );
   const unfiltered = !filters.from && !filters.to && !filters.supplierId && filters.status === 'all' && filters.payment === 'all' && !filters.mine;
 

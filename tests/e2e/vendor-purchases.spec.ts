@@ -36,6 +36,7 @@ const products = [
   { id: 'prd_tee', vendorId: 'usr_vendor', name: 'Gym tee', priceTzs: 20000, stock: 6, status: 'active', costTzs: 8000, variants: [
     { name: 'S', stock: 2, costTzs: null, effectiveCostTzs: 8000 }, { name: 'M', stock: 1, costTzs: 7500, effectiveCostTzs: 7500 }, { name: 'L', stock: 3, costTzs: null, effectiveCostTzs: 8000 },
   ] },
+  { id: 'prd_cap', vendorId: 'usr_vendor', name: 'Cap', priceTzs: 10000, stock: 2, status: 'active', costTzs: 4000, variants: [{ name: 'One size', stock: 2, costTzs: null, effectiveCostTzs: 4000 }] },
   { id: 'prd_bar', vendorId: 'usr_vendor', name: 'Protein bar', priceTzs: 3000, stock: 0, status: 'paused', costTzs: null, variants: [] },
   { id: 'prd_old', vendorId: 'usr_vendor', name: 'Old shaker', priceTzs: 5000, stock: 0, status: 'archived', costTzs: null, variants: [] },
 ];
@@ -67,7 +68,7 @@ const row = (extra: Record<string, unknown> = {}) => ({
 const aging = (extra: Record<string, unknown> = {}) => ({
   asOf: TODAY,
   totals: { owedTzs: 150000, overdueTzs: 50000, supplierCount: 1, overdueSupplierCount: 1, dueIn7DaysTzs: 20000, current: 100000, d1_30: 50000, d31_60: 0, d61_90: 0, d90plus: 0 },
-  rows: [{ supplierId: 'vsp_juma', name: 'Juma Supplies', owedTzs: 150000, overdueTzs: 50000, oldestDueDate: addDays(TODAY, -3), maxDaysOverdue: 3, current: 100000, d1_30: 50000, d31_60: 0, d61_90: 0, d90plus: 0 }],
+  rows: [{ supplierId: 'vsp_juma', name: 'Juma Supplies', owedTzs: 150000, overdueTzs: 50000, oldestDueDate: addDays(TODAY, -3), maxDaysOverdue: 1, current: 100000, d1_30: 50000, d31_60: 0, d61_90: 0, d90plus: 0 }],
   nextCursor: null, ...extra,
 });
 
@@ -185,7 +186,8 @@ test.describe('suppliers', () => {
     await signedInAs(page, VENDOR);
     let n = 0;
     const calls = await mockApi(page, base({
-      'POST /vendor/suppliers': () => (++n === 1 ? { status: 409, json: { error: 'duplicate_supplier', supplierId: 'vsp_juma' } }
+      'POST /vendor/suppliers': () => (++n === 1 ? { status: 409, json: { error: 'duplicate_supplier', supplierId: 'vsp_juma', existing: { id: 'vsp_juma', name: 'Juma Supplies' } } }
+        : n === 2 ? { status: 409, json: { error: 'duplicate_supplier', supplierId: 'vsp_juma' } }
         : { status: 201, json: { supplier: { id: 'vsp_new', name: 'Kariakoo Traders', phone: null, email: null, contactPerson: null, address: null, tin: null, note: null, archivedAt: null, createdAt: NOW, updatedAt: NOW } } }),
       'GET /vendor/suppliers/vsp_new': { json: supplierProfile({ owedTzs: 0, overdueTzs: 0, aging: zero, openInstalments: [] }, { id: 'vsp_new', name: 'Kariakoo Traders' }) },
     }));
@@ -194,13 +196,19 @@ test.describe('suppliers', () => {
     await page.getByTestId('suppliers-add').click();
     await page.getByTestId('supplier-name').fill('juma supplies');
     await page.getByTestId('supplier-save').click();
-    await expect(page.getByTestId('supplier-form')).toContainText('You already have a supplier called juma supplies.');
-    await expect(page.getByTestId('supplier-open-duplicate')).toHaveText('Open juma supplies');
+    // UAT L-4: the existing supplier's own name, not what was typed.
+    await expect(page.getByTestId('supplier-form')).toContainText('You already have a supplier called Juma Supplies.');
+    await expect(page.getByTestId('supplier-open-duplicate')).toHaveText('Open Juma Supplies');
+    // Without `existing` (older server): the typed name.
+    await page.getByTestId('supplier-name').fill('JUMA supplies');
+    await page.getByTestId('supplier-save').click();
+    await expect(page.getByTestId('supplier-form')).toContainText('You already have a supplier called JUMA supplies.');
+    await expect(page.getByTestId('supplier-open-duplicate')).toHaveText('Open JUMA supplies');
     await page.getByTestId('supplier-name').fill('Kariakoo Traders');
     await page.getByTestId('supplier-phone').fill('0712 345 678');
     await page.getByTestId('supplier-save').click();
     await expect(page.getByTestId('supplier-heading')).toHaveText('Kariakoo Traders');
-    expect(callsOf(calls, 'POST', '/vendor/suppliers')[1].body).toMatchObject({ name: 'Kariakoo Traders', phone: '0712 345 678' });
+    expect(callsOf(calls, 'POST', '/vendor/suppliers')[2].body).toMatchObject({ name: 'Kariakoo Traders', phone: '0712 345 678' });
   });
 
   test('profile: archive disabled while owed; archived supplier shows the banner and Restore', async ({ page }) => {
@@ -215,7 +223,7 @@ test.describe('suppliers', () => {
     await expect(page.getByTestId('supplier-archive')).toBeDisabled();
     await expect(page.getByTestId('supplier-archive-owes')).toHaveText("You still owe TSh 150,000, so they can't be archived.");
     await expect(page.getByTestId('supplier-call')).toHaveAttribute('aria-label', 'Call Juma Supplies');
-    await expect(page.getByTestId('supplier-bought')).toHaveText('Bought TSh 200,000 in 1 deliveries · paid TSh 50,000');
+    await expect(page.getByTestId('supplier-bought')).toHaveText('Bought TSh 200,000 in 1 delivery · paid TSh 50,000');
     await expect(page.getByTestId('supplier-receive')).toHaveAttribute('href', /receive\/\?supplier=vsp_juma/);
     archived = true;
     await page.reload();
@@ -283,7 +291,7 @@ test.describe('receive stock', () => {
     const confirm = page.getByTestId('receive-confirm');
     await expect(confirm.getByRole('heading')).toHaveText('Receive 24 items from Juma Supplies?');
     await expect(confirm).toContainText('3 instalments:');
-    await expect(confirm).toContainText('Cost price changes for 1 items');
+    await expect(confirm).toContainText('Cost price changes for 1 item');
     await page.getByTestId('receive-confirm-save').click();
     await expect(page).toHaveURL(/\/vendor\/purchases\/\?id=vpo_9/);
     await expect(page.getByText('Stock received: GRN-000009')).toBeVisible();
@@ -322,7 +330,7 @@ test.describe('receive stock', () => {
     await page.getByTestId('supplier-option-none').click();
     await expect(page.getByTestId('receive-no-supplier')).toContainText('Only if you paid in full');
     await page.getByTestId('receive-review').click();
-    await expect(page.getByTestId('receive-confirm').getByRole('heading')).toHaveText('Receive 1 items?');
+    await expect(page.getByTestId('receive-confirm').getByRole('heading')).toHaveText('Receive 1 item?');
     await page.getByTestId('receive-confirm-save').click();
     await expect(page.getByTestId('receive-confirm-alert')).toContainText('Could not save. Nothing was changed.');
     await expect(page.getByTestId('receive-confirm-save')).toHaveText('Try again');
@@ -465,7 +473,7 @@ test.describe('purchase detail', () => {
     await page.getByTestId('purchase-void').click();
     const dialog = page.getByTestId('purchase-void-dialog');
     await expect(dialog.getByRole('heading')).toHaveText('Void GRN-000001?');
-    await expect(page.getByTestId('void-payments-note')).toHaveText('The 1 payments recorded on it (TSh 50,000) are voided too. Get any money back from the supplier yourself.');
+    await expect(page.getByTestId('void-payments-note')).toHaveText('The payment recorded on it (TSh 50,000) is voided too. Get any money back from the supplier yourself.');
     await expect(page.getByTestId('void-cost-note')).toBeVisible();
     await page.getByTestId('purchase-void-reason').fill('Wrong delivery');
     await page.getByTestId('purchase-void-confirm').click();
@@ -522,6 +530,9 @@ test.describe('purchase detail', () => {
     expect(text).not.toContain('Rehema');
     await page.getByTestId('purchase-record-payment').click();
     await expect(page.getByTestId('purchase-pay-dialog')).toBeVisible();
+    // UAT L-8: the heading has focus on open, not the amount field.
+    await expect(page.getByTestId('purchase-pay-dialog').getByRole('heading', { name: 'Record payment to Juma Supplies' })).toBeFocused();
+    await expect(page.getByTestId('purchase-pay-amount')).not.toBeFocused();
     await page.keyboard.press('Escape');
     await expect(page.getByTestId('purchase-pay-dialog')).toHaveCount(0);
     await expect(page.getByTestId('purchase-record-payment')).toBeFocused();
@@ -539,6 +550,8 @@ test.describe('owed to suppliers, history, reports, Swahili', () => {
     await page.goto('/vendor/purchases/?view=payables');
     await expect(page.getByTestId('payables-total')).toHaveText('TSh 150,000');
     await expect(page.getByTestId('payables-due-soon')).toHaveText('TSh 20,000');
+    await expect(page.getByTestId('payables-table')).toContainText('1 day overdue');
+    await expect(page.getByTestId('payables-table')).not.toContainText('1 days');
     await expect(page.getByTestId('payables-totals-row')).toContainText('TSh 150,000');
     await page.getByTestId('payables-bucket-d1_30').click();
     await expect(page.getByTestId('payables-bucket-d1_30')).toHaveAttribute('aria-pressed', 'true');
@@ -614,5 +627,35 @@ test.describe('owed to suppliers, history, reports, Swahili', () => {
     await pickProduct(page, 1, 'tee', 'prd_tee');
     await expect(page.getByLabel('Chaguo')).toBeVisible();
     await expect(page.getByText('Aina', { exact: true })).toHaveCount(0);
+    // UAT L-1: variant counts read "Chaguo 1" / "Chaguo 3".
+    await page.getByTestId('receive-add-row').click();
+    await page.getByTestId('receive-product-2').click();
+    await expect(page.getByTestId('product-option-prd_cap')).toContainText('Cap · Chaguo 1');
+    await expect(page.getByTestId('product-option-prd_tee')).toContainText('Gym tee · Chaguo 3');
+  });
+
+  test('English variant counts: "1 variant" / "3 variants"', async ({ page }) => {
+    await signedInAs(page, VENDOR);
+    await mockApi(page, base());
+    await page.goto('/vendor/purchases/receive/');
+    await page.getByTestId('receive-product-0').click();
+    await expect(page.getByTestId('product-option-prd_cap')).toContainText('Cap · 1 variant');
+    await expect(page.getByTestId('product-option-prd_tee')).toContainText('Gym tee · 3 variants');
+  });
+
+  test('UAT L-10: the purchases page loads without a nesting (hydration) warning', async ({ page }) => {
+    const warnings: string[] = [];
+    page.on('console', m => { if (m.type() === 'error' || m.type() === 'warning') warnings.push(m.text()); });
+    await signedInAs(page, VENDOR);
+    let release!: () => void;
+    const gate = new Promise<void>(res => { release = res; });
+    await mockApi(page, base({ 'GET /vendor/payables/aging': () => ({ json: aging() }) }));
+    // Hold the metric request so the tiles render their skeletons first.
+    await page.route('**/vendor/payables/aging**', async route => { await gate; await route.fallback(); });
+    await page.goto('/vendor/purchases/');
+    await expect(page.getByTestId('purchases-metrics')).toBeVisible();
+    release();
+    await expect(page.getByTestId('metric-owed')).toHaveText('TSh 150,000');
+    expect(warnings.filter(w => /cannot be a descendant of|cannot contain a nested|hydration/i.test(w))).toEqual([]);
   });
 });
