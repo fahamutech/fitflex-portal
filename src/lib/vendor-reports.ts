@@ -136,7 +136,8 @@ export interface CustomersReport extends ReportHead {
   /** S7: balance taken off pay-later sales by refunds in the period, minus undos (not money). */
   refundedOffTzs?: number;
 }
-export interface MethodsReport extends ReportHead { byYou: MethodYou[]; viaFitFlex: MethodFitFlex[]; paidBack?: MethodPaidBack[] }
+/** S9: paidToSuppliers (money the vendor paid suppliers, by paid date) only for callers with `purchases` + the tool on; money out, never summed with money in. */
+export interface MethodsReport extends ReportHead { byYou: MethodYou[]; viaFitFlex: MethodFitFlex[]; paidBack?: MethodPaidBack[]; paidToSuppliers?: MethodPaidBack[] }
 /** S7 §2.11: one row per refund and per undo in the period, oldest first; undo rows negative in every money/unit column. */
 export interface RefundEventRow {
   type: 'refund' | 'revert';

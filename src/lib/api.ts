@@ -2383,6 +2383,8 @@ export interface VendorTools {
   canSeeOrderMoney?: boolean;
   /** S7 (VENDOR_TOOLS + VENDOR_WALKIN_SALES + VENDOR_REFUNDS): make, undo and share refunds on walk-in sales. Missing = off. */
   refunds?: boolean;
+  /** S9 (VENDOR_TOOLS + VENDOR_STOCK_LEDGER + VENDOR_PURCHASES): suppliers, receive stock, payables. Missing = off. */
+  purchases?: boolean;
   [tool: string]: unknown;
 }
 
