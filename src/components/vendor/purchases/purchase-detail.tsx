@@ -4,7 +4,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ArrowLeft, Copy, Printer } from 'lucide-react';
 import { money } from '@/lib/admin-utils';
-import { eatDateTime, eatDayOf, errorCode, fmt, receiptDay, saleMethodLabel } from '@/lib/vendor';
+import { receiptDateTime, eatDayOf, errorCode, fmt, receiptDay, saleMethodLabel } from '@/lib/vendor';
 import { instalmentText, mayVoidPurchase, mayVoidPurchasePayment, purchasesApi, purchaseText, type Purchase, type PurchasePayment } from '@/lib/vendor-purchases';
 import { Alert, Badge, Button, Card, CardContent, CardHeader, ErrorState, SkeletonCard, Table, TBody, Td, Th, THead, Tr, useToast } from '@/components/shared';
 import { useVendor } from '@/components/vendor-context';
@@ -97,7 +97,7 @@ export function PurchaseDetail({ id, onBack, onOpenSupplier }: {
         <div className="flex flex-wrap gap-2"><StatusBadge status={p.status} /><PaymentBadge state={p.paymentState} overdueTzs={p.overdueTzs} status={p.status} /></div>
       </div>
       {!received && p.voidedAt && (
-        <div data-testid="purchase-voided-banner"><Alert tone="info">{fmt(t('vendor.purchases.voidedBy'), { name: p.voidedBy?.name ?? '—', time: eatDateTime(p.voidedAt, locale), reason: p.voidReason ?? '' })}</Alert></div>
+        <div data-testid="purchase-voided-banner"><Alert tone="info">{fmt(t('vendor.purchases.voidedBy'), { name: p.voidedBy?.name ?? '—', time: receiptDateTime(p.voidedAt, locale), reason: p.voidReason ?? '' })}</Alert></div>
       )}
 
       <Card>
@@ -108,7 +108,7 @@ export function PurchaseDetail({ id, onBack, onOpenSupplier }: {
             </Meta>
             <Meta label={t('vendor.purchases.receivedOn')}>
               <span data-testid="purchase-received">{receiptDay(p.receivedOn, locale)}</span>
-              {recordedDay && recordedDay !== p.receivedOn && <span className="block text-[var(--color-fg-tertiary)]" data-testid="purchase-recorded">{fmt(t('vendor.purchases.recordedAt'), { time: eatDateTime(p.recordedAt, locale) })}</span>}
+              {recordedDay && recordedDay !== p.receivedOn && <span className="block text-[var(--color-fg-tertiary)]" data-testid="purchase-recorded">{fmt(t('vendor.purchases.recordedAt'), { time: receiptDateTime(p.recordedAt, locale) })}</span>}
             </Meta>
             {p.supplierInvoiceRef && <Meta label={t('vendor.purchases.invoiceRef')}>{p.supplierInvoiceRef}</Meta>}
             <Meta label={t('vendor.purchases.col.recordedBy')}>{p.createdBy?.name ?? '—'}</Meta>
@@ -203,7 +203,7 @@ export function PurchaseDetail({ id, onBack, onOpenSupplier }: {
                         {pay.atReceipt && <Badge tone="gray">{t('vendor.purchases.atDelivery')}</Badge>}
                         {voided && <Badge tone="gray">{t('vendor.purchases.state.voided')}</Badge>}
                       </span>
-                      {voided && pay.voidedAt && <span className="block text-[var(--color-fg-tertiary)] [overflow-wrap:anywhere]">{fmt(t('vendor.purchases.voidedBy'), { name: pay.voidedBy?.name ?? '—', time: eatDateTime(pay.voidedAt, locale), reason: pay.voidReason ?? '' })}</span>}
+                      {voided && pay.voidedAt && <span className="block text-[var(--color-fg-tertiary)] [overflow-wrap:anywhere]">{fmt(t('vendor.purchases.voidedBy'), { name: pay.voidedBy?.name ?? '—', time: receiptDateTime(pay.voidedAt, locale), reason: pay.voidReason ?? '' })}</span>}
                     </span>
                     {canVoid && (
                       <Button variant="ghost" size="sm" className="min-h-11 print:hidden" disabled={!online} onClick={() => setVoidPay(pay)}

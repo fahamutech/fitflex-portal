@@ -47,7 +47,7 @@ const supplierProfile = (extra: Record<string, unknown> = {}, sup: Record<string
   openInstalments: [{ purchaseId: 'vpo_1', number: 'GRN-000001', seq: 2, dueDate: addDays(TODAY, -3), openTzs: 50000, daysOverdue: 3 }],
   ...extra,
 });
-const inst = (seq: number, extra: Record<string, unknown> = {}) => ({ id: `vpi_${seq}`, seq, dueDate: addDays(TODAY, 30 * (seq - 1)), amountTzs: 50000, coveredTzs: 0, openTzs: 50000, state: 'due', daysOverdue: -30 * (seq - 1), ...extra });
+const inst = (seq: number, extra: Record<string, unknown> = {}) => ({ id: `vpi_${seq}`, seq, dueDate: addDays(TODAY, 30 * (seq - 1)), amountTzs: 50000, coveredTzs: 0, openTzs: 50000, state: 'due', daysOverdue: 0, ...extra });
 const pay = (extra: Record<string, unknown> = {}) => ({
   id: 'vpp_1', amountTzs: 50000, paidOn: TODAY, method: 'mpesa', reference: 'QK12AB34', note: null, atReceipt: true,
   recordedBy: { id: 'usr_vendor', name: 'Rehema' }, recordedAt: NOW, status: 'recorded', voidedBy: null, voidedAt: null, voidReason: null, voidedWithPurchase: false, ...extra,
@@ -55,7 +55,7 @@ const pay = (extra: Record<string, unknown> = {}) => ({
 const purchase = (extra: Record<string, unknown> = {}) => ({
   id: 'vpo_1', number: 'GRN-000001', status: 'received', supplier: { id: 'vsp_juma', name: 'Juma Supplies', archived: false },
   receivedOn: TODAY, recordedAt: NOW, supplierInvoiceRef: 'INV-4471', note: 'Back door', createdBy: { id: 'usr_vendor', name: 'Rehema' },
-  totalTzs: 200000, paidTzs: 50000, balanceTzs: 150000, overdueTzs: 0, paymentState: 'part_paid', nextDue: { dueDate: addDays(TODAY, 30), openTzs: 50000, daysOverdue: -30 },
+  totalTzs: 200000, paidTzs: 50000, balanceTzs: 150000, overdueTzs: 0, paymentState: 'part_paid', nextDue: { dueDate: addDays(TODAY, 30), openTzs: 50000, daysOverdue: 0 },
   lines: [{ id: 'vpl_1', productId: 'prd_whey', variant: null, nameSnapshot: 'Whey 1kg', qty: 20, unitCostTzs: 10000, lineTotalTzs: 200000, costUpdated: true, free: false, previousCostTzs: 9000, costRestoredOnVoid: null }],
   instalments: [inst(1, { dueDate: TODAY, coveredTzs: 50000, openTzs: 0, state: 'paid', daysOverdue: 0 }), inst(2), inst(3), inst(4)],
   payments: [pay()], voidedBy: null, voidedAt: null, voidReason: null, ...extra,
@@ -485,6 +485,17 @@ test.describe('purchase detail', () => {
     expect(callsOf(calls, 'POST', '/vendor/purchases/vpo_1/void')[0].body).toEqual({ reason: 'Wrong delivery' });
   });
 
+  test('payment void on an archived supplier: its own message', async ({ page }) => {
+    await signedInAs(page, VENDOR);
+    await mockApi(page, base({ 'POST /vendor/purchases/vpo_1/payments/vpp_1/void': { status: 409, json: { error: 'supplier_archived', supplierId: 'vsp_juma' } } }));
+    await page.goto('/vendor/purchases/?id=vpo_1');
+    await expect(page.getByTestId('instalment-2-state')).toHaveText('Due in 30 days');
+    await page.getByTestId('payment-void-vpp_1').click();
+    await page.getByTestId('payment-void-reason').fill('Recorded twice');
+    await page.getByTestId('payment-void-confirm').click();
+    await expect(page.getByTestId('payment-void-alert')).toHaveText('This supplier is archived. Restore them before changing payments.');
+  });
+
   test('M2: other staff see "Only the owner or an admin can void this." on someone else\'s purchase', async ({ page }) => {
     await signedInAs(page, STAFF);
     await mockApi(page, base({ 'GET /vendor/me': { json: me({ userType: 'vendor_staff', vendorRole: 'inventory_manager', permissions: ['purchases'], tools: tools({ canSeeCost: false }) }) } }));
@@ -504,6 +515,7 @@ test.describe('purchase detail', () => {
     const text = await page.evaluate(() => (window as unknown as { __copied: string }).__copied);
     expect(text).toContain('Stock received GRN-000001');
     expect(text).toContain('Supplier invoice: INV-4471');
+    expect(text).toContain('From Juma Supplies');
     expect(text).toContain('This is not a TRA fiscal receipt.');
     expect(text).not.toContain('9,000');
     expect(text).not.toContain('Back door');
@@ -543,6 +555,7 @@ test.describe('owed to suppliers, history, reports, Swahili', () => {
   test('stock history: Received from supplier links to the GRN; without `purchases` it is plain text', async ({ page }) => {
     const history = { productId: 'prd_whey', variant: null, openingStock: 3, closingStock: 3, nextCursor: null, rows: [
       { id: 'mv_2', productId: 'prd_whey', variant: null, reason: 'stock_in_void', kind: 'stock_in_void', delta: -10, stockBefore: 13, stockAfter: 3, note: 'GRN-000001', actor: { id: 'usr_vendor', name: 'Rehema' }, document: { type: 'purchase', id: 'vpo_1', number: 'GRN-000001' }, createdAt: NOW },
+      { id: 'mv_3', productId: 'prd_whey', variant: null, reason: 'sale_void', kind: 'sale_void', delta: 1, stockBefore: 2, stockAfter: 3, note: 'variant_gone', actor: null, document: null, createdAt: NOW },
       { id: 'mv_1', productId: 'prd_whey', variant: null, reason: 'stock_in', kind: 'stock_in', delta: 10, stockBefore: 3, stockAfter: 13, note: 'GRN-000001', actor: { id: 'usr_vendor', name: 'Rehema' }, document: { type: 'purchase', id: 'vpo_1', number: 'GRN-000001' }, createdAt: NOW },
     ] };
     await signedInAs(page, VENDOR);
@@ -554,6 +567,8 @@ test.describe('owed to suppliers, history, reports, Swahili', () => {
     await page.goto('/vendor/products/history/?id=prd_whey');
     await expect(page.getByText('Received from supplier').first()).toBeVisible();
     await expect(page.getByText('Delivery voided, out of stock again').first()).toBeVisible();
+    await expect(page.getByText('This option no longer exists').first()).toBeVisible();
+    await expect(page.getByText('variant_gone')).toHaveCount(0);
     await expect(page.getByRole('link', { name: 'Delivery GRN-000001' }).first()).toHaveAttribute('href', /\/vendor\/purchases\/\?id=vpo_1/);
     purchasesOn = false;
     await page.reload();
@@ -595,5 +610,9 @@ test.describe('owed to suppliers, history, reports, Swahili', () => {
     await expect(page.getByTestId('purchases-money-notice')).toHaveText('FitFlex hailipi wasambazaji. Hapa unarekodi tu ulicholipa na unachodaiwa bado.');
     await expect(page.getByRole('button', { name: 'Bado haijalipwa' })).toBeVisible();
     await expect(page.getByTestId('receive-supplier-chosen')).toContainText('Tayari unadaiwa TSh 150,000');
+    await page.getByTestId('receive-add-row').click();
+    await pickProduct(page, 1, 'tee', 'prd_tee');
+    await expect(page.getByLabel('Chaguo')).toBeVisible();
+    await expect(page.getByText('Aina', { exact: true })).toHaveCount(0);
   });
 });

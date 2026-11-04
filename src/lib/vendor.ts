@@ -123,6 +123,8 @@ const SYSTEM_NOTES: Record<string, MessageKey> = {
   product_form: 'vendor.stock.fromProductForm',
   product_created: 'vendor.stock.note.productCreated',
   variants_tracked: 'vendor.stock.note.variantsTracked',
+  // A variant removed after the movement (S3 sale / S7 refund voids too): words, never the raw code.
+  variant_gone: 'vendor.stock.note.variantGone',
 };
 export const systemNoteKey = (note: string | null | undefined): MessageKey | null => (note && SYSTEM_NOTES[note]) || null;
 

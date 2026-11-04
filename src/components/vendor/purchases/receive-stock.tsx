@@ -8,7 +8,7 @@ import { Minus, Plus, Trash2, UserPlus, X } from 'lucide-react';
 import { api, type VendorProduct } from '@/lib/api';
 import { money } from '@/lib/admin-utils';
 import {
-  addDays, dayMonth, eatDateTime, eatToday, errorBody, errorCode, fmt, isRefusal, newClientRef, receiptDay, REFERENCE_REQUIRED,
+  addDays, dayMonth, receiptDateTime, eatToday, errorBody, errorCode, fmt, isRefusal, newClientRef, receiptDay, REFERENCE_REQUIRED,
   saleMethodLabel, tracksVariantStock, variantsOf,
 } from '@/lib/vendor';
 import {
@@ -491,7 +491,7 @@ export function ReceiveStock({ initialSupplierId }: { initialSupplierId: string 
       {dirty && key && <p className="-mt-4 text-xs text-[var(--color-fg-quaternary)]" data-testid="receive-draft-saved">{t('vendor.purchases.draftSaved')}</p>}
       {draftOffer && (
         <div className="space-y-2 rounded-[var(--radius-lg)] border border-[var(--color-info-200)] bg-[var(--color-info-50)] p-3 text-sm text-[var(--color-info-800)]" data-testid="receive-draft-offer">
-          <p>{fmt(t('vendor.purchases.draftFound'), { time: eatDateTime(draftOffer.savedAt, locale) })}</p>
+          <p>{fmt(t('vendor.purchases.draftFound'), { time: receiptDateTime(draftOffer.savedAt, locale) })}</p>
           <div className="flex flex-wrap gap-2">
             <Button size="sm" className="min-h-11" onClick={() => {
               const { savedAt: _savedAt, ...rest } = draftOffer; void _savedAt;
@@ -541,7 +541,7 @@ export function ReceiveStock({ initialSupplierId }: { initialSupplierId: string 
                         {p && (
                           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-[minmax(0,1.2fr)_auto_minmax(0,1fr)_auto]">
                             {vs.length > 0 && (
-                              <Field label={t('vendor.purchases.variant')} required={tracked}>
+                              <Field label={t('vendor.stock.variantLabel')} required={tracked}>
                                 <Select value={l.variant} onChange={e => pickVariant(l.key, e.target.value)} data-focus="variant" data-testid={`receive-variant-${idx}`}>
                                   <option value="">{tracked ? t('vendor.stock.pickVariant') : t('vendor.purchases.noVariant')}</option>
                                   {vs.map(v => <option key={v.name} value={v.name}>{tracked ? `${v.name} · ${v.stock ?? 0}` : v.name}</option>)}

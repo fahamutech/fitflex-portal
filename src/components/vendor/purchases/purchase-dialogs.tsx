@@ -330,7 +330,7 @@ export function VoidPaymentDialog({ payment, purchase, onClose, onVoided, onRelo
       const b = errorBody<{ reason?: string }>(err);
       if (code === 'void_not_allowed') setAlert(t(voidRefusalKey(b?.reason)));
       else if (code === 'supplier_required') setAlert(t('vendor.purchases.err.noSupplierDebt'));
-      else if (code === 'supplier_archived') setAlert(fmt(t('vendor.purchases.err.supplierArchived'), { name: purchase.supplier?.name ?? '' }));
+      else if (code === 'supplier_archived') setAlert(t('vendor.purchases.err.paymentSupplierArchived'));
       else if (code === 'already_voided' || code === 'purchase_voided') { setAlert(t(purchaseErrorKey(code, 'paymentVoid'))); onReload(); }
       else if (code === 'reason_required' || code === 'reason_too_long') setAlert(t('vendor.purchases.voidReasonShort'));
       else {

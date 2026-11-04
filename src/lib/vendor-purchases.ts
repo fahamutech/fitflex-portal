@@ -196,11 +196,12 @@ export const paymentStateTone = (s: PaymentState, overdue: boolean) => (overdue 
 export const paymentStateKey = (s: PaymentState, overdue: boolean) => `vendor.purchases.state.${overdue ? 'overdue' : s}` as MessageKey;
 
 /** An instalment's state in words (§4.5). */
-export function instalmentText(i: Instalment, t: (k: MessageKey) => string, money: (n: number) => string) {
+export function instalmentText(i: Instalment, t: (k: MessageKey) => string, money: (n: number) => string, now = new Date()) {
   if (i.state === 'paid') return t('vendor.purchases.inst.paid');
   if (i.state === 'part_paid') return fmt(t('vendor.purchases.inst.part'), { covered: money(i.coveredTzs), amount: money(i.amountTzs) });
   if (i.state === 'overdue' || i.daysOverdue > 0) return fmt(t('vendor.purchases.inst.overdue'), { n: i.daysOverdue });
-  const days = -i.daysOverdue;
+  // The server's daysOverdue is never negative (0 when not due yet): count the days ahead from the due date (EAT).
+  const days = Math.round((Date.parse(`${i.dueDate}T00:00:00Z`) - Date.parse(`${eatToday(now)}T00:00:00Z`)) / 86_400_000);
   return days <= 0 ? t('vendor.purchases.inst.dueToday') : fmt(t('vendor.purchases.inst.dueIn'), { n: days });
 }
 
@@ -242,7 +243,7 @@ export function purchaseText(p: Purchase, opts: { business: string; locale: Loca
   const rule = '-'.repeat(20);
   const out = [opts.business, fmt(t('vendor.purchases.grnTitle'), { number: p.number })];
   if (p.status === 'voided') out.push(t('vendor.purchases.state.voided'));
-  if (p.supplier) out.push(`${t('vendor.purchases.supplier')}: ${p.supplier.name}`);
+  if (p.supplier) out.push(fmt(t('vendor.purchases.textFrom'), { name: p.supplier.name }));
   out.push(fmt(t('vendor.purchases.receivedDate'), { date: receiptDay(p.receivedOn, locale) }));
   if (p.supplierInvoiceRef) out.push(fmt(t('vendor.purchases.invoiceLabel'), { ref: p.supplierInvoiceRef }));
   out.push(rule);
