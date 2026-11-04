@@ -4,6 +4,7 @@
 import Link from 'next/link';
 import { AGING_BUCKETS, agingKey, canWalkInSales, documentsOn, fmt, payLabel, saleMethodLabel } from '@/lib/vendor';
 import { documentHref } from '@/lib/vendor-documents';
+import { canPurchases } from '@/lib/vendor-purchases';
 import { dayWords, periodWords, type CustomersReport, type MethodsReport, type PayoutsReport, type RefundsReport } from '@/lib/vendor-reports';
 import { Badge, Card, CardContent, CardHeader, Table, TBody, Td, Th, THead, Tr } from '@/components/shared';
 import { useVendor } from '@/components/vendor-context';
@@ -184,6 +185,8 @@ function MethodGroup({ title, rows, testId, note }: { title: string; rows: Array
 
 export function MethodsView({ query, onTryPeriod, onWalkIn }: ViewProps) {
   const { t } = useApp();
+  const vendor = useVendor();
+  const showSuppliers = canPurchases(vendor.me);
   const [value, retry] = useReport('methods', query);
   useWalkInSeen(value, onWalkIn);
   return (
@@ -191,7 +194,7 @@ export function MethodsView({ query, onTryPeriod, onWalkIn }: ViewProps) {
       {(d: MethodsReport) => (
         <div className="space-y-4">
           <HeaderLine head={d} view="methods" />
-          {!d.byYou.length && !d.viaFitFlex.length && !d.paidBack?.length ? <NoSales from={d.from} to={d.to} hasEverSold={d.hasEverSold} onTryPeriod={onTryPeriod} /> : (
+          {!d.byYou.length && !d.viaFitFlex.length && !d.paidBack?.length && !(showSuppliers && d.paidToSuppliers?.length) ? <NoSales from={d.from} to={d.to} hasEverSold={d.hasEverSold} onTryPeriod={onTryPeriod} /> : (
             <div className="grid min-w-0 gap-4 lg:grid-cols-2">
               <MethodGroup
                 title={t('vendor.reports.methods.byYou')} testId="methods-you"
@@ -209,6 +212,17 @@ export function MethodsView({ query, onTryPeriod, onWalkIn }: ViewProps) {
                   rows={d.paidBack.map(r => ({ key: r.method, label: saleMethodLabel(r.method, t), amountTzs: r.amountTzs, count: r.count }))}
                   note={t('vendor.refunds.moneyNotice')}
                 />
+              )}
+              {/* S9: money paid to suppliers, its own group (reports + purchases + the tool on; the server leaves it out otherwise). */}
+              {showSuppliers && !!d.paidToSuppliers?.length && (
+                <div className="space-y-2">
+                  <MethodGroup
+                    title={t('vendor.reports.methods.paidToSuppliers')} testId="methods-paid-to-suppliers"
+                    rows={d.paidToSuppliers.map(r => ({ key: r.method, label: saleMethodLabel(r.method, t), amountTzs: r.amountTzs, count: r.count }))}
+                    note={t('vendor.purchases.moneyNotice')}
+                  />
+                  <Link href="/vendor/purchases/?view=payables" className="inline-flex min-h-11 items-center text-sm font-semibold text-[var(--color-brand-700)] underline-offset-4 hover:underline" data-testid="methods-payables-link">{t('vendor.payables.title')}</Link>
+                </div>
               )}
             </div>
           )}

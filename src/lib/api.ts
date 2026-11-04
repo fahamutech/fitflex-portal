@@ -2420,6 +2420,8 @@ export interface VendorTools {
   import?: boolean;
   /** The caps to show before uploading; the server enforces them. */
   importLimits?: { maxBytes?: number; maxRows?: number };
+  /** S9 (VENDOR_TOOLS + VENDOR_STOCK_LEDGER + VENDOR_PURCHASES): suppliers, receive stock, payables. Missing = off. */
+  purchases?: boolean;
   [tool: string]: unknown;
 }
 

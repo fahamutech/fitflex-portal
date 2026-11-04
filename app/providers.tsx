@@ -5,6 +5,7 @@ import { api, ApiError, setOnPasswordChangeRequired, setOnUnauthorized, tokenReq
 import { wipeAllListsOnSignOut } from '@/components/organizer/kit-desk-offline/desk-store';
 import { PwaRegistration } from '@/components/pwa-registration';
 import { clearSession as clearMemberSession } from '@/lib/member-api';
+import { clearAllPurchaseDrafts } from '@/lib/vendor-purchases';
 import { ToastProvider } from '@/components/ui/toast';
 import { VendorProvider } from '@/components/vendor-context';
 import { OrganizerProvider } from '@/components/organizer-context';
@@ -96,6 +97,8 @@ export function Providers({ children }: { children: ReactNode }) {
   const signOut = useCallback(() => {
     // Events S7 §3.11: signing out removes any saved offline ticket list from this browser. Unsent scans are kept (never lost to a sign-out).
     void wipeAllListsOnSignOut();
+    // Vendor S9 §4.9: receive-stock drafts hold cost figures; they go with the session.
+    clearAllPurchaseDrafts();
     clearMemberSession();
     localStorage.removeItem('token'); localStorage.removeItem('user');
     setToken(null); setUser(null); setPersonas([]); setPwcRefused(false);
