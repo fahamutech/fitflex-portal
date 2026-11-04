@@ -1,8 +1,10 @@
 'use client';
 import { useEffect, useMemo, useRef, useState } from 'react';
+import Link from 'next/link';
 import { api, type ProductStock, type StockReason, type VendorProduct } from '@/lib/api';
 import type { MessageKey } from '@/lib/i18n';
 import { errorBody, errorCode, fmt, isRefusal, newClientRef, variantsOf } from '@/lib/vendor';
+import { canPurchases } from '@/lib/vendor-purchases';
 import { Alert, Button, Field, Input, Radio, Textarea, useToast } from '@/components/shared';
 import { Dialog, DialogFooter } from '@/components/dialog';
 import { useApp } from '../../../app/providers';
@@ -19,10 +21,12 @@ const NOTE_MAX = 200;
  * retries, so a request that reached the server is never applied twice.
  */
 export function AdjustStockDialog({
-  product, initialVariant, open, onClose, onSaved, onGone, onStockKnown,
+  product, initialVariant, initialReason, open, onClose, onSaved, onGone, onStockKnown,
 }: {
   product: VendorProduct;
   initialVariant?: string | null;
+  /** S9: opened from a refused purchase void to count the stock (Counted preselected). */
+  initialReason?: StockReason;
   open: boolean;
   onClose: () => void;
   /** The product's new stock, from the server's answer. */
@@ -62,11 +66,11 @@ export function AdjustStockDialog({
 
   useEffect(() => {
     if (!open) return;
-    setVariant(initialVariant ?? ''); setReason(''); setDirection(''); setQty(''); setNote('');
+    setVariant(initialVariant ?? ''); setReason(initialReason ?? ''); setDirection(''); setQty(''); setNote('');
     setStale(false); setNetwork(false); setQtyError(null); setNoteError(null); setVariantError(null); setFormError(null);
     setCurrentOverride(null);
     clientRef.current = newClientRef();
-  }, [open, initialVariant]);
+  }, [open, initialVariant, initialReason]);
 
   const rowStock = hasVariants
     ? (variant ? variants.find(v => v.name === variant)?.stock ?? null : null)
@@ -156,6 +160,13 @@ export function AdjustStockDialog({
         {stale && <Alert tone="warning">{t('vendor.stock.changed')}</Alert>}
         {network && <Alert tone="error">{t('vendor.networkError')} {t('vendor.stock.nothingSaved')}</Alert>}
         {formError && <Alert tone="error">{formError}</Alert>}
+        {/* S9 §2.11: stock bought from a supplier belongs in Receive stock (cost price and what is owed). */}
+        {canPurchases(vendor.me) && (
+          <p className="text-sm text-[var(--color-fg-tertiary)]" data-testid="adjust-purchases-hint">
+            {t('vendor.purchases.adjustHint')}{' '}
+            <Link href="/vendor/purchases/receive/" className="inline-flex min-h-11 items-center font-semibold text-[var(--color-brand-700)] underline-offset-4 hover:underline">{t('vendor.purchases.receive')}</Link>
+          </p>
+        )}
 
         {hasVariants && (
           <Field label={t('vendor.stock.variantLabel')} required error={variantError ?? undefined}>
