@@ -665,6 +665,40 @@ test.describe('review round', () => {
     });
   }
 
+  test('C2: an old backend that ignores applyState (returns every row) hides the chip and shows the default list', async ({ page }) => {
+    await signedInAs(page, VENDOR);
+    const j = journey();
+    j.set(PARTIAL());
+    const calls = await mockApi(page, base({
+      ...j.routes,
+      'GET /vendor/imports/imp_1/preview': { json: { batch: PARTIAL(), counts: counts(), rows: [...ROWS, FAILED_ROW], nextCursor: null } },
+    }));
+    await page.goto('/vendor/import/batch/?id=imp_1');
+    await expect(page.getByTestId('import-row')).toHaveCount(4, { timeout: 45_000 });
+    await page.getByTestId('import-filter-failed').click();
+    await expect(page.getByTestId('import-filter-failed')).toHaveCount(0);
+    await expect(page.getByTestId('import-filter-all')).toHaveAttribute('aria-pressed', 'true');
+    await expect(page.getByTestId('import-row')).toHaveCount(4);
+    expect(calls.some(c => c.path.endsWith('/preview') && c.search.get('applyState') === 'failed')).toBe(true);
+  });
+
+  test('C2: invalid_apply_state (the new backend\'s refusal) also hides the chip', async ({ page }) => {
+    await signedInAs(page, VENDOR);
+    const j = journey();
+    j.set(PARTIAL());
+    await mockApi(page, base({
+      ...j.routes,
+      'GET /vendor/imports/imp_1/preview': (_req, url) => (url.searchParams.get('applyState')
+        ? refusal(400, 'invalid_apply_state', {}, 'Unknown apply state.')
+        : { json: { batch: PARTIAL(), counts: counts(), rows: [...ROWS, FAILED_ROW], nextCursor: null } }),
+    }));
+    await page.goto('/vendor/import/batch/?id=imp_1');
+    await expect(page.getByTestId('import-row')).toHaveCount(4, { timeout: 45_000 });
+    await page.getByTestId('import-filter-failed').click();
+    await expect(page.getByTestId('import-filter-failed')).toHaveCount(0);
+    await expect(page.getByTestId('import-row')).toHaveCount(4);
+  });
+
   test('C3: reload mid-loop shows Continue / Retry with counts, no mapping or check controls', async ({ page }) => {
     await signedInAs(page, VENDOR);
     const j = journey();

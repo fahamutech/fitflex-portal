@@ -34,12 +34,14 @@ export function RowsList({ batchId, counts, showApplyState = false, version }: {
     try {
       const res = await importApi.preview(token, batchId, filter === 'failed' ? { applyState: 'failed', cursor: next } : { status: filter === 'all' ? undefined : filter, cursor: next });
       if (req !== requestId.current) return;
+      // An older server ignores the unknown applyState and answers every row: never show those under "Failed rows".
+      if (filter === 'failed' && res.rows.some(r => r.applyState !== 'failed')) { setFailedSupported(false); setFilter('all'); return; }
       setRows(cur => (next ? [...cur, ...res.rows] : res.rows));
       setCursor(res.nextCursor ?? null);
       setState('ready');
     } catch (err) {
       if (req !== requestId.current || vendor.handleError(err)) return;
-      if (filter === 'failed' && apiCode(err) === 'invalid_status') { setFailedSupported(false); setFilter('all'); return; }
+      if (filter === 'failed' && ['invalid_status', 'invalid_apply_state'].includes(apiCode(err) ?? '')) { setFailedSupported(false); setFilter('all'); return; }
       if (next) setMoreFailed(errorText(err, locale, t)); else setState('error');
     } finally { if (req === requestId.current) setMoreBusy(false); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
