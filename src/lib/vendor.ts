@@ -169,6 +169,9 @@ export const VENDOR_AREAS: ReadonlyArray<{ href: string; permission: string | nu
   // S6: reports need the tool on (fails closed) and the `reports` permission. With the tool off a deep link goes
   // home with no message (spec §0.1, AC-1); without the permission it says "no access" (AC-3).
   { href: '/vendor/reports', permission: 'reports', tool: 'reports', quietWhenOff: true, noAccessKey: 'vendor.reports.noAccess' },
+  // Smart import (functions#326): the tool on (fails closed: missing = off) and the `import` permission. With the tool
+  // off a deep link goes home with no message (dormant); without the permission it says "no access".
+  { href: '/vendor/import', permission: 'import', tool: 'import', quietWhenOff: true, noAccessKey: 'vendor.import.noAccess' },
   { href: '/vendor/payouts', permission: 'payments' },
   // S5: the document view needs documents switched on (fails closed); each kind checks its own permission on the
   // page (sale: sales or customers · payment, statement: customers · order: orders). Not a nav item.
