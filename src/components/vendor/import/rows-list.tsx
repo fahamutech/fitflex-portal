@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { fmt } from '@/lib/vendor';
 import {
-  hasMessageKey, errorText, fieldKey, importApi, rowErrorText, rowStatusKey, rowStatusTone, valueText, type ApplyState, type ImportCounts, type ImportRow,
+  apiCode, hasMessageKey, errorText, fieldKey, importApi, rowErrorText, rowStatusKey, rowStatusTone, valueText, type ApplyState, type ImportCounts, type ImportRow,
 } from '@/lib/vendor-import';
 import { Badge, EmptyState, ErrorState, SkeletonCard } from '@/components/shared';
 import { IssueList, Btn } from './parts';
@@ -11,10 +11,10 @@ import { useVendor } from '@/components/vendor-context';
 import { useApp } from '../../../../app/providers';
 
 const FILTERS = ['all', 'invalid', 'needs_review', 'valid'] as const;
-type Filter = (typeof FILTERS)[number];
+type Filter = (typeof FILTERS)[number] | 'failed';
 const applyTone = (s: ApplyState) => (s === 'applied' ? 'success' : s === 'failed' ? 'danger' : 'gray');
 
-export function RowsList({ batchId, counts, showApplyState = false, version }: { batchId: string; counts: ImportCounts | null; showApplyState?: boolean; /** Reload when this changes (after a mapping save or an apply). */ version: string }) {
+export function RowsList({ batchId, counts, showApplyState = false, version }: { batchId: string; counts: ImportCounts | null; /** Result view: show what happened to each row and offer the Failed rows filter. */ showApplyState?: boolean; /** Reload when this changes (after a mapping save or an apply). */ version: string }) {
   const { token, t, locale } = useApp();
   const vendor = useVendor();
   const [filter, setFilter] = useState<Filter>('all');
@@ -23,6 +23,8 @@ export function RowsList({ batchId, counts, showApplyState = false, version }: {
   const [state, setState] = useState<'loading' | 'ready' | 'error'>('loading');
   const [moreBusy, setMoreBusy] = useState(false);
   const [moreFailed, setMoreFailed] = useState<string | null>(null);
+  // The "Failed rows" filter asks preview?applyState=failed. A server without it answers invalid_status: the chip is hidden.
+  const [failedSupported, setFailedSupported] = useState(true);
   const requestId = useRef(0);
 
   const load = useCallback(async (next?: string | null) => {
@@ -30,25 +32,27 @@ export function RowsList({ batchId, counts, showApplyState = false, version }: {
     const req = ++requestId.current;
     if (next) { setMoreBusy(true); setMoreFailed(null); } else setState('loading');
     try {
-      const res = await importApi.preview(token, batchId, { status: filter === 'all' ? undefined : filter, cursor: next });
+      const res = await importApi.preview(token, batchId, filter === 'failed' ? { applyState: 'failed', cursor: next } : { status: filter === 'all' ? undefined : filter, cursor: next });
       if (req !== requestId.current) return;
       setRows(cur => (next ? [...cur, ...res.rows] : res.rows));
       setCursor(res.nextCursor ?? null);
       setState('ready');
     } catch (err) {
       if (req !== requestId.current || vendor.handleError(err)) return;
+      if (filter === 'failed' && apiCode(err) === 'invalid_status') { setFailedSupported(false); setFilter('all'); return; }
       if (next) setMoreFailed(errorText(err, locale, t)); else setState('error');
     } finally { if (req === requestId.current) setMoreBusy(false); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token, batchId, filter, version, locale]);
   useEffect(() => { void load(); }, [load]);
 
-  const label = (f: Filter) => (f === 'all' ? t('vendor.import.filter.all') : t(`vendor.import.count.${f}` as 'vendor.import.count.valid')) + (f !== 'all' && counts ? ` (${counts[f]})` : '');
+  const label = (f: Filter) => (f === 'all' ? t('vendor.import.filter.all') : f === 'failed' ? `${t('vendor.import.filter.failed')}${counts ? ` (${counts.failed})` : ''}` : `${t(`vendor.import.count.${f}` as 'vendor.import.count.valid')}${counts ? ` (${counts[f]})` : ''}`);
+  const filters: Filter[] = showApplyState && failedSupported && (counts?.failed ?? 0) > 0 ? [...FILTERS, 'failed'] : [...FILTERS];
 
   return (
     <div className="space-y-3" aria-busy={state === 'loading'}>
       <div className="flex flex-wrap gap-2" role="group" aria-label={t('vendor.import.filter.label')}>
-        {FILTERS.map(f => (
+        {filters.map(f => (
           <button
             key={f}
             type="button"
@@ -69,7 +73,7 @@ export function RowsList({ batchId, counts, showApplyState = false, version }: {
       {state === 'ready' && rows.length > 0 && (
         <ul className="space-y-3" data-testid="import-rows">
           {rows.map(row => {
-            const values = Object.entries(row.values ?? {}).map(([k, v]) => [k, valueText(k, v)] as const).filter(([, v]) => v !== null);
+            const values = Object.entries(row.values ?? {}).map(([k, v]) => [k, valueText(k, v, t)] as const).filter(([, v]) => v !== null);
             const failure = rowErrorText(row, locale, t);
             return (
               <li key={row.id} className="rounded-[var(--radius-lg)] border border-[var(--color-border-secondary)] bg-[var(--color-bg-primary)] p-3 sm:p-4" data-testid="import-row" data-row-status={row.status}>
@@ -82,7 +86,7 @@ export function RowsList({ batchId, counts, showApplyState = false, version }: {
                   <dl className="mt-2 grid grid-cols-1 gap-x-4 gap-y-1 text-sm sm:grid-cols-2">
                     {values.map(([k, v]) => (
                       <div key={k} className="flex min-w-0 gap-2">
-                        <dt className="shrink-0 text-[var(--color-fg-quaternary)]">{hasMessageKey(fieldKey(k)) ? t(fieldKey(k)) : k}:</dt>
+                        <dt className="shrink-0 text-[var(--color-fg-quaternary)]">{hasMessageKey(fieldKey(k)) ? t(fieldKey(k)) : t('vendor.import.field.other')}:</dt>
                         <dd className="min-w-0 text-[var(--color-fg-primary)] [overflow-wrap:anywhere] line-clamp-2">{v}</dd>
                       </div>
                     ))}

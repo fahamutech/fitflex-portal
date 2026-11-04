@@ -81,11 +81,14 @@ export const IMPORT_STEPS = ['choose', 'upload', 'columns', 'check', 'confirm', 
 export type ImportStep = (typeof IMPORT_STEPS)[number];
 export const stepKey = (s: ImportStep) => `vendor.import.step.${s}` as MessageKey;
 
+/** Rows were already applied or failed: the batch is being worked through (mapping edits are refused by the server). */
+export const hasProgress = (b: ImportBatch) => (b.counts?.applied ?? 0) + (b.counts?.failed ?? 0) > 0;
+
 /** Which step a batch sits at, from its status; for `ready` the vendor moves between check / confirm / columns themselves. */
 export function stepOfBatch(batch: ImportBatch, view: 'columns' | 'check' | 'confirm' | null): ImportStep {
   switch (batch.status) {
     case 'mapping_required': return 'columns';
-    case 'ready': return view ?? 'check';
+    case 'ready': return hasProgress(batch) ? 'confirm' : (view ?? 'check');
     case 'applying': return 'confirm';
     default: return 'result';
   }
@@ -112,7 +115,7 @@ export function issueText(issue: ImportIssue, locale: Locale, t: Translate, has:
   const server = issue.message?.[locale];
   if (server) return server;
   const key = `vendor.import.issue.${issue.code}`;
-  if (!has(key)) return issue.code;
+  if (!has(key)) return t('vendor.import.issue.unknown');
   const params: Record<string, string | number> = {};
   for (const [k, v] of Object.entries(issue.params ?? {})) if (typeof v === 'string' || typeof v === 'number') params[k] = v;
   const field = issue.params?.field ?? issue.field;
@@ -132,6 +135,7 @@ export function errorText(err: unknown, locale: Locale, t: Translate): string {
     if (main) return why && why !== main ? `${main} ${why}` : main;
     if (err.status === 429) return t('vendor.import.err.rateLimited');
     if (err.status === 413) return t('vendor.import.err.tooLarge');
+    if (err.status === 499 || (err.body as { error?: string } | null)?.error === 'request_aborted') return t('vendor.import.err.aborted');
     if (err.status >= 500) return t('vendor.import.err.server');
   }
   return err instanceof ApiError ? t('vendor.import.err.generic') : t('vendor.import.err.network');
@@ -153,9 +157,9 @@ export const importApi = {
   },
   putMapping: (token: string, id: string, mapping: Record<string, string | null>) =>
     request<{ batch: ImportBatch }>(`/vendor/imports/${encodeURIComponent(id)}/mapping`, { method: 'PUT', body: JSON.stringify({ mapping, confirm: true }) }, token),
-  preview: (token: string, id: string, q: { status?: string; limit?: number; cursor?: string | null } = {}) =>
+  preview: (token: string, id: string, q: { status?: string; applyState?: string; limit?: number; cursor?: string | null } = {}) =>
     request<{ batch: ImportBatch; counts: ImportCounts; rows: ImportRow[]; nextCursor: string | null }>(
-      `/vendor/imports/${encodeURIComponent(id)}/preview${qs({ status: q.status, limit: q.limit ?? 50, cursor: q.cursor })}`, {}, token),
+      `/vendor/imports/${encodeURIComponent(id)}/preview${qs({ status: q.status, applyState: q.applyState, limit: q.limit ?? 50, cursor: q.cursor })}`, {}, token),
   apply: (token: string, id: string, includeNeedsReview: boolean) =>
     request<{ batch: ImportBatch; processed: number; remaining: number }>(`/vendor/imports/${encodeURIComponent(id)}/apply`, { method: 'POST', body: JSON.stringify({ includeNeedsReview }) }, token),
   retry: (token: string, id: string) =>
@@ -219,6 +223,11 @@ export interface DriveOptions {
   maxWaits?: number;
   baseDelayMs?: number;
 }
+/**
+ * A refused call may mean the batch finished meanwhile. For a retry, a terminal `partial` read is NOT proof: it may be the
+ * state from before the retry (failed rows still waiting), so it counts as finished only when nothing failed.
+ */
+const finishedFor = (call: 'apply' | 'retry', b: ImportBatch) => isTerminal(b.status) && (call === 'apply' || (b.counts?.failed ?? 0) === 0);
 const wait = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
 
 /**
@@ -235,6 +244,7 @@ export async function driveApply(o: DriveOptions): Promise<ApplyOutcome> {
   let last: ImportBatch | null = null;
   for (;;) {
     if (o.shouldStop?.()) return { kind: 'paused', reason: 'busy', batch: last };
+    const attempted = call;
     try {
       const res = call === 'retry' ? await importApi.retry(o.token, o.id) : await importApi.apply(o.token, o.id, o.includeNeedsReview);
       call = 'apply';
@@ -255,7 +265,7 @@ export async function driveApply(o: DriveOptions): Promise<ApplyOutcome> {
         // Someone (an earlier request of ours) may have finished the batch already.
         if (code === 'not_ready') {
           const fresh = await importApi.get(o.token, o.id).catch(() => null);
-          if (fresh && isTerminal(fresh.batch.status)) return { kind: 'done', batch: fresh.batch };
+          if (fresh && finishedFor(attempted, fresh.batch)) return { kind: 'done', batch: fresh.batch };
         }
         return { kind: 'failed', error: err };
       }
@@ -263,7 +273,7 @@ export async function driveApply(o: DriveOptions): Promise<ApplyOutcome> {
       if (code === 'apply_in_progress') {
         // Our own earlier request may still be running, or has just finished.
         const fresh = await importApi.get(o.token, o.id).catch(() => null);
-        if (fresh) { last = fresh.batch; if (isTerminal(fresh.batch.status)) return { kind: 'done', batch: fresh.batch }; }
+        if (fresh) { last = fresh.batch; if (finishedFor(attempted, fresh.batch)) return { kind: 'done', batch: fresh.batch }; }
       }
       if (waits >= maxWaits) return { kind: 'paused', reason, batch: last };
       const retryAfter = Number(apiBody<{ retryAfterSeconds?: number }>(err)?.retryAfterSeconds);
@@ -277,10 +287,11 @@ export async function driveApply(o: DriveOptions): Promise<ApplyOutcome> {
 /** "TSh 1,500" (English digits grouping in both languages, as elsewhere in the vendor area). */
 export const tshText = (n: number) => `TSh ${new Intl.NumberFormat('en-US').format(Number(n || 0))}`;
 /** A checked value for the row list: money as TSh, text as is, empty as null. */
-export function valueText(field: string, value: unknown): string | null {
+export function valueText(field: string, value: unknown, t?: Translate): string | null {
   if (value === null || value === undefined || value === '') return null;
   if (MONEY_FIELDS.has(field) && typeof value === 'number') return tshText(value);
-  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') return String(value);
+  if (typeof value === 'boolean') return t ? t(value ? 'vendor.import.yes' : 'vendor.import.no') : null;
+  if (typeof value === 'string' || typeof value === 'number') return String(value);
   return null;
 }
 

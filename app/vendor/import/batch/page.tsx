@@ -3,11 +3,11 @@ import { Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { useFocusAfterRender } from '@/lib/use-focus-after-render';
-import { apiCode, errorText, importApi, isAccountHolder, stepOfBatch, type ImportBatch, type ImportColumn, type ImportStep } from '@/lib/vendor-import';
+import { apiCode, errorText, importApi, hasProgress, isAccountHolder, stepOfBatch, type ImportBatch, type ImportColumn, type ImportStep } from '@/lib/vendor-import';
 import { Alert, ErrorState, PageHeader, SkeletonCard } from '@/components/shared';
 import { BackLink, StatusBadge, Stepper, StepHeading, primaryLinkCls } from '@/components/vendor/import/parts';
 import { ColumnsStep } from '@/components/vendor/import/columns-step';
-import { CheckStep, ConfirmStep, DiscardDialog, ResultStep } from '@/components/vendor/import/apply-steps';
+import { CheckStep, ConfirmStep, ContinueStep, DiscardDialog, ResultStep } from '@/components/vendor/import/apply-steps';
 import { useVendor } from '@/components/vendor-context';
 import { useApp } from '../../../providers';
 
@@ -28,6 +28,8 @@ function BatchInner() {
   const [batch, setBatch] = useState<ImportBatch | null>(null);
   const [columns, setColumns] = useState<ImportColumn[]>([]);
   const [view, setView] = useState<View>(null);
+  // Opened on a batch that is ready but already worked on (a reload mid-loop): show Continue / Retry, not check/confirm.
+  const [resume, setResume] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [discarding, setDiscarding] = useState(false);
   const requestId = useRef(0);
@@ -41,6 +43,7 @@ function BatchInner() {
       const res = await importApi.get(token, id);
       if (req !== requestId.current) return;
       setBatch(res.batch); setColumns(res.columns); setState('ready');
+      setResume(res.batch.status === 'ready' && hasProgress(res.batch));
     } catch (err) {
       if (req !== requestId.current || vendor.handleError(err)) return;
       if (apiCode(err) === 'import_not_found') setState('notFound');
@@ -101,8 +104,9 @@ function BatchInner() {
           onStale={() => { setView(null); void load(); }}
         />
       )}
+      {resume && batch.status === 'ready' && step === 'confirm' && <ContinueStep batch={batch} readOnly={readOnly} onBatch={onBatch} onPin={onPin} />}
       {step === 'check' && <CheckStep batch={batch} readOnly={readOnly} onColumns={() => setView('columns')} onNext={() => setView('confirm')} onDiscard={() => setDiscarding(true)} />}
-      {step === 'confirm' && <ConfirmStep batch={batch} readOnly={readOnly} onBatch={onBatch} onPin={onPin} onBack={() => setView('check')} onDiscard={() => setDiscarding(true)} />}
+      {step === 'confirm' && !(resume && batch.status === 'ready') && <ConfirmStep batch={batch} readOnly={readOnly} onBatch={onBatch} onPin={onPin} onBack={() => setView('check')} onDiscard={() => setDiscarding(true)} />}
       {step === 'result' && <ResultStep batch={batch} readOnly={readOnly} onBatch={onBatch} onPin={onPin} />}
 
       <DiscardDialog

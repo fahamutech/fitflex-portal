@@ -159,7 +159,7 @@ test.describe('history and templates', () => {
     await expect(items.first()).toContainText('Unganisha safu wima');
     await expect(items.first().getByRole('link', { name: /Endelea/ })).toHaveAttribute('href', '/vendor/import/batch/?id=imp_a');
     await expect(items.nth(1)).toContainText('Imeingizwa');
-    await expect(items.nth(1)).toContainText('Zilizoingizwa 3');
+    await expect(items.nth(1)).toContainText('Zilizoingizwa: 3');
     await expect(items.nth(1).getByRole('link', { name: /Tazama/ })).toHaveAttribute('href', '/vendor/import/batch/?id=imp_b');
     expect(calls.outside).toEqual([]);
   });
@@ -335,7 +335,7 @@ test.describe('the wizard', () => {
     await page.getByTestId('import-check-next').click();
 
     // Step 5: needs-review rows are off by default; the first apply sends false.
-    await expect(page.getByTestId('import-confirm-summary')).toHaveText('2 rows will be imported.');
+    await expect(page.getByTestId('import-confirm-summary')).toHaveText('Rows to import: 2');
     await expect(page.getByTestId('import-include-review')).not.toBeChecked();
     await expect(page.getByText(/created as paused, waiting for approval/)).toBeVisible();
     await page.getByTestId('import-apply').click();
@@ -376,7 +376,7 @@ test.describe('the wizard', () => {
     await expect(page.getByRole('heading', { name: 'Check your rows' })).toBeVisible({ timeout: 45_000 });
     await page.getByTestId('import-check-next').click();
     await page.getByTestId('import-include-review').check();
-    await expect(page.getByTestId('import-confirm-summary')).toHaveText('3 rows will be imported.');
+    await expect(page.getByTestId('import-confirm-summary')).toHaveText('Rows to import: 3');
     await page.getByTestId('import-apply').click();
     await expect(page.getByRole('heading', { name: 'Import finished' })).toBeVisible({ timeout: 20_000 });
     const applies = calls.filter(c => c.path.endsWith('/apply'));
@@ -597,6 +597,182 @@ test.describe('375px', () => {
     await expect(page.getByTestId('import-result')).toBeVisible({ timeout: 20_000 });
     expect(await overflow()).toEqual([]);
     await tall(['import-retry', 'import-errors-download', 'import-to-products']);
+    expect(calls.outside).toEqual([]);
+  });
+});
+
+const FAILED_ROW = { id: 'r9', rowNo: 9, status: 'valid', applyState: 'failed', values: { name: 'Gloves' }, resultId: null, attempts: 1, issues: [],
+  lastError: { code: 'stock_changed', message: { en: 'Stock changed since the file was checked.', sw: 'Stock ilibadilika tangu faili ilipokaguliwa.' } } };
+const PARTIAL = () => batch({ status: 'partial', includeNeedsReview: false, counts: counts({ applied: 1, failed: 1 }) });
+
+test.describe('review round', () => {
+  test('C1: a retry refused with apply_in_progress is not "finished" by a stale partial read; it keeps waiting', async ({ page }) => {
+    await signedInAs(page, VENDOR);
+    test.slow();
+    let n = 0;
+    const j = journey();
+    j.set(PARTIAL());
+    const calls = await mockApi(page, base({
+      ...j.routes,
+      'POST /vendor/imports/imp_1/retry': () => (++n <= 2
+        ? refusal(409, 'apply_in_progress', { retryAfterSeconds: 1 }, 'This import is being applied right now.')
+        : { json: { batch: batch({ status: 'applied', includeNeedsReview: false, counts: counts({ applied: 2 }) }), processed: 1, remaining: 0 } }),
+    }));
+    await page.goto('/vendor/import/batch/?id=imp_1');
+    await page.getByTestId('import-retry').click({ timeout: 45_000 });
+    await expect(page.getByRole('heading', { name: 'Import finished', exact: true })).toBeVisible({ timeout: 30_000 });
+    expect(calls.filter(c => c.path.endsWith('/retry'))).toHaveLength(3);
+    expect(calls.outside).toEqual([]);
+  });
+
+  test('C1: while a retry keeps being refused, the calm wait message shows and Retry stays available', async ({ page }) => {
+    await signedInAs(page, VENDOR);
+    test.slow();
+    const j = journey();
+    j.set(PARTIAL());
+    const calls = await mockApi(page, base({ ...j.routes, 'POST /vendor/imports/imp_1/retry': refusal(409, 'apply_in_progress', { retryAfterSeconds: 1 }) }));
+    await page.goto('/vendor/import/batch/?id=imp_1');
+    await page.getByTestId('import-retry').click({ timeout: 45_000 });
+    await expect(page.getByText('Imports are busy right now. Nothing is lost. Continue in a moment.')).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByTestId('import-retry')).toBeVisible();
+    expect(calls.filter(c => c.path.endsWith('/retry')).length).toBe(6);
+  });
+
+  for (const supported of [true, false]) {
+    test(`C2: Failed rows filter ${supported ? 'asks applyState=failed' : 'is hidden when the server says invalid_status'}`, async ({ page }) => {
+      await signedInAs(page, VENDOR);
+      const j = journey();
+      j.set(PARTIAL());
+      const calls = await mockApi(page, base({
+        ...j.routes,
+        'GET /vendor/imports/imp_1/preview': (_req, url) => (url.searchParams.get('applyState')
+          ? (supported ? { json: { batch: PARTIAL(), counts: counts(), rows: [FAILED_ROW], nextCursor: null } } : refusal(400, 'invalid_status', {}, 'Unknown status filter.'))
+          : { json: { batch: PARTIAL(), counts: counts(), rows: [...ROWS, FAILED_ROW], nextCursor: null } }),
+      }));
+      await page.goto('/vendor/import/batch/?id=imp_1');
+      await expect(page.getByTestId('import-rows')).toBeVisible({ timeout: 45_000 });
+      await expect(page.getByTestId('import-row')).toHaveCount(4); // default order unchanged
+      await page.getByTestId('import-filter-failed').click();
+      if (supported) {
+        await expect(page.getByTestId('import-row')).toHaveCount(1);
+        await expect(page.getByTestId('import-row-failure')).toHaveText('Stock changed since the file was checked.');
+        expect(calls.some(c => c.path.endsWith('/preview') && c.search.get('applyState') === 'failed')).toBe(true);
+      } else {
+        await expect(page.getByTestId('import-filter-failed')).toHaveCount(0);
+        await expect(page.getByTestId('import-row')).toHaveCount(4);
+      }
+      expect(calls.outside).toEqual([]);
+    });
+  }
+
+  test('C3: reload mid-loop shows Continue / Retry with counts, no mapping or check controls', async ({ page }) => {
+    await signedInAs(page, VENDOR);
+    const j = journey();
+    j.set(batch({ status: 'ready', includeNeedsReview: false, counts: counts({ applied: 1, failed: 1 }) }));
+    const calls = await mockApi(page, base(j.routes));
+    await page.goto('/vendor/import/batch/?id=imp_1');
+    await expect(page.getByTestId('import-continue')).toBeVisible({ timeout: 45_000 });
+    await expect(page.getByTestId('import-continue-counts')).toContainText('Imported');
+    await expect(page.getByTestId('import-continue-counts')).toContainText('Waiting');
+    await expect(page.getByTestId('import-edit-columns')).toHaveCount(0);
+    await expect(page.getByTestId('import-columns')).toHaveCount(0);
+    await expect(page.getByTestId('import-discard')).toHaveCount(0);
+    await page.getByTestId('import-continue-retry').click();
+    await expect(page.getByRole('heading', { name: 'Import finished', exact: true })).toBeVisible({ timeout: 20_000 });
+    expect(calls.filter(c => c.path.endsWith('/retry'))).toHaveLength(1);
+    expect(calls.filter(c => c.method === 'PUT')).toHaveLength(0);
+  });
+
+  test('C3: Continue importing applies the rest and the step stays put between calls', async ({ page }) => {
+    await signedInAs(page, VENDOR);
+    const j = journey({ applySteps: [
+      { json: { batch: batch({ status: 'ready', includeNeedsReview: false, counts: counts({ applied: 2 }) }), processed: 1, remaining: 1 } },
+      { json: { batch: batch({ status: 'applied', includeNeedsReview: false, counts: counts({ applied: 3 }) }), processed: 1, remaining: 0 } },
+    ] });
+    j.set(batch({ status: 'ready', includeNeedsReview: false, counts: counts({ applied: 1 }) }));
+    const calls = await mockApi(page, base(j.routes));
+    await page.goto('/vendor/import/batch/?id=imp_1');
+    await page.getByTestId('import-continue-go').click({ timeout: 45_000 });
+    await expect(page.getByRole('heading', { name: 'Import finished', exact: true })).toBeVisible({ timeout: 20_000 });
+    expect(calls.filter(c => c.path.endsWith('/apply'))).toHaveLength(2);
+  });
+
+  test('C4: duplicate_file mid-loop shows the server text and a link to the other import; 499 is calm', async ({ page }) => {
+    await signedInAs(page, VENDOR);
+    const j = journey();
+    j.set(batch({ status: 'ready' }));
+    const answers: Reply[] = [
+      refusal(409, 'duplicate_file', { batchId: 'imp_other', createdAt: NOW, status: 'ready' }, 'This exact file was already uploaded.'),
+      { status: 499, json: { error: 'request_aborted' } },
+    ];
+    let i = 0;
+    const calls = await mockApi(page, base({ ...j.routes, 'POST /vendor/imports/imp_1/apply': () => answers[Math.min(i++, 1)] }));
+    await page.goto('/vendor/import/batch/?id=imp_1');
+    await page.getByTestId('import-check-next').click({ timeout: 45_000 });
+    await page.getByTestId('import-apply').click();
+    await expect(page.getByText('This exact file was already uploaded.')).toBeVisible();
+    await expect(page.getByTestId('import-other-batch')).toHaveAttribute('href', '/vendor/import/batch/?id=imp_other');
+    await page.getByTestId('import-apply').click();
+    await expect(page.getByText('That request was interrupted. Nothing is lost. Try again.')).toBeVisible();
+    await expect(page.getByText(/API 499/)).toHaveCount(0);
+    expect(calls.outside).toEqual([]);
+  });
+
+  test('I1: unknown issue code, unknown field key and boolean values never show raw codes', async ({ page }) => {
+    await signedInAs(page, VENDOR);
+    const j = journey();
+    j.set(batch({ status: 'ready' }));
+    const calls = await mockApi(page, base({
+      ...j.routes,
+      'GET /vendor/imports/imp_1/preview': { json: { batch: batch(), counts: counts(), nextCursor: null, rows: [
+        { id: 'rx', rowNo: 2, status: 'invalid', applyState: 'pending', resultId: null, lastError: null, attempts: 0,
+          values: { name: 'Odd', brand_new_field: 'abc', flag: true }, issues: [{ code: 'brand_new_code', field: null, severity: 'error', params: {} }] },
+      ] } },
+    }));
+    await page.goto('/vendor/import/batch/?id=imp_1');
+    const row = page.getByTestId('import-row');
+    await expect(row).toContainText('This row has a problem.', { timeout: 45_000 });
+    await expect(row).toContainText(/Other:\s*abc/);
+    await expect(row).toContainText(/Other:\s*Yes/);
+    await expect(row).not.toContainText('brand_new');
+    expect(calls.outside).toEqual([]);
+  });
+
+  test('I3: Swahili at 375px: result, continue, upload error and Failed rows filter do not overflow or clip', async ({ page }) => {
+    await page.setViewportSize({ width: 375, height: 800 });
+    await signedInAs(page, VENDOR, 'sw');
+    test.slow();
+    const j = journey();
+    j.set(PARTIAL());
+    const calls = await mockApi(page, base({
+      ...j.routes,
+      'GET /vendor/imports/imp_c': { json: { batch: batch({ id: 'imp_c', status: 'ready', includeNeedsReview: false, counts: counts({ applied: 1, failed: 1 }) }), columns: COLUMNS } },
+      'GET /vendor/imports/imp_c/preview': { json: { batch: batch(), counts: counts(), rows: [], nextCursor: null } },
+      'GET /vendor/imports/imp_1/preview': { json: { batch: PARTIAL(), counts: counts(), rows: [FAILED_ROW, ...ROWS], nextCursor: null } },
+    }));
+    const problems = () => page.evaluate(() => {
+      const bad: string[] = [];
+      document.querySelectorAll('main *').forEach(el => {
+        const h = el as HTMLElement;
+        const r = h.getBoundingClientRect();
+        if (r.width > 0 && r.right > window.innerWidth + 1) bad.push(`overflow ${h.tagName}`);
+        if ((h.tagName === 'BUTTON' || h.tagName === 'A') && h.scrollHeight > h.clientHeight + 1) bad.push(`clipped ${h.tagName} ${h.textContent?.slice(0, 30)}`);
+      });
+      return bad;
+    });
+    await page.goto('/vendor/import/batch/?id=imp_1');
+    await expect(page.getByTestId('import-result')).toBeVisible({ timeout: 45_000 });
+    await expect(page.getByTestId('import-retry')).toHaveText('Jaribu tena zilizoshindikana');
+    await expect(page.getByTestId('import-filter-failed')).toBeVisible();
+    expect(await problems()).toEqual([]);
+    await page.goto('/vendor/import/batch/?id=imp_c');
+    await expect(page.getByTestId('import-continue')).toBeVisible();
+    expect(await problems()).toEqual([]);
+    await page.goto('/vendor/import/new/');
+    await page.getByTestId('import-choose-next').click();
+    await page.getByTestId('import-file').setInputFiles({ name: 'a.xlsx', mimeType: 'application/vnd.ms-excel', buffer: Buffer.from('PK') });
+    await expect(page.getByText(/Hifadhi kama \(Save As\)/)).toBeVisible();
+    expect(await problems()).toEqual([]);
     expect(calls.outside).toEqual([]);
   });
 });

@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { fmt } from '@/lib/vendor';
 import {
-  apiCode, driveApply, eligibleCount, errorText, importApi, type ApplyOutcome, type ImportBatch, type ImportCounts,
+  apiBody, apiCode, driveApply, eligibleCount, errorText, importApi, type ApplyOutcome, type ImportBatch, type ImportCounts,
 } from '@/lib/vendor-import';
 import { Alert, Checkbox, Stat } from '@/components/shared';
 import { ConfirmDialog } from '@/components/dialog';
@@ -60,7 +60,7 @@ export function useApplyRunner(batch: ImportBatch, onBatch: (b: ImportBatch) => 
   const vendor = useVendor();
   const [running, setRunning] = useState(false);
   const [pause, setPause] = useState<Pause | null>(null);
-  const [error, setError] = useState<{ code: string | null; text: string } | null>(null);
+  const [error, setError] = useState<{ code: string | null; text: string; batchId?: string } | null>(null);
   const alive = useRef(true);
   useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
   useEffect(() => { onPin(running); }, [running, onPin]);
@@ -78,7 +78,8 @@ export function useApplyRunner(batch: ImportBatch, onBatch: (b: ImportBatch) => 
     if (outcome.kind === 'done') onBatch(outcome.batch);
     else if (outcome.kind === 'paused') { if (outcome.batch) onBatch(outcome.batch); setPause(outcome.reason); }
     else if (!vendor.handleError(outcome.error)) {
-      setError({ code: apiCode(outcome.error), text: errorText(outcome.error, locale, t) });
+      const other = apiBody<{ batchId?: string }>(outcome.error)?.batchId;
+      setError({ code: apiCode(outcome.error), text: errorText(outcome.error, locale, t), ...(apiCode(outcome.error) === 'duplicate_file' && other && other !== batch.id ? { batchId: other } : {}) });
       // Whatever the refusal, show the batch as the server has it now.
       const fresh = await importApi.get(token, batch.id).catch(() => null);
       if (fresh && alive.current) onBatch(fresh.batch);
@@ -88,7 +89,7 @@ export function useApplyRunner(batch: ImportBatch, onBatch: (b: ImportBatch) => 
   return { running, pause, error, run };
 }
 
-function RunStatus({ batch, include, running, pause, error }: { batch: ImportBatch; include: boolean; running: boolean; pause: Pause | null; error: { text: string } | null }) {
+function RunStatus({ batch, include, running, pause, error }: { batch: ImportBatch; include: boolean; running: boolean; pause: Pause | null; error: { text: string; batchId?: string } | null }) {
   const { t } = useApp();
   const c = batch.counts;
   const total = eligibleCount(c, include);
@@ -103,8 +104,42 @@ function RunStatus({ batch, include, running, pause, error }: { batch: ImportBat
         </div>
       )}
       {pause && <Alert tone="info">{t(`vendor.import.paused.${pause}` as 'vendor.import.paused.busy')}</Alert>}
-      {error && <Alert tone="error" className="[overflow-wrap:anywhere]">{error.text}</Alert>}
+      {error && (
+        <Alert tone="error" className="[overflow-wrap:anywhere]">
+          {error.text}
+          {error.batchId && <Link href={`/vendor/import/batch/?id=${encodeURIComponent(error.batchId)}`} className={`${linkBtnCls} mt-3 block`} data-testid="import-other-batch">{t('vendor.import.err.otherBatchOpen')}</Link>}
+        </Alert>
+      )}
     </div>
+  );
+}
+
+// ── Step 5 (resume): a batch that is ready but already worked on (reload mid-loop) ──
+export function ContinueStep({ batch, readOnly, onBatch, onPin }: { batch: ImportBatch; readOnly: boolean; onBatch: (b: ImportBatch) => void; onPin: (on: boolean) => void }) {
+  const { t } = useApp();
+  const c = batch.counts;
+  const include = batch.includeNeedsReview === true;
+  const { running, pause, error, run } = useApplyRunner(batch, onBatch, include, onPin);
+  const failed = c?.failed ?? 0;
+  const waiting = c ? Math.max(0, eligibleCount(c, include) - c.applied - c.failed) : 0;
+  return (
+    <section aria-labelledby="import-continue-title" className="space-y-4" aria-busy={running} data-testid="import-continue">
+      <StepHeading id="import-continue-title" hint={t('vendor.import.continue.body')}>{t('vendor.import.continue.title')}</StepHeading>
+      {c && (
+        <div className="grid grid-cols-3 gap-3" data-testid="import-continue-counts">
+          <Stat label={t('vendor.import.continue.imported')} value={c.applied} />
+          <Stat label={t('vendor.import.continue.failed')} value={c.failed} />
+          <Stat label={t('vendor.import.continue.waiting')} value={waiting} />
+        </div>
+      )}
+      <RunStatus batch={batch} include={include} running={running} pause={pause} error={error} />
+      {!readOnly && (
+        <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap">
+          <Btn onClick={() => run('apply')} loading={running} disabled={waiting === 0 && failed > 0} className="max-sm:w-full" data-testid="import-continue-go">{t('vendor.import.continue.go')}</Btn>
+          {failed > 0 && <Btn variant="secondary" onClick={() => run('retry')} disabled={running} className="max-sm:w-full" data-testid="import-continue-retry">{t('vendor.import.continue.retry')}</Btn>}
+        </div>
+      )}
+    </section>
   );
 }
 

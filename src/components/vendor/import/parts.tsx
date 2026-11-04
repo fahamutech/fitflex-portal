@@ -40,7 +40,8 @@ export function Stepper({ current }: { current: ImportStep }) {
 
 /** The design-system Button at the 44px touch-target minimum. */
 export function Btn({ className, ...rest }: React.ComponentProps<typeof Button>) {
-  return <Button {...rest} className={cn('min-h-11', className)} />;
+  // h-auto + padding: a long Swahili label wraps inside the button instead of being clipped by the fixed height.
+  return <Button {...rest} className={cn('h-auto min-h-11 py-2 text-center', className)} />;
 }
 
 export function StatusBadge({ status }: { status: string }) {
