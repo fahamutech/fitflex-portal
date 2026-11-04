@@ -123,6 +123,8 @@ const SYSTEM_NOTES: Record<string, MessageKey> = {
   product_form: 'vendor.stock.fromProductForm',
   product_created: 'vendor.stock.note.productCreated',
   variants_tracked: 'vendor.stock.note.variantsTracked',
+  // A variant removed after the movement (S3 sale / S7 refund voids too): words, never the raw code.
+  variant_gone: 'vendor.stock.note.variantGone',
 };
 export const systemNoteKey = (note: string | null | undefined): MessageKey | null => (note && SYSTEM_NOTES[note]) || null;
 
@@ -158,6 +160,9 @@ export function newClientRef() {
 export const VENDOR_AREAS: ReadonlyArray<{ href: string; permission: string | null; tool?: keyof VendorTools; nav?: false; quietWhenOff?: true; noAccessKey?: MessageKey }> = [
   { href: '/vendor', permission: null },
   { href: '/vendor/products', permission: 'products' },
+  // S9: suppliers, receive stock and payables need the tool on (fails closed) and `purchases`. Tool off → home with no
+  // message (spec §0.2); without the permission → "no access to purchases".
+  { href: '/vendor/purchases', permission: 'purchases', tool: 'purchases', quietWhenOff: true, noAccessKey: 'vendor.purchases.noAccess' },
   // Shop banners (Phase 2 S1): owner + staff with `products` (spec Q-10). The nav item also waits for the
   // server to have SHOP_BANNERS on (useShopBannersAvailable); a deep link with it off shows "isn't available yet".
   { href: '/vendor/promotions', permission: 'products' },

@@ -9,10 +9,11 @@ import { addDays, canWalkInSales, documentsOn, eatDateTime, eatToday, errorCode,
 import { Alert, Badge, Button, Card, CardContent, EmptyState, ErrorState, Field, Input, PageHeader, Segmented, Select, SkeletonCard, SkeletonTable, Spinner, Table, TBody, Td, Th, THead, Tr } from '@/components/shared';
 import { AdjustStockDialog } from '@/components/vendor/adjust-stock-dialog';
 import { documentHref } from '@/lib/vendor-documents';
+import { canPurchases } from '@/lib/vendor-purchases';
 import { useVendor } from '@/components/vendor-context';
 import { useApp } from '../../../providers';
 
-const KNOWN_REASONS = new Set(['count', 'restock', 'returned', 'found', 'damaged', 'expired', 'lost', 'other', 'reserve', 'release', 'sale', 'sale_void', 'refund_restock', 'refund_revert']);
+const KNOWN_REASONS = new Set(['count', 'restock', 'returned', 'found', 'damaged', 'expired', 'lost', 'other', 'reserve', 'release', 'sale', 'sale_void', 'refund_restock', 'refund_revert', 'stock_in', 'stock_in_void']);
 type Range = '7d' | '30d' | 'custom';
 
 function HistoryInner() {
@@ -123,6 +124,14 @@ function HistoryInner() {
       return canSales && documentsOn(vendor.me)
         ? <Link href={documentHref('credit_note', r.document.id)} className="inline-flex min-h-11 items-center font-medium text-[var(--color-brand-700)] underline-offset-4 hover:underline">{label}</Link>
         : <span>{label}</span>;
+    }
+    // S9: stock received from a supplier (or its void) links to the GRN with the purchases tool on and `purchases`;
+    // otherwise (flag off too, spec §0.2) the number as plain text.
+    if (r.document?.type === 'purchase') {
+      const label = fmt(t('vendor.stock.grn'), { number: r.document.number || shortRefOf(r.document.id) });
+      return canPurchases(vendor.me)
+        ? <Link href={`/vendor/purchases/?id=${encodeURIComponent(r.document.id)}`} className="inline-flex min-h-11 items-center font-medium text-[var(--color-brand-700)] underline-offset-4 hover:underline" data-testid={`history-grn-${r.document.id}`}>{label}</Link>
+        : <span data-testid={`history-grn-${r.document.id}`}>{label}</span>;
     }
     if (r.document?.type !== 'order') return null;
     const label = fmt(t('vendor.stock.order'), { ref: r.document.shortRef || r.document.number || shortRefOf(r.document.id) });
