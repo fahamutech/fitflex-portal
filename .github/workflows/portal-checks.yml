@@ -39,6 +39,13 @@ jobs:
       NEXT_PUBLIC_PHOTO_HERO_UI: ${{ vars.NEXT_PUBLIC_PHOTO_HERO_UI || 'false' }}
       # Partner photos admin (src/lib/flags.ts). Off unless the repository variable is exactly 'true'.
       NEXT_PUBLIC_PARTNER_MEDIA_ADMIN: ${{ vars.NEXT_PUBLIC_PARTNER_MEDIA_ADMIN || 'false' }}
+      # Member web portal /m (src/lib/flags.ts MEMBER_PORTAL). Off unless the repository variable is exactly 'true'.
+      # Needs the server's IDENTITY_V2 + V2_PIN_LOGIN for sign-in, and Tunzaa or Lipa Namba to pay for a pass.
+      NEXT_PUBLIC_MEMBER_PORTAL: ${{ vars.NEXT_PUBLIC_MEMBER_PORTAL || 'false' }}
+      # Marathon & events module (src/lib/flags.ts EVENTS_MODULE): the member Events page AND the staff organizer
+      # (/organizer) and admin events areas. Off unless the repository variable is exactly 'true'. Needs the server's
+      # EVENTS_MODULE (+ EVENTS_REGISTRATION and event payments for members to register).
+      NEXT_PUBLIC_EVENTS_MODULE: ${{ vars.NEXT_PUBLIC_EVENTS_MODULE || 'false' }}
 
     steps:
       - name: Checkout repository
