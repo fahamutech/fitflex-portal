@@ -19,7 +19,8 @@ import type { MessageKey } from '@/lib/i18n';
  */
 export interface PayTarget {
   label: string; amountTzs: number; product: 'FITFLEX_PASS' | 'TRAINER_SERVICE' | 'EVENT_ORDER'; paymentId?: string;
-  create?: (extra?: { reference: string; payerPhone: string }) => Promise<string>; manual?: boolean;
+  /** Makes the request and answers its id and the amount the server set on it (what is then shown). */
+  create?: (extra?: { reference: string; payerPhone: string }) => Promise<{ id: string; amountTzs: number }>; manual?: boolean;
   doneTitleKey?: MessageKey; doneBody?: string; doneHref?: string;
 }
 type Step = 'form' | 'waiting' | 'slow' | 'done' | 'failed' | 'held' | 'manual_done';
@@ -36,8 +37,12 @@ const MEMBER_ERR = MEMBER_PASSTHROUGH;
 
 export function PayPanel({ target, options, defaultPhone, onBack }: { target: PayTarget; options: PaymentOptions | null; defaultPhone: string; onBack: () => void }) {
   const { t, locale } = useApp();
-  const mobile = canPayByMobileMoney(options, target.product);
-  const manual = !mobile && target.manual && target.create && options?.manual?.enabled ? options.manual : null;
+  // While Lipa Namba is on (MANUAL_PAY_INSTRUCTIONS with a saved number), the server requires a transaction ID on every
+  // new pass request (subscription-service memberReferenceFor), so a pass goes the Lipa Namba way even when mobile money
+  // is on too; a request that already exists (no ID needed any more) can still be paid by mobile money.
+  const manualOn = !!(target.manual && target.create && !target.paymentId && options?.manual?.enabled);
+  const manual = manualOn ? options!.manual! : null;
+  const mobile = !manualOn && canPayByMobileMoney(options, target.product);
   const [phone, setPhone] = useState(defaultPhone);
   const [reference, setReference] = useState('');
   const [step, setStep] = useState<Step>('form');
@@ -47,7 +52,9 @@ export function PayPanel({ target, options, defaultPhone, onBack }: { target: Pa
   const polls = useRef(0);
   const timer = useRef<number | null>(null);
   const headingRef = useRef<HTMLHeadingElement>(null);
-  const amount = formatTzs(target.amountTzs, locale);
+  // The amount the server set on the request once it exists (it always charges that one); the page's price before.
+  const [serverAmount, setServerAmount] = useState<number | null>(null);
+  const amount = formatTzs(serverAmount ?? target.amountTzs, locale);
 
   useEffect(() => () => { if (timer.current) window.clearTimeout(timer.current); }, []);
   useEffect(() => { if (step !== 'form') headingRef.current?.focus(); }, [step]);
@@ -56,8 +63,10 @@ export function PayPanel({ target, options, defaultPhone, onBack }: { target: Pa
   async function ensureRequest(extra?: { reference: string; payerPhone: string }): Promise<string> {
     if (paymentId.current) return paymentId.current;
     if (!target.create) throw new MemberApiError(409, 'payment_not_pending');
-    paymentId.current = await target.create(extra);
-    return paymentId.current;
+    const made = await target.create(extra);
+    paymentId.current = made.id;
+    if (Number.isFinite(made.amountTzs)) setServerAmount(made.amountTzs);
+    return made.id;
   }
 
   async function check() {
@@ -116,7 +125,7 @@ export function PayPanel({ target, options, defaultPhone, onBack }: { target: Pa
         <CheckCircle2 aria-hidden="true" className="h-16 w-16 text-[#3dd98e]" />
         <h2 ref={headingRef} tabIndex={-1} className="text-2xl font-extrabold">{t(target.doneTitleKey ?? 'member.pay.doneTitle')}</h2>
         <p>{target.doneBody ?? fmt(t('member.pay.doneBody'), { tier: target.label })}</p>
-        <Link href={target.doneHref ?? MEMBER_ROUTES.home} className={primaryBtn}>{t('member.pay.backToday')}</Link>
+        <Link href={target.doneHref ?? MEMBER_ROUTES.home} className={primaryBtn}>{t(target.doneHref ? 'member.pay.done' : 'member.pay.backToday')}</Link>
       </section>
     );
   }

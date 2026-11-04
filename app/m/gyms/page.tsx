@@ -4,8 +4,8 @@ import Link from 'next/link';
 import { Heart, Search } from 'lucide-react';
 import { useApp } from '../../providers';
 import { LoadError, Loading, MemberFrame, PageTitle, card, ghostBtn, linkCls, muted, primaryBtn } from '@/components/member/member-frame';
-import { fmt, revealPanel } from '@/components/member/member-shared';
-import { MEMBER_ROUTES, memberApi, type Gym, type MeResponse, type Pass } from '@/lib/member-api';
+import { fmt, passOf, revealPanel } from '@/components/member/member-shared';
+import { formatNumber, formatSlot, MEMBER_ROUTES, memberApi, type Gym, type MeResponse, type Pass } from '@/lib/member-api';
 import type { MessageKey } from '@/lib/i18n';
 
 export default function MemberGymsPage() {
@@ -29,7 +29,7 @@ function hoursOf(g: Gym, day: string): { open: string; close: string } | null {
 }
 
 function Gyms() {
-  const { t } = useApp();
+  const { t, locale } = useApp();
   const [gyms, setGyms] = useState<Gym[]>([]);
   const [favs, setFavs] = useState<Set<string>>(new Set());
   const [covers, setCovers] = useState<string[] | null>(null);
@@ -46,7 +46,8 @@ function Gyms() {
         memberApi.gyms(), memberApi.favoriteGymIds().catch(() => []),
         memberApi.me().catch(() => null as MeResponse | null), memberApi.passes().catch(() => [] as Pass[]),
       ]);
-      const tier = me?.subscription?.status === 'active' ? me.subscription.tier : null;
+      const pass = passOf(me);
+      const tier = pass?.status === 'active' ? pass.tier : null;
       const access = tier ? passes.find(p => p.key === tier)?.gymAccess : null;
       setGyms(g); setFavs(new Set(f)); setCovers(access ? COVERS[access] ?? null : null);
       setSelectedId(g[0]?.id ?? null); setState('ready');
@@ -104,7 +105,7 @@ function Gyms() {
                     {thumb ? <img src={thumb} alt="" className="h-20 w-20 flex-none rounded-xl object-cover" /> : <span aria-hidden="true" className="h-20 w-20 flex-none rounded-xl bg-[#1e293b]" />}
                     <span className="flex min-w-0 flex-1 flex-col gap-1">
                       <span className="flex items-center gap-2"><strong className="truncate text-base">{g.name}</strong>{favs.has(g.id) && <Heart aria-label={t('member.gyms.saved')} className="h-4 w-4 flex-none fill-[#ff8a6b] text-[#ff8a6b]" />}</span>
-                      <span className="text-sm text-[#cbd5e1]">{[g.location, g.tier && TIER_KEYS[g.tier] ? t(TIER_KEYS[g.tier]) : null, g.rating ? fmt(t('member.gyms.rating'), { rating: g.rating.toFixed(1), n: g.reviewCount ?? 0 }) : null].filter(Boolean).join(' · ')}</span>
+                      <span className="text-sm text-[#cbd5e1]">{[g.location, g.tier && TIER_KEYS[g.tier] ? t(TIER_KEYS[g.tier]) : null, g.rating ? fmt(t('member.gyms.rating'), { rating: formatNumber(g.rating, locale), n: g.reviewCount ?? 0 }) : null].filter(Boolean).join(' · ')}</span>
                       {covers && <span className={`text-sm ${covers.includes(g.tier ?? '') ? 'text-[#3dd98e]' : 'text-[#fec84b]'}`}>{t(covers.includes(g.tier ?? '') ? 'member.gyms.covered' : 'member.gyms.notCovered')}</span>}
                     </span>
                   </button>
@@ -120,7 +121,7 @@ function Gyms() {
 }
 
 function GymDetail({ gym, fav, onFav, covered }: { gym: Gym; fav: boolean; onFav: () => void; covered: boolean | null }) {
-  const { t } = useApp();
+  const { t, locale } = useApp();
   const facilities = [...(gym.amenities ?? []), ...(gym.equipment ?? [])].slice(0, 12);
   const c = gym.coordinates;
   const maps = c && Number.isFinite(c.lat) && Number.isFinite(c.lng) && (c.lat !== 0 || c.lng !== 0) ? `https://www.google.com/maps/dir/?api=1&destination=${c.lat},${c.lng}` : null;
@@ -146,7 +147,7 @@ function GymDetail({ gym, fav, onFav, covered }: { gym: Gym; fav: boolean; onFav
           <h3 className="mb-1 text-sm font-semibold text-[#94a3b8]">{t('member.gyms.hours')}</h3>
           <dl className="grid grid-cols-[auto_1fr] gap-x-6 gap-y-1 text-sm tabular-nums">
             {DAYS.map(d => { const h = hoursOf(gym, d); return (
-              <div key={d} className="contents"><dt className={muted}>{t(`member.gyms.day.${d}` as MessageKey)}</dt><dd>{h ? `${h.open} – ${h.close}` : t('member.gyms.closed')}</dd></div>
+              <div key={d} className="contents"><dt className={muted}>{t(`member.gyms.day.${d}` as MessageKey)}</dt><dd>{h ? `${formatSlot(h.open, locale)} – ${formatSlot(h.close, locale)}` : t('member.gyms.closed')}</dd></div>
             ); })}
           </dl>
         </div>

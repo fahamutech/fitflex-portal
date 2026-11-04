@@ -3,7 +3,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useApp } from '../../providers';
 import { LoadError, Loading, MemberFrame, PageTitle, card, muted } from '@/components/member/member-frame';
 import { PayPanel, type PayTarget } from '@/components/member/pay-panel';
-import { fmt, isActive, tierLabel } from '@/components/member/member-shared';
+import { fmt, isActive, passOf, passVisits, tierLabel, unlimited } from '@/components/member/member-shared';
 import { formatDate, formatTzs, memberApi, type MemberSession, type MeResponse, type Pass, type PaymentOptions, type PaymentRequest, type UpgradeOption } from '@/lib/member-api';
 import type { MessageKey } from '@/lib/i18n';
 
@@ -50,8 +50,9 @@ function PassPage({ session }: { session: MemberSession | null }) {
   if (state === 'error' || !data) return <LoadError onRetry={load} />;
 
   const { me, passes, upgrades, options, payments } = data;
-  const sub = me.subscription;
+  const sub = passOf(me);
   const active = isActive(me);
+  const v = passVisits(me);
   const pending = me.pendingPayment;
 
   if (target) {
@@ -76,7 +77,7 @@ function PassPage({ session }: { session: MemberSession | null }) {
       create: async extra => {
         const body = { tier: c.key, ...(extra ?? {}) };
         const r = c.kind === 'upgrade' ? await memberApi.upgrade(body) : await memberApi.subscribe(body);
-        return r.paymentRequest.id;
+        return { id: r.paymentRequest.id, amountTzs: r.paymentRequest.amountTzs };
       },
     });
   };
@@ -97,7 +98,9 @@ function PassPage({ session }: { session: MemberSession | null }) {
                   </span>
                 </div>
                 {sub.expiresAt && <p className={muted}>{fmt(t('member.pass.endsOn'), { date: formatDate(sub.expiresAt, locale) })}</p>}
-                {me.visitCap != null && <p className="tabular-nums">{fmt(t('member.pass.visits'), { used: me.visitsUsed, cap: me.visitCap })}</p>}
+                {v && (v.cap != null
+                  ? <p className="tabular-nums">{fmt(t('member.pass.visits'), { used: v.used, cap: v.cap })}</p>
+                  : <p className="tabular-nums">{fmt(t('member.today.visitsUnlimited'), { used: v.used })}</p>)}
               </>
             ) : <p>{t('member.pass.none')}</p>}
           </section>
@@ -135,7 +138,7 @@ function PassPage({ session }: { session: MemberSession | null }) {
                         onChange={() => { setChoice(c.key); setChooseError(false); }} data-testid={`member-pass-option-${c.key}`} />
                       <span className="flex flex-col">
                         <strong>{c.label}</strong>
-                        {c.visits != null && <span className={`text-sm ${muted}`}>{fmt(t('member.pass.planVisits'), { n: c.visits })}</span>}
+                        <span className={`text-sm ${muted}`}>{unlimited(c.visits) ? t('member.pass.planUnlimited') : fmt(t('member.pass.planVisits'), { n: c.visits as number })}</span>
                       </span>
                     </span>
                     <strong className="tabular-nums">
@@ -164,7 +167,7 @@ function PassPage({ session }: { session: MemberSession | null }) {
             {payments.slice(0, 12).map(p => (
               <li key={p.id} className="flex flex-wrap items-center justify-between gap-3 py-3">
                 <span className="flex flex-col">
-                  <strong>{p.eventName || p.gym?.name || tierLabel(p.tier, passes) || '—'}</strong>
+                  <strong>{p.eventTitle || p.eventName || p.gym?.name || tierLabel(p.tier, passes) || t('member.unknown')}</strong>
                   <span className={`text-sm ${muted}`}>{formatDate(p.requestedAt, locale)}</span>
                 </span>
                 <span className="flex items-center gap-3 tabular-nums">

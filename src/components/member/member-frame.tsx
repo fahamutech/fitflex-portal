@@ -8,7 +8,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import { Globe, QrCode, UserRound } from 'lucide-react';
 import { useApp } from '../../../app/providers';
 import { EVENTS_MODULE, MEMBER_PORTAL } from '@/lib/flags';
-import { loadSession, MEMBER_ROUTES, setOnSessionEnded, type MemberSession } from '@/lib/member-api';
+import { loadSession, MEMBER_ROUTES, setOnSessionEnded, touchSession, watchOtherTabs, type MemberSession } from '@/lib/member-api';
 import type { MessageKey } from '@/lib/i18n';
 import { BrandLogo } from '@/components/brand-logo';
 
@@ -45,11 +45,15 @@ export function MemberFrame({ testId, needsSession = true, children }: {
     setSession(MEMBER_PORTAL ? loadSession() : null);
   }, [ready]);
 
-  // A 401 from any member call ends the member session: back to sign-in.
+  // A 401 from any member call ends the member session: back to sign-in. So does a sign-out (or a staff sign-in or
+  // sign-out) in another tab. Using a page pushes the idle limit back.
   useEffect(() => {
-    setOnSessionEnded(() => { setSession(null); router.replace(MEMBER_ROUTES.signin); });
-    return () => setOnSessionEnded(null);
-  }, [router]);
+    const ended = () => { setSession(null); router.replace(MEMBER_ROUTES.signin); };
+    setOnSessionEnded(ended);
+    const stop = watchOtherTabs(ended);
+    if (loadSession()) touchSession();
+    return () => { setOnSessionEnded(null); stop(); };
+  }, [router, pathname]);
 
   useEffect(() => {
     if (MEMBER_PORTAL && needsSession && session === null) router.replace(MEMBER_ROUTES.signin);

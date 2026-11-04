@@ -4,6 +4,7 @@ import { Locale, MessageKey, t as translate } from '@/lib/i18n';
 import { api, ApiError, setOnPasswordChangeRequired, setOnUnauthorized, tokenRequiresPasswordChange, type PersonaSummary } from '@/lib/api';
 import { wipeAllListsOnSignOut } from '@/components/organizer/kit-desk-offline/desk-store';
 import { PwaRegistration } from '@/components/pwa-registration';
+import { clearSession as clearMemberSession } from '@/lib/member-api';
 import { ToastProvider } from '@/components/ui/toast';
 import { VendorProvider } from '@/components/vendor-context';
 import { OrganizerProvider } from '@/components/organizer-context';
@@ -86,6 +87,8 @@ export function Providers({ children }: { children: ReactNode }) {
 
   const setLocale = (l: Locale) => { localStorage.setItem('locale', l); setLocaleState(l); };
   const signIn = (tk: string, u: AppCtx['user']) => {
+    // A staff sign-in on this browser ends any member portal session here (shared front-desk computers).
+    clearMemberSession();
     localStorage.setItem('token', tk);
     localStorage.setItem('user', JSON.stringify(u));
     setToken(tk); setUser(u); setPwcRefused(false);
@@ -93,6 +96,7 @@ export function Providers({ children }: { children: ReactNode }) {
   const signOut = useCallback(() => {
     // Events S7 §3.11: signing out removes any saved offline ticket list from this browser. Unsent scans are kept (never lost to a sign-out).
     void wipeAllListsOnSignOut();
+    clearMemberSession();
     localStorage.removeItem('token'); localStorage.removeItem('user');
     setToken(null); setUser(null); setPersonas([]); setPwcRefused(false);
   }, []);

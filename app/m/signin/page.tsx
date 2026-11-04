@@ -26,6 +26,7 @@ function SignInForm() {
   const [pinError, setPinError] = useState(false);
   const [error, setError] = useState<MemberCode | null>(null);
   const [busy, setBusy] = useState(false);
+  const [keep, setKeep] = useState(false);
   const [available, setAvailable] = useState(true);
   const sending = useRef(false);
   const pinRef = useRef<HTMLInputElement>(null);
@@ -45,7 +46,7 @@ function SignInForm() {
     if (!/^\d{4}$/.test(pin)) { setPinError(true); pinRef.current?.focus(); return; }
     setPinError(false);
     sending.current = true; setBusy(true);
-    const r = await signIn(identifier, pin);
+    const r = await signIn(identifier, pin, keep);
     setPin('');
     if (r.ok) { router.replace(MEMBER_ROUTES.home); return; }
     sending.current = false; setBusy(false);
@@ -75,6 +76,10 @@ function SignInForm() {
               autoComplete="current-password" aria-invalid={pinError || undefined} aria-describedby="member-pin-hint"
               onChange={e => setPin(e.target.value.replace(/\D/g, '').slice(0, 4))} data-testid="member-signin-pin" />
             <span id="member-pin-hint" className={`font-normal ${pinError ? 'text-[#ff8a6b]' : muted}`}>{pinError ? t('member.signin.pinInvalid') : t('member.signin.pinHint')}</span>
+          </label>
+          <label className="flex items-start gap-3 text-sm">
+            <input type="checkbox" checked={keep} onChange={e => setKeep(e.target.checked)} className="mt-0.5 h-5 w-5 flex-none accent-[#c8f04a]" data-testid="member-signin-keep" />
+            <span className="flex flex-col">{t('member.signin.keep')}<span className={`text-xs ${muted}`}>{t('member.signin.keepHint')}</span></span>
           </label>
           <button type="submit" className={primaryBtn} disabled={busy || !identifier.trim()} data-testid="member-signin-submit">
             {busy ? t('member.signin.busy') : t('member.signin.submit')}
