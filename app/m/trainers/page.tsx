@@ -5,7 +5,7 @@ import { LoadError, Loading, MemberFrame, PageTitle, card, input, linkCls, muted
 import { errorKey, PayPanel, type PayTarget } from '@/components/member/pay-panel';
 import { fmt, revealPanel } from '@/components/member/member-shared';
 import {
-  canPayByMobileMoney, eatToday, formatDate, formatTzs, MEMBER_ROUTES, MemberApiError, memberApi,
+  canPayByMobileMoney, eatToday, formatDate, formatNumber, formatSlot, formatTzs, MEMBER_ROUTES, MemberApiError, memberApi,
   type BookingQuote, type MemberCode, type MemberSession, type PaymentOptions, type ScheduleDay, type Trainer, type TrainerBooking,
 } from '@/lib/member-api';
 import type { MessageKey } from '@/lib/i18n';
@@ -67,7 +67,7 @@ function Trainers({ session }: { session: MemberSession | null }) {
       <PageTitle eyebrow={t('member.trainers.eyebrow')} title={t('member.trainers.title')} />
       <div className="mb-6 flex flex-wrap gap-2.5" role="group" aria-label={t('member.trainers.title')}>
         <button type="button" aria-pressed={!specialty && !gymFilter} className={chip(!specialty && !gymFilter)} onClick={() => { setSpecialty(null); setGymFilter(null); }}>{t('member.trainers.all')}</button>
-        {gymFilter && <button type="button" aria-pressed="true" className={chip(true)} onClick={() => setGymFilter(null)}>{fmt(t('member.trainers.at'), { gym: gymName ?? '…' })} ×</button>}
+        {gymFilter && <button type="button" aria-pressed="true" className={chip(true)} onClick={() => setGymFilter(null)}><span>{fmt(t('member.trainers.at'), { gym: gymName ?? t('member.unknown') })}</span><span aria-hidden="true"> ×</span><span className="sr-only">{t('member.trainers.clearGym')}</span></button>}
         {specialties.map(s => <button key={s} type="button" aria-pressed={specialty === s} className={chip(specialty === s)} onClick={() => setSpecialty(specialty === s ? null : s)}>{s}</button>)}
       </div>
       <div className="grid items-start gap-4 [grid-template-columns:repeat(auto-fit,minmax(min(100%,380px),1fr))]">
@@ -87,7 +87,7 @@ function Trainers({ session }: { session: MemberSession | null }) {
                     </span>
                     {x.gyms?.length ? <span className="text-sm text-[#cbd5e1]">{x.gyms.map(g => g.name).join(', ')}</span> : null}
                     <span className="mt-auto flex justify-between text-sm">
-                      <span>{x.rating ? `★ ${x.rating.toFixed(1)} (${x.reviewCount ?? 0})` : ''}</span>
+                      <span>{x.rating ? fmt(t('member.gyms.rating'), { rating: formatNumber(x.rating, locale), n: x.reviewCount ?? 0 }) : ''}</span>
                       {x.hourlyRateTzs ? <strong className="tabular-nums">{fmt(t('member.trainers.from'), { amount: formatTzs(x.hourlyRateTzs, locale) })}</strong> : null}
                     </span>
                   </button>
@@ -107,7 +107,7 @@ function Trainers({ session }: { session: MemberSession | null }) {
               <ul className="divide-y divide-[#1e293b]" data-testid="member-trainer-sessions">
                 {upcoming.map(b => (
                   <li key={b.id} className="flex flex-wrap items-center justify-between gap-2 py-2.5">
-                    <span className="flex flex-col"><strong>{b.trainer?.displayName ?? '—'}</strong><span className={`text-sm ${muted}`}>{formatDate(`${b.date}T12:00:00+03:00`, locale)} · {b.slot}{b.gym?.name ? ` · ${b.gym.name}` : ''}</span></span>
+                    <span className="flex flex-col"><strong>{b.trainer?.displayName ?? t('member.unknown')}</strong><span className={`text-sm ${muted}`}>{formatDate(`${b.date}T12:00:00+03:00`, locale)} · {formatSlot(b.slot, locale)}{b.gym?.name ? ` · ${b.gym.name}` : ''}</span></span>
                     <span className="rounded-full bg-[#1e293b] px-2.5 py-0.5 text-xs font-bold">{t(STATUS_KEYS[b.status] ?? 'member.trainers.status.other')}</span>
                   </li>
                 ))}
@@ -123,7 +123,7 @@ function BookingPanel({ trainer, options, preferredGym, onPay, onBooked }: {
   trainer: Trainer; options: PaymentOptions | null; preferredGym: string | null; onPay: (t: PayTarget) => void; onBooked: () => void;
 }) {
   const { t, locale } = useApp();
-  const gyms = trainer.gyms?.length ? trainer.gyms : (trainer.gymIds ?? []).map(id => ({ id, name: id }));
+  const gyms = trainer.gyms?.length ? trainer.gyms : (trainer.gymIds ?? []).map(id => ({ id, name: t('member.trainers.gymFallback') }));
   const [gymId, setGymId] = useState(preferredGym && gyms.some(g => g.id === preferredGym) ? preferredGym : gyms[0]?.id ?? '');
   const [days, setDays] = useState<ScheduleDay[] | null>(null);
   const [date, setDate] = useState<string | null>(null);
@@ -156,7 +156,7 @@ function BookingPanel({ trainer, options, preferredGym, onPay, onBooked }: {
 
   const day = days?.find(d => d.date === date) ?? null;
   const body = date && slot ? { trainerId: trainer.id, gymId, slots: [{ date, slot }] } : null;
-  const when = date && slot ? `${formatDate(`${date}T12:00:00+03:00`, locale)} · ${slot}` : '';
+  const when = date && slot ? `${formatDate(`${date}T12:00:00+03:00`, locale)} · ${formatSlot(slot, locale)}` : '';
 
   async function book() {
     if (!body || !quote) { setError(null); return; }
@@ -166,10 +166,10 @@ function BookingPanel({ trainer, options, preferredGym, onPay, onBooked }: {
         create: async () => {
           const r = await memberApi.book(body);
           if (!r.paymentRequest) throw new MemberApiError(409, 'payment_not_pending');
-          return r.paymentRequest.id;
+          return { id: r.paymentRequest.id, amountTzs: r.paymentRequest.amountTzs };
         },
         doneTitleKey: 'member.trainers.bookedTitle',
-        doneBody: fmt(t('member.trainers.bookedBody'), { trainer: trainer.displayName, date: formatDate(`${date}T12:00:00+03:00`, locale), slot: slot ?? '' }),
+        doneBody: fmt(t('member.trainers.bookedBody'), { trainer: trainer.displayName, date: formatDate(`${date}T12:00:00+03:00`, locale), slot: slot ? formatSlot(slot, locale) : '' }),
         doneHref: MEMBER_ROUTES.trainers,
       });
       return;
@@ -222,10 +222,10 @@ function BookingPanel({ trainer, options, preferredGym, onPay, onBooked }: {
               <div className="flex flex-wrap gap-2">
                 {day.slots.filter(s => s.status !== 'past').map(s => s.status === 'available' ? (
                   <button key={s.slot} type="button" aria-pressed={slot === s.slot} onClick={() => setSlot(s.slot)} data-testid={`member-slot-${s.slot}`}
-                    className={`min-h-11 rounded-xl px-3.5 text-sm tabular-nums ${slot === s.slot ? 'bg-[#c8f04a] font-extrabold text-[#020617]' : 'border border-[#334155]'}`}>{s.slot}</button>
+                    className={`min-h-11 rounded-xl px-3.5 text-sm tabular-nums ${slot === s.slot ? 'bg-[#c8f04a] font-extrabold text-[#020617]' : 'border border-[#334155]'}`}>{formatSlot(s.slot, locale)}</button>
                 ) : (
-                  <span key={s.slot} aria-label={fmt(t('member.trainers.slotTaken'), { slot: s.slot })}
-                    className="inline-flex min-h-11 items-center rounded-xl border border-dashed border-[#334155] px-3.5 text-sm text-[#64748b] line-through">{s.slot}</span>
+                  <span key={s.slot} aria-label={fmt(t('member.trainers.slotTaken'), { slot: formatSlot(s.slot, locale) })}
+                    className="inline-flex min-h-11 items-center rounded-xl border border-dashed border-[#334155] px-3.5 text-sm text-[#64748b] line-through">{formatSlot(s.slot, locale)}</span>
                 ))}
               </div>
             )}

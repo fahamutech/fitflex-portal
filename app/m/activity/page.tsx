@@ -5,7 +5,7 @@ import { useApp } from '../../providers';
 import { LoadError, Loading, MemberFrame, PageTitle, card, ghostBtn, input, muted } from '@/components/member/member-frame';
 import { errorKey } from '@/components/member/pay-panel';
 import { fmt, revealPanel } from '@/components/member/member-shared';
-import { formatDate, MemberApiError, memberApi, memberApi3, type Activity, type Checkin, type MemberCode, type RoutePoint } from '@/lib/member-api';
+import { formatDate, formatNumber, MemberApiError, memberApi, memberApi3, type Activity, type Checkin, type MemberCode, type RoutePoint } from '@/lib/member-api';
 import type { MessageKey } from '@/lib/i18n';
 
 export default function MemberActivityPage() {
@@ -20,6 +20,7 @@ const TYPE_KEYS: Record<string, MessageKey> = {
   running: 'member.activity.type.running', walking: 'member.activity.type.walking', cycling: 'member.activity.type.cycling',
   workout: 'member.activity.type.workout', strength: 'member.activity.type.strength',
 };
+const MEMBER_SOURCES = new Set(['device', 'fitflex', 'manual']);
 const isMove = (a: Activity) => ['running', 'walking', 'cycling'].includes(a.type);
 
 /** Start of the period in East Africa time (week from Monday). */
@@ -77,9 +78,9 @@ function ActivityPage() {
   const chip = (on: boolean) => `min-h-11 rounded-full border px-4 text-sm ${on ? 'border-[#c8f04a] bg-[#1e293b] font-semibold' : 'border-[#334155] text-[#cbd5e1]'}`;
   const tiles: Array<[MessageKey, string]> = [
     ['member.activity.stat.visits', String(inPeriod.visits.length)],
-    ['member.activity.stat.distance', fmt(t('member.activity.km'), { n: km.toFixed(1) })],
+    ['member.activity.stat.distance', fmt(t('member.activity.km'), { n: formatNumber(km, locale) })],
     ['member.activity.stat.workouts', String(workouts)],
-    ['member.activity.stat.time', fmt(t('member.activity.hm'), { h: Math.floor(minutes / 60), m: minutes % 60 })],
+    ['member.activity.stat.time', minutes >= 60 ? fmt(t('member.activity.hm'), { h: Math.floor(minutes / 60), m: minutes % 60 }) : fmt(t('member.activity.min'), { m: minutes })],
   ];
 
   return (
@@ -115,7 +116,7 @@ function ActivityPage() {
               {rows.map(r => r.kind === 'visit' ? (
                 <li key={`v-${r.v.id}`} className="flex items-center gap-3.5 border-b border-[#1e293b] py-3">
                   <span aria-hidden="true" className="flex h-12 w-12 flex-none items-center justify-center rounded-xl bg-[#1e293b]"><MapPin className="h-5 w-5 text-[#c8f04a]" /></span>
-                  <span className="flex flex-1 flex-col"><strong>{fmt(t('member.activity.visit'), { gym: r.v.gym?.name ?? '—' })}</strong><span className={`text-sm ${muted}`}>{formatDate(r.v.timestamp, locale, true)}</span></span>
+                  <span className="flex flex-1 flex-col"><strong>{fmt(t('member.activity.visit'), { gym: r.v.gym?.name ?? t('member.unknown') })}</strong><span className={`text-sm ${muted}`}>{formatDate(r.v.timestamp, locale, true)}</span></span>
                 </li>
               ) : (
                 <li key={r.a.id}>
@@ -129,7 +130,7 @@ function ActivityPage() {
                       <span className={`text-sm ${muted}`}>{formatDate(r.a.startedAt, locale, true)}{r.a.source === 'device' ? ` · ${r.a.deviceName ? fmt(t('member.activity.synced'), { device: r.a.deviceName }) : t('member.activity.syncedPhone')}` : ''}</span>
                     </span>
                     <span className="text-right text-sm tabular-nums">
-                      {r.a.distanceKm ? <strong>{fmt(t('member.activity.km'), { n: r.a.distanceKm.toFixed(1) })}</strong>
+                      {r.a.distanceKm ? <strong>{fmt(t('member.activity.km'), { n: formatNumber(r.a.distanceKm, locale) })}</strong>
                         : r.a.steps ? fmt(t('member.activity.steps'), { n: r.a.steps.toLocaleString(locale === 'sw' ? 'sw-TZ' : 'en-GB') })
                         : r.a.durationMinutes ? fmt(t('member.activity.min'), { m: r.a.durationMinutes }) : ''}
                     </span>
@@ -183,11 +184,11 @@ function ActivityDetail({ a, onDeleted }: { a: Activity; onDeleted: () => void }
   const time = secs != null ? `${Math.floor(secs / 3600) ? `${Math.floor(secs / 3600)}:` : ''}${String(Math.floor((secs % 3600) / 60)).padStart(Math.floor(secs / 3600) ? 2 : 1, '0')}:${String(secs % 60).padStart(2, '0')}` : null;
   const pace = secs && a.distanceKm ? (() => { const p = secs / a.distanceKm; return `${Math.floor(p / 60)}:${String(Math.round(p % 60)).padStart(2, '0')}`; })() : null;
   const stats: Array<[MessageKey, string | null]> = [
-    ['member.activity.stat.distance', a.distanceKm ? fmt(t('member.activity.km'), { n: a.distanceKm.toFixed(2) }) : null],
+    ['member.activity.stat.distance', a.distanceKm ? fmt(t('member.activity.km'), { n: formatNumber(a.distanceKm, locale, 2) }) : null],
     ['member.activity.time', time],
     ['member.activity.pace', pace ? fmt(t('member.activity.paceValue'), { p: pace }) : null],
-    ['member.activity.calories', a.calories ? String(Math.round(a.calories)) : null],
-    ['member.activity.climb', a.elevationGainM ? `${Math.round(a.elevationGainM)} m` : null],
+    ['member.activity.calories', a.calories ? formatNumber(Math.round(a.calories), locale, 0) : null],
+    ['member.activity.climb', a.elevationGainM ? fmt(t('member.activity.metres'), { n: Math.round(a.elevationGainM) }) : null],
   ];
 
   async function del() {
@@ -213,7 +214,8 @@ function ActivityDetail({ a, onDeleted }: { a: Activity; onDeleted: () => void }
       {a.notes && <p className="text-sm text-[#cbd5e1]">{a.notes}</p>}
       <p className={`text-sm ${muted}`}>{t('member.activity.viewOnly')}</p>
       {error && <div role="alert" className="rounded-xl bg-[#3a1d14] px-4 py-3 text-sm text-[#ffd2c4]">{t(errorKey(error))}</div>}
-      {confirming ? (
+      {/* Trainer and gym records belong to that relationship (server: 403 not_member_owned): no delete for them. */}
+      {!MEMBER_SOURCES.has(a.source ?? 'manual') ? null : confirming ? (
         <div role="alertdialog" aria-labelledby="del-q" className="flex flex-col gap-3 rounded-2xl border border-[#5c2a1d] p-4">
           <p id="del-q">{t('member.activity.deleteConfirm')}</p>
           <div className="flex flex-wrap gap-2.5">

@@ -13,7 +13,8 @@ export default function MemberChallengesPage() {
 
 type Tab = 'joined' | 'open' | 'ended';
 const day = (d: string) => `${d}T12:00:00+03:00`;
-const goalKey = (type: string) => `member.challenges.type.${type}` as MessageKey;
+const GOAL_TYPES = new Set(['steps', 'distance_km', 'workouts', 'active_minutes', 'consistency', 'gym_attendance']);
+const goalKey = (type: string) => (GOAL_TYPES.has(type) ? `member.challenges.type.${type}` : 'member.challenges.type.other') as MessageKey;
 
 function phaseLabel(c: Challenge, t: (k: MessageKey) => string, locale: 'en' | 'sw') {
   if (c.phase === 'upcoming') return fmt(t('member.challenges.phase.upcoming'), { date: formatDate(day(c.startDate), locale) });
@@ -97,7 +98,19 @@ function ChallengeDetail({ c, onChanged }: { c: Challenge; onChanged: () => void
   const [error, setError] = useState<MemberCode | null>(null);
   const [confirmLeave, setConfirmLeave] = useState(false);
   const [board, setBoard] = useState<Leaderboard | null>(null);
-  const needsTeam = c.mode !== 'individual' && c.mode !== 'department' && c.teams.length > 0;
+  // Teams mode: pick one of the challenge's teams. Gym vs gym: pick one of YOUR gyms (home gym, visited, shared;
+  // GET /me/gym-sharing); the server makes the gym's team when its first member joins.
+  const needsTeam = c.mode === 'teams' && c.teams.length > 0;
+  const gymMode = c.mode === 'gym_vs_gym';
+  const [myGyms, setMyGyms] = useState<Array<{ id: string; name: string }> | null>(null);
+  const [gymId, setGymId] = useState('');
+  useEffect(() => {
+    if (!gymMode || c.joined) return;
+    let live = true;
+    memberApi3.myGyms().then(g => { if (!live) return; const list = g.map(x => x.gym); setMyGyms(list); if (list.length === 1) setGymId(list[0].id); })
+      .catch(() => { if (live) setMyGyms([]); });
+    return () => { live = false; };
+  }, [gymMode, c.joined]);
 
   useEffect(() => {
     if (!c.joined) { setBoard(null); return; }
@@ -113,11 +126,12 @@ function ChallengeDetail({ c, onChanged }: { c: Challenge; onChanged: () => void
     finally { setBusy(false); }
   }
   const join = () => {
-    if (needsTeam && !teamId) { setError(c.mode === 'gym_vs_gym' ? 'gym_required' : 'team_required'); return; }
-    const team = c.teams.find(x => x.id === teamId);
+    if (needsTeam && !teamId) { setError('team_required'); return; }
+    if (gymMode && !gymId) { setError('gym_required'); return; }
     void act(() => memberApi3.joinChallenge(c.id, {
       leaderboardOptIn: optIn,
-      ...(needsTeam ? (c.mode === 'gym_vs_gym' ? { gymId: team?.gymId ?? undefined, teamId } : { teamId }) : {}),
+      ...(needsTeam ? { teamId } : {}),
+      ...(gymMode ? { gymId } : {}),
     }));
   };
   const canJoin = !c.joined && (c.phase === 'active' || c.phase === 'upcoming');
@@ -144,6 +158,16 @@ function ChallengeDetail({ c, onChanged }: { c: Challenge; onChanged: () => void
               </select>
             </label>
           )}
+          {gymMode && (myGyms === null ? <p role="status" className={muted}>{t('member.loading')}</p> : myGyms.length === 0
+            ? <p className="text-sm text-[#fec84b]" data-testid="member-challenge-no-gym">{t('member.challenges.noGym')}</p>
+            : (
+              <label className="flex flex-col gap-1.5 text-sm font-semibold">{t('member.challenges.yourGym')}
+                <select className={input} value={gymId} onChange={e => setGymId(e.target.value)} data-testid="member-challenge-gym">
+                  {myGyms.length > 1 && <option value="">{t('member.challenges.chooseGym')}</option>}
+                  {myGyms.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
+                </select>
+              </label>
+            ))}
           <label className="flex items-center gap-3 text-sm"><input type="checkbox" checked={optIn} onChange={e => setOptIn(e.target.checked)} className="h-5 w-5 accent-[#c8f04a]" data-testid="member-challenge-optin" />{t('member.challenges.showMe')}</label>
           <button type="button" className={`${primaryBtn} self-start`} disabled={busy} onClick={join} data-testid="member-challenge-join">{t('member.challenges.join')}</button>
         </div>
@@ -162,7 +186,7 @@ function ChallengeDetail({ c, onChanged }: { c: Challenge; onChanged: () => void
               <div className="flex flex-wrap gap-2.5">
                 <button type="button" disabled={busy} onClick={() => void act(() => memberApi3.leaveChallenge(c.id))} data-testid="member-challenge-leave-yes"
                   className="inline-flex min-h-11 items-center rounded-full border border-[#ff8a6b] px-5 text-sm font-bold text-[#ff8a6b]">{t('member.challenges.leaveYes')}</button>
-                <button type="button" className={ghostBtn} onClick={() => setConfirmLeave(false)}>{t('member.activity.deleteNo')}</button>
+                <button type="button" className={ghostBtn} onClick={() => setConfirmLeave(false)}>{t('member.challenges.leaveNo')}</button>
               </div>
             </div>
           ) : (
@@ -194,12 +218,16 @@ function LeaderboardView({ board }: { board: Leaderboard | null }) {
           ))}
         </ol>
       )}
-      {board.teamStandings && board.teamStandings.length > 0 && (
+      {board.teams && board.teams.length > 0 && (
         <>
           <h3 className="mt-2 text-base font-extrabold">{t('member.challenges.teams')}</h3>
-          <ol className="flex flex-col tabular-nums">
-            {board.teamStandings.map((s, i) => (
-              <li key={s.teamId ?? s.name} className="flex gap-3.5 border-b border-[#1e293b] px-3 py-2"><span className="w-7 font-bold">{s.rank ?? i + 1}</span><span className="flex-1">{s.name}</span>{s.fraction != null && <span>{Math.round(s.fraction * 100)}%</span>}</li>
+          <ol className="flex flex-col tabular-nums" data-testid="member-challenge-teams">
+            {board.teams.map(s => (
+              <li key={s.teamId} className="flex gap-3.5 border-b border-[#1e293b] px-3 py-2">
+                <span className="w-7 font-bold">{s.rank}</span>
+                <span className="flex-1">{s.name}</span>
+                <span>{Math.round(Math.min(1, s.averageCompletion) * 100)}%</span>
+              </li>
             ))}
           </ol>
         </>

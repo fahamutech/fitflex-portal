@@ -4,8 +4,8 @@ import Link from 'next/link';
 import { QrCode } from 'lucide-react';
 import { useApp } from '../providers';
 import { LoadError, Loading, MemberFrame, PageTitle, card, ghostBtn, linkCls, muted, primaryBtn } from '@/components/member/member-frame';
-import { fmt, isActive, nameOf, tierLabel } from '@/components/member/member-shared';
-import { eatToday, formatDate, formatTzs, MEMBER_ROUTES, memberApi, type Checkin, type MeResponse, type Pass, type ShopOrder, type TrainerBooking } from '@/lib/member-api';
+import { fmt, isActive, nameOf, passOf, passVisits, tierLabel } from '@/components/member/member-shared';
+import { eatToday, formatDate, formatSlot, formatTzs, MEMBER_ROUTES, memberApi, type Checkin, type MeResponse, type Pass, type ShopOrder, type TrainerBooking } from '@/lib/member-api';
 
 export default function MemberTodayPage() {
   return <MemberFrame testId="member-today-page">{() => <Today />}</MemberFrame>;
@@ -37,9 +37,10 @@ function Today() {
   if (state === 'loading') return <Loading />;
   if (state === 'error' || !me) return <LoadError onRetry={load} />;
 
-  const sub = me.subscription;
+  const sub = passOf(me);
   const active = isActive(me);
-  const cap = me.visitCap;
+  const v = passVisits(me);
+  const cap = v?.cap ?? null;
   const pending = me.pendingPayment;
   const name = nameOf(me);
 
@@ -52,14 +53,14 @@ function Today() {
           {sub && active ? (
             <>
               <p className="text-3xl font-black">{tierLabel(sub.tier, passes)}</p>
-              {cap != null ? (
+              {v && cap != null ? (
                 <>
-                  <p className="text-lg font-semibold tabular-nums">{fmt(t('member.today.visitsLeft'), { left: Math.max(0, cap - me.visitsUsed), cap })}</p>
+                  <p className="text-lg font-semibold tabular-nums">{fmt(t('member.today.visitsLeft'), { left: Math.max(0, cap - v.used), cap })}</p>
                   <div className="h-2 rounded-full bg-[#1e293b]" aria-hidden="true">
-                    <div className="h-2 rounded-full bg-[#c8f04a]" style={{ width: `${Math.min(100, (me.visitsUsed / Math.max(1, cap)) * 100)}%` }} />
+                    <div className="h-2 rounded-full bg-[#c8f04a]" style={{ width: `${Math.min(100, (v.used / Math.max(1, cap)) * 100)}%` }} />
                   </div>
                 </>
-              ) : <p className="tabular-nums">{fmt(t('member.today.visitsUsed'), { used: me.visitsUsed })}</p>}
+              ) : v ? <p className="tabular-nums">{fmt(t('member.today.visitsUnlimited'), { used: v.used })}</p> : null}
               {sub.expiresAt && <p className={muted}>{fmt(t('member.today.until'), { date: formatDate(sub.expiresAt, locale) })}</p>}
               <Link href={MEMBER_ROUTES.pass} className={`${linkCls} mt-1 self-start`}>{t('member.today.managePass')}</Link>
             </>
@@ -97,8 +98,8 @@ function Today() {
               ))}
               {sessions.map(b => (
                 <li key={b.id} className="flex flex-wrap justify-between gap-2 py-2.5">
-                  <span className="font-semibold">{b.trainer?.displayName ?? '—'}{b.gym?.name ? ` · ${b.gym.name}` : ''}</span>
-                  <span className={`${muted} tabular-nums`}>{formatDate(`${b.date}T12:00:00+03:00`, locale)} · {b.slot}</span>
+                  <span className="font-semibold">{b.trainer?.displayName ?? t('member.unknown')}{b.gym?.name ? ` · ${b.gym.name}` : ''}</span>
+                  <span className={`${muted} tabular-nums`}>{formatDate(`${b.date}T12:00:00+03:00`, locale)} · {formatSlot(b.slot, locale)}</span>
                 </li>
               ))}
             </ul>
@@ -111,7 +112,7 @@ function Today() {
             <ul className="divide-y divide-[#1e293b]">
               {visits.map(v => (
                 <li key={v.id} className="flex justify-between gap-3 py-2.5">
-                  <span className="font-semibold">{v.gym?.name ?? '—'}</span>
+                  <span className="font-semibold">{v.gym?.name ?? t('member.unknown')}</span>
                   <span className={`${muted} tabular-nums`}>{formatDate(v.timestamp, locale, true)}</span>
                 </li>
               ))}

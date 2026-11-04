@@ -4,6 +4,7 @@
 // Nothing here logs anything, and no token, PIN or QR value is ever put in an address.
 import { API_BASE } from './api';
 import { normaliseError, type CheckinCode } from './web-checkin';
+import { clock } from './events';
 
 export const MEMBER_ROUTES = {
   home: '/m/', signin: '/m/signin/', pass: '/m/pass/', checkIn: '/m/check-in/',
@@ -17,8 +18,14 @@ const TIMEOUT_MS = 15_000;
 export interface MemberUser { id: string; userType: string; name?: string | null; displayName?: string | null; phone?: string | null; email?: string | null; publicId?: string | null }
 export interface MemberSession { token: string; user: MemberUser }
 export interface Subscription { id: string; tier: string | null; type: string; status: string; startedAt?: string | null; expiresAt?: string | null; renewsAt?: string | null; homeGym?: { id: string; name: string } | null }
-export interface PaymentRequest { id: string; tier: string | null; amountTzs: number; status: string; requestedAt: string; provider?: string | null; reference?: string | null; memberReference?: string | null; productType?: string | null; note?: string | null; gym?: { id: string; name: string } | null; eventName?: string | null }
-export interface MeResponse { user: MemberUser; subscription: Subscription | null; pendingPayment: PaymentRequest | null; pendingPayments?: PaymentRequest[]; visitsUsed: number; visitCap: number | null }
+export interface PaymentRequest { id: string; tier: string | null; amountTzs: number; status: string; requestedAt: string; provider?: string | null; reference?: string | null; memberReference?: string | null; productType?: string | null; note?: string | null; gym?: { id: string; name: string } | null; eventName?: string | null; eventTitle?: string | null }
+export interface MeResponse {
+  user: MemberUser; subscription: Subscription | null; pendingPayment: PaymentRequest | null; pendingPayments?: PaymentRequest[];
+  /** Counts for `subscription` (the newest of any kind: a gym plan too). */
+  visitsUsed: number; visitCap: number | null;
+  /** The two access products side by side; the FitFlex Pass is `fitflexPass` (a gym plan never stands for it). */
+  entitlements?: { fitflexPass: Subscription | null; gymSubscriptions?: Subscription[] } | null;
+}
 export interface Pass { id: string; key: string; label: string; price: number; visitCap: number | null; visits?: number | null; gymAccess?: string | null }
 export interface UpgradeOption { tier: string; label: string; monthlyPrice: number; visits?: number | null; differenceTzs: number }
 export interface ManualPayment { enabled: boolean; lipaNamba?: string; accountName?: string; network?: string | null; instructions?: { en?: string | null; sw?: string | null } | null; referenceRequired?: boolean; payerPhoneRequired?: boolean }
@@ -58,7 +65,9 @@ export type MemberCode = CheckinCode | 'not_member' | 'payment_already_pending' 
   | 'slot_already_booked' | 'slot_in_past' | 'slot_not_available' | 'trainer_unavailable' | 'trainer_not_available_at_gym' | 'cannot_book_own_sessions'
   | 'challenge_closed' | 'challenge_paused' | 'team_required' | 'gym_required' | 'not_your_gym' | 'already_joined' | 'not_joined' | 'gym_owner_has_checkin_activity' | 'trainer_has_bookings'
   | 'organizer_owner' | 'account_deletion_failed' | 'invalid_field' | 'event_not_open' | 'registration_closed' | 'hold_limit_reached'
-  | 'already_registered' | 'sold_out' | 'waitlist_full' | 'not_sold_out' | 'price_changed' | 'consent_version_stale' | 'participant_invalid' | 'validation_failed' | 'hold_expired' | 'waitlist_unavailable' | 'verification_required';
+  | 'already_registered' | 'sold_out' | 'waitlist_full' | 'not_sold_out' | 'price_changed' | 'consent_version_stale' | 'participant_invalid' | 'validation_failed' | 'hold_expired' | 'waitlist_unavailable' | 'verification_required'
+  | 'too_many_attempts' | 'password_change_required' | 'open_paid_order' | 'idempotency_key_reused' | 'capacity_unavailable'
+  | 'manual_payment_submitted' | 'provider_unavailable' | 'ticket_not_issued' | 'ticket_revoked' | 'not_member_owned' | 'invalid_team';
 /** Codes with their own member.err.* message (src/lib/i18n-member.ts). */
 export const MEMBER_PASSTHROUGH: ReadonlySet<string> = new Set<string>(['payment_already_pending', 'no_active_pass', 'payment_reference_required', 'payment_reference_invalid',
   'payment_reference_duplicate', 'payer_phone_required', 'payer_phone_invalid', 'invalid_phone', 'feature_disabled', 'payment_not_pending',
@@ -66,34 +75,80 @@ export const MEMBER_PASSTHROUGH: ReadonlySet<string> = new Set<string>(['payment
   'trainer_not_available_at_gym', 'cannot_book_own_sessions', 'challenge_closed', 'challenge_paused', 'team_required', 'gym_required', 'not_your_gym', 'already_joined', 'not_joined',
   'gym_owner_has_checkin_activity', 'trainer_has_bookings', 'organizer_owner', 'account_deletion_failed', 'invalid_field',
   'event_not_open', 'registration_closed', 'hold_limit_reached', 'already_registered', 'sold_out', 'waitlist_full', 'not_sold_out',
-  'price_changed', 'consent_version_stale', 'participant_invalid', 'validation_failed', 'hold_expired', 'waitlist_unavailable', 'verification_required']);
+  'price_changed', 'consent_version_stale', 'participant_invalid', 'validation_failed', 'hold_expired', 'waitlist_unavailable', 'verification_required',
+  'too_many_attempts', 'password_change_required', 'open_paid_order', 'idempotency_key_reused', 'capacity_unavailable',
+  'manual_payment_submitted', 'provider_unavailable', 'ticket_not_issued', 'ticket_revoked', 'not_member_owned', 'invalid_team']);
 
 export class MemberApiError extends Error {
-  constructor(public status: number, public code: MemberCode) { super(code); }
+  /** `serverMessage`: the server's own sentence where it sends one in both languages (account deletion). */
+  constructor(public status: number, public code: MemberCode, public serverMessage: { en?: string | null; sw?: string | null } | null = null) { super(code); }
 }
 
-// ── Session (own storage key; a blocked storage means memory only) ─────────────────────────────────────────────────
+// ── Session (own storage key) ──────────────────────────────────────────────────────────────────────────────────
+// Kept in this tab only (sessionStorage) unless the member ticks "Keep me signed in on this device" (localStorage).
+// A shared computer (a gym front desk running the staff portal on the same site) must not hand the next person a
+// signed-in member: the staff sign-in and sign-out clear it too (app/providers.tsx), a sign-out in one tab ends it in
+// the others, and it ends after IDLE_MS without use. A blocked storage means memory only.
+const IDLE_MS = 30 * 60_000;
+const ACTIVITY_KEY = 'ff_member_last_active';
 let mem: MemberSession | null = null;
 let onEnded: (() => void) | null = null;
 export function setOnSessionEnded(fn: (() => void) | null) { onEnded = fn; }
 
-export function loadSession(): MemberSession | null {
-  if (mem) return mem;
-  try {
-    const raw = localStorage.getItem(SESSION_KEY);
-    if (!raw) return null;
-    const s = JSON.parse(raw) as MemberSession;
-    if (s && typeof s.token === 'string' && s.user?.userType === 'member') { mem = s; return s; }
-  } catch { /* blocked or corrupt */ }
+const stores = (): Storage[] => {
+  const out: Storage[] = [];
+  try { out.push(sessionStorage); } catch { /* blocked */ }
+  try { out.push(localStorage); } catch { /* blocked */ }
+  return out;
+};
+function readStored(): MemberSession | null {
+  for (const st of stores()) {
+    try {
+      const raw = st.getItem(SESSION_KEY);
+      if (!raw) continue;
+      const v = JSON.parse(raw) as MemberSession;
+      if (v && typeof v.token === 'string' && v.user?.userType === 'member') return v;
+    } catch { /* corrupt */ }
+  }
   return null;
 }
-function saveSession(s: MemberSession) {
+function idleExpired(): boolean {
+  try {
+    const last = Number(localStorage.getItem(ACTIVITY_KEY) || sessionStorage.getItem(ACTIVITY_KEY) || 0);
+    return last > 0 && Date.now() - last > IDLE_MS;
+  } catch { return false; }
+}
+/** Called on use (every member request and page): pushes the idle limit back. */
+export function touchSession() {
+  try { (localStorage.getItem(SESSION_KEY) ? localStorage : sessionStorage).setItem(ACTIVITY_KEY, String(Date.now())); } catch { /* blocked */ }
+}
+
+export function loadSession(): MemberSession | null {
+  // Another tab may have signed out: storage is the truth, the memory copy only a cache.
+  const stored = readStored();
+  if (!stored) { mem = null; return null; }
+  if (idleExpired()) { clearSession(); return null; }
+  mem = stored;
+  return mem;
+}
+function saveSession(s: MemberSession, keep: boolean) {
   mem = s;
-  try { localStorage.setItem(SESSION_KEY, JSON.stringify(s)); } catch { /* memory only */ }
+  clearStored();
+  try { (keep ? localStorage : sessionStorage).setItem(SESSION_KEY, JSON.stringify(s)); } catch { /* memory only */ }
+  touchSession();
+}
+function clearStored() {
+  for (const st of stores()) { try { st.removeItem(SESSION_KEY); st.removeItem(ACTIVITY_KEY); } catch { /* blocked */ } }
 }
 export function clearSession() {
   mem = null;
-  try { localStorage.removeItem(SESSION_KEY); } catch { /* blocked */ }
+  clearStored();
+}
+/** A sign-out (or a staff sign-in) in another tab ends this tab's member session too. */
+export function watchOtherTabs(onGone: () => void): () => void {
+  const fn = (e: StorageEvent) => { if ((e.key === SESSION_KEY || e.key === null) && !readStored()) { mem = null; onGone(); } };
+  window.addEventListener('storage', fn);
+  return () => window.removeEventListener('storage', fn);
 }
 
 // ── HTTP ──────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -123,30 +178,55 @@ function codeOf(r: Reply): MemberCode {
   if (MEMBER_PASSTHROUGH.has(raw)) return raw as MemberCode;
   return normaliseError(r.status, r.body);
 }
+/** Sign-in keeps the check-in mapping: there, too_many_attempts means the PIN is paused. */
+const signInCodeOf = (r: Reply): MemberCode => normaliseError(r.status, r.body);
+const messageOf = (r: Reply) => {
+  const en = typeof r.body?.message === 'string' ? r.body.message : null;
+  const sw = typeof r.body?.messageSw === 'string' ? r.body.messageSw : null;
+  return en || sw ? { en, sw } : null;
+};
 
 /** Signed-in request. A 401 ends the member session (never the staff one). */
 async function authed<T>(method: 'GET' | 'POST' | 'PUT' | 'DELETE', path: string, body?: unknown, headers?: Record<string, string>): Promise<T> {
   const s = loadSession();
   if (!s) throw new MemberApiError(401, 'unauthorized');
   const r = await call(method, path, { body, bearer: s.token, headers });
-  if (r.status === 401) { clearSession(); onEnded?.(); throw new MemberApiError(401, 'unauthorized'); }
-  if (r.status < 200 || r.status >= 300) throw new MemberApiError(r.status, codeOf(r));
+  // Signed out on the server, or the account was deleted or suspended (on another device too): end the session here.
+  const raw = typeof r.body?.error === 'string' ? r.body.error : '';
+  if (r.status === 401 || (r.status === 404 && raw === 'user_not_found') || (r.status === 403 && (raw === 'account_suspended' || raw === 'person_not_active'))) {
+    clearSession(); onEnded?.(); throw new MemberApiError(401, 'unauthorized');
+  }
+  if (r.status < 200 || r.status >= 300) throw new MemberApiError(r.status, codeOf(r), messageOf(r));
+  touchSession();
   return r.body as T;
 }
 
 // ── Sign-in: the same phone-or-email + PIN sign-in as the app and the web check-in ─────────────────────────────────
 export type SignInResult = { ok: true; session: MemberSession } | { ok: false; code: MemberCode };
-export async function signIn(identifier: string, pin: string): Promise<SignInResult> {
+export async function signIn(identifier: string, pin: string, keep = false): Promise<SignInResult> {
   const id = identifier.trim();
   const r = await call('POST', '/auth/pin/login', { body: { ...(id.includes('@') ? { email: id } : { phone: id }), pin } });
-  if (r.status < 200 || r.status >= 300) return { ok: false, code: codeOf(r) };
+  if (r.status < 200 || r.status >= 300) return { ok: false, code: signInCodeOf(r) };
   const b = r.body ?? {};
   // A PIN still held only by Firebase, an invitation start PIN or a person with no profile: finish in the app.
   if (b.setupRequired || b.onboarding || b.startPin || typeof b.token !== 'string') return { ok: false, code: 'setup_required' };
-  const user = b.user as MemberUser | undefined;
+  let token = b.token;
+  let user = b.user as MemberUser | undefined;
+  if (user && user.userType !== 'member') {
+    // The sign-in opened another role (the one used last, or the person's only working one). When the same person is
+    // also a member, open that role instead (POST /auth/switch-persona; the app then opens it next time too). The
+    // other role's token is used for this one call and never stored.
+    const personas = Array.isArray(b.personas) ? b.personas as Array<{ id: string; userType: string; accountStatus?: string; approvalStatus?: string; portalOnly?: boolean }> : [];
+    const member = personas.find(p => p.userType === 'member' && !p.portalOnly && p.accountStatus !== 'suspended' && p.approvalStatus !== 'rejected');
+    if (!member) return { ok: false, code: 'not_member' };
+    const sw = await call('POST', '/auth/switch-persona', { body: { personaId: member.id }, bearer: token });
+    const sb = sw.body ?? {};
+    if (sw.status < 200 || sw.status >= 300 || typeof sb.token !== 'string') return { ok: false, code: 'not_member' };
+    token = sb.token; user = sb.user as MemberUser | undefined;
+  }
   if (!user || user.userType !== 'member') return { ok: false, code: 'not_member' };
-  const session = { token: b.token, user };
-  saveSession(session);
+  const session = { token, user };
+  saveSession(session, keep);
   return { ok: true, session };
 }
 
@@ -213,16 +293,35 @@ export function instructionsText(m: ManualPayment | null | undefined, locale: 'e
   return (locale === 'sw' ? i.sw || i.en : i.en || i.sw) || null;
 }
 
+/** "TSh 60,000": the glossary's display label in English and Swahili (TZS stays the code in data). */
 export function formatTzs(n: number, locale: 'en' | 'sw'): string {
-  return `TZS ${new Intl.NumberFormat(locale === 'sw' ? 'sw-TZ' : 'en-GB').format(Math.round(n))}`;
+  return `TSh ${new Intl.NumberFormat(locale === 'sw' ? 'sw-TZ' : 'en-GB').format(Math.round(n))}`;
+}
+/**
+ * Time of day in East Africa. Swahili: the 12-hour clock with the part of the day ("2:05 mchana", glossary
+ * 2026-10-20, the same helper as the events pages); English: 24-hour "14:05".
+ */
+export function formatTime(d: Date, locale: 'en' | 'sw'): string {
+  return clock(d, 'Africa/Dar_es_Salaam', locale);
+}
+/** A trainer slot or an opening hour given as "HH:MM" (East Africa time), in the page's clock. */
+export function formatSlot(hhmm: string, locale: 'en' | 'sw'): string {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(hhmm.trim());
+  if (!m) return hhmm;
+  return formatTime(new Date(`2000-01-03T${m[1].padStart(2, '0')}:${m[2]}:00+03:00`), locale);
 }
 export function formatDate(iso: string | null | undefined, locale: 'en' | 'sw', withTime = false): string {
   if (!iso) return '';
   const d = new Date(iso);
   if (Number.isNaN(+d)) return '';
-  return new Intl.DateTimeFormat(locale === 'sw' ? 'sw-TZ' : 'en-GB', {
-    day: 'numeric', month: 'short', year: 'numeric', ...(withTime ? { hour: '2-digit', minute: '2-digit' } : {}), timeZone: 'Africa/Dar_es_Salaam',
+  const day = new Intl.DateTimeFormat(locale === 'sw' ? 'sw-TZ' : 'en-GB', {
+    day: 'numeric', month: 'short', year: 'numeric', timeZone: 'Africa/Dar_es_Salaam',
   }).format(d);
+  return withTime ? `${day}, ${formatTime(d, locale)}` : day;
+}
+/** A number in the page's locale ("8.2" / "8,2" as Intl gives it). */
+export function formatNumber(n: number, locale: 'en' | 'sw', digits = 1): string {
+  return new Intl.NumberFormat(locale === 'sw' ? 'sw-TZ' : 'en-GB', { maximumFractionDigits: digits, minimumFractionDigits: 0 }).format(n);
 }
 
 // ── Slice 3: activity, challenges, events, account ────────────────────────────────────────────────────────────────
@@ -242,7 +341,9 @@ export interface Challenge {
 export interface Leaderboard {
   individuals: Array<{ rank: number; name: string; progress: number; fraction: number; completed: boolean; you?: boolean }>;
   you?: { optedIn: boolean; rank: number; of: number; progress: number };
-  teamStandings?: Array<{ teamId?: string; name: string; rank?: number; fraction?: number; progress?: number }>;
+  /** Team standings (teams of 3+ only): averageCompletion is 0–1. */
+  teams?: Array<{ teamId: string; name: string; rank: number; members: number; averageCompletion: number; total?: number }>;
+  hiddenTeams?: number;
 }
 export interface CommsPrefs {
   inAppMarketing: boolean; pushMarketing: boolean; whatsappMarketing: boolean; smsMarketing: boolean;
@@ -260,6 +361,7 @@ export const memberApi3 = {
   leaveChallenge: (id: string) => authed<unknown>('POST', `/challenges/${encodeURIComponent(id)}/leave`),
   setLeaderboardOptIn: (id: string, optIn: boolean) => authed<unknown>('PUT', `/challenges/${encodeURIComponent(id)}/leaderboard-opt-in`, { optIn }),
   leaderboard: (id: string) => authed<Leaderboard>('GET', `/challenges/${encodeURIComponent(id)}/leaderboard`),
+  myGyms: () => authed<{ gyms: Array<{ gym: { id: string; name: string }; reasons: string[] }> }>('GET', '/me/gym-sharing').then(r => r.gyms ?? []),
   saveProfile: (body: { displayName?: string; email?: string }) => authed<unknown>('POST', '/me/profile', body),
   commsPrefs: () => authed<{ preferences: CommsPrefs } | CommsPrefs>('GET', '/me/communication-preferences').then(r => ('preferences' in r ? r.preferences : r) as CommsPrefs),
   setCommsPrefs: (body: Partial<Pick<CommsPrefs, 'inAppMarketing' | 'pushMarketing' | 'whatsappMarketing' | 'smsMarketing'>> & { locale?: string }) =>
@@ -268,7 +370,7 @@ export const memberApi3 = {
 };
 
 // ── Events (module behind EVENTS_MODULE on the server and NEXT_PUBLIC_EVENTS_MODULE here) ─────────────────────────
-export interface EventsOptions { discovery: boolean; registration: boolean; payment?: 'none' | 'manual' | 'provider'; waitlist?: boolean; consentTextVersion?: string }
+export interface EventsOptions { discovery: boolean; registration: boolean; payment?: 'none' | 'manual' | 'provider'; waitlist?: { enabled: boolean } | null; consentTextVersion?: string }
 export interface EventSummary {
   id: string; slug?: string; title: string; type?: string; startsAt: string; timezone?: string; availability: string;
   venue?: { name?: string | null; city?: string | null } | null; heroThumbUrl?: string | null; fromPriceTzs?: number | null; distancesM?: number[];
@@ -278,10 +380,11 @@ export interface TicketType { id: string; name: string; priceTzs: number; availa
 export interface EventCategory { id: string; name: string; distanceM?: number | null; startsAt?: string | null; availability: string; remaining?: number | null; ticketTypes: TicketType[] }
 export interface EventDetail extends EventSummary {
   description?: { en?: string | null; sw?: string | null } | null; heroImageUrl?: string | null; categories: EventCategory[];
-  venue?: { name?: string | null; city?: string | null; address?: string | null } | null; terms?: string | null; refundPolicy?: unknown;
+  terms?: { en?: string | null; sw?: string | null } | null;
+  venue?: { name?: string | null; city?: string | null; address?: string | null } | null; refundPolicy?: { preset?: string | null; text?: { en?: string | null; sw?: string | null } | null; generated?: { en?: string | null; sw?: string | null } | string | null } | null;
 }
 export interface Participant {
-  ticketTypeId: string; firstName: string; lastName: string; phone?: string; dateOfBirth?: string;
+  ticketTypeId: string; firstName: string; lastName: string; phone?: string; email?: string; gender?: string; dateOfBirth?: string;
   emergencyContact?: { name: string; phone: string }; kitSize?: string; consentBasis: 'self';
 }
 export type FieldPolicy = 'required' | 'optional' | 'off';
