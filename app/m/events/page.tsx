@@ -21,7 +21,16 @@ const AVAIL: Record<string, MessageKey> = {
   open: 'member.events.avail.open', closing_soon: 'member.events.avail.closing_soon', sold_out: 'member.events.avail.sold_out',
   closed: 'member.events.avail.closed', not_yet_open: 'member.events.avail.not_yet_open', in_progress: 'member.events.avail.in_progress',
 };
-const km = (m?: number | null) => (m ? `${Math.round(m / 100) / 10} km` : '');
+const FIELD_KEYS: Record<string, MessageKey> = {
+  firstName: 'member.events.firstName', lastName: 'member.events.lastName', phone: 'member.events.phone', email: 'member.events.email',
+  dateOfBirth: 'member.events.dob', gender: 'member.events.gender', emergencyContact: 'member.events.emergencyName',
+  'emergencyContact.name': 'member.events.emergencyName', 'emergencyContact.phone': 'member.events.emergencyPhone', kitSize: 'member.events.kitSize',
+};
+/** "10 km" through the translated unit; distances come in metres. */
+const kmText = (m: number | null | undefined, t: (k: MessageKey) => string, locale: 'en' | 'sw') =>
+  (m ? fmt(t('member.activity.km'), { n: new Intl.NumberFormat(locale === 'sw' ? 'sw-TZ' : 'en-GB', { maximumFractionDigits: 1 }).format(m / 1000) }) : '');
+const KIT_SIZES = ['xs', 's', 'm', 'l', 'xl', 'xxl', 'xxxl'] as const;
+const GENDERS = ['female', 'male', 'other'] as const;
 
 // Events ship with the events module (decision P3): this build needs NEXT_PUBLIC_EVENTS_MODULE, and the server must
 // answer discovery: true on GET /events/options. Either off: one notice, no further request.
@@ -85,7 +94,7 @@ function Events({ session }: { session: MemberSession | null }) {
                     </span>
                     <span className="flex min-w-0 flex-1 flex-col gap-1">
                       <strong className="text-base">{e.title}</strong>
-                      <span className="text-sm text-[#cbd5e1]">{[e.venue?.name, e.venue?.city, (e.distancesM ?? []).map(km).join(', ')].filter(Boolean).join(' · ')}</span>
+                      <span className="text-sm text-[#cbd5e1]">{[e.venue?.name, e.venue?.city, (e.distancesM ?? []).map(m => kmText(m, t, locale)).join(', ')].filter(Boolean).join(' · ')}</span>
                       <span className={`text-sm ${e.availability === 'sold_out' ? 'text-[#fec84b]' : e.availability === 'open' || e.availability === 'closing_soon' ? 'text-[#3dd98e]' : muted}`}>
                         {t(AVAIL[e.availability] ?? 'member.events.avail.closed')}{e.fromPriceTzs === 0 ? ` · ${t('member.events.free')}` : e.fromPriceTzs ? ` · ${fmt(t('member.events.fromPrice'), { amount: formatTzs(e.fromPriceTzs, locale) })}` : ''}
                       </span>
@@ -117,6 +126,10 @@ function EventPanel({ id, opts, payOpts, session, onPay, onRegistered }: {
   const [emName, setEmName] = useState('');
   const [emPhone, setEmPhone] = useState('');
   const [kit, setKit] = useState('');
+  const [email, setEmail] = useState(session?.user.email ?? '');
+  const [gender, setGender] = useState('');
+  // The participant fields this event asks for, from the first quote; kept when details change (the quote is redone).
+  const [fields, setFields] = useState<Record<string, string>>({});
   const [quote, setQuote] = useState<EventQuote | null>(null);
   const [terms, setTerms] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -138,11 +151,16 @@ function EventPanel({ id, opts, payOpts, session, onPay, onRegistered }: {
   const all: Array<TicketType & { category: string; distanceM?: number | null }> = ev.categories.flatMap(c => c.ticketTypes.map(tt => ({ ...tt, category: c.name, distanceM: c.distanceM })));
   const chosen = all.find(x => x.id === ticketId) ?? null;
   const soldOut = chosen?.availability === 'sold_out';
-  const canWaitlist = soldOut && opts.waitlist && chosen?.waitlist?.state !== 'closed';
-  const fields = quote?.fields ?? {};
+  // GET /events/options sends waitlist as { enabled, … }; a ticket type's own state is 'open' only when one can join.
+  const canWaitlist = soldOut && opts.waitlist?.enabled === true && chosen?.waitlist?.state === 'open';
+  const show = (k: string) => fields[k] === 'required' || fields[k] === 'optional';
   const need = (k: string) => fields[k] === 'required';
+  const termsText = localText(ev.terms, locale);
+  const refundText = localText(ev.refundPolicy?.text ?? null, locale) || localText(ev.refundPolicy?.generated ?? null, locale);
+  const consentText = localText(quote?.consentText?.self, locale);
   const participant = (): Participant => ({
     ticketTypeId: ticketId, firstName: first.trim(), lastName: last.trim(), phone: phone.trim() || undefined, consentBasis: 'self',
+    ...(email.trim() && show('email') ? { email: email.trim() } : {}), ...(gender && show('gender') ? { gender } : {}),
     ...(dob ? { dateOfBirth: dob } : {}), ...(emName && emPhone ? { emergencyContact: { name: emName.trim(), phone: emPhone.trim() } } : {}), ...(kit ? { kitSize: kit } : {}),
   });
   const body = () => ({ eventId: ev.id, lines: [{ ticketTypeId: ticketId, quantity: 1 }], participants: [participant()] });
@@ -155,7 +173,18 @@ function EventPanel({ id, opts, payOpts, session, onPay, onRegistered }: {
     setBusy(true); setError(null);
     try { await fn(); } catch (e) { setError(e instanceof MemberApiError ? e.code : 'unknown'); } finally { setBusy(false); }
   }
-  const checkPrice = () => run(async () => { setTerms(false); setQuote(await eventsApi.quote(body())); });
+  // Also run before joining a waitlist: it answers the consent text and the fields this event asks for.
+  const checkPrice = () => run(async () => {
+    setTerms(false);
+    try {
+      const q = await eventsApi.quote(body());
+      setQuote(q);
+      if (q.fields) setFields(q.fields);
+    } catch (e) {
+      // A sold-out ticket type cannot be quoted; the waitlist still shows the event terms.
+      if (!(soldOut && e instanceof MemberApiError)) throw e;
+    }
+  });
   const register = () => run(async () => {
     if (!quote) return;
     const { order } = await eventsApi.place(orderKey.current, { ...body(), acceptedTerms: true, consentTextVersion: quote.consentText?.version ?? opts.consentTextVersion, expectedTotalTzs: quote.quote.totalTzs });
@@ -180,10 +209,25 @@ function EventPanel({ id, opts, payOpts, session, onPay, onRegistered }: {
     setDone('manual');
   });
   const joinWaitlist = () => run(async () => {
-    const r = await eventsApi.joinWaitlist(ev.id, { ticketTypeId: ticketId, participants: [participant()], consent: { accepted: true, textVersion: opts.consentTextVersion } });
+    if (!terms) return;
+    const r = await eventsApi.joinWaitlist(ev.id, { ticketTypeId: ticketId, participants: [participant()], consent: { accepted: true, textVersion: quote?.consentText?.version ?? opts.consentTextVersion } });
     setDone({ waitlist: r.entry.position ?? null });
   });
 
+
+  const termsBlock = (
+    <div className="flex flex-col gap-2" data-testid="member-event-terms-block">
+      {(termsText || refundText) && (
+        <details className="rounded-2xl border border-[#1e293b] bg-[#020617] px-4 py-3 text-sm">
+          <summary className="cursor-pointer font-semibold">{t('member.events.readTerms')}</summary>
+          {termsText && <div className="mt-3"><h4 className="font-bold">{t('member.events.termsTitle')}</h4><p className="mt-1 whitespace-pre-line text-[#cbd5e1]" data-testid="member-event-terms-text">{termsText}</p></div>}
+          {refundText && <div className="mt-3"><h4 className="font-bold">{t('member.events.refundTitle')}</h4><p className="mt-1 whitespace-pre-line text-[#cbd5e1]" data-testid="member-event-refund-text">{refundText}</p></div>}
+        </details>
+      )}
+      {consentText && <p className={`text-sm ${muted}`} data-testid="member-event-consent">{consentText}</p>}
+      <label className="flex items-start gap-3 text-sm"><input type="checkbox" checked={terms} onChange={e => setTerms(e.target.checked)} className="mt-0.5 h-5 w-5 flex-none accent-[#c8f04a]" data-testid="member-event-terms" />{t('member.events.terms')}</label>
+    </div>
+  );
   const errBox = error && <div role="alert" className="rounded-xl bg-[#3a1d14] px-4 py-3 text-sm text-[#ffd2c4]" data-testid="member-event-error">{t(errorKey(error))}</div>;
   const field = (label: MessageKey, value: string, set: (v: string) => void, extra: React.InputHTMLAttributes<HTMLInputElement> = {}) => (
     <label className="flex flex-col gap-1.5 text-sm font-semibold">{t(label)}<input className={input} value={value} onChange={e => { set(e.target.value); setQuote(null); }} {...extra} /></label>
@@ -204,7 +248,7 @@ function EventPanel({ id, opts, payOpts, session, onPay, onRegistered }: {
 
       {done ? (
         <div className="flex flex-col gap-2 rounded-2xl border-2 border-[#3dd98e] p-4" data-testid="member-event-done" role="status">
-          <strong className="text-lg">{done === 'registered' ? t('member.events.registeredTitle') : done === 'manual' ? t('member.pay.manualDoneTitle') : fmt(t('member.events.waitlistJoined'), { n: done.waitlist ?? '—' })}</strong>
+          <strong className="text-lg">{done === 'registered' ? t('member.events.registeredTitle') : done === 'manual' ? t('member.pay.manualDoneTitle') : fmt(t('member.events.waitlistJoined'), { n: done.waitlist ?? t('member.unknown') })}</strong>
           <span className={`text-sm ${muted}`}>{done === 'registered' ? t('member.events.registeredBody') : done === 'manual' ? t('member.pay.manualDoneBody') : t('member.events.waitlistBody')}</span>
         </div>
       ) : !opts.registration ? null : manualOrder ? (
@@ -231,7 +275,7 @@ function EventPanel({ id, opts, payOpts, session, onPay, onRegistered }: {
               <label key={x.id} className={`flex cursor-pointer items-center justify-between gap-3 rounded-2xl px-4 py-3 ${ticketId === x.id ? 'border-2 border-[#c8f04a]' : 'border border-[#334155]'}`}>
                 <span className="flex items-center gap-3">
                   <input type="radio" name="ev-ticket" checked={ticketId === x.id} onChange={() => { setTicketId(x.id); setQuote(null); setError(null); }} className="h-5 w-5 accent-[#c8f04a]" data-testid={`member-event-ticket-${x.id}`} />
-                  <span className="flex flex-col"><strong>{x.category}{x.name && x.name !== x.category ? ` · ${x.name}` : ''}</strong><span className={`text-sm ${muted}`}>{km(x.distanceM)}</span></span>
+                  <span className="flex flex-col"><strong>{x.category}{x.name && x.name !== x.category ? ` · ${x.name}` : ''}</strong><span className={`text-sm ${muted}`}>{kmText(x.distanceM, t, locale)}</span></span>
                 </span>
                 <span className="flex flex-col items-end text-sm tabular-nums">
                   <strong>{x.priceTzs === 0 ? t('member.events.free') : formatTzs(x.priceTzs, locale)}</strong>
@@ -248,20 +292,38 @@ function EventPanel({ id, opts, payOpts, session, onPay, onRegistered }: {
                 {field('member.events.lastName', last, setLast, { autoComplete: 'family-name', 'data-testid': 'member-event-last' } as React.InputHTMLAttributes<HTMLInputElement>)}
               </div>
               {field('member.events.phone', phone, setPhone, { type: 'tel', autoComplete: 'tel' })}
-              {need('dateOfBirth') && field('member.events.dob', dob, setDob, { type: 'date', 'data-testid': 'member-event-dob' } as React.InputHTMLAttributes<HTMLInputElement>)}
-              {need('emergencyContact') && (
+              {/* Every field the event asks for (required or optional), as the first quote reported them. */}
+              {show('email') && field(need('email') ? 'member.events.email' : 'member.events.emailOptional', email, setEmail, { type: 'email', autoComplete: 'email', 'data-testid': 'member-event-email' } as React.InputHTMLAttributes<HTMLInputElement>)}
+              {show('dateOfBirth') && field('member.events.dob', dob, setDob, { type: 'date', 'data-testid': 'member-event-dob' } as React.InputHTMLAttributes<HTMLInputElement>)}
+              {show('gender') && (
+                <label className="flex flex-col gap-1.5 text-sm font-semibold">{t('member.events.gender')}
+                  <select className={input} value={gender} onChange={e => { setGender(e.target.value); setQuote(null); }} data-testid="member-event-gender">
+                    <option value="">{t('member.events.choose1')}</option>
+                    {GENDERS.map(g => <option key={g} value={g}>{t(`member.events.gender.${g}` as MessageKey)}</option>)}
+                  </select>
+                </label>
+              )}
+              {show('emergencyContact') && (
                 <div className="grid gap-3 sm:grid-cols-2">{field('member.events.emergencyName', emName, setEmName)}{field('member.events.emergencyPhone', emPhone, setEmPhone, { type: 'tel' })}</div>
               )}
-              {need('kitSize') && field('member.events.kitSize', kit, setKit)}
+              {show('kitSize') && (
+                <label className="flex flex-col gap-1.5 text-sm font-semibold">{t('member.events.kitSize')}
+                  <select className={input} value={kit} onChange={e => { setKit(e.target.value); setQuote(null); }} data-testid="member-event-kit">
+                    <option value="">{t('member.events.choose1')}</option>
+                    {KIT_SIZES.map(k => <option key={k} value={k}>{k.toUpperCase()}</option>)}
+                  </select>
+                </label>
+              )}
               <p className={`text-sm ${muted}`}>{t('member.events.selfOnly')}</p>
             </div>
           ))}
-          {problems.length > 0 && <ul role="alert" className="flex flex-col gap-1 text-sm text-[#ffd2c4]">{problems.map(p => <li key={`${p.field}-${p.code}`}>{fmt(t('member.events.problem'), { field: p.field })}</li>)}</ul>}
+          {problems.length > 0 && <ul role="alert" className="flex flex-col gap-1 text-sm text-[#ffd2c4]">{problems.map(p => <li key={`${p.field}-${p.code}`}>{fmt(t('member.events.problem'), { field: FIELD_KEYS[p.field] ? t(FIELD_KEYS[p.field]) : t('member.events.yourDetails') })}</li>)}</ul>}
           {errBox}
           {chosen && canWaitlist && (
-            <div className="flex flex-col gap-2">
+            <div className="flex flex-col gap-3">
               <p className={`text-sm ${muted}`}>{t('member.events.waitlistBody')}</p>
-              <button type="button" className={`${ghostBtn} self-start`} disabled={busy || !first.trim() || !last.trim()} onClick={() => void joinWaitlist()} data-testid="member-event-waitlist">{t('member.events.waitlist')}</button>
+              {termsBlock}
+              <button type="button" className={`${ghostBtn} self-start`} disabled={busy || !terms || !first.trim() || !last.trim()} onClick={() => void joinWaitlist()} data-testid="member-event-waitlist">{t('member.events.waitlist')}</button>
             </div>
           )}
           {chosen && !soldOut && !quote && (
@@ -273,8 +335,7 @@ function EventPanel({ id, opts, payOpts, session, onPay, onRegistered }: {
                 <span className="flex flex-col"><strong>{t('member.events.total')}</strong>{quote.quote.feesTzs > 0 && <span className={`text-sm ${muted}`}>{fmt(t('member.events.fees'), { amount: formatTzs(quote.quote.feesTzs, locale) })}</span>}</span>
                 <strong className="text-xl tabular-nums">{total === 0 ? t('member.events.free') : formatTzs(total, locale)}</strong>
               </div>
-              {localText(quote.consentText?.self, locale) && <p className={`text-sm ${muted}`} data-testid="member-event-consent">{localText(quote.consentText?.self, locale)}</p>}
-              <label className="flex items-start gap-3 text-sm"><input type="checkbox" checked={terms} onChange={e => setTerms(e.target.checked)} className="mt-0.5 h-5 w-5 flex-none accent-[#c8f04a]" data-testid="member-event-terms" />{t('member.events.terms')}</label>
+              {termsBlock}
               {paymentBlocked
                 ? <p className="rounded-xl bg-[#3a1d14] px-4 py-3 text-sm text-[#ffd2c4]" data-testid="member-event-pay-not-open">{t('member.events.payNotOpen')}</p>
                 : <button type="button" className={primaryBtn} disabled={busy || !terms || !quote.valid} onClick={() => void register()} data-testid="member-event-register">
@@ -291,13 +352,13 @@ function EventPanel({ id, opts, payOpts, session, onPay, onRegistered }: {
 function Tickets({ tickets }: { tickets: EventTicket[] }) {
   const { t, locale } = useApp();
   const [open, setOpen] = useState<string | null>(null);
-  const [qr, setQr] = useState<{ svg: string; code: string } | null | 'error' | 'revoked'>(null);
+  const [qr, setQr] = useState<{ svg: string; code: string } | null | 'error' | 'revoked' | 'not_issued'>(null);
   const show = async (id: string) => {
     setOpen(id); setQr(null);
     try {
       const r = await eventsApi.ticket(id);
       setQr({ svg: await QRCode.toString(r.qrPayload, { type: 'svg', margin: 1, errorCorrectionLevel: 'M' }), code: r.ticket.displayCode });
-    } catch (e) { setQr(e instanceof MemberApiError && e.status === 409 ? 'revoked' : 'error'); }
+    } catch (e) { setQr(e instanceof MemberApiError && e.code === 'ticket_not_issued' ? 'not_issued' : e instanceof MemberApiError && e.status === 409 ? 'revoked' : 'error'); }
   };
   if (tickets.length === 0) return <p className={`${card} ${muted}`}>{t('member.events.noTickets')}</p>;
   return (
@@ -315,6 +376,7 @@ function Tickets({ tickets }: { tickets: EventTicket[] }) {
           {open === k.registrationId && (
             qr === null ? <p role="status" className={muted}>{t('member.loading')}</p>
               : qr === 'revoked' ? <p className="text-[#fec84b]">{t('member.events.ticketRevoked')}</p>
+              : qr === 'not_issued' ? <p className="text-[#fec84b]">{t('member.events.ticketNotIssued')}</p>
               : qr === 'error' ? <p role="alert">{t('member.error.load')}</p>
               : (
                 <div className="flex flex-col items-center gap-2 rounded-2xl bg-[#f7f5f0] p-4 text-[#101828]" data-testid="member-event-qr">

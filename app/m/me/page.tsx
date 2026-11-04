@@ -5,7 +5,7 @@ import { useApp } from '../../providers';
 import { LoadError, Loading, MemberFrame, PageTitle, card, ghostBtn, input, muted, primaryBtn } from '@/components/member/member-frame';
 import { errorKey } from '@/components/member/pay-panel';
 import { fmt } from '@/components/member/member-shared';
-import { clearSession, MEMBER_ROUTES, MemberApiError, memberApi, memberApi3, type CommsPrefs, type MemberCode, type MeResponse } from '@/lib/member-api';
+import { clearSession, localText, MEMBER_ROUTES, MemberApiError, memberApi, memberApi3, type CommsPrefs, type MemberCode, type MeResponse } from '@/lib/member-api';
 import type { MessageKey } from '@/lib/i18n';
 
 export default function MemberMePage() {
@@ -28,6 +28,7 @@ function Me() {
   const [typed, setTyped] = useState('');
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<MemberCode | null>(null);
+  const [deleteMessage, setDeleteMessage] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setState('loading');
@@ -67,7 +68,10 @@ function Me() {
     catch (err) {
       // Already gone (a retry whose first answer was lost): treat as done.
       if (err instanceof MemberApiError && err.status === 404) { clearSession(); router.replace(MEMBER_ROUTES.signin); return; }
-      setDeleteError(err instanceof MemberApiError ? err.code : 'unknown'); setDeleting(false);
+      setDeleteError(err instanceof MemberApiError ? err.code : 'unknown');
+      // The server explains why it can't delete yet (an open paid order, a gym it owns…) in both languages: show that.
+      setDeleteMessage(err instanceof MemberApiError ? localText(err.serverMessage ? { en: err.serverMessage.en, sw: err.serverMessage.sw } : null, locale) : null);
+      setDeleting(false);
     }
   }
 
@@ -133,7 +137,7 @@ function Me() {
         <p className="max-w-3xl text-sm leading-relaxed text-[#cbd5e1]">{t('member.me.deleteBody')}</p>
         <label className="flex max-w-sm flex-col gap-1.5 text-sm font-semibold">{fmt(t('member.me.deleteType'), { word })}
           <input className={input} value={typed} onChange={e => setTyped(e.target.value)} autoComplete="off" data-testid="member-me-delete-type" /></label>
-        {deleteError && <div role="alert" className="rounded-xl bg-[#3a1d14] px-4 py-3 text-sm text-[#ffd2c4]">{t(errorKey(deleteError))}</div>}
+        {deleteError && <div role="alert" className="rounded-xl bg-[#3a1d14] px-4 py-3 text-sm text-[#ffd2c4]" data-testid="member-me-delete-error">{deleteMessage || t(errorKey(deleteError))}</div>}
         <button type="button" disabled={deleting || typed.trim().toUpperCase() !== word} onClick={() => void deleteAccount()} data-testid="member-me-delete-button"
           className="inline-flex min-h-11 items-center self-start rounded-full border border-[#ff8a6b] px-5 text-sm font-bold text-[#ff8a6b] disabled:opacity-50">{t('member.me.deleteButton')}</button>
       </section>

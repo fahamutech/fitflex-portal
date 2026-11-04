@@ -72,7 +72,7 @@ function OrderCard({ order, gym }: { order: ShopOrder; gym: Gym | null }) {
   const { t, locale } = useApp();
   const ready = order.status === 'ready_for_pickup';
   const rank = RANK[order.status] ?? 0;
-  const names = order.items.map(i => `${i.name ?? '—'}${i.qty > 1 ? ` × ${i.qty}` : ''}`).join(', ');
+  const names = order.items.map(i => i.qty > 1 ? fmt(t('member.orders.itemQty'), { name: i.name ?? t('member.unknown'), n: i.qty }) : (i.name ?? t('member.unknown'))).join(', ');
   const gymName = order.pickupGym?.name ?? gym?.name ?? null;
   const paid = order.paymentStatus === 'paid' || !order.paymentStatus;
   return (

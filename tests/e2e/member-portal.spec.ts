@@ -410,4 +410,158 @@ test.describe('member portal, flag on', () => {
     await expect(page.getByTestId('member-events-off')).toBeVisible();
     expect(h.count('GET /events')).toBe(0);
   });
+
+  // ── Review fixes (security, contract and Swahili audits) ─────────────────────────────────────────────────────────
+  test('session: kept in this tab only unless "keep me signed in"; a sign-out in another tab ends it here', async ({ page, context }) => {
+    await setup(page, {}, false);
+    await page.goto('/m/signin/');
+    await page.getByTestId('member-signin-identifier').fill('0754123678');
+    await page.getByTestId('member-signin-pin').fill('4821');
+    await page.getByTestId('member-signin-submit').click();
+    await expect(page.getByTestId('member-today-page')).toBeVisible();
+    expect(await page.evaluate(() => ({ local: localStorage.getItem('ff_member_session'), tab: !!sessionStorage.getItem('ff_member_session') }))).toEqual({ local: null, tab: true });
+    // Signed in to keep: a second tab shares it, and signing out there ends this tab too.
+    await page.evaluate(() => sessionStorage.clear());
+    await page.goto('/m/signin/');
+    await page.getByTestId('member-signin-identifier').fill('0754123678');
+    await page.getByTestId('member-signin-pin').fill('4821');
+    await page.getByTestId('member-signin-keep').check();
+    await page.getByTestId('member-signin-submit').click();
+    await expect(page.getByTestId('member-today-page')).toBeVisible();
+    expect(await page.evaluate(() => !!localStorage.getItem('ff_member_session'))).toBe(true);
+    const other = await context.newPage();
+    await setup(other, {}, false);
+    await other.goto('/m/me/');
+    await other.getByTestId('member-me-sign-out').click();
+    await expect(page).toHaveURL(/\/m\/signin\/$/);
+  });
+
+  test('session: a session idle for over 30 minutes is ended', async ({ page }) => {
+    await setup(page);
+    await page.addInitScript(() => { localStorage.setItem('ff_member_last_active', String(Date.now() - 31 * 60_000)); });
+    await page.goto('/m/');
+    await expect(page).toHaveURL(/\/m\/signin\/$/);
+  });
+
+  test('session: a deleted account (404 user_not_found) or a suspended one ends the session', async ({ page }) => {
+    await setup(page, { 'GET /me': ok({ error: 'user_not_found' }, 404) });
+    await page.goto('/m/');
+    await expect(page).toHaveURL(/\/m\/signin\/$/);
+    expect(await page.evaluate(() => localStorage.getItem('ff_member_session'))).toBeNull();
+  });
+
+  test('sign-in: a person whose sign-in opened their trainer role is switched to their member role', async ({ page }) => {
+    const h = await setup(page, {
+      'POST /auth/pin/login': ok({ token: 'TRAINER-TOKEN', user: { id: 'usr_t1', userType: 'trainer' }, personas: [{ id: 'usr_t1', userType: 'trainer' }, { id: 'usr_m1', userType: 'member', accountStatus: 'active' }] }),
+      'POST /auth/switch-persona': ok({ token: TOKEN, user: USER }),
+    }, false);
+    await page.goto('/m/signin/');
+    await page.getByTestId('member-signin-identifier').fill('0754123678');
+    await page.getByTestId('member-signin-pin').fill('4821');
+    await page.getByTestId('member-signin-submit').click();
+    await expect(page.getByTestId('member-today-page')).toBeVisible();
+    const sw = h.reqs.find(r => r.path === '/auth/switch-persona')!;
+    expect(sw.body).toEqual({ personaId: 'usr_m1' });
+    expect(sw.auth).toBe('Bearer TRAINER-TOKEN');
+    expect(await page.evaluate(() => sessionStorage.getItem('ff_member_session'))).not.toContain('TRAINER-TOKEN');
+  });
+
+  test('pass: a gym plan is not the FitFlex Pass; an unlimited tier says unlimited', async ({ page }) => {
+    await setup(page, {
+      'GET /me': ok({ user: USER, subscription: { id: 'sub_gym', tier: null, type: 'direct_sub', status: 'active' }, pendingPayment: null, visitsUsed: 3, visitCap: null,
+        entitlements: { fitflexPass: null, gymSubscriptions: [{ id: 'sub_gym', type: 'direct_sub', status: 'active' }] } }),
+      'GET /passes': ok([...PASSES, { id: 'executive', key: 'executive', label: 'Executive', price: 400000, visitCap: null, visits: -1 }]),
+    });
+    await page.goto('/m/pass/');
+    await expect(page.getByTestId('member-pass-current')).toContainText(en['member.pass.none']);
+    await expect(page.getByTestId('member-pass-option-executive').locator('xpath=ancestor::label')).toContainText(en['member.pass.planUnlimited']);
+    await expect(page.getByTestId('member-pass-choose')).not.toContainText('-1');
+  });
+
+  test('pass: with mobile money AND Lipa Namba on, the pass goes the Lipa Namba way (the server needs the transaction ID)', async ({ page }) => {
+    const h = await setup(page, { 'GET /payments/options': ok({ enabled: true, environment: 'production', manual: { enabled: true, lipaNamba: '5123456', accountName: 'FITFLEX', referenceRequired: true, payerPhoneRequired: true } }) });
+    await page.goto('/m/pass/');
+    await page.getByTestId('member-pass-option-basic').check();
+    await page.getByTestId('member-pass-continue').click();
+    await expect(page.getByTestId('member-pay-manual')).toBeVisible();
+    await expect(page.getByTestId('member-pay-mobile')).toHaveCount(0);
+    expect(h.count('POST /me/subscribe')).toBe(0);
+  });
+
+  test('prices say TSh and Swahili times use the 12-hour clock with the part of the day', async ({ page }) => {
+    await setup(page, { 'GET /payments/options': ok({ enabled: true, environment: 'production', mobileMoney: { products: ['FITFLEX_PASS', 'TRAINER_SERVICE'] } }) });
+    await page.goto('/m/trainers/');
+    await page.getByTestId('member-trainer-t1').click();
+    await page.getByTestId('member-slot-17:30').click();
+    await expect(page.getByTestId('member-trainer-quote')).toContainText('TSh 31,500');
+    await page.getByTestId('member-lang-toggle').click();
+    await expect(page.getByTestId('member-slot-17:30')).toHaveText('5:30 jioni');
+  });
+
+  test('challenges: team standings render from the server field; gym vs gym offers your own gyms', async ({ page }) => {
+    const h = await setup(page, {
+      'GET /me/challenges': ok({ challenges: [
+        { ...CHALLENGES[1], mode: 'teams', teams: [{ id: 'tm1', name: 'Sinza Squad' }] },
+        { id: 'ch_gvg', name: 'Gym vs gym', type: 'gym_attendance', target: 8, startDate: '2026-10-20', endDate: '2030-11-20', mode: 'gym_vs_gym', phase: 'active', joined: false, leaderboardOptIn: false, participantCount: 30, teams: [], creator: null },
+      ] }),
+      'GET /challenges/ch_mine/leaderboard': ok({ individuals: [], you: { optedIn: true, rank: 1, of: 3, progress: 5 }, teams: [{ rank: 1, teamId: 'tm1', name: 'Sinza Squad', members: 3, averageCompletion: 0.42, total: 15 }], hiddenTeams: 0 }),
+      'GET /me/gym-sharing': ok({ gyms: [{ gym: { id: 'g1', name: 'Kijiweni Strength Club' }, reasons: ['visited'] }] }),
+      'POST /challenges/ch_gvg/join': ok({ ok: true }),
+    });
+    await page.goto('/m/challenges/');
+    await expect(page.getByTestId('member-challenge-teams')).toContainText('Sinza Squad');
+    await expect(page.getByTestId('member-challenge-teams')).toContainText('42%');
+    await page.getByTestId('member-challenges-tab-open').click();
+    await page.getByTestId('member-challenge-ch_gvg').click();
+    await expect(page.getByTestId('member-challenge-gym')).toHaveValue('g1');
+    await page.getByTestId('member-challenge-join').click();
+    await expect.poll(() => h.reqs.find(r => r.path === '/challenges/ch_gvg/join')?.body).toEqual({ leaderboardOptIn: true, gymId: 'g1' });
+  });
+
+  test('events: the terms and refund rules are shown before registering; waitlist only when the server has it on, with consent', async ({ page }) => {
+    const soldOutEvent = { ...EVENT, terms: { en: 'Run at your own risk.', sw: 'Kimbia kwa hatari yako.' }, refundPolicy: { preset: null, text: { en: 'No refunds after 7 days.', sw: null }, generated: null },
+      categories: [{ id: 'c10', name: '10K', distanceM: 10000, availability: 'sold_out', ticketTypes: [{ id: 'tt10', name: 'Standard', priceTzs: 35000, availability: 'sold_out', waitlist: { state: 'open' } }] }] };
+    let h = await setup(page, { 'GET /events/ev1': ok(soldOutEvent), 'GET /events/options': ok({ discovery: true, registration: true, payment: 'provider', waitlist: { enabled: false } }) });
+    await page.goto('/m/events/');
+    await page.getByTestId('member-event-ev1').click();
+    await page.getByTestId('member-event-ticket-tt10').check();
+    await expect(page.getByTestId('member-event-waitlist')).toHaveCount(0);
+    await page.unrouteAll({ behavior: 'ignoreErrors' });
+    h = await setup(page, { 'GET /events/ev1': ok(soldOutEvent), 'GET /events/options': ok({ discovery: true, registration: true, payment: 'provider', waitlist: { enabled: true }, consentTextVersion: 'v3' }),
+      'POST /me/events/ev1/waitlist': ok({ entry: { id: 'w1', position: 4 } }, 201), 'POST /me/event-orders/quote': ok({ error: 'sold_out' }, 409) });
+    await page.reload();
+    await page.getByTestId('member-event-ev1').click();
+    await page.getByTestId('member-event-ticket-tt10').check();
+    await page.getByText(en['member.events.readTerms']).click();
+    await expect(page.getByTestId('member-event-terms-text')).toHaveText('Run at your own risk.');
+    await expect(page.getByTestId('member-event-refund-text')).toHaveText('No refunds after 7 days.');
+    await expect(page.getByTestId('member-event-waitlist')).toBeDisabled();
+    await page.getByTestId('member-event-terms').check();
+    await page.getByTestId('member-event-waitlist').click();
+    await expect(page.getByTestId('member-event-done')).toContainText('4');
+    expect(h.reqs.find(r => r.path === '/me/events/ev1/waitlist')!.body.consent).toEqual({ accepted: true, textVersion: 'v3' });
+  });
+
+  test('events: fields the event asks for (email, gender) appear after the first price check and stay', async ({ page }) => {
+    await setup(page, { 'POST /me/event-orders/quote': ok({ valid: false, quote: { currency: 'TZS', subtotalTzs: 35000, discountTzs: 0, feesTzs: 0, totalTzs: 35000 },
+      participants: [{ index: 0, ok: false, problems: [{ field: 'gender', code: 'required' }] }], problems: [], fields: { phone: 'required', email: 'required', gender: 'required' },
+      consentText: { version: 'v3', self: { en: 'I agree.', sw: 'Ninakubali.' } } }) });
+    await page.goto('/m/events/');
+    await page.getByTestId('member-event-ev1').click();
+    await page.getByTestId('member-event-ticket-tt10').check();
+    await page.getByTestId('member-event-quote').click();
+    await expect(page.getByTestId('member-event-gender')).toBeVisible();
+    await expect(page.getByRole('alert').filter({ hasText: en['member.events.gender'] })).toBeVisible();
+    await page.getByTestId('member-event-email').fill('neema@example.com');
+    await expect(page.getByTestId('member-event-gender')).toBeVisible();
+  });
+
+  test('activity: no delete for a record from a trainer or a gym', async ({ page }) => {
+    await setup(page, { 'GET /me/activities': ok([{ id: 'act_tr', type: 'strength', source: 'trainer', startedAt: new Date(Date.now() - 3600_000).toISOString(), durationMinutes: 40 }]) });
+    await page.goto('/m/activity/');
+    await page.getByTestId('member-activity-period-week').click();
+    await page.getByTestId('member-activity-act_tr').click();
+    await expect(page.getByTestId('member-activity-detail')).toBeVisible();
+    await expect(page.getByTestId('member-activity-delete')).toHaveCount(0);
+  });
 });
