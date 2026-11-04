@@ -7,7 +7,7 @@ import { ArrowDown, ArrowUp, ChevronRight, Download, HandCoins } from 'lucide-re
 import type { AgingBucket } from '@/lib/api';
 import { money } from '@/lib/admin-utils';
 import { AGING_BUCKETS, agingKey, errorCode, fmt, receiptDay } from '@/lib/vendor';
-import { purchasesApi, type PayablesPage, type PayablesRow, type PayablesSort } from '@/lib/vendor-purchases';
+import { plural, purchasesApi, type PayablesPage, type PayablesRow, type PayablesSort } from '@/lib/vendor-purchases';
 import { Alert, Badge, Button, Card, EmptyState, ErrorState, SkeletonTable, Spinner, Table, TBody, Td, Th, THead, Tr, useToast } from '@/components/shared';
 import { useVendor } from '@/components/vendor-context';
 import { saveBlob } from '@/components/vendor/documents/share-menu';
@@ -157,7 +157,7 @@ export function PayablesView({ bucket, sort, onParams, onOpen }: {
                     <Td className="whitespace-nowrap">
                       <span className="inline-flex flex-col gap-1">
                         <span>{receiptDay(r.oldestDueDate, locale)}</span>
-                        {r.maxDaysOverdue > 0 && <Badge tone="warning">{fmt(t('vendor.suppliers.daysOverdue'), { n: r.maxDaysOverdue })}</Badge>}
+                        {r.maxDaysOverdue > 0 && <Badge tone="warning">{fmt(plural(t, 'vendor.suppliers.daysOverdue', r.maxDaysOverdue), { n: r.maxDaysOverdue })}</Badge>}
                       </span>
                     </Td>
                     <Td><ChevronRight aria-hidden="true" className="h-4 w-4 text-[var(--color-fg-quaternary)]" /></Td>
@@ -186,7 +186,7 @@ export function PayablesView({ bucket, sort, onParams, onOpen }: {
                     <span className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-[var(--color-fg-tertiary)]">
                       {r.overdueTzs > 0 && <span className="whitespace-nowrap">{fmt(t('vendor.purchases.overdueAmount'), { amount: money(r.overdueTzs) })}</span>}
                       <span>{t('vendor.payables.oldestDue')}: {receiptDay(r.oldestDueDate, locale)}</span>
-                      {r.maxDaysOverdue > 0 && <Badge tone="warning">{fmt(t('vendor.suppliers.daysOverdue'), { n: r.maxDaysOverdue })}</Badge>}
+                      {r.maxDaysOverdue > 0 && <Badge tone="warning">{fmt(plural(t, 'vendor.suppliers.daysOverdue', r.maxDaysOverdue), { n: r.maxDaysOverdue })}</Badge>}
                     </span>
                   </Link>
                 </Card>
