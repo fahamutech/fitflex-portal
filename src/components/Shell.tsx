@@ -36,7 +36,7 @@ import {
   Star,
   HandCoins,
   SlidersHorizontal,
-  Undo2, Receipt, KeyRound, ShieldAlert, Images, Landmark, Percent, CalendarCheck, ImageUp, Plug, ScrollText, Truck,
+  Undo2, Receipt, KeyRound, FileUp, ShieldAlert, Images, Landmark, Percent, CalendarCheck, ImageUp, Plug, ScrollText, Truck,
 } from 'lucide-react';
 import { useApp } from '../../app/providers';
 import { ChangePasswordGate } from './change-password-gate';
@@ -142,8 +142,8 @@ const OPERATOR_NAV: NavItem[] = [
 
 // A business that sells on FitFlex (vendor portal, S2): each item needs its permission.
 function vendorNav(permissions: string[], tools: VendorTools | null | undefined, lowCount: number | null, waitingCount: number | null, bannersOn = false): NavItem[] {
-  const icons: Record<string, React.ElementType> = { '/vendor': LayoutDashboard, '/vendor/products': ShoppingBag, '/vendor/purchases': Truck, '/vendor/promotions': Megaphone, '/vendor/orders': ClipboardList, '/vendor/sales': Receipt, '/vendor/customers': Users, '/vendor/reports': BarChart3, '/vendor/payouts': HandCoins, '/vendor/settings/tax': Landmark };
-  const labels: Record<string, string> = { '/vendor': 'vendor.nav.dashboard', '/vendor/products': 'vendor.nav.products', '/vendor/purchases': 'vendor.nav.purchases', '/vendor/promotions': 'merch.nav', '/vendor/orders': 'vendor.nav.orders', '/vendor/sales': 'vendor.nav.sales', '/vendor/customers': 'vendor.nav.customers', '/vendor/reports': 'vendor.nav.reports', '/vendor/payouts': 'vendor.nav.payouts', '/vendor/settings/tax': 'vendor.tax.title' };
+  const icons: Record<string, React.ElementType> = { '/vendor': LayoutDashboard, '/vendor/products': ShoppingBag, '/vendor/purchases': Truck, '/vendor/promotions': Megaphone, '/vendor/orders': ClipboardList, '/vendor/sales': Receipt, '/vendor/customers': Users, '/vendor/reports': BarChart3, '/vendor/import': FileUp, '/vendor/payouts': HandCoins, '/vendor/settings/tax': Landmark };
+  const labels: Record<string, string> = { '/vendor': 'vendor.nav.dashboard', '/vendor/products': 'vendor.nav.products', '/vendor/purchases': 'vendor.nav.purchases', '/vendor/promotions': 'merch.nav', '/vendor/orders': 'vendor.nav.orders', '/vendor/sales': 'vendor.nav.sales', '/vendor/customers': 'vendor.nav.customers', '/vendor/reports': 'vendor.nav.reports', '/vendor/import': 'vendor.nav.import', '/vendor/payouts': 'vendor.nav.payouts', '/vendor/settings/tax': 'vendor.tax.title' };
   // S5: Settings → Tax details (VAT on; owner or staff with `payments`).
   const groups: Record<string, string> = { '/vendor/settings/tax': 'vendor.nav.group.settings' };
   return VENDOR_AREAS.filter(a => a.nav !== false && vendorAreaOpen(a, permissions, tools) && (a.href !== '/vendor/promotions' || bannersOn)).map(a => ({
