@@ -134,6 +134,10 @@ test.describe('gating and permissions', () => {
   test('tool off: no Purchases nav or tile, and a deep link goes home with no message', async ({ page }) => {
     await signedInAs(page, VENDOR);
     const calls = await mockApi(page, base({ 'GET /vendor/me': { json: me({ tools: tools({ purchases: false }) }) } }));
+    // Dev server only: on a cold compile cache the Shell's redirect can be lost while /vendor compiles on demand
+    // (the static export has no on-demand compile). Open /vendor once first so the redirect target is built.
+    await page.goto('/vendor/');
+    await expect(page.getByTestId('dash-sales')).toBeVisible();
     await page.goto('/vendor/purchases/receive/');
     await expect(page).toHaveURL(/\/vendor\/$/);
     await expect(page.getByRole('link', { name: 'Purchases', exact: true })).toHaveCount(0);
@@ -627,11 +631,11 @@ test.describe('owed to suppliers, history, reports, Swahili', () => {
     await pickProduct(page, 1, 'tee', 'prd_tee');
     await expect(page.getByLabel('Chaguo')).toBeVisible();
     await expect(page.getByText('Aina', { exact: true })).toHaveCount(0);
-    // UAT L-1: variant counts read "Chaguo 1" / "Chaguo 3".
+    // UAT L-1: variant counts read "Chaguo 1" / "Machaguo 3" (as mobile).
     await page.getByTestId('receive-add-row').click();
     await page.getByTestId('receive-product-2').click();
     await expect(page.getByTestId('product-option-prd_cap')).toContainText('Cap · Chaguo 1');
-    await expect(page.getByTestId('product-option-prd_tee')).toContainText('Gym tee · Chaguo 3');
+    await expect(page.getByTestId('product-option-prd_tee')).toContainText('Gym tee · Machaguo 3');
   });
 
   test('English variant counts: "1 variant" / "3 variants"', async ({ page }) => {

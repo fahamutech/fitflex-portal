@@ -12437,7 +12437,7 @@ export const messages = {
     "vendor.purchases.voidPaymentsOne": "Malipo 1 yaliyorekodiwa ({amount}) yatabatilishwa pia. Dai pesa yako kutoka kwa msambazaji wewe mwenyewe.",
     "vendor.suppliers.daysOverdueOne": "Imechelewa siku 1",
     "vendor.suppliers.boughtOne": "Umenunua {amount} kwa mzigo 1 · umelipa {paid}",
-    "vendor.purchases.variantCount": "Chaguo {n}",
+    "vendor.purchases.variantCount": "Machaguo {n}",
     "vendor.purchases.variantCountOne": "Chaguo 1",
     "vendor.stock.note.variantGone": "Chaguo hili halipo tena",
     "vendor.purchases.err.paymentSupplierArchived": "Msambazaji huyu amehifadhiwa. Mrejeshe kwanza kabla ya kubadilisha malipo.",
