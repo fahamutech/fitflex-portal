@@ -12,7 +12,7 @@ import { Alert, Badge, Button, ErrorState, SkeletonCard } from '@/components/sha
 import { Dialog, DialogFooter } from '@/components/dialog';
 import { useVendor } from '@/components/vendor-context';
 import { useApp } from '../../../../app/providers';
-import { CreditBadges } from './bits';
+import { CreditBadges, RefundBadges } from './bits';
 
 export function CustomerSaleDialog({ customerId, saleId, onClose }: { customerId: string; saleId: string | null; onClose: () => void }) {
   const { token, t, locale } = useApp();
@@ -52,6 +52,7 @@ export function CustomerSaleDialog({ customerId, saleId, onClose }: { customerId
             <div className="flex flex-wrap items-center gap-1.5">
               {s.status === 'voided' && <Badge tone="gray">{t('vendor.sales.voidedBadge')}</Badge>}
               <CreditBadges sale={s} />
+              <RefundBadges sale={s} />
             </div>
             <p className="text-[var(--color-fg-tertiary)]">{eatDateTime(s.soldAt, locale)}</p>
             {s.status === 'voided' && (

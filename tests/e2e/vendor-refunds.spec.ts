@@ -26,9 +26,16 @@ const VENDOR = { id: 'usr_vendor', userType: 'vendor', displayName: 'Rehema' };
 const STAFF = { id: 'usr_staff', userType: 'vendor_staff', vendorId: 'usr_vendor', displayName: 'Juma' };
 const staffMe = (role: string, extra: Record<string, unknown> = {}) => me({ userType: 'vendor_staff', vendorRole: role, permissions: ['sales'], ...extra });
 
-const NOW = new Date(Date.now() - 60_000).toISOString();
-const YESTERDAY = new Date(Date.now() - 30 * 3_600_000).toISOString();
 const eatToday = () => new Date(Date.now() + 3 * 3_600_000).toISOString().slice(0, 10);
+/** Start of today's EAT day (00:00 EAT = 21:00 UTC the day before). */
+const EAT_DAY_START = Date.parse(`${eatToday()}T00:00:00+03:00`);
+/**
+ * "Sold a minute ago", but never before today's EAT day start, so a run just after EAT midnight still counts it as
+ * sold today (the M2 rule compares EAT days). Never in the future.
+ */
+const NOW = new Date(Math.max(Date.now() - 60_000, EAT_DAY_START)).toISOString();
+/** Always on an earlier EAT day: one hour before today's EAT day start. */
+const YESTERDAY = new Date(EAT_DAY_START - 3_600_000).toISOString();
 
 /** 3 × TSh 3,500 with a TSh 500 line discount (lineNet 10,000) and a shaker; cash. */
 const line = (extra: Record<string, unknown> = {}) => ({

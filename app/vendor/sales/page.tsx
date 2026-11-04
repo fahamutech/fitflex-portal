@@ -12,7 +12,7 @@ import {
 } from '@/lib/vendor';
 import { RefundDialog } from '@/components/vendor/sales/refund-dialog';
 import { RefundsCard } from '@/components/vendor/sales/refunds-card';
-import { CreditBadges } from '@/components/vendor/customers/bits';
+import { CreditBadges, RefundBadges } from '@/components/vendor/customers/bits';
 import { docLinkCls } from '@/components/vendor/documents/share-menu';
 import { documentHref } from '@/lib/vendor-documents';
 import {
@@ -44,8 +44,7 @@ function SaleBadges({ sale }: { sale: Pick<VendorSaleRow, 'status' | 'soldAt' | 
       {recordedOffline(sale) && <Badge tone="gray">{t('vendor.sales.offlineBadge')}</Badge>}
       {sale.hasOverride === true && <Badge tone="warning">{t('vendor.sales.priceChangedBadge')}</Badge>}
       {/* S7: refunds stay visible whatever the flag (bookkeeping facts of the sale). */}
-      {sale.status === 'completed' && sale.refundState === 'partial' && <Badge tone="info">{t('vendor.refunds.badgePartial')}</Badge>}
-      {sale.status === 'completed' && sale.refundState === 'full' && <Badge tone="gray">{t('vendor.refunds.badgeFull')}</Badge>}
+      <RefundBadges sale={sale} />
       {/* S4: "Pay later" and what is still owed (or "Paid off"). */}
       <CreditBadges sale={sale} />
     </span>
