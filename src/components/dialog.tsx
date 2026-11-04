@@ -121,7 +121,7 @@ export function Dialog({
             type="button"
             onClick={onClose}
             aria-label={t('pro.close')}
-            className="shrink-0 p-2.5 -m-1.5 rounded-[var(--radius-md)] text-[var(--color-fg-tertiary)] hover:bg-[var(--color-bg-tertiary)] hover:text-[var(--color-fg-primary)] transition-colors"
+            className="inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center -m-1.5 rounded-[var(--radius-md)] text-[var(--color-fg-tertiary)] hover:bg-[var(--color-bg-tertiary)] hover:text-[var(--color-fg-primary)] transition-colors"
           >
             <X className="h-5 w-5" />
           </button>

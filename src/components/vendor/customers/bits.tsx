@@ -4,7 +4,7 @@ import { type ReactNode, useEffect, useState } from 'react';
 import type { AgingBucket, VendorAging, VendorSaleRow } from '@/lib/api';
 import { money } from '@/lib/admin-utils';
 import type { MessageKey } from '@/lib/i18n';
-import { AGING_BUCKETS, agingKey, errorBody, errorCode, fmt } from '@/lib/vendor';
+import { AGING_BUCKETS, agingKey, errorBody, errorCode, fmt, creditClearedAs } from '@/lib/vendor';
 import { Badge, Card } from '@/components/shared';
 import { useApp } from '../../../../app/providers';
 
@@ -71,15 +71,29 @@ export const isBucket = (b: string): b is AgingBucket => (AGING_BUCKETS as reado
 export const linkCls = 'inline-flex min-h-11 items-center font-semibold text-[var(--color-brand-700)] underline-offset-4 hover:underline';
 
 /** Pay later / owes / paid off / voided badges of a sale row. */
-export function CreditBadges({ sale }: { sale: Pick<VendorSaleRow, 'status' | 'kind' | 'balanceTzs'> }) {
+/**
+ * S7: Part refunded / Refunded on a completed sale (whatever the flag: refunds already made stay visible). Shared by
+ * the sales list and detail and the customer screens, so a fully refunded pay-later sale never reads "Pay later" alone.
+ */
+export function RefundBadges({ sale }: { sale: { status: string; refundState?: string } }) {
+  const { t } = useApp();
+  if (sale.status !== 'completed') return null;
+  if (sale.refundState === 'partial') return <Badge tone="info"><span data-testid="badge-part-refunded">{t('vendor.refunds.badgePartial')}</span></Badge>;
+  if (sale.refundState === 'full') return <Badge tone="gray"><span data-testid="badge-refunded">{t('vendor.refunds.badgeFull')}</span></Badge>;
+  return null;
+}
+
+export function CreditBadges({ sale }: { sale: Pick<VendorSaleRow, 'status' | 'kind' | 'balanceTzs'> & { refundState?: string; refundedTzs?: number; balanceReducedTzs?: number } }) {
   const { t } = useApp();
   if (sale.kind !== 'credit') return null;
+  // S7 UAT L-3: "Paid off" only when payments paid it off; a refund that cleared it says so; fully refunded says Refunded (its own badge).
+  const cleared = creditClearedAs(sale);
   return (
     <>
       <Badge tone="info">{t('vendor.sales.payLaterBadge')}</Badge>
-      {sale.status === 'completed' && (Number(sale.balanceTzs) > 0
-        ? <Badge tone="warning"><span className="whitespace-nowrap">{fmt(t('vendor.sales.owesBadge'), { amount: money(sale.balanceTzs) })}</span></Badge>
-        : <Badge tone="success">{t('vendor.sales.paidOffBadge')}</Badge>)}
+      {sale.status === 'completed' && Number(sale.balanceTzs) > 0 && <Badge tone="warning"><span className="whitespace-nowrap">{fmt(t('vendor.sales.owesBadge'), { amount: money(sale.balanceTzs) })}</span></Badge>}
+      {cleared === 'paidOff' && <Badge tone="success">{t('vendor.sales.paidOffBadge')}</Badge>}
+      {cleared === 'settled' && <Badge tone="gray"><span data-testid="credit-settled">{t('vendor.documents.status.settled_by_credit_note')}</span></Badge>}
     </>
   );
 }

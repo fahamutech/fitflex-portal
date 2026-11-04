@@ -7,12 +7,12 @@ import { api, type VendorRefund, type VendorSale, type VendorSaleRow, type Vendo
 import { money } from '@/lib/admin-utils';
 import type { MessageKey } from '@/lib/i18n';
 import {
-  addDays, canCustomers, customerName, documentsOn, eatDateTime, eatToday, errorBody, errorCode, fmt, isRefusal, itemsKey, mayRefundSale, mayVoidSale, receiptDay,
+  addDays, canCustomers, creditClearedAs, customerName, documentsOn, eatDateTime, eatToday, errorBody, errorCode, fmt, isRefusal, itemsKey, mayRefundSale, mayVoidSale, receiptDay,
   recordedOffline, refundsOn, saleMethodLabel, saleMethodsLabel, saleReceiptText,
 } from '@/lib/vendor';
 import { RefundDialog } from '@/components/vendor/sales/refund-dialog';
 import { RefundsCard } from '@/components/vendor/sales/refunds-card';
-import { CreditBadges } from '@/components/vendor/customers/bits';
+import { CreditBadges, RefundBadges } from '@/components/vendor/customers/bits';
 import { docLinkCls } from '@/components/vendor/documents/share-menu';
 import { documentHref } from '@/lib/vendor-documents';
 import {
@@ -44,8 +44,7 @@ function SaleBadges({ sale }: { sale: Pick<VendorSaleRow, 'status' | 'soldAt' | 
       {recordedOffline(sale) && <Badge tone="gray">{t('vendor.sales.offlineBadge')}</Badge>}
       {sale.hasOverride === true && <Badge tone="warning">{t('vendor.sales.priceChangedBadge')}</Badge>}
       {/* S7: refunds stay visible whatever the flag (bookkeeping facts of the sale). */}
-      {sale.status === 'completed' && sale.refundState === 'partial' && <Badge tone="info">{t('vendor.refunds.badgePartial')}</Badge>}
-      {sale.status === 'completed' && sale.refundState === 'full' && <Badge tone="gray">{t('vendor.refunds.badgeFull')}</Badge>}
+      <RefundBadges sale={sale} />
       {/* S4: "Pay later" and what is still owed (or "Paid off"). */}
       <CreditBadges sale={sale} />
     </span>
@@ -173,6 +172,7 @@ function SalesInner() {
       ...(typeof sale.balanceTzs === 'number' ? { balanceTzs: sale.balanceTzs } : {}),
       ...(typeof sale.refundedTzs === 'number' ? { refundedTzs: sale.refundedTzs } : {}),
       ...(sale.refundState ? { refundState: sale.refundState } : {}),
+      ...(typeof sale.balanceReducedTzs === 'number' ? { balanceReducedTzs: sale.balanceReducedTzs } : {}),
     } : s)));
     if (!token) return;
     const id = requestId.current;
@@ -597,7 +597,9 @@ function SaleDetail({ id, onBack, onUpdated }: { id: string; onBack: () => void;
               {s.dueDate && <div className={row}><span>{t('vendor.receipt.dueBy')}</span><span className="whitespace-nowrap">{receiptDay(s.dueDate, locale)}</span></div>}
               {s.status === 'completed' && (Number(s.balanceTzs) > 0
                 ? <div className={`${row} font-semibold`}><span>{t('vendor.pay.stillOwed')}</span><span className="whitespace-nowrap tabular-nums" data-testid="sale-balance">{money(s.balanceTzs)}</span></div>
-                : <p><Badge tone="success">{t('vendor.sales.paidOffBadge')}</Badge></p>)}
+                : creditClearedAs(s) === 'paidOff' ? <p><Badge tone="success">{t('vendor.sales.paidOffBadge')}</Badge></p>
+                : creditClearedAs(s) === 'settled' ? <p data-testid="sale-settled"><Badge tone="gray">{t('vendor.documents.status.settled_by_credit_note')}</Badge></p>
+                : null)}
               {(s.allocations ?? []).length > 0 && (
                 <div className="space-y-1 pt-1" data-testid="sale-allocations">
                   <p className="font-medium">{t('vendor.sales.customerPayments')}</p>
