@@ -6,7 +6,7 @@ import { api, type VendorProduct } from '@/lib/api';
 import { money } from '@/lib/admin-utils';
 import { addDays, dayMonth, errorBody, errorCode, fmt, isRefusal, newClientRef, receiptDay, REFERENCE_REQUIRED } from '@/lib/vendor';
 import {
-  coverPreview, DUE_MAX_DAYS, MAX_NOTE, purchaseErrorKey, purchasesApi, REASON, voidRefusalKey, type Purchase, type PurchasePayment,
+  coverPreview, DUE_MAX_DAYS, plural, MAX_NOTE, purchaseErrorKey, purchasesApi, REASON, voidRefusalKey, type Purchase, type PurchasePayment,
 } from '@/lib/vendor-purchases';
 import { Alert, Button, Field, Input, Textarea, useToast } from '@/components/shared';
 import { Dialog, DialogFooter } from '@/components/dialog';
@@ -91,7 +91,7 @@ export function RecordPaymentDialog({ open, purchase, onClose, onSaved, onReload
   }
 
   return (
-    <Dialog open={open} onClose={() => { if (!busy) onClose(); }} title={fmt(t('vendor.purchases.payTitle'), { supplier })} size="lg" sheetOnMobile testId="purchase-pay-dialog">
+    <Dialog focusTitle open={open} onClose={() => { if (!busy) onClose(); }} title={fmt(t('vendor.purchases.payTitle'), { supplier })} size="lg" sheetOnMobile testId="purchase-pay-dialog">
       <form className="space-y-4" onSubmit={e => { e.preventDefault(); void save(); }} noValidate data-testid="purchase-pay-form">
         <p className="text-sm text-[var(--color-fg-secondary)]" data-testid="pay-left">{fmt(t('vendor.purchases.leftToPay'), { amount: money(balance) })}</p>
         {alert && <div data-testid="purchase-pay-alert"><Alert tone="error">{alert}</Alert></div>}
@@ -180,7 +180,7 @@ export function ChangePlanDialog({ open, purchase, onClose, onSaved, onReload }:
   }
 
   return (
-    <Dialog open={open} onClose={() => { if (!busy) onClose(); }} title={t('vendor.purchases.changePlan')} size="lg" sheetOnMobile testId="purchase-plan-dialog">
+    <Dialog focusTitle open={open} onClose={() => { if (!busy) onClose(); }} title={t('vendor.purchases.changePlan')} size="lg" sheetOnMobile testId="purchase-plan-dialog">
       <div className="space-y-4">
         <p className="text-sm">{fmt(t('vendor.purchases.paidSoFar'), { amount: money(purchase.paidTzs) })} · {fmt(t('vendor.purchases.mustAddUp'), { balance: money(balance) })}</p>
         {kept.length > 0 && (
@@ -263,10 +263,10 @@ export function VoidPurchaseDialog({ open, purchase, onClose, onVoided, onReload
 
   return (
     <>
-      <Dialog open={open && !adjust} onClose={() => { if (!busy) onClose(); }} title={fmt(t('vendor.purchases.voidTitle'), { number: purchase.number })} sheetOnMobile testId="purchase-void-dialog">
+      <Dialog focusTitle open={open && !adjust} onClose={() => { if (!busy) onClose(); }} title={fmt(t('vendor.purchases.voidTitle'), { number: purchase.number })} sheetOnMobile testId="purchase-void-dialog">
         <div className="space-y-3 text-sm">
           <p>{fmt(t('vendor.purchases.voidBody'), { number: purchase.number })}</p>
-          {recorded.length > 0 && <p data-testid="void-payments-note">{fmt(t('vendor.purchases.voidPayments'), { n: recorded.length, amount: money(paidSum) })}</p>}
+          {recorded.length > 0 && <p data-testid="void-payments-note">{fmt(plural(t, 'vendor.purchases.voidPayments', recorded.length), { n: recorded.length, amount: money(paidSum) })}</p>}
           {costChanged && <p data-testid="void-cost-note">{t('vendor.purchases.voidCost')}</p>}
           {short && (
             <div role="alert" className="space-y-2 rounded-[var(--radius-lg)] border border-[var(--color-error-200)] bg-[var(--color-error-50)] p-3 text-[var(--color-error-800)]" data-testid="void-insufficient">
@@ -343,7 +343,7 @@ export function VoidPaymentDialog({ payment, purchase, onClose, onVoided, onRelo
   }
 
   return (
-    <Dialog open onClose={() => { if (!busy) onClose(); }} title={fmt(t('vendor.purchases.voidPaymentTitle'), { amount: money(payment.amountTzs), date: receiptDay(payment.paidOn, locale) })} sheetOnMobile testId="payment-void-dialog">
+    <Dialog focusTitle open onClose={() => { if (!busy) onClose(); }} title={fmt(t('vendor.purchases.voidPaymentTitle'), { amount: money(payment.amountTzs), date: receiptDay(payment.paidOn, locale) })} sheetOnMobile testId="payment-void-dialog">
       <div className="space-y-3 text-sm">
         <p>{t('vendor.purchases.voidPaymentBody')}</p>
         {alert && <div data-testid="payment-void-alert"><Alert tone="error">{alert}</Alert></div>}

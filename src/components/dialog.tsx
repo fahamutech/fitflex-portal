@@ -65,6 +65,7 @@ export function Dialog({
   size = 'md',
   sheetOnMobile = false,
   testId,
+  focusTitle = false,
 }: {
   open: boolean;
   onClose: () => void;
@@ -75,6 +76,8 @@ export function Dialog({
   /** Below 640px the panel fills the screen (no rounded corners, no margin), e.g. a multi-line form at 375px. */
   sheetOnMobile?: boolean;
   testId?: string;
+  /** Focus the title on open instead of the first field (screen readers hear the title first). Off by default. */
+  focusTitle?: boolean;
 }) {
   const panelRef = useRef<HTMLDivElement>(null);
   const titleId = useId();
@@ -112,7 +115,7 @@ export function Dialog({
         {/* Header */}
         <div className="flex items-start justify-between gap-4 px-6 pt-6 pb-0">
           <div className="flex-1 min-w-0">
-            <h2 id={titleId} className="text-lg font-semibold text-[var(--color-fg-primary)] [overflow-wrap:anywhere]">{title}</h2>
+            <h2 id={titleId} tabIndex={focusTitle ? -1 : undefined} data-autofocus={focusTitle || undefined} className="text-lg font-semibold text-[var(--color-fg-primary)] outline-none [overflow-wrap:anywhere]">{title}</h2>
             {description && (
               <p className="mt-1 text-sm text-[var(--color-fg-quaternary)]">{description}</p>
             )}

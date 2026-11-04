@@ -13,7 +13,7 @@ import {
 } from '@/lib/vendor';
 import {
   clearDraft, DEFAULT_DUE_DAYS, draftKey, DUE_MAX_DAYS, loadDraft, MAX_INVOICE_REF, MAX_NOTE, MAX_QTY, MAX_TOTAL, MAX_UNIT_COST,
-  purchaseErrorKey, purchasesApi, RECEIVED_BACK_DAYS, saveDraft, scheduleFor, type LastCostRow, type ReceiveInput, type SupplierRow,
+  plural, purchaseErrorKey, purchasesApi, RECEIVED_BACK_DAYS, saveDraft, scheduleFor, type LastCostRow, type ReceiveInput, type SupplierRow,
 } from '@/lib/vendor-purchases';
 import { Alert, Badge, Button, Card, CardContent, ErrorState, Field, Input, PageHeader, Segmented, Select, SkeletonCard, Textarea, useToast } from '@/components/shared';
 import { Dialog, DialogFooter } from '@/components/dialog';
@@ -81,7 +81,7 @@ function ProductCombobox({ products, addedIds, onPick, label, inputTestId, autoF
             return (
               <li key={p.id} id={`${listId}-${i}`} role="option" aria-selected={i === active} className={optionCls(i === active)}
                 onMouseDown={e => { e.preventDefault(); pick(p); }} data-testid={`product-option-${p.id}`}>
-                <span className="min-w-0 [overflow-wrap:anywhere]">{p.name}{vs.length ? ` · ${vs.length}` : ''}</span>
+                <span className="min-w-0 [overflow-wrap:anywhere]">{p.name}{vs.length ? ` · ${fmt(plural(t, 'vendor.purchases.variantCount', vs.length), { n: vs.length })}` : ''}</span>
                 <span className="flex shrink-0 items-center gap-1 text-xs text-[var(--color-fg-tertiary)]">
                   {p.status === 'paused' && <Badge tone="gray">{t('vendor.products.status.paused')}</Badge>}
                   {addedIds.has(p.id) && !vs.length && <Badge tone="info">{t('vendor.purchases.added')}</Badge>}
@@ -677,8 +677,8 @@ export function ReceiveStock({ initialSupplierId }: { initialSupplierId: string 
         </div>
       )}
 
-      <Dialog open={confirmOpen} onClose={() => { if (!saving) setConfirmOpen(false); }}
-        title={supplierName ? fmt(t('vendor.purchases.confirmTitle'), { units, supplier: supplierName }) : fmt(t('vendor.purchases.confirmTitleNoSupplier'), { units })} sheetOnMobile testId="receive-confirm">
+      <Dialog focusTitle open={confirmOpen} onClose={() => { if (!saving) setConfirmOpen(false); }}
+        title={supplierName ? fmt(plural(t, 'vendor.purchases.confirmTitle', units), { units, supplier: supplierName }) : fmt(plural(t, 'vendor.purchases.confirmTitleNoSupplier', units), { units })} sheetOnMobile testId="receive-confirm">
         <div className="space-y-3 text-sm" data-testid="receive-confirm-body">
           <ul className="space-y-1">
             {chosen.map(l => <li key={l.key} className="[overflow-wrap:anywhere]">{intOf(l.qty)} × {nameOf(l)} · <span className="tabular-nums">{money(intOf(l.qty) * intOf(l.cost))}</span></li>)}
@@ -686,9 +686,9 @@ export function ReceiveStock({ initialSupplierId }: { initialSupplierId: string 
           <p className="flex justify-between gap-2 font-semibold"><span>{t('vendor.purchases.total')}</span><span className="tabular-nums">{money(total)}</span></p>
           {paidNowValue > 0 && <p className="flex justify-between gap-2"><span>{fmt(t('vendor.purchases.confirmPaidNow'), { method: saleMethodLabel(form.method, t) })}</span><span className="tabular-nums">{money(paidNowValue)}</span></p>}
           {left > 0 && (
-            <p data-testid="receive-confirm-plan">{fmt(t('vendor.purchases.leftToPay'), { amount: money(left) })}{form.planMode === 'split' ? ` · ${fmt(t('vendor.purchases.confirmPlan'), { n: form.rows.length, list: planList })}` : ` · ${t('vendor.purchases.payBy')} ${receiptDay(form.dueDate, locale)}`}</p>
+            <p data-testid="receive-confirm-plan">{fmt(t('vendor.purchases.leftToPay'), { amount: money(left) })}{form.planMode === 'split' ? ` · ${fmt(plural(t, 'vendor.purchases.confirmPlan', form.rows.length), { n: form.rows.length, list: planList })}` : ` · ${t('vendor.purchases.payBy')} ${receiptDay(form.dueDate, locale)}`}</p>
           )}
-          {costChangeCount > 0 && <p>{fmt(t('vendor.purchases.costChanges'), { n: costChangeCount })}</p>}
+          {costChangeCount > 0 && <p>{fmt(plural(t, 'vendor.purchases.costChanges', costChangeCount), { n: costChangeCount })}</p>}
           {saving && <p aria-live="polite">{t('vendor.purchases.saving')}</p>}
           {saveAlert && <div data-testid="receive-confirm-alert"><Alert tone="error">{saveAlert}</Alert></div>}
         </div>
@@ -700,7 +700,7 @@ export function ReceiveStock({ initialSupplierId }: { initialSupplierId: string 
         </DialogFooter>
       </Dialog>
 
-      <Dialog open={leaveOpen} onClose={() => setLeaveOpen(false)} title={t('vendor.purchases.leaveTitle')} size="sm" testId="receive-leave">
+      <Dialog focusTitle open={leaveOpen} onClose={() => setLeaveOpen(false)} title={t('vendor.purchases.leaveTitle')} size="sm" testId="receive-leave">
         <p className="text-sm">{t('vendor.purchases.draftSaved')}</p>
         <DialogFooter className="flex-wrap">
           <Button type="button" variant="secondary" className="min-h-11" onClick={() => setLeaveOpen(false)}>{t('common.cancel')}</Button>

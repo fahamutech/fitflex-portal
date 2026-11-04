@@ -6,7 +6,7 @@ import Link from 'next/link';
 import { ArrowLeft, Phone, Truck } from 'lucide-react';
 import { money } from '@/lib/admin-utils';
 import { errorBody, errorCode, fmt, receiptDay } from '@/lib/vendor';
-import { purchasesApi, type PurchaseRow, type SupplierProfile as Profile } from '@/lib/vendor-purchases';
+import { plural, purchasesApi, type PurchaseRow, type SupplierProfile as Profile } from '@/lib/vendor-purchases';
 import { Alert, Badge, Button, Card, CardContent, CardHeader, EmptyState, ErrorState, SkeletonCard, Spinner, useToast } from '@/components/shared';
 import { ConfirmDialog } from '@/components/dialog';
 import { useVendor } from '@/components/vendor-context';
@@ -36,7 +36,7 @@ export function SupplierProfile({ id, onBack, onOpenPurchase, onOpenSupplier }: 
   const [editOpen, setEditOpen] = useState(false);
   const [archiveOpen, setArchiveOpen] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [alert, setAlert] = useState<{ text: string; duplicateId?: string } | null>(null);
+  const [alert, setAlert] = useState<{ text: string; duplicateId?: string; duplicateName?: string } | null>(null);
   const headingRef = useRef<HTMLHeadingElement>(null);
 
   const load = useCallback(async (quiet = false) => {
@@ -83,9 +83,13 @@ export function SupplierProfile({ id, onBack, onOpenPurchase, onOpenSupplier }: 
     } catch (err) {
       setArchiveOpen(false);
       const code = errorCode(err);
-      const b = errorBody<{ owedTzs?: number; supplierId?: string }>(err);
+      const b = errorBody<{ owedTzs?: number; supplierId?: string; existing?: { id?: string; name?: string } }>(err);
       if (code === 'supplier_has_balance') { setAlert({ text: fmt(t('vendor.suppliers.archiveOwes'), { amount: money(b?.owedTzs ?? profile?.owedTzs ?? 0) }) }); void load(true); }
-      else if (code === 'duplicate_supplier') setAlert({ text: fmt(t('vendor.purchases.err.duplicateSupplier'), { name: profile?.supplier.name ?? '' }), duplicateId: b?.supplierId });
+      else if (code === 'duplicate_supplier') {
+        // UAT L-4: name and link from the existing supplier (409 existing { id, name }); else this one's name and supplierId.
+        const name = b?.existing?.name?.trim() || profile?.supplier.name || '';
+        setAlert({ text: fmt(t('vendor.purchases.err.duplicateSupplier'), { name }), duplicateId: b?.existing?.id || b?.supplierId, duplicateName: name });
+      }
       else {
         const limited = rateLimitText(err, t);
         if (limited) setAlert({ text: limited });
@@ -133,7 +137,7 @@ export function SupplierProfile({ id, onBack, onOpenPurchase, onOpenSupplier }: 
       {alert && (
         <div className="space-y-2" data-testid="supplier-alert">
           <Alert tone="error">{alert.text}</Alert>
-          {alert.duplicateId && <button type="button" className={linkCls} onClick={() => onOpenSupplier(alert.duplicateId!)}>{fmt(t('vendor.suppliers.openDuplicate'), { name: s.name })}</button>}
+          {alert.duplicateId && <button type="button" className={linkCls} onClick={() => onOpenSupplier(alert.duplicateId!)}>{fmt(t('vendor.suppliers.openDuplicate'), { name: alert.duplicateName || s.name })}</button>}
         </div>
       )}
 
@@ -175,7 +179,7 @@ export function SupplierProfile({ id, onBack, onOpenPurchase, onOpenSupplier }: 
                     <span><span className="font-mono font-semibold">{i.number}</span> · {fmt(t('vendor.purchases.instalmentN'), { n: i.seq })} · {receiptDay(i.dueDate, locale)}</span>
                     <span className="flex items-center gap-2">
                       <span className="tabular-nums font-semibold">{money(i.openTzs)}</span>
-                      {i.daysOverdue > 0 && <Badge tone="warning">{fmt(t('vendor.suppliers.daysOverdue'), { n: i.daysOverdue })}</Badge>}
+                      {i.daysOverdue > 0 && <Badge tone="warning">{fmt(plural(t, 'vendor.suppliers.daysOverdue', i.daysOverdue), { n: i.daysOverdue })}</Badge>}
                     </span>
                   </button>
                 </li>
@@ -188,7 +192,7 @@ export function SupplierProfile({ id, onBack, onOpenPurchase, onOpenSupplier }: 
       <section aria-labelledby="supplier-purchases" className="space-y-2">
         <h2 id="supplier-purchases" className="font-semibold">{t('vendor.purchases.segPurchases')}</h2>
         <p className="text-sm text-[var(--color-fg-tertiary)]" data-testid="supplier-bought">
-          {fmt(t('vendor.suppliers.bought'), { amount: money(profile.totals.purchasedTzs), n: profile.totals.purchaseCount, paid: money(profile.totals.paidTzs) })}
+          {fmt(plural(t, 'vendor.suppliers.bought', profile.totals.purchaseCount), { amount: money(profile.totals.purchasedTzs), n: profile.totals.purchaseCount, paid: money(profile.totals.paidTzs) })}
         </p>
         {rows == null ? <SkeletonCard /> : rowsFailed ? <ErrorState title={t('vendor.purchases.failed')} onRetry={loadRows} retryLabel={t('common.tryAgain')} />
           : rows.length === 0 ? <EmptyState icon={<Truck />} title={t('vendor.purchases.empty')} />
