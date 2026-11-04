@@ -349,6 +349,37 @@ test.describe('profile and A-02', () => {
     await expect(page.getByTestId('customer-tab-sales')).toContainText('Owes TSh 20,000');
   });
 
+  test('S7: sale rows show Refunded / Part refunded / Settled by credit note / Paid off by the sales-list rule', async ({ page }) => {
+    await signedInAs(page, VENDOR);
+    await mockApi(page, base({
+      'GET /vendor/customers/cus_juma/sales': { json: { sales: [
+        creditRow({ id: 's05', number: 'R-000005', balanceTzs: 0, refundedTzs: 20000, refundState: 'full', balanceReducedTzs: 20000 }),
+        creditRow({ id: 's35', number: 'R-000035', balanceTzs: 0, refundedTzs: 20000, refundState: 'full', balanceReducedTzs: 0 }),
+        creditRow({ id: 's06', number: 'R-000006', balanceTzs: 0, refundedTzs: 5000, refundState: 'partial', balanceReducedTzs: 5000 }),
+        creditRow({ id: 's07', number: 'R-000007', balanceTzs: 0, refundedTzs: 5000, refundState: 'partial', balanceReducedTzs: 0 }),
+        creditRow({ id: 's08', number: 'R-000008', balanceTzs: 15000, refundedTzs: 5000, refundState: 'partial', balanceReducedTzs: 5000 }),
+        creditRow({ id: 's09', number: 'R-000009', balanceTzs: 0, refundedTzs: 0, refundState: 'none', balanceReducedTzs: 0 }),
+      ], nextCursor: null } },
+    }));
+    await page.goto('/vendor/customers/?id=cus_juma');
+    const row = (id: string) => page.getByTestId(`customer-sale-${id}`);
+    for (const id of ['s05', 's35']) {
+      await expect(row(id)).toContainText('Pay later');
+      await expect(row(id)).toContainText('Refunded');
+      await expect(row(id)).not.toContainText('Paid off');
+      await expect(row(id)).not.toContainText('Settled by credit note');
+    }
+    await expect(row('s06')).toContainText('Part refunded');
+    await expect(row('s06')).toContainText('Settled by credit note');
+    await expect(row('s06')).not.toContainText('Paid off');
+    await expect(row('s07')).toContainText('Part refunded');
+    await expect(row('s07')).toContainText('Paid off');
+    await expect(row('s08')).toContainText('Part refunded');
+    await expect(row('s08')).toContainText('Owes TSh 15,000');
+    await expect(row('s09')).toContainText('Paid off');
+    await expect(row('s09')).not.toContainText('refunded');
+  });
+
   test('app customer: no phone, email, address anywhere; edit has the note only; app orders listed', async ({ page }) => {
     await signedInAs(page, VENDOR);
     const calls = await mockApi(page, base({ 'PUT /vendor/customers/cus_app': { json: { customer: { ...appProfile(), note: 'VIP' }, phoneDuplicate: null } } }));
