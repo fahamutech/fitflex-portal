@@ -7952,7 +7952,7 @@ export const messages = {
     "vendor.products.statusFilter": "Hali",
     "vendor.products.status.all": "Hali zote",
     "vendor.products.status.active": "Inauzwa",
-    "vendor.products.status.paused": "Imesimamishwa",
+    "vendor.products.status.paused": "Imesitishwa",
     "vendor.products.status.archived": "Imehifadhiwa kando",
     "vendor.products.pendingApproval": "Inasubiri idhini",
     "vendor.products.rejected": "Haijaidhinishwa",
