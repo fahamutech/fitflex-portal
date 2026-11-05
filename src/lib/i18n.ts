@@ -6161,6 +6161,7 @@ export const messages = {
     ...hrOrgMessages.en,
     ...eventsS6Messages.en,
     ...eventsS7Messages.en,
+    ...vendorImportMessages.en,
     ...memberMessages.en,
     // ── Public gym page (/g, flag NEXT_PUBLIC_WEB_GYM_PROFILE); Swahili marked for native review ──
     // ── Browser gym check-in (/g/signin, /g/confirm, /g/done; flag NEXT_PUBLIC_WEB_QR_CHECKIN); Swahili marked for native review ──
@@ -8262,7 +8263,7 @@ export const messages = {
     "vendor.products.statusFilter": "Hali",
     "vendor.products.status.all": "Hali zote",
     "vendor.products.status.active": "Inauzwa",
-    "vendor.products.status.paused": "Imesimamishwa",
+    "vendor.products.status.paused": "Imesitishwa",
     "vendor.products.status.archived": "Imehifadhiwa kando",
     "vendor.products.pendingApproval": "Inasubiri idhini",
     "vendor.products.rejected": "Haijaidhinishwa",
@@ -12445,6 +12446,7 @@ export const messages = {
     ...hrOrgMessages.sw,
     ...eventsS6Messages.sw,
     ...eventsS7Messages.sw,
+    ...vendorImportMessages.sw,
     ...memberMessages.sw,
     // ── Ukurasa wa gym wa umma (/g); Kiswahili kinasubiri mapitio ya mzungumzaji asilia ──
     // Browser gym check-in: Swahili is a DRAFT for native review
@@ -12568,6 +12570,7 @@ export const messages = {
 import { hrOrgMessages } from './i18n-hr-org';
 import { eventsS6Messages } from './i18n-events-s6';
 import { eventsS7Messages } from './i18n-events-s7';
+import { vendorImportMessages } from './i18n-vendor-import';
 import { memberMessages } from './i18n-member';
 
 export type MessageKey = keyof typeof messages['en'];
