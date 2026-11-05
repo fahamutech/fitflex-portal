@@ -1,6 +1,8 @@
 import { expect, request, test } from '@playwright/test';
 
 const API = process.env.FITFLEX_API_URL || 'http://localhost:3000';
+// The server checks that an uploaded image really is one.
+const PIXEL = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
 
 function devToken(payload: Record<string, string>) {
   return `dev:${Buffer.from(JSON.stringify(payload)).toString('base64url')}`;
@@ -35,8 +37,8 @@ test('marketplace requirements: portal approval connects vendor, every buyer rol
     headers: auth(vendor.token),
     data: {
       businessName: `Market Store ${suffix}`,
-      logo: 'data:image/png;base64,bG9nbw==',
-      banner: 'data:image/png;base64,YmFubmVy',
+      logo: PIXEL,
+      banner: PIXEL,
       description: 'End-to-end marketplace store',
       businessCategory: 'Equipment',
       contactNumber: '+255700000111',
@@ -48,7 +50,7 @@ test('marketplace requirements: portal approval connects vendor, every buyer rol
       publish: true,
     },
   });
-  expect(profile.ok()).toBeTruthy();
+  expect(profile.ok(), await profile.text()).toBeTruthy();
   expect((await profile.json()).status).toBe('published');
 
   const productName = `Marketplace Bands ${suffix}`;
@@ -57,7 +59,7 @@ test('marketplace requirements: portal approval connects vendor, every buyer rol
     data: {
       name: productName,
       description: 'Portable resistance band kit',
-      category: 'Equipment',
+      category: 'equipment',
       brand: 'FitFlex',
       priceTzs: 50000,
       discountPriceTzs: 45000,
@@ -66,7 +68,7 @@ test('marketplace requirements: portal approval connects vendor, every buyer rol
       sku: `BAND-${suffix}`,
       weightKg: 0.8,
       variants: [{ name: 'Green', stock: 10 }, { name: 'Black', stock: 10 }],
-      images: ['data:image/png;base64,aW1hZ2Ux', 'data:image/png;base64,aW1hZ2Uy'],
+      images: [PIXEL, PIXEL],
       deliveryAvailable: true,
     },
   });
@@ -95,7 +97,7 @@ test('marketplace requirements: portal approval connects vendor, every buyer rol
   for (const buyer of [member, trainer, owner]) {
     const catalogueStartedAt = Date.now();
     const catalogue = await ctx.get(
-      `${API}/shop/products?category=Equipment&brand=FitFlex&minPrice=40000&maxPrice=46000&maxDistanceKm=5&delivery=true&promotions=true&sort=popularity`,
+      `${API}/shop/products?category=equipment&brand=FitFlex&minPrice=40000&maxPrice=46000&maxDistanceKm=5&delivery=true&promotions=true&sort=popularity`,
       { headers: auth(buyer.token) },
     );
     expect(Date.now() - catalogueStartedAt).toBeLessThan(3000);
@@ -144,11 +146,22 @@ test('marketplace requirements: portal approval connects vendor, every buyer rol
     data: {
       items: [{ productId: product.id, qty: 2 }],
       deliveryMethod: 'home_delivery', deliveryAddress: 'Arusha',
-      paymentMethod: 'mpesa', paymentOutcome: 'success',
+      paymentMethod: 'mpesa',
     },
   });
   expect(checkout.ok()).toBeTruthy();
   const order = await checkout.json();
+  // The app's own payment result is never trusted: the order is paid once an admin
+  // confirms its payment request, as in the portal's Payments page.
+  expect(order.paymentStatus).toBe('pending');
+  const requests = await ctx.get(`${API}/admin/payment-requests`, { headers: auth(admin.token) });
+  expect(requests.ok()).toBeTruthy();
+  const paymentRequest = (await requests.json()).find((item: { orderId?: string }) => item.orderId === order.id);
+  expect(paymentRequest, 'payment request for the order').toBeTruthy();
+  const confirmed = await ctx.post(`${API}/admin/payment-requests/${paymentRequest.id}/decision`, {
+    headers: auth(admin.token), data: { decision: 'approve', reference: `MP${suffix.replace(/\D/g, '')}` },
+  });
+  expect(confirmed.ok(), await confirmed.text()).toBeTruthy();
   for (const status of ['accepted', 'processing', 'packed', 'dispatched', 'delivered']) {
     const update = await ctx.post(`${API}/vendor/orders/${order.id}/status`, {
       headers: auth(vendor.token), data: { status },
@@ -169,7 +182,7 @@ test('marketplace requirements: portal approval connects vendor, every buyer rol
   const invoice = await ctx.get(`${API}/me/shop-orders/${order.id}/invoice`, { headers: auth(member.token) });
   expect(await invoice.text()).toContain('FitFlex Marketplace Invoice');
   const reordered = await ctx.post(`${API}/me/shop-orders/${order.id}/reorder`, { headers: auth(member.token) });
-  expect((await reordered.json()).items).toEqual([{ productId: product.id, qty: 2 }]);
+  expect((await reordered.json()).items).toEqual([{ productId: product.id, variant: null, qty: 2 }]);
   const review = await ctx.post(`${API}/me/shop-orders/${order.id}/reviews`, {
     headers: auth(member.token), data: { productId: product.id, rating: 5, comment: 'Excellent bands' },
   });
