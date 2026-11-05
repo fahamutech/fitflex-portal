@@ -3,8 +3,9 @@ name: Deploy Portal to Firebase Hosting
 on:
   push:
     branches: [main]
+  # release-candidate is build-only: the deploy step below is skipped on PRs.
   pull_request:
-    branches: [main]
+    branches: [main, release-candidate]
   workflow_dispatch:
 
 concurrency:
