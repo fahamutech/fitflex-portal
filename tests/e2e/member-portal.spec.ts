@@ -470,6 +470,9 @@ test.describe('member portal, flag on', () => {
     const h = await setup(page, {}, false);
     await page.goto('/login/');
     await expect(page.getByTestId('pin-method-btn')).toHaveText(en['login.pinHeading'], { timeout: 30_000 });
+    // The page speaks to members too, not only partners.
+    await expect(page.getByRole('heading', { level: 1, name: en['member.login.heading'] })).toBeVisible();
+    await expect(page.getByText(en['member.login.newHere'])).toBeVisible();
     await page.getByTestId('pin-method-btn').click();
     await page.getByTestId('pin-identifier-input').fill('0754123678');
     await page.getByTestId('pin-input').fill('4821');
