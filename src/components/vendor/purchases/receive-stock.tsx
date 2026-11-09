@@ -6,7 +6,7 @@ import { useCallback, useEffect, useId, useMemo, useRef, useState, type Keyboard
 import { useRouter } from 'next/navigation';
 import { Minus, Plus, Trash2, UserPlus, X } from 'lucide-react';
 import { api, type ProductLookupMatch, type VendorProduct } from '@/lib/api';
-import { barcodesOf, looksLikeCode, matchLocal } from '@/lib/barcode-rules';
+import { codeKey, hasBarcodesKey, looksLikeCode, matchLocal } from '@/lib/barcode-rules';
 import { money } from '@/lib/admin-utils';
 import {
   addDays, dayMonth, receiptDateTime, eatToday, errorBody, errorCode, fmt, isRefusal, newClientRef, receiptDay, REFERENCE_REQUIRED,
@@ -447,7 +447,7 @@ export function ReceiveStock({ initialSupplierId }: { initialSupplierId: string 
     setErrors(e => { const lines = { ...e.lines }; delete lines[k]; return { ...e, lines }; });
     if (pickVariantNow) focusLine(k, 'variant');
     else focus(() => { const all = document.querySelectorAll<HTMLElement>('[data-testid="receive-lines"] input[data-focus="product"]'); return all[all.length - 1]; });
-    say(fmt(t('vendor.scan.addedLine'), { name: v ? `${p.name} (${v})` : p.name, qty }));
+    say(fmt(plural(t, 'vendor.scan.addedLine', qty), { name: v ? `${p.name} (${v})` : p.name, qty }));
   };
   const archivedOutcome = (name: string): CodeOutcome => ({ kind: 'status', tone: 'warning', text: fmt(t('vendor.scan.archived'), { name }) });
   /** One product chosen by a code: archived → refused; else added. */
@@ -922,12 +922,26 @@ function AddCodeDialog({ code, products, onClose, onAdded }: {
     setSaving(true); setError(null);
     try {
       const res = await api.vendorAddBarcodes(token, product.id, [forVariant ? { code, variant: forVariant } : { code }]);
+      // The tool was switched off after the page loaded: the server ignored the code (200 with no `barcodes` key).
+      if (!hasBarcodesKey(res)) { toast.error(t('vendor.barcodes.unavailable')); void vendor.refresh(); onClose(); return; }
       toast.success(fmt(t('vendor.scan.codeAdded'), { name: product.name }));
-      onAdded({ ...product, barcodes: Array.isArray(res?.barcodes) ? res.barcodes : [...barcodesOf(product), { code, variant: forVariant || null }] }, forVariant || null);
+      onAdded({ ...product, barcodes: res.barcodes }, forVariant || null);
     } catch (err) {
       const c = errorCode(err);
       const b = errorBody<BarcodeRefusal>(err);
       if (c === 'feature_disabled') { toast.error(t('vendor.barcodes.unavailable')); void vendor.refresh(); onClose(); return; }
+      // 409 naming this same product (e.g. another device added it to another variant meanwhile): look the code up
+      // again and use what it is on now, as the app does (§4.6), instead of "Already on {this product}".
+      if (c === 'barcode_in_use' && b?.productId === product.id) {
+        try {
+          const found = (await api.vendorProductLookup(token, code)).matches.find(m => m.productId === product.id);
+          if (found) {
+            const barcodes = [...(product.barcodes ?? []).filter(x => codeKey(x.code) !== codeKey(code)), { code, variant: found.variant }];
+            onAdded({ ...product, barcodes }, found.variant);
+            return;
+          }
+        } catch { /* fall through to the message */ }
+      }
       if (isRefusal(err) && vendor.handleError(err)) { onClose(); return; }
       setError(barcodeErrorText(t, b) ?? (isRefusal(err) ? serverMessage(b, locale) : null) ?? t('vendor.barcodes.err.server'));
     } finally {

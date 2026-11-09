@@ -3,10 +3,10 @@
 // the code and presses Enter: Enter adds the code to the list and keeps focus in the input, so several items can be
 // scanned one after another. Save sends the whole list (PUT /vendor/products/:id { barcodes }); nothing else of the
 // product is edited here (S2 Q-6 stands). Shown only while tools.barcodes is true and the person has `products`.
-import { useId, useMemo, useRef, useState, type KeyboardEvent } from 'react';
+import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { Trash2 } from 'lucide-react';
 import { api, type BarcodeInput, type VendorProduct } from '@/lib/api';
-import { barcodesOf, codeKey, MAX_BARCODES_PER_PRODUCT, validateBarcode } from '@/lib/barcode-rules';
+import { barcodesOf, codeKey, hasBarcodesKey, MAX_BARCODES_PER_PRODUCT, validateBarcode } from '@/lib/barcode-rules';
 import { errorBody, errorCode, fmt, isRefusal, variantsOf } from '@/lib/vendor';
 import { Alert, Button, Input, Select, useToast } from '@/components/shared';
 import { ConfirmDialog, Dialog, DialogFooter } from '@/components/dialog';
@@ -19,11 +19,13 @@ type Row = { key: string; code: string; variant: string | null };
 const rowKey = () => `b${Math.random().toString(36).slice(2, 10)}`;
 const sig = (rows: Array<{ code: string; variant: string | null }>) => JSON.stringify(rows.map(r => [codeKey(r.code), r.variant ?? '']));
 
-export function BarcodesDialog({ product, onClose, onSaved }: {
+export function BarcodesDialog({ product, onClose, onSaved, onStale }: {
   product: VendorProduct;
   onClose: () => void;
   /** The product with its saved codes (the server's answer). */
   onSaved: (p: VendorProduct) => void;
+  /** The row has no `barcodes` key, or the server ignored the codes: load the products and tools again. */
+  onStale: () => void;
 }) {
   const { token, t, locale } = useApp();
   const vendor = useVendor();
@@ -44,9 +46,17 @@ export function BarcodesDialog({ product, onClose, onSaved }: {
   const [discardOpen, setDiscardOpen] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const dirty = sig(rows) !== sig(initial);
+  // Contract check #214: a row without the `barcodes` key (loaded while the tool was off) has unknown codes. Sending a
+  // full list from it would wipe the stored ones, so editing waits for a reload that carries the key.
+  const known = hasBarcodesKey(product);
+  const onStaleRef = useRef(onStale);
+  onStaleRef.current = onStale;
+  useEffect(() => { if (!known) onStaleRef.current(); }, [known]);
+  const locked = saving || !known;
   const forLabel = (v: string | null) => v || t('vendor.barcodes.wholeProduct');
 
   function add() {
+    if (!known) return;
     const v = validateBarcode(text);
     let error: string | null = null;
     if ('error' in v) error = barcodeErrorText(t, v);
@@ -73,14 +83,15 @@ export function BarcodesDialog({ product, onClose, onSaved }: {
   };
 
   async function save() {
-    if (!token || saving) return;
+    if (!token || saving || !known) return;
     setSaving(true); setAlert(null); setRowErrors({});
     const body: BarcodeInput[] = rows.map(r => (r.variant ? { code: r.code, variant: r.variant } : { code: r.code }));
     try {
       const res = await api.vendorSetBarcodes(token, product.id, body);
-      const saved = Array.isArray(res?.barcodes) ? res.barcodes : rows.map(r => ({ code: r.code, variant: r.variant }));
+      // The tool was switched off after the page loaded: the server ignored the codes (200 with no `barcodes` key).
+      if (!hasBarcodesKey(res)) { toast.error(t('vendor.barcodes.unavailable')); void vendor.refresh(); onStale(); onClose(); return; }
       toast.success(t('vendor.barcodes.saved'));
-      onSaved({ ...product, barcodes: saved });
+      onSaved({ ...product, barcodes: res.barcodes });
       onClose();
     } catch (err) {
       const code = errorCode(err);
@@ -95,6 +106,7 @@ export function BarcodesDialog({ product, onClose, onSaved }: {
         setRowErrors({ [row.key]: text });
         focus(() => document.querySelector<HTMLElement>(`[data-barcode-row="${row.key}"] button`));
       } else {
+        // Anything else (incl. 409 save_conflict when a save raced): the server's text if it sent one; the dialog stays open.
         setAlert(text ?? (isRefusal(err) ? serverMessage(b, locale) : null) ?? t('vendor.barcodes.err.server'));
       }
     } finally {
@@ -107,6 +119,7 @@ export function BarcodesDialog({ product, onClose, onSaved }: {
       <Dialog open onClose={requestClose} title={fmt(t('vendor.barcodes.dialogTitle'), { name: product.name })}
         description={t('vendor.barcodes.help')} sheetOnMobile testId="barcodes-dialog">
         <div className="space-y-4">
+          {!known && <div data-testid="barcodes-stale"><Alert tone="info">{t('vendor.barcodes.unavailableNow')}</Alert></div>}
           {rows.length === 0
             ? <p className="text-sm text-[var(--color-fg-tertiary)]" data-testid="barcodes-none">{t('vendor.barcodes.none')}</p>
             : (
@@ -123,7 +136,7 @@ export function BarcodesDialog({ product, onClose, onSaved }: {
                           <span className="text-sm text-[var(--color-fg-tertiary)]"> · {forLabel(r.variant)}</span>
                         </span>
                       </span>
-                      <Button type="button" variant="ghost" className="min-h-11 min-w-11 px-2" disabled={saving}
+                      <Button type="button" variant="ghost" className="min-h-11 min-w-11 px-2" disabled={locked}
                         aria-label={fmt(t('vendor.barcodes.remove'), { code: r.code })} aria-describedby={e ? `${r.key}-err` : undefined}
                         onClick={() => remove(r.key)} data-testid="barcode-remove">
                         <Trash2 aria-hidden="true" className="h-4 w-4" />
@@ -137,7 +150,7 @@ export function BarcodesDialog({ product, onClose, onSaved }: {
 
           <div className="space-y-1.5">
             <label htmlFor={inputId} className="text-sm font-medium text-[var(--color-fg-secondary)]">{t('vendor.barcodes.field')}</label>
-            <Input id={inputId} ref={inputRef} value={text} autoComplete="off" autoCapitalize="off" spellCheck={false} disabled={saving}
+            <Input id={inputId} ref={inputRef} value={text} autoComplete="off" autoCapitalize="off" spellCheck={false} disabled={locked}
               aria-invalid={inputError ? true : undefined} aria-describedby={inputError ? errId : hintId}
               onChange={e => { setText(e.target.value); setInputError(null); }} onKeyDown={onKey} data-testid="barcode-input" />
             {inputError
@@ -148,19 +161,19 @@ export function BarcodesDialog({ product, onClose, onSaved }: {
             {variants.length > 0 && (
               <div className="flex min-w-0 flex-1 flex-col gap-1.5">
                 <label htmlFor={`${inputId}-for`} className="text-sm font-medium text-[var(--color-fg-secondary)]">{t('vendor.barcodes.for')}</label>
-                <Select id={`${inputId}-for`} value={forVariant} disabled={saving} onChange={e => setForVariant(e.target.value)} data-testid="barcode-for">
+                <Select id={`${inputId}-for`} value={forVariant} disabled={locked} onChange={e => setForVariant(e.target.value)} data-testid="barcode-for">
                   <option value="">{t('vendor.barcodes.wholeProduct')}</option>
                   {variants.map(v => <option key={v.name} value={v.name}>{v.name}</option>)}
                 </Select>
               </div>
             )}
-            <Button type="button" variant="secondary" className="min-h-11" disabled={saving} onClick={add} data-testid="barcode-add">{t('vendor.barcodes.add')}</Button>
+            <Button type="button" variant="secondary" className="min-h-11" disabled={locked} onClick={add} data-testid="barcode-add">{t('vendor.barcodes.add')}</Button>
           </div>
           {alert && <div data-testid="barcodes-alert"><Alert tone="error">{alert}</Alert></div>}
         </div>
         <DialogFooter className="flex-wrap">
           <Button type="button" variant="secondary" className="min-h-11" disabled={saving} onClick={requestClose} data-testid="barcodes-cancel">{t('common.cancel')}</Button>
-          <Button type="button" className="min-h-11" loading={saving} onClick={save} data-testid="barcodes-save">{t('vendor.barcodes.save')}</Button>
+          <Button type="button" className="min-h-11" loading={saving} disabled={!known} onClick={save} data-testid="barcodes-save">{t('vendor.barcodes.save')}</Button>
         </DialogFooter>
       </Dialog>
       <ConfirmDialog open={discardOpen} onClose={() => setDiscardOpen(false)} onConfirm={() => { setDiscardOpen(false); onClose(); }}

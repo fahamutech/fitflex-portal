@@ -2459,7 +2459,7 @@ export interface ProductLookupMatch {
   variant: string | null;
   /** Only when variant is null and the product's variants keep stock. */
   variants: Array<{ name: string; stock: number | null }> | null;
-  priceTzs: number;
+  priceTzs: number | null;
   discountPriceTzs: number | null;
   stock: number;
   status: 'active' | 'paused' | 'archived';

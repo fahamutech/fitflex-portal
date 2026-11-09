@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test, type Page, type Request } from '@playwright/test';
-import { codeKey, validateBarcode } from '../../src/lib/barcode-rules';
+import { codeKey, looksLikeCode, validateBarcode } from '../../src/lib/barcode-rules';
 import { messages } from '../../src/lib/i18n';
 
 // Vendor S8 barcodes in the portal (docs/design/vendor-barcodes-s8.md §6, §14), against a mocked API (contract:
@@ -125,8 +125,21 @@ test.describe('barcode rules (shared vectors with functions and mobile)', () => 
     expect(en.length).toBeGreaterThan(30);
     const sw = messages.sw as Record<string, string>;
     for (const k of en) expect(sw[k], k).toBeTruthy();
-    // "msimbopau" is the barcode term (spec §10).
+    // "msimbopau" is the barcode term (spec §10); Swahili audit on #214.
     expect(sw['vendor.barcodes.title']).toBe('Misimbopau');
+    expect(sw['vendor.scan.addedLineOne']).toBe('{name} imeongezwa · 1 imepokelewa');
+    expect(sw['vendor.barcodes.err.checkDigit']).toContain('Angalia');
+    expect(sw['vendor.scan.lookupFailed']).toBe('Imeshindikana kuangalia msimbo huu. Jaribu tena.');
+    expect(sw['vendor.scan.askProducts']).toMatch(/^Mwombe /);
+    expect(messages.en['vendor.barcodes.err.variantGone']).toBe('The variant {variant} no longer exists. Choose again.');
+  });
+  test('looksLikeCode: 4–48 printable ASCII with no spaces, as the app', () => {
+    expect(looksLikeCode(' 6201234567893 ')).toBe(true);
+    expect(looksLikeCode('WP-1KG')).toBe(true);
+    expect(looksLikeCode('abc')).toBe(false);
+    expect(looksLikeCode('gym gloves')).toBe(false);
+    expect(looksLikeCode('Kettlebéll')).toBe(false);
+    expect(looksLikeCode('ABC\u000112')).toBe(false);
   });
 });
 
@@ -270,7 +283,7 @@ test.describe('Barcodes dialog', () => {
     await expect(page.getByTestId('barcodes-alert')).toHaveText('Server says no.');
     // functions#334 L-1: the holder is unknown → a dialog alert, not "Already on" on the first row.
     await page.getByTestId('barcodes-save').click();
-    await expect(page.getByTestId('barcodes-alert')).toHaveText('This code is in use. Try again.');
+    await expect(page.getByTestId('barcodes-alert')).toHaveText('This barcode is in use. Try again.');
     await expect(page.getByTestId('barcode-row-error')).toHaveCount(0);
     await page.getByTestId('barcodes-save').click();
     await expect(page.getByText("Barcodes aren't available right now.")).toBeVisible();
@@ -297,6 +310,64 @@ test.describe('Barcodes dialog', () => {
     await page.getByRole('alertdialog').getByRole('button', { name: 'Discard' }).click();
     await expect(page.getByTestId('barcodes-dialog')).toHaveCount(0);
     expect(callsOf(calls, 'PUT', '/vendor/products/prd_whey')).toEqual([]);
+  });
+
+  test('flag switched off after load: a 200 without `barcodes` is not "saved"; tools reload', async ({ page }) => {
+    await signedInAs(page, VENDOR);
+    const calls = await mockApi(page, base({ 'PUT /vendor/products/prd_whey': { json: (({ barcodes: _b, ...rest }) => rest)(WHEY) } }));
+    await openBarcodes(page, 'prd_whey');
+    const meCalls = callsOf(calls, 'GET', '/vendor/me').length;
+    await page.getByTestId('barcode-input').fill('12345671');
+    await page.getByTestId('barcode-input').press('Enter');
+    await page.getByTestId('barcodes-save').click();
+    await expect(page.getByText("Barcodes aren't available right now.")).toBeVisible();
+    await expect(page.getByText('Barcodes saved.')).toHaveCount(0);
+    await expect(page.getByTestId('barcodes-dialog')).toHaveCount(0);
+    await expect(table(page).getByTestId('product-row-prd_whey')).not.toContainText('2 barcodes');
+    await expect.poll(() => callsOf(calls, 'GET', '/vendor/me').length).toBeGreaterThan(meCalls);
+  });
+
+  test('a row loaded without the `barcodes` key never sends a list: Save disabled and the list reloads', async ({ page }) => {
+    await signedInAs(page, VENDOR);
+    let withKey = false;
+    const noKey = (({ barcodes: _b, ...rest }) => rest)(WHEY);
+    const calls = await mockApi(page, base({ 'GET /vendor/products': () => ({ json: withKey ? PRODUCTS : [noKey, ...PRODUCTS.slice(1)] }) }));
+    await page.goto('/vendor/products/');
+    await expect(table(page).getByTestId('product-row-prd_whey')).toBeVisible();
+    const loads = callsOf(calls, 'GET', '/vendor/products').length;
+    await table(page).getByTestId('barcodes-prd_whey').click();
+    await expect(page.getByTestId('barcodes-stale')).toHaveText("Barcodes aren't available right now. Reloading…");
+    await expect(page.getByTestId('barcodes-save')).toBeDisabled();
+    await expect(page.getByTestId('barcode-input')).toBeDisabled();
+    await expect.poll(() => callsOf(calls, 'GET', '/vendor/products').length).toBeGreaterThan(loads);
+    expect(callsOf(calls, 'PUT', '/vendor/products/prd_whey')).toEqual([]);
+    // A reload that brings the key: the dialog shows the stored codes and can save.
+    withKey = true;
+    await page.getByTestId('barcodes-cancel').click();
+    await page.getByRole('button', { name: 'Refresh' }).click();
+    await table(page).getByTestId('barcodes-prd_whey').click();
+    await expect(page.getByTestId('barcodes-stale')).toHaveCount(0);
+    await expect(page.getByTestId('barcodes-dialog').getByTestId('barcode-code')).toHaveText(['6201234567893']);
+    await expect(page.getByTestId('barcodes-save')).toBeEnabled();
+  });
+
+  test('409 save_conflict: its message, and the dialog stays open with the list', async ({ page }) => {
+    await signedInAs(page, VENDOR);
+    let n = 0;
+    await mockApi(page, base({
+      'PUT /vendor/products/prd_whey': () => (++n === 1
+        ? { status: 409, json: { error: 'save_conflict', message: { en: 'This product was saved at the same time. Try again.', sw: 'Bidhaa hii ilihifadhiwa wakati huo huo. Jaribu tena.' } } }
+        : { status: 409, json: { error: 'save_conflict' } }),
+    }));
+    await openBarcodes(page, 'prd_whey');
+    await page.getByTestId('barcode-input').fill('12345671');
+    await page.getByTestId('barcode-input').press('Enter');
+    await page.getByTestId('barcodes-save').click();
+    await expect(page.getByTestId('barcodes-alert')).toHaveText('This product was saved at the same time. Try again.');
+    await expect(page.getByTestId('barcodes-dialog').getByTestId('barcode-code')).toHaveText(['6201234567893', '12345671']);
+    await page.getByTestId('barcodes-save').click();
+    await expect(page.getByTestId('barcodes-alert')).toHaveText("Couldn't save the barcodes. Try again.");
+    await expect(page.getByTestId('barcodes-dialog')).toBeVisible();
   });
 
   test('page search also matches codes (by codeKey)', async ({ page }) => {
@@ -426,6 +497,47 @@ test.describe('Receive stock: Enter with a code', () => {
     await scan(page, 1, '4006381333931');
     await expect(page.getByTestId('receive-qty-0')).toHaveValue('2');
     expect(callsOf(calls, 'GET', '/vendor/products/lookup').length).toBe(before);
+  });
+
+  test('quick add: a 200 without `barcodes` is not "added" (no line); a 409 naming the same product looks the code up again', async ({ page }) => {
+    await signedInAs(page, VENDOR);
+    let mode: 'off' | 'race' = 'off';
+    const calls = await mockApi(page, base({
+      'GET /vendor/products/lookup': (_req, url) => ({ json: { code: url.searchParams.get('code'), codeKey: url.searchParams.get('code'),
+        matches: mode === 'race' && callsOf(calls, 'PUT', '/vendor/products/prd_gloves').length >= 2 ? [lookupMatch(GLOVES, { variant: 'M', stock: 4 })] : [] } }),
+      'PUT /vendor/products/prd_gloves': () => (mode === 'off'
+        ? { json: (({ barcodes: _b, ...rest }) => rest)(GLOVES) }
+        : { status: 409, json: { error: 'barcode_in_use', code: '4006381333931', productId: 'prd_gloves', name: 'Gym Gloves', variant: 'M' } }),
+    }));
+    await page.goto('/vendor/purchases/receive/');
+    const addTo = async () => {
+      await scan(page, 0, '4006381333931');
+      await page.getByTestId('receive-product-0-add-code').click();
+      await page.getByTestId('add-code-product').fill('glove');
+      await page.getByTestId('add-code-dialog').getByTestId('product-option-prd_gloves').click();
+      await page.getByTestId('add-code-for').selectOption('S');
+      await page.getByTestId('add-code-save').click();
+    };
+    await addTo();
+    await expect(page.getByText("Barcodes aren't available right now.")).toBeVisible();
+    await expect(page.getByText('Code added to Gym Gloves.')).toHaveCount(0);
+    await expect(page.getByTestId('add-code-dialog')).toHaveCount(0);
+    await expect(page.getByTestId('receive-product-0')).toBeVisible();
+    mode = 'race';
+    await addTo();
+    await expect(page.getByTestId('add-code-dialog')).toHaveCount(0);
+    await expect(page.getByTestId('receive-line-0')).toContainText('Gym Gloves');
+    await expect(page.getByTestId('receive-variant-0')).toHaveValue('M');
+    await expect(page.getByText('Already on Gym Gloves.')).toHaveCount(0);
+  });
+
+  test('non-ASCII text is never looked up', async ({ page }) => {
+    await signedInAs(page, VENDOR);
+    const calls = await mockApi(page, base());
+    await page.goto('/vendor/purchases/receive/');
+    await scan(page, 0, 'Kettlebéll');
+    await expect(page.getByTestId('receive-product-0')).toHaveValue('Kettlebéll');
+    expect(callsOf(calls, 'GET', '/vendor/products/lookup')).toEqual([]);
   });
 
   test('quick add refused with barcode_in_use shows "Already on {name}"', async ({ page }) => {

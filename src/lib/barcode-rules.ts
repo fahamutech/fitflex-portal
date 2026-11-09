@@ -53,11 +53,14 @@ export function validateBarcode(raw: string): { code: string; codeKey: string } 
   return { code, codeKey: codeKey(code) };
 }
 
-/** §6.2 step 3: text that may be a code worth looking up (no spaces, 4–48 characters). */
+/** §6.2 step 3: text that may be a code worth looking up: 4–48 printable ASCII characters, no spaces (as the app). */
 export const looksLikeCode = (raw: string) => {
   const s = raw.trim();
-  return s.length >= BARCODE_MIN && s.length <= BARCODE_MAX && !/\s/.test(s);
+  return s.length >= BARCODE_MIN && s.length <= BARCODE_MAX && PRINTABLE.test(s);
 };
+
+/** A product row loaded while the tool was on carries a `barcodes` key; without it we don't know its codes. */
+export const hasBarcodesKey = (p: { barcodes?: unknown } | null | undefined): boolean => !!p && Array.isArray(p.barcodes);
 
 /** The barcodes of a product from GET /vendor/products (absent while the tool is off). */
 export const barcodesOf = (p: VendorProduct): ProductBarcode[] =>

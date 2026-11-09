@@ -379,9 +379,12 @@ function ProductsInner() {
 
       {barcodesFor && canBarcodes && (
         <BarcodesDialog
-          product={barcodesFor}
+          // The current row (a reload may bring the `barcodes` key); a new key remounts it with the loaded codes.
+          key={`${barcodesFor.id}:${Array.isArray((rows ?? []).find(p => p.id === barcodesFor.id)?.barcodes)}`}
+          product={(rows ?? []).find(p => p.id === barcodesFor.id) ?? barcodesFor}
           onClose={() => setBarcodesFor(null)}
           onSaved={saved => setRows(current => (current ?? []).map(p => (p.id === saved.id ? { ...p, barcodes: saved.barcodes } : p)))}
+          onStale={() => { void vendor.refresh(); void load(); }}
         />
       )}
     </div>
