@@ -275,9 +275,9 @@ export default function LoginPage() {
       <div className="w-full max-w-sm">
         {/* No brand mark here: the login header already carries the logo (spec §12, F-7). */}
         <div className="mb-8 text-center">
-          <h1 className="text-2xl font-semibold text-[var(--color-fg-primary)]">{t('login.heading')}</h1>
+          <h1 className="text-2xl font-semibold text-[var(--color-fg-primary)]">{t(MEMBER_PORTAL ? 'member.login.heading' : 'login.heading')}</h1>
           <p className="mt-1.5 text-sm text-[var(--color-fg-quaternary)]">
-            {t('login.assignedAccount')}
+            {t(MEMBER_PORTAL ? 'member.login.sub' : 'login.assignedAccount')}
           </p>
         </div>
 
@@ -504,7 +504,7 @@ export default function LoginPage() {
         </Card>
 
         <p className="mt-6 text-center text-xs text-[var(--color-fg-quaternary)]">
-          {t('login.noSelfRegistration')}
+          {t(MEMBER_PORTAL ? 'member.login.newHere' : 'login.noSelfRegistration')}
         </p>
         {/* Events S2 (spec §4.2): organizers request access after signing in with the account they already have. */}
         {EVENTS_MODULE && (
@@ -524,10 +524,10 @@ export default function LoginPage() {
       <div className="flex min-h-[calc(100vh-4rem)] flex-col lg:flex-row" data-testid="login-photo-layout">
         <PhotoPanel
           photo={LOGIN_HERO_PHOTO}
-          eyebrow={t('login.hero.eyebrow')}
-          headlineLead={t('login.hero.lead')}
-          headlineAccent={t('login.hero.accent')}
-          subline={t('login.hero.sub')}
+          eyebrow={t(MEMBER_PORTAL ? 'member.login.hero.eyebrow' : 'login.hero.eyebrow')}
+          headlineLead={t(MEMBER_PORTAL ? 'member.login.hero.lead' : 'login.hero.lead')}
+          headlineAccent={t(MEMBER_PORTAL ? 'member.login.hero.accent' : 'login.hero.accent')}
+          subline={t(MEMBER_PORTAL ? 'member.login.hero.sub' : 'login.hero.sub')}
           remoteSlot={HERO_IMAGES_REMOTE ? 'portalLogin' : undefined}
           data-testid="login-photo-panel"
         />
