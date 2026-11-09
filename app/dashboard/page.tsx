@@ -12,6 +12,7 @@ import { useApp } from '../providers';
 import { api, DashboardResponse } from '@/lib/api';
 import { money } from '@/lib/admin-utils';
 import { period, shortDay } from '@/lib/settlements';
+import { fill } from '@/components/communication-shared';
 import {
   MetricCard,
   Card,
@@ -27,7 +28,7 @@ import {
 export default function DashboardPage() {
   const { token, t } = useApp();
   const [data, setData] = useState<DashboardResponse | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState(false);
   const [loading, setLoading] = useState(true);
   const [gymId, setGymId] = useState('');
   const [memberType, setMemberType] = useState<'all' | 'direct' | 'fitflex'>('all');
@@ -42,7 +43,7 @@ export default function DashboardPage() {
     setLoading(true);
     api.dashboard(token, { gymId, periodStart, periodEnd, memberType })
       .then(setData)
-      .catch((e) => setError(String(e)))
+      .catch(() => setError(true))
       .finally(() => setLoading(false));
   };
 
@@ -58,7 +59,7 @@ export default function DashboardPage() {
     );
   }
 
-  if (error) return <Alert tone="error">{error}</Alert>;
+  if (error) return <Alert tone="error">{t('ownerDash.loadFailed')}</Alert>;
   if (!data)  return null;
 
   // What FitFlex pays this gym: absent for staff without the payments permission.
@@ -77,7 +78,7 @@ export default function DashboardPage() {
       {/* Page header */}
       <PageHeader
         title={data.gym.name}
-        description={`${data.gym.tier} gym`}
+        description={fill(t('ownerDash.tierGym'), { tier: data.gym.tier })}
         actions={
           <Button variant="secondary" size="sm" onClick={load} disabled={loading}>
             <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
@@ -89,7 +90,7 @@ export default function DashboardPage() {
       {/* Gym identity strip */}
       <Card>
         <CardContent className="flex flex-wrap items-center gap-3">
-          <Badge tone="brand" dot>{data.gym.tier} tier</Badge>
+          <Badge tone="brand" dot>{fill(t('ownerDash.tierBadge'), { tier: data.gym.tier })}</Badge>
           {pay?.rates && (
             <>
               <span className="text-sm text-[var(--color-fg-quaternary)]">·</span>

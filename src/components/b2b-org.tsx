@@ -14,6 +14,7 @@ import { RewardQueue } from '@/components/reward-queue';
 import { GroupManager } from '@/components/group-manager';
 import type { Locale, MessageKey } from '@/lib/i18n';
 import { PendingMemberStatus, WithdrawRequestButton, fill, memberRequestError, requestLabel, requestSentNotice, shownRequests, withdrawMemberRequest } from '@/components/b2b-member-requests';
+import { OrgT, useOrgT } from '@/lib/org-i18n';
 
 /**
  * The organisation's own screens for the people it covers and its
@@ -24,36 +25,28 @@ import { PendingMemberStatus, WithdrawRequestButton, fill, memberRequestError, r
 
 export type Mine = { organization: B2BOrganization; role: string; permissions: string[]; companyStaffManage?: boolean };
 
-const ERRORS: Record<string, string> = {
-  invalid_email: 'That email address doesn’t look right.',
-  invalid_phone: 'That number doesn’t look right. Try 0712 345 678 or +255712345678.',
-  user_contact_required: 'Enter their email address or mobile number.',
-  // By user ID only: by email or number nothing person-dependent comes back any more (functions#283), so
-  // user_not_found / beneficiary_must_be_member / user_must_be_member are not handled here.
-  already_enrolled: 'They are already on your list.',
-  user_already_linked: 'That account is already linked to another of your employees.',
-  external_reference_in_use: 'Someone else already has that reference.',
-  organization_not_active: 'Your organisation isn’t active yet, so people can’t be added.',
-  display_name_required: 'Enter the employee’s name.',
-  seat_limit_reached: 'All of your company’s seats are in use. Ask FitFlex for more.',
-  forbidden: 'Your role doesn’t include this.',
-  invalid_transition: 'That change isn’t possible now.',
-};
-const said = (e: unknown, fallback: string, t: (k: MessageKey) => string, locale: Locale = 'en') => {
+// The refusals these screens explain, each with an `org.err.<code>` message. By user ID only: by email or number
+// nothing person-dependent comes back any more (functions#283), so user_not_found / beneficiary_must_be_member /
+// user_must_be_member are not handled here.
+const ERROR_CODES = new Set([
+  'invalid_email', 'invalid_phone', 'user_contact_required', 'already_enrolled', 'user_already_linked', 'external_reference_in_use',
+  'organization_not_active', 'display_name_required', 'seat_limit_reached', 'forbidden', 'invalid_transition',
+]);
+const said = (o: OrgT, e: unknown, fallback: MessageKey, t: (k: MessageKey) => string, locale: Locale = 'en') => {
   const request = memberRequestError(e, t, locale);
   if (request) return request;
   const code = e instanceof ApiError ? (e.body as { error?: string } | null)?.error : undefined;
-  return (code && ERRORS[code]) || fallback;
+  return o.t(code && ERROR_CODES.has(code) ? `org.err.${code}` as MessageKey : fallback);
 };
 const TONE: Record<string, 'success' | 'warning' | 'gray' | 'danger' | 'brand'> = {
   active: 'success', pending: 'warning', suspended: 'danger', inactive: 'gray', exited: 'gray',
   draft: 'gray', paused: 'warning', expired: 'gray', cancelled: 'gray',
 };
-const day = (v?: string | null) => (v ? new Date(`${v}T00:00:00`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : '—');
 
 /** The organisations the signed-in person belongs to, the one chosen, and what they may do there. */
 export function useMyOrganization() {
   const { token } = useApp();
+  const o = useOrgT();
   const [orgs, setOrgs] = useState<Array<{ id: string; name: string }> | null>(null);
   const [orgId, setOrgId] = useState('');
   const [mine, setMine] = useState<Mine | null>(null);
@@ -67,14 +60,14 @@ export function useMyOrganization() {
         setOrgs(list);
         setOrgId(id => id || list[0]?.id || '');
       })
-      .catch(() => { setOrgs([]); setError('Could not load your organisation.'); });
+      .catch(() => { setOrgs([]); setError(o.t('org.frame.loadFailed')); });
   }, [token]);
   useEffect(() => {
     if (!token || !orgId) return;
     setMine(null);
     api.b2bOrganization(token, orgId)
       .then(r => setMine({ organization: r.organization, role: r.access.role, permissions: r.access.permissions, companyStaffManage: r.access.companyStaffManage === true }))
-      .catch(() => setError('Could not load your organisation.'));
+      .catch(() => setError(o.t('org.frame.loadFailed')));
   }, [token, orgId]);
 
   return { token, orgs, orgId, setOrgId, mine, error };
@@ -86,12 +79,13 @@ export function OrgFrame({ title, description, state, bare = false, children }: 
   bare?: boolean;
 }) {
   const { token, orgs, orgId, setOrgId, mine, error } = state;
+  const o = useOrgT();
   if (!token) return null;
   return (
     <div className="space-y-5">
       {!bare && <PageHeader title={title} description={mine ? `${mine.organization.tradingName || mine.organization.legalName} · ${description}` : description} />}
       {error && <Alert tone="error">{error}</Alert>}
-      {orgs && orgs.length === 0 && !error && <Alert tone="info">You aren’t part of any organisation on FitFlex yet.</Alert>}
+      {orgs && orgs.length === 0 && !error && <Alert tone="info">{o.t('org.frame.none')}</Alert>}
       {orgs && orgs.length > 1 && (
         <Select className="!w-auto" value={orgId} onChange={e => setOrgId(e.target.value)} data-testid="org-picker">
           {orgs.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
@@ -106,17 +100,18 @@ export function OrgFrame({ title, description, state, bare = false, children }: 
 
 export function OrgPeoplePage() {
   const state = useMyOrganization();
-  const { user } = useApp();
+  const { user, t } = useApp();
+  const o = useOrgT();
   return (
-    <OrgFrame title="People" description="who your programmes cover." state={state}>
+    <OrgFrame title={t('org.nav.people')} description={o.t('org.people.description')} state={state}>
       {(mine, token) => {
-        if (!mine.permissions.includes('beneficiaries.read')) return <Alert tone="info">Your role doesn’t include the list of people. Ask your organisation’s owner or admin.</Alert>;
+        if (!mine.permissions.includes('beneficiaries.read')) return <Alert tone="info">{o.t('org.people.noRole')}</Alert>;
         // A company set up under Companies keeps its staff list there; its HR login manages it.
         // B5b: while the server has ORG_ONLY_SPONSORS on, the staff list is managed here for every role that may.
         if (mine.organization.legacyCorporateId) {
           return <CompanyPeopleOr token={token} mine={mine}>{user?.userType === 'corporate_hr' || user?.userType === 'admin'
             ? <CompanyStaff token={token} />
-            : <Beneficiaries token={token} mine={mine} readOnlyNote="Your company’s staff list is managed by its HR login." />}</CompanyPeopleOr>;
+            : <Beneficiaries token={token} mine={mine} readOnlyNote={o.t('org.people.managedByHr')} />}</CompanyPeopleOr>;
         }
         return <Beneficiaries token={token} mine={mine} />;
       }}
@@ -128,6 +123,7 @@ function Beneficiaries({ token, mine, readOnlyNote }: { token: string; mine: Min
   const { t, locale } = useApp();
   const orgId = mine.organization.id;
   const canManage = mine.permissions.includes('beneficiaries.manage') && !readOnlyNote;
+  const o = useOrgT();
   const [people, setPeople] = useState<B2BBeneficiary[] | null>(null);
   // Adds by user ID, email or number the member has not accepted yet (absent on an older backend).
   const [pending, setPending] = useState<B2BMemberRequest[]>([]);
@@ -144,19 +140,19 @@ function Beneficiaries({ token, mine, readOnlyNote }: { token: string; mine: Min
     setPeople(r.items); setTotal(r.total); setPending(shownRequests(r.pendingMemberAcceptance));
   };
   useEffect(() => {
-    load().catch(() => { setError('Could not load the list.'); setPeople([]); });
+    load().catch(() => { setError(o.t('org.people.loadFailed')); setPeople([]); });
     api.b2bReference().then(r => setTypes(r.beneficiaryTypes)).catch(() => undefined);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [orgId]);
 
-  const run = async (fn: () => Promise<string | void>, fallback: string) => {
+  const run = async (fn: () => Promise<string | void>, fallback: MessageKey) => {
     setBusy(true); setError(null); setNotice(null);
     try {
       const told = await fn();
       if (told) setNotice(told);
       await load();
     } catch (e) {
-      setError(said(e, fallback, t, locale));
+      setError(said(o, e, fallback, t, locale));
     } finally {
       setBusy(false);
     }
@@ -173,14 +169,14 @@ function Beneficiaries({ token, mine, readOnlyNote }: { token: string; mine: Min
       // whatever came back (an id-null stub, or a request by contact that nobody may be behind), so the
       // screen can't reveal whether the person has an account (functions#241, #283).
       if (isPendingMemberAcceptance(out)) return requestSentNotice(t);
-      return `${out.beneficiary.displayName ?? 'They'} can now use your programmes.`;
-    }, 'Could not add them.');
+      return o.t('org.people.added', { name: out.beneficiary.displayName ?? o.t('org.people.they') });
+    }, 'org.people.addFailed');
   };
 
   const withdraw = (r: B2BMemberRequest) => r.id && run(async () => {
     await withdrawMemberRequest(token, orgId, r.id as string);
     return t('b2b.memberRequest.withdrawn');
-  }, t('b2b.memberRequest.withdrawFailed'));
+  }, 'b2b.memberRequest.withdrawFailed');
 
   return (
     <div className="space-y-4" data-testid="org-people">
@@ -192,18 +188,18 @@ function Beneficiaries({ token, mine, readOnlyNote }: { token: string; mine: Min
           <CardContent className="py-4">
             <form onSubmit={add} className="grid gap-3 sm:grid-cols-5" data-testid="org-people-add">
               <div className="sm:col-span-2">
-                <Field label="Email or mobile number" hint={t('b2b.memberRequest.contactHint')}>
-                  <Input required value={form.contact} onChange={e => setForm({ ...form, contact: e.target.value })} placeholder="asha@example.co.tz or 0712 345 678" data-testid="org-people-contact" />
+                <Field label={o.t('org.people.contact')} hint={t('b2b.memberRequest.contactHint')}>
+                  <Input required value={form.contact} onChange={e => setForm({ ...form, contact: e.target.value })} placeholder={o.t('org.people.contactPlaceholder')} data-testid="org-people-contact" />
                 </Field>
               </div>
-              <Field label="Type">
+              <Field label={o.t('org.common.type')}>
                 <Select value={form.beneficiaryType} onChange={e => setForm({ ...form, beneficiaryType: e.target.value })}>
-                  {Object.entries(Object.keys(types).length ? types : { member: 'Member' }).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+                  {Object.entries(Object.keys(types).length ? types : { member: 'Member' }).map(([k, v]) => <option key={k} value={k}>{o.server('org.people.type', k, v)}</option>)}
                 </Select>
               </Field>
-              <Field label="Group (optional)"><Input value={form.groupName} onChange={e => setForm({ ...form, groupName: e.target.value })} placeholder="e.g. Head office" /></Field>
-              <Field label="Your reference (optional)"><Input value={form.externalReference} onChange={e => setForm({ ...form, externalReference: e.target.value })} placeholder="Staff or policy no." /></Field>
-              <div className="sm:col-span-5"><Button type="submit" size="sm" disabled={busy || !form.contact.trim()} data-testid="org-people-add-button">Add person</Button></div>
+              <Field label={o.t('org.people.groupOptional')}><Input value={form.groupName} onChange={e => setForm({ ...form, groupName: e.target.value })} placeholder={o.t('org.people.groupPlaceholder')} /></Field>
+              <Field label={o.t('org.people.refOptional')}><Input value={form.externalReference} onChange={e => setForm({ ...form, externalReference: e.target.value })} placeholder={o.t('org.people.refPlaceholder')} /></Field>
+              <div className="sm:col-span-5"><Button type="submit" size="sm" disabled={busy || !form.contact.trim()} data-testid="org-people-add-button">{o.t('org.people.add')}</Button></div>
             </form>
           </CardContent>
         </Card>
@@ -212,24 +208,24 @@ function Beneficiaries({ token, mine, readOnlyNote }: { token: string; mine: Min
       <Card>
         <CardContent className="space-y-3 py-4">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <div className="text-sm font-semibold">{total} {total === 1 ? 'person' : 'people'}</div>
-            <form className="flex gap-2" onSubmit={(e) => { e.preventDefault(); run(async () => undefined, 'Could not search.'); }}>
-              <Input className="!w-56" value={search} onChange={e => setSearch(e.target.value)} placeholder="Search by name or reference" />
-              <Button type="submit" size="sm" variant="secondary" disabled={busy}><RefreshCw className="h-4 w-4" />Search</Button>
+            <div className="text-sm font-semibold">{o.n('org.people.count', total)}</div>
+            <form className="flex gap-2" onSubmit={(e) => { e.preventDefault(); run(async () => undefined, 'org.people.searchFailed'); }}>
+              <Input className="!w-56" value={search} onChange={e => setSearch(e.target.value)} placeholder={o.t('org.people.searchPlaceholder')} />
+              <Button type="submit" size="sm" variant="secondary" disabled={busy}><RefreshCw className="h-4 w-4" />{o.t('org.common.search')}</Button>
             </form>
           </div>
-          {!people ? <Spinner className="h-5 w-5" /> : people.length === 0 && pending.length === 0 ? <p className="text-sm text-[var(--color-fg-quaternary)]">Nobody yet.</p> : (
-            <Table aria-label={`${total} ${total === 1 ? 'person' : 'people'}`} data-testid="org-people-list">
+          {!people ? <Spinner className="h-5 w-5" /> : people.length === 0 && pending.length === 0 ? <p className="text-sm text-[var(--color-fg-quaternary)]">{o.t('org.people.empty')}</p> : (
+            <Table aria-label={o.n('org.people.count', total)} data-testid="org-people-list">
               <THead>
                 <Tr>
-                  <Th>Name</Th><Th>Type</Th><Th>Group</Th><Th>Reference</Th><Th>Status</Th><Th></Th>
+                  <Th>{o.t('org.common.name')}</Th><Th>{o.t('org.common.type')}</Th><Th>{o.t('org.common.group')}</Th><Th>{o.t('org.common.reference')}</Th><Th>{o.t('org.common.status')}</Th><Th></Th>
                 </Tr>
               </THead>
               <TBody>
                 {pending.map(r => (
                   <Tr key={`request-${r.id}`} data-testid={`org-people-request-${r.id}`}>
                     <Td className="font-medium">{requestLabel(t, r)}</Td>
-                    <Td>{r.beneficiaryType ? (types[r.beneficiaryType] ?? r.beneficiaryType) : ''}</Td>
+                    <Td>{r.beneficiaryType ? o.server('org.people.type', r.beneficiaryType, types[r.beneficiaryType]) : ''}</Td>
                     <Td>{r.groupName ?? ''}</Td>
                     <Td>{r.externalReference ?? ''}</Td>
                     <Td><PendingMemberStatus request={r} /></Td>
@@ -240,17 +236,17 @@ function Beneficiaries({ token, mine, readOnlyNote }: { token: string; mine: Min
                 ))}
                 {people.map(p => (
                   <Tr key={p.id}>
-                    <Td className="font-medium">{p.displayName ?? '—'}{!p.userId && <span className="ml-2 text-xs font-normal text-[var(--color-fg-quaternary)]">no FitFlex account linked</span>}</Td>
-                    <Td>{types[p.beneficiaryType] ?? p.beneficiaryType}</Td>
+                    <Td className="font-medium">{p.displayName ?? '—'}{!p.userId && <span className="ml-2 text-xs font-normal text-[var(--color-fg-quaternary)]">{o.t('org.people.notLinked')}</span>}</Td>
+                    <Td>{o.server('org.people.type', p.beneficiaryType, types[p.beneficiaryType])}</Td>
                     <Td>{p.groupName ?? ''}</Td>
                     <Td>{p.externalReference ?? ''}</Td>
-                    <Td><Badge tone={TONE[p.status] ?? 'gray'}>{p.status}</Badge></Td>
+                    <Td><Badge tone={TONE[p.status] ?? 'gray'}>{o.label('org.personStatus', p.status)}</Badge></Td>
                     <Td className="text-right">
                       {canManage && !p.readOnly && (
                         <span className="flex justify-end gap-2">
-                          {p.status !== 'active' && <Button size="sm" variant="secondary" disabled={busy} onClick={() => run(async () => { await api.setB2BBeneficiaryStatus(token, orgId, p.id, 'active'); }, 'Could not activate them.')}>Activate</Button>}
-                          {p.status === 'active' && <Button size="sm" variant="secondary" disabled={busy} onClick={() => run(async () => { await api.setB2BBeneficiaryStatus(token, orgId, p.id, 'suspended'); }, 'Could not suspend them.')}>Suspend</Button>}
-                          {p.status !== 'inactive' && <Button size="sm" variant="secondary" disabled={busy} onClick={() => { if (window.confirm('Remove this person from your programmes? What they already used stays on record.')) run(async () => { await api.setB2BBeneficiaryStatus(token, orgId, p.id, 'inactive'); }, 'Could not remove them.'); }}>Remove</Button>}
+                          {p.status !== 'active' && <Button size="sm" variant="secondary" disabled={busy} onClick={() => run(async () => { await api.setB2BBeneficiaryStatus(token, orgId, p.id, 'active'); }, 'org.people.activateFailed')}>{o.t('org.people.activate')}</Button>}
+                          {p.status === 'active' && <Button size="sm" variant="secondary" disabled={busy} onClick={() => run(async () => { await api.setB2BBeneficiaryStatus(token, orgId, p.id, 'suspended'); }, 'org.people.suspendFailed')}>{o.t('org.people.suspend')}</Button>}
+                          {p.status !== 'inactive' && <Button size="sm" variant="secondary" disabled={busy} onClick={() => { if (window.confirm(o.t('org.people.removeConfirm'))) run(async () => { await api.setB2BBeneficiaryStatus(token, orgId, p.id, 'inactive'); }, 'org.people.removeFailed'); }}>{o.t('org.common.remove')}</Button>}
                         </span>
                       )}
                     </Td>
@@ -259,7 +255,7 @@ function Beneficiaries({ token, mine, readOnlyNote }: { token: string; mine: Min
               </TBody>
             </Table>
           )}
-          <p className="text-xs text-[var(--color-fg-quaternary)]">Only active people are covered. Suspending or removing someone stops new use straight away; a sponsored pass already started runs to the end of its month.</p>
+          <p className="text-xs text-[var(--color-fg-quaternary)]">{o.t('org.people.note')}</p>
         </CardContent>
       </Card>
     </div>
@@ -269,6 +265,7 @@ function Beneficiaries({ token, mine, readOnlyNote }: { token: string; mine: Min
 /** A company's staff list (the Companies side): add an employee, link them to their FitFlex account, change their status. */
 function CompanyStaff({ token }: { token: string }) {
   const { t, locale } = useApp();
+  const o = useOrgT();
   const [staff, setStaff] = useState<CorporateEmployee[] | null>(null);
   const [form, setForm] = useState({ displayName: '', contact: '', department: '' });
   const [link, setLink] = useState<Record<string, string>>({});
@@ -278,17 +275,17 @@ function CompanyStaff({ token }: { token: string }) {
 
   const load = async () => setStaff((await api.corporateStaff(token)).employees);
   useEffect(() => {
-    load().catch(() => { setError('Could not load your staff.'); setStaff([]); });
+    load().catch(() => { setError(o.t('org.people.staff.loadFailed')); setStaff([]); });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
-  const run = async (fn: () => Promise<string | void>, fallback: string) => {
+  const run = async (fn: () => Promise<string | void>, fallback: MessageKey) => {
     setBusy(true); setError(null); setNotice(null);
     try {
       const told = await fn();
       if (told) setNotice(told);
       await load();
     } catch (e) {
-      setError(said(e, fallback, t, locale));
+      setError(said(o, e, fallback, t, locale));
     } finally {
       setBusy(false);
     }
@@ -304,7 +301,7 @@ function CompanyStaff({ token }: { token: string }) {
       await api.setCorporateStaffStatus(token, employee.id, 'active');
       setForm({ displayName: '', contact: '', department: form.department });
       // Benefits only work once the employee is linked to the account they use in the app.
-      if (!contact) return `${employee.displayName} added. Link their FitFlex account so they can use the benefits.`;
+      if (!contact) return o.t('org.people.staff.addedNoLink', { name: employee.displayName });
       try {
         const linked = await api.linkCorporateStaff(token, employee.id, contact);
         // HR only asks (functions#283): by email or number the reply is the same whoever is behind it, and the
@@ -312,12 +309,12 @@ function CompanyStaff({ token }: { token: string }) {
         if (isPendingMemberAcceptance(linked)) {
           return fill(t('b2b.memberRequest.employeeAddedSent'), { employee: employee.displayName });
         }
-        return `${employee.displayName} added and linked to their FitFlex account.`;
+        return o.t('org.people.staff.addedLinked', { name: employee.displayName });
       } catch (err) {
         // Only refusals that say nothing about the person (invalid contact, rate limits) come back now.
-        return fill(t('b2b.memberRequest.employeeAddedNotLinked'), { employee: employee.displayName, reason: said(err, t('b2b.hrOrg.link.failed'), t, locale) });
+        return fill(t('b2b.memberRequest.employeeAddedNotLinked'), { employee: employee.displayName, reason: said(o, err, 'b2b.hrOrg.link.failed', t, locale) });
       }
-    }, 'Could not add the employee.');
+    }, 'org.people.staff.addFailed');
   };
 
   return (
@@ -327,25 +324,25 @@ function CompanyStaff({ token }: { token: string }) {
       <Card>
         <CardContent className="py-4">
           <form onSubmit={add} className="grid gap-3 sm:grid-cols-4" data-testid="company-staff-add">
-            <Field label="Employee’s name"><Input required value={form.displayName} onChange={e => setForm({ ...form, displayName: e.target.value })} data-testid="company-staff-name" /></Field>
+            <Field label={o.t('org.people.staff.name')}><Input required value={form.displayName} onChange={e => setForm({ ...form, displayName: e.target.value })} data-testid="company-staff-name" /></Field>
             <div className="sm:col-span-2">
-              <Field label="Email or mobile number (optional)" hint={t('b2b.hrOrg.add.contactHint')}>
-                <Input value={form.contact} onChange={e => setForm({ ...form, contact: e.target.value })} placeholder="asha@example.co.tz or 0712 345 678" data-testid="company-staff-contact" />
+              <Field label={o.t('org.people.staff.contactOptional')} hint={t('b2b.hrOrg.add.contactHint')}>
+                <Input value={form.contact} onChange={e => setForm({ ...form, contact: e.target.value })} placeholder={o.t('org.people.contactPlaceholder')} data-testid="company-staff-contact" />
               </Field>
             </div>
-            <Field label="Department (optional)"><Input value={form.department} onChange={e => setForm({ ...form, department: e.target.value })} /></Field>
-            <div className="sm:col-span-4"><Button type="submit" size="sm" disabled={busy || !form.displayName.trim()} data-testid="company-staff-add-button">Add employee</Button></div>
+            <Field label={o.t('org.people.staff.departmentOptional')}><Input value={form.department} onChange={e => setForm({ ...form, department: e.target.value })} /></Field>
+            <div className="sm:col-span-4"><Button type="submit" size="sm" disabled={busy || !form.displayName.trim()} data-testid="company-staff-add-button">{o.t('org.people.staff.add')}</Button></div>
           </form>
         </CardContent>
       </Card>
       <Card>
         <CardContent className="space-y-3 py-4">
-          <div className="text-sm font-semibold">{staff?.length ?? 0} {staff?.length === 1 ? 'employee' : 'employees'}</div>
-          {!staff ? <Spinner className="h-5 w-5" /> : staff.length === 0 ? <p className="text-sm text-[var(--color-fg-quaternary)]">No employees yet.</p> : (
-            <Table aria-label={`${staff?.length ?? 0} ${staff?.length === 1 ? 'employee' : 'employees'}`} data-testid="company-staff-list">
+          <div className="text-sm font-semibold">{o.n('org.people.staff.count', staff?.length ?? 0)}</div>
+          {!staff ? <Spinner className="h-5 w-5" /> : staff.length === 0 ? <p className="text-sm text-[var(--color-fg-quaternary)]">{o.t('org.people.staff.empty')}</p> : (
+            <Table aria-label={o.n('org.people.staff.count', staff?.length ?? 0)} data-testid="company-staff-list">
               <THead>
                 <Tr>
-                  <Th>Name</Th><Th>Department</Th><Th>FitFlex account</Th><Th>Status</Th><Th></Th>
+                  <Th>{o.t('org.common.name')}</Th><Th>{o.t('org.people.staff.department')}</Th><Th>{o.t('org.people.staff.account')}</Th><Th>{o.t('org.common.status')}</Th><Th></Th>
                 </Tr>
               </THead>
               <TBody>
@@ -355,8 +352,8 @@ function CompanyStaff({ token }: { token: string }) {
                     <Td>{s.department ?? ''}</Td>
                     <Td>
                       {s.userId ? (
-                        <span className="flex items-center gap-2"><Badge tone="success">Linked</Badge>
-                          <Button variant="link" className="h-auto px-0 text-xs font-normal text-[var(--color-fg-quaternary)] underline" disabled={busy} onClick={() => run(async () => { await api.linkCorporateStaff(token, s.id, null); }, 'Could not unlink.')}>Unlink</Button>
+                        <span className="flex items-center gap-2"><Badge tone="success">{o.t('org.people.staff.linked')}</Badge>
+                          <Button variant="link" className="h-auto px-0 text-xs font-normal text-[var(--color-fg-quaternary)] underline" disabled={busy} onClick={() => run(async () => { await api.linkCorporateStaff(token, s.id, null); }, 'org.people.staff.unlinkFailed')}>{o.t('org.people.staff.unlink')}</Button>
                         </span>
                       ) : s.pendingLink?.id ? (
                         <span className="flex flex-wrap items-center gap-2" data-testid={`company-staff-request-${s.id}`}>
@@ -365,27 +362,27 @@ function CompanyStaff({ token }: { token: string }) {
                           {/* HR withdraws a link request (by user ID, email or number) by unlinking the record: the backend closes
                               it, a masked decline too. DELETE …/member-requests/:id does not take staff links (404). */}
                           <WithdrawRequestButton request={s.pendingLink} disabled={busy}
-                            onWithdraw={() => run(async () => { await api.linkCorporateStaff(token, s.id, null); return t('b2b.memberRequest.withdrawn'); }, t('b2b.memberRequest.withdrawFailed'))} />
+                            onWithdraw={() => run(async () => { await api.linkCorporateStaff(token, s.id, null); return t('b2b.memberRequest.withdrawn'); }, 'b2b.memberRequest.withdrawFailed')} />
                         </span>
                       ) : (
                         <span className="flex flex-wrap items-center gap-2">
-                          <Input className="!w-52" value={link[s.id] ?? ''} onChange={e => setLink({ ...link, [s.id]: e.target.value })} placeholder="Their email or number" data-testid={`company-staff-link-${s.id}`} />
+                          <Input className="!w-52" value={link[s.id] ?? ''} onChange={e => setLink({ ...link, [s.id]: e.target.value })} placeholder={o.t('org.people.staff.linkPlaceholder')} data-testid={`company-staff-link-${s.id}`} />
                           <Button size="sm" variant="secondary" disabled={busy || !(link[s.id] ?? '').trim()}
                             onClick={() => run(async () => {
                               const linked = await api.linkCorporateStaff(token, s.id, userContact(link[s.id]));
                               setLink({ ...link, [s.id]: '' });
                               if (isPendingMemberAcceptance(linked)) return requestSentNotice(t);
-                              return `${s.displayName} is linked to their FitFlex account.`;
-                            }, 'Could not link them.')}>Link</Button>
+                              return o.t('org.people.staff.linkedNotice', { name: s.displayName });
+                            }, 'org.people.staff.linkFailed')}>{o.t('org.people.staff.link')}</Button>
                         </span>
                       )}
                     </Td>
-                    <Td><Badge tone={TONE[s.status] ?? 'gray'}>{s.status === 'exited' ? 'left' : s.status}</Badge></Td>
+                    <Td><Badge tone={TONE[s.status] ?? 'gray'}>{o.label('org.personStatus', s.status)}</Badge></Td>
                     <Td className="text-right">
                       <span className="flex justify-end gap-2">
-                        {s.status !== 'active' && s.status !== 'exited' && <Button size="sm" variant="secondary" disabled={busy} onClick={() => run(async () => { await api.setCorporateStaffStatus(token, s.id, 'active'); }, 'Could not activate them.')}>Activate</Button>}
-                        {s.status === 'active' && <Button size="sm" variant="secondary" disabled={busy} onClick={() => run(async () => { await api.setCorporateStaffStatus(token, s.id, 'suspended'); }, 'Could not suspend them.')}>Suspend</Button>}
-                        {s.status !== 'exited' && <Button size="sm" variant="secondary" disabled={busy} onClick={() => { if (window.confirm('Mark this employee as having left? Their seat goes back to your pool.')) run(async () => { await api.setCorporateStaffStatus(token, s.id, 'exited'); }, 'Could not update them.'); }}>Left</Button>}
+                        {s.status !== 'active' && s.status !== 'exited' && <Button size="sm" variant="secondary" disabled={busy} onClick={() => run(async () => { await api.setCorporateStaffStatus(token, s.id, 'active'); }, 'org.people.activateFailed')}>{o.t('org.people.activate')}</Button>}
+                        {s.status === 'active' && <Button size="sm" variant="secondary" disabled={busy} onClick={() => run(async () => { await api.setCorporateStaffStatus(token, s.id, 'suspended'); }, 'org.people.suspendFailed')}>{o.t('org.people.suspend')}</Button>}
+                        {s.status !== 'exited' && <Button size="sm" variant="secondary" disabled={busy} onClick={() => { if (window.confirm(o.t('org.people.staff.leftConfirm'))) run(async () => { await api.setCorporateStaffStatus(token, s.id, 'exited'); }, 'org.people.staff.updateFailed'); }}>{o.t('org.people.staff.left')}</Button>}
                       </span>
                     </Td>
                   </Tr>
@@ -393,7 +390,7 @@ function CompanyStaff({ token }: { token: string }) {
               </TBody>
             </Table>
           )}
-          <p className="text-xs text-[var(--color-fg-quaternary)]">An employee is covered once they are active and linked to the FitFlex account they use in the app.</p>
+          <p className="text-xs text-[var(--color-fg-quaternary)]">{o.t('org.people.staff.note')}</p>
         </CardContent>
       </Card>
     </div>
@@ -402,17 +399,21 @@ function CompanyStaff({ token }: { token: string }) {
 
 // ── Programmes ───────────────────────────────────────────────────────────────
 
-const USAGE = (b: B2BBenefit) => (b.benefitType === 'sponsored_pass' ? 'A pass for the month'
-  : b.usagePeriod === 'unlimited' ? 'No limit'
-    : `${b.usageLimit != null ? `${b.usageLimit} per ${b.usagePeriod === 'program' ? 'programme' : b.usagePeriod}` : `No count limit, per ${b.usagePeriod}`}`);
+const USAGE = (o: OrgT, b: B2BBenefit) => (b.benefitType === 'sponsored_pass' ? o.t('org.programmes.usage.pass')
+  : b.usagePeriod === 'unlimited' ? o.t('org.programmes.usage.noLimit')
+    : b.usageLimit != null ? o.t('org.programmes.usage.limited', { n: b.usageLimit, period: o.label('org.programmes.period', b.usagePeriod) })
+      // English has always shown this one as the server names it ("per program").
+      : o.t('org.programmes.usage.uncounted', { period: o.locale === 'en' ? b.usagePeriod : o.label('org.programmes.period', b.usagePeriod) }));
 
 export function OrgProgrammesPage() {
   const state = useMyOrganization();
+  const { t } = useApp();
+  const o = useOrgT();
   return (
-    <OrgFrame title="Programmes" description="the wellness programmes FitFlex runs for you." state={state}>
+    <OrgFrame title={t('org.nav.programmes')} description={o.t('org.programmes.description')} state={state}>
       {(mine, token) => (mine.permissions.includes('programs.read')
         ? <Programmes token={token} mine={mine} />
-        : <Alert tone="info">Your role doesn’t include programmes. Ask your organisation’s owner or admin.</Alert>)}
+        : <Alert tone="info">{o.t('org.programmes.noRole')}</Alert>)}
     </OrgFrame>
   );
 }
@@ -420,6 +421,8 @@ export function OrgProgrammesPage() {
 function Programmes({ token, mine }: { token: string; mine: Mine }) {
   const { t } = useApp();
   const orgId = mine.organization.id;
+  const o = useOrgT();
+  const day = o.day;
   const [programmes, setProgrammes] = useState<B2BProgram[] | null>(null);
   const [open, setOpen] = useState<string | null>(null);
   const [benefits, setBenefits] = useState<Record<string, B2BBenefit[]>>({});
@@ -431,7 +434,7 @@ function Programmes({ token, mine }: { token: string; mine: Mine }) {
   const canManage = mine.permissions.includes('programs.manage');
 
   const load = () => {
-    api.b2bPrograms(token, orgId).then(r => setProgrammes(r.items)).catch(() => { setError('Could not load your programmes.'); setProgrammes([]); });
+    api.b2bPrograms(token, orgId).then(r => setProgrammes(r.items)).catch(() => { setError(o.t('org.programmes.loadFailed')); setProgrammes([]); });
     api.b2bProgramLifecycle(token, orgId).then(r => setLife(Object.fromEntries(r.items.map(i => [i.programId, i])))).catch(() => undefined);
   };
   useEffect(() => {
@@ -444,11 +447,12 @@ function Programmes({ token, mine }: { token: string; mine: Mine }) {
     setBusy(true); setError(null); setNotice(null);
     try {
       const r = await api.prepareB2BProgramRenewal(token, orgId, p.id);
-      const skipped = r.skipped.length ? ` ${r.skipped.length} benefit${r.skipped.length === 1 ? '' : 's'} could not be copied (${r.skipped.map(x => x.name).join(', ')}); FitFlex will set ${r.skipped.length === 1 ? 'it' : 'them'} up again with you.` : '';
-      setNotice(`${r.existing ? 'A renewal is already prepared' : 'Renewal prepared'} for ${day(r.program.startDate)} to ${r.program.endDate ? day(r.program.endDate) : 'open'}. FitFlex will review it with you before it starts; nothing changes until then.${skipped}${r.discountNotCarriedOver ? ' The current price concession is not carried over automatically; FitFlex will confirm the price.' : ''}`);
+      const skipped = r.skipped.length ? o.n('org.programmes.renew.skipped', r.skipped.length, { names: r.skipped.map(x => x.name).join(', ') }) : '';
+      const range = o.t('org.common.range', { from: day(r.program.startDate), to: r.program.endDate ? day(r.program.endDate) : o.t('org.programmes.open') });
+      setNotice(`${o.t(r.existing ? 'org.programmes.renew.existing' : 'org.programmes.renew.prepared', { range })}${skipped}${r.discountNotCarriedOver ? o.t('org.programmes.renew.discount') : ''}`);
       load();
     } catch (e) {
-      setError(said(e, 'Could not prepare the renewal.', t));
+      setError(said(o, e, 'org.programmes.renewFailed', t));
     } finally {
       setBusy(false);
     }
@@ -462,7 +466,7 @@ function Programmes({ token, mine }: { token: string; mine: Mine }) {
         const r = await api.b2bProgram(token, orgId, id);
         setBenefits(b => ({ ...b, [id]: r.benefits }));
       } catch {
-        setError('Could not load that programme.');
+        setError(o.t('org.programmes.loadOneFailed'));
       }
     }
   };
@@ -472,7 +476,7 @@ function Programmes({ token, mine }: { token: string; mine: Mine }) {
     <div className="space-y-3" data-testid="org-programmes">
       {error && <Alert tone="error">{error}</Alert>}
       {notice && <Alert tone="success">{notice}</Alert>}
-      {programmes.length === 0 && <Card><CardContent className="py-8 text-center text-sm text-[var(--color-fg-quaternary)]">No programme yet. FitFlex sets programmes up with you.</CardContent></Card>}
+      {programmes.length === 0 && <Card><CardContent className="py-8 text-center text-sm text-[var(--color-fg-quaternary)]">{o.t('org.programmes.empty')}</CardContent></Card>}
       {programmes.map(p => (
         <Card key={p.id}>
           <CardContent className="py-4">
@@ -482,11 +486,11 @@ function Programmes({ token, mine }: { token: string; mine: Mine }) {
                 <span className="font-semibold">{p.name}</span>
               </span>
               <span className="flex items-center gap-3 text-xs text-[var(--color-fg-quaternary)]">
-                {life[p.id]?.renewalOf && <Badge tone="brand">Renewal</Badge>}
-                {life[p.id]?.endingSoon && <Badge tone="warning">{life[p.id].daysLeft === 0 ? 'Ends today' : `Ends in ${life[p.id].daysLeft} day${life[p.id].daysLeft === 1 ? '' : 's'}`}</Badge>}
-                <span>{day(p.startDate)} to {p.endDate ? day(p.endDate) : 'open'}</span>
-                {p.budgetTzs != null && <span>Budget {money(p.budgetTzs)}</span>}
-                <Badge tone={TONE[p.effectiveStatus] ?? 'gray'}>{p.effectiveStatus === 'pending' ? 'waiting for FitFlex' : p.effectiveStatus}</Badge>
+                {life[p.id]?.renewalOf && <Badge tone="brand">{o.t('org.programmes.renewal')}</Badge>}
+                {life[p.id]?.endingSoon && <Badge tone="warning">{life[p.id].daysLeft === 0 ? o.t('org.programmes.endsToday') : o.n('org.programmes.endsIn', life[p.id].daysLeft ?? 0)}</Badge>}
+                <span>{o.t('org.common.range', { from: day(p.startDate), to: p.endDate ? day(p.endDate) : o.t('org.programmes.open') })}</span>
+                {p.budgetTzs != null && <span>{o.t('org.programmes.budget', { amount: money(p.budgetTzs) })}</span>}
+                <Badge tone={TONE[p.effectiveStatus] ?? 'gray'}>{p.effectiveStatus === 'pending' ? o.t('org.status.waitingFitflex') : o.label('org.status', p.effectiveStatus)}</Badge>
               </span>
             </button>
             {open === p.id && (
@@ -494,34 +498,37 @@ function Programmes({ token, mine }: { token: string; mine: Mine }) {
                 {p.description && <p className="text-[var(--color-fg-tertiary)]">{p.description}</p>}
                 {life[p.id]?.renewal && (
                   <Alert tone="info">
-                    Its renewal for {day(life[p.id].renewal!.startDate)} to {life[p.id].renewal!.endDate ? day(life[p.id].renewal!.endDate!) : 'open'} is {life[p.id].renewal!.status === 'draft' ? 'prepared and with FitFlex to review' : life[p.id].renewal!.status === 'pending' ? 'waiting for FitFlex to activate' : life[p.id].renewal!.status}.
+                    {o.t(life[p.id].renewal!.status === 'draft' ? 'org.programmes.renewal.draft' : life[p.id].renewal!.status === 'pending' ? 'org.programmes.renewal.pending' : 'org.programmes.renewal.other', {
+                      range: o.t('org.common.range', { from: day(life[p.id].renewal!.startDate), to: life[p.id].renewal!.endDate ? day(life[p.id].renewal!.endDate!) : o.t('org.programmes.open') }),
+                      status: o.label('org.status', life[p.id].renewal!.status),
+                    })}
                   </Alert>
                 )}
                 {canManage && life[p.id]?.canRenew && (life[p.id].endingSoon || life[p.id].status === 'expired') && (
                   <div className="flex flex-wrap items-center gap-3 rounded-lg border border-[var(--color-border-secondary)] px-3 py-2" data-testid={`renew-${p.id}`}>
-                    <span className="text-[var(--color-fg-tertiary)]">{life[p.id].status === 'expired' ? 'This programme has ended.' : 'This programme is ending soon.'} Prepare the next period with the same benefits and people.</span>
-                    <Button size="sm" disabled={busy} onClick={() => renew(p)} data-testid={`renew-button-${p.id}`}>Prepare renewal</Button>
+                    <span className="text-[var(--color-fg-tertiary)]">{o.t(life[p.id].status === 'expired' ? 'org.programmes.ended' : 'org.programmes.endingSoon')} {o.t('org.programmes.renewHint')}</span>
+                    <Button size="sm" disabled={busy} onClick={() => renew(p)} data-testid={`renew-button-${p.id}`}>{o.t('org.programmes.renew')}</Button>
                   </div>
                 )}
-                {p.effectiveStatus === 'paused' && <Alert tone="warning">This programme is paused{p.statusReason === 'budget_exhausted' ? ' because its budget has been used up' : ''}. Only FitFlex can resume it.</Alert>}
+                {p.effectiveStatus === 'paused' && <Alert tone="warning">{o.t(p.statusReason === 'budget_exhausted' ? 'org.programmes.pausedBudget' : 'org.programmes.paused')}</Alert>}
                 <div className="text-xs text-[var(--color-fg-quaternary)]">
-                  Covers: {p.eligibility.scope === 'all' ? 'everyone on your list' : p.eligibility.scope === 'groups' ? `the groups ${p.eligibility.groups.join(', ')}` : `${p.eligibility.beneficiaryIds.length} chosen people`}
+                  {o.t('org.programmes.covers', { who: p.eligibility.scope === 'all' ? o.t('org.programmes.covers.all') : p.eligibility.scope === 'groups' ? o.t('org.programmes.covers.groups', { groups: p.eligibility.groups.join(', ') }) : o.t('org.programmes.covers.chosen', { n: p.eligibility.beneficiaryIds.length }) })}
                 </div>
-                {!benefits[p.id] ? <Spinner className="h-5 w-5" /> : benefits[p.id].length === 0 ? <p className="text-[var(--color-fg-quaternary)]">No benefits yet.</p> : (
+                {!benefits[p.id] ? <Spinner className="h-5 w-5" /> : benefits[p.id].length === 0 ? <p className="text-[var(--color-fg-quaternary)]">{o.t('org.programmes.noBenefits')}</p> : (
                   <Table aria-label={p.name}>
                     <THead>
                       <Tr>
-                        <Th>Benefit</Th><Th>What</Th><Th>Who pays</Th><Th>How much</Th><Th>Status</Th>
+                        <Th>{o.t('org.programmes.col.benefit')}</Th><Th>{o.t('org.common.what')}</Th><Th>{o.t('org.programmes.col.whoPays')}</Th><Th>{o.t('org.programmes.col.howMuch')}</Th><Th>{o.t('org.common.status')}</Th>
                       </Tr>
                     </THead>
                     <TBody>
                       {benefits[p.id].map(b => (
                         <Tr key={b.id}>
                           <Td className="font-medium">{b.name}</Td>
-                          <Td>{types[b.benefitType]?.label ?? b.benefitType}{b.passTier ? ` · ${b.passTier}` : ''}{b.fixedFeeTzs ? ` · ${money(b.fixedFeeTzs)} a person a month` : ''}</Td>
+                          <Td>{o.server('org.benefitType', b.benefitType, types[b.benefitType]?.label)}{b.passTier ? ` · ${b.passTier}` : ''}{b.fixedFeeTzs ? o.t('org.programmes.fixedFee', { amount: money(b.fixedFeeTzs) }) : ''}</Td>
                           <Td>{b.fundingSummary}</Td>
-                          <Td>{USAGE(b)}</Td>
-                          <Td><Badge tone={TONE[b.status] ?? 'gray'}>{b.status}</Badge></Td>
+                          <Td>{USAGE(o, b)}</Td>
+                          <Td><Badge tone={TONE[b.status] ?? 'gray'}>{o.label('org.status', b.status)}</Badge></Td>
                         </Tr>
                       ))}
                     </TBody>
@@ -532,46 +539,54 @@ function Programmes({ token, mine }: { token: string; mine: Mine }) {
           </CardContent>
         </Card>
       ))}
-      <p className="text-xs text-[var(--color-fg-quaternary)]">Programmes and their benefits are set up and changed by FitFlex. Contact FitFlex to change one.</p>
+      <p className="text-xs text-[var(--color-fg-quaternary)]">{o.t('org.programmes.note')}</p>
     </div>
   );
 }
 
 // ── Challenges, rewards and groups ───────────────────────────────────────────
 
-const NO_ENGAGEMENT = <Alert tone="info">Your role doesn’t include challenges and groups. Ask your organisation’s owner or admin.</Alert>;
+function NoEngagement() {
+  const o = useOrgT();
+  return <Alert tone="info">{o.t('org.frame.noEngagement')}</Alert>;
+}
 
 /** Challenges an organisation runs for its own people. Totals here; each person's progress is under Insights. */
 export function OrgChallengesPage() {
   const state = useMyOrganization();
+  const { t } = useApp();
+  const o = useOrgT();
   return (
-    <OrgFrame bare title="Challenges" description="" state={state}>
+    <OrgFrame bare title={t('admin.nav.challenges')} description="" state={state}>
       {mine => (mine.permissions.includes('engagement.read') ? (
         <ChallengeManager scope="corporate" organizationId={mine.organization.id} rewardsHref="/org/rewards"
-          title="Wellness challenges"
-          description={`Challenges for ${mine.organization.tradingName || mine.organization.legalName}’s people. This page shows participation, completion and group progress; each person’s progress is under Insights.`} />
-      ) : NO_ENGAGEMENT)}
+          title={t('hr.nav.challenges')}
+          description={o.t('org.challenges.org.description', { name: mine.organization.tradingName || mine.organization.legalName })} />
+      ) : <NoEngagement />)}
     </OrgFrame>
   );
 }
 
 export function OrgRewardsPage() {
   const state = useMyOrganization();
+  const { t } = useApp();
+  const o = useOrgT();
   return (
-    <OrgFrame bare title="Rewards" description="" state={state}>
+    <OrgFrame bare title={t('hr.nav.rewards')} description="" state={state}>
       {mine => (mine.permissions.includes('engagement.read') ? (
-        <RewardQueue scope="corporate" organizationId={mine.organization.id} title="Rewards"
-          description="Rewards your organisation funds that your people have earned. Approve, then mark issued once handed over. Rewards FitFlex funds are handed out by FitFlex." />
-      ) : NO_ENGAGEMENT)}
+        <RewardQueue scope="corporate" organizationId={mine.organization.id} title={t('hr.nav.rewards')}
+          description={o.t('org.rewards.org.description')} />
+      ) : <NoEngagement />)}
     </OrgFrame>
   );
 }
 
 export function OrgGroupsPage() {
   const state = useMyOrganization();
+  const { t } = useApp();
   return (
-    <OrgFrame bare title="Groups" description="" state={state}>
-      {mine => (mine.permissions.includes('engagement.read') ? <GroupManager organizationId={mine.organization.id} /> : NO_ENGAGEMENT)}
+    <OrgFrame bare title={t('hr.nav.groups')} description="" state={state}>
+      {mine => (mine.permissions.includes('engagement.read') ? <GroupManager organizationId={mine.organization.id} /> : <NoEngagement />)}
     </OrgFrame>
   );
 }

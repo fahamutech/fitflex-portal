@@ -3,6 +3,7 @@ import { useEffect, useState, useRef, DragEvent, ChangeEvent } from 'react';
 import { Upload, X, ImageIcon, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/cn';
 import { api } from '@/lib/api';
+import { useApp } from '../../app/providers';
 
 interface ImageUploadProps {
   /** Auth token — required to upload to the Zebra storage proxy (`POST /storage`). */
@@ -88,6 +89,7 @@ export function ImageUpload({
   disabled = false,
   className,
 }: ImageUploadProps) {
+  const { t } = useApp();
   const [dragOver, setDragOver] = useState(false);
   const [uploading, setUploading] = useState(0);
   const [uploadError, setUploadError] = useState<string | null>(null);
@@ -117,8 +119,8 @@ export function ImageUpload({
           thumbnailsRef.current = nextThumbnails;
           onChange(nextImages, nextThumbnails);
         })
-        .catch((e) => {
-          setUploadError(e instanceof Error ? e.message : 'Upload failed');
+        .catch(() => {
+          setUploadError(t('ui.upload.failed'));
         })
         .finally(() => setUploading((n) => Math.max(0, n - 1)));
     });
@@ -162,7 +164,7 @@ export function ImageUpload({
               key={i}
               className="relative group h-20 w-20 rounded-[var(--radius-lg)] overflow-hidden border border-[var(--color-border-secondary)] bg-[var(--color-bg-tertiary)]"
             >
-              <img src={thumbnails[i] ?? url} alt={`Upload ${i + 1}`} className="h-full w-full object-cover" />
+              <img src={thumbnails[i] ?? url} alt={t('ui.upload.alt').replace('{n}', String(i + 1))} className="h-full w-full object-cover" />
               {!disabled && (
                 <button
                   type="button"
@@ -202,13 +204,13 @@ export function ImageUpload({
           <div className="text-center">
             <p className="text-sm font-medium text-[var(--color-brand-700)]">
               {uploading > 0 ? (
-                `Uploading ${uploading} image${uploading > 1 ? 's' : ''}...`
+                t(uploading > 1 ? 'ui.upload.uploadingMany' : 'ui.upload.uploadingOne').replace('{n}', String(uploading))
               ) : (
-                <>Click to upload <span className="text-[var(--color-fg-quaternary)] font-normal">or drag and drop</span></>
+                <>{t('ui.upload.click')} <span className="text-[var(--color-fg-quaternary)] font-normal">{t('ui.upload.orDrag')}</span></>
               )}
             </p>
             <p className="text-xs text-[var(--color-fg-quaternary)] mt-1">
-              PNG, JPG, WEBP up to 5MB &mdash; converted to WebP and uploaded automatically
+              {t('ui.upload.hint')}
             </p>
           </div>
         </div>

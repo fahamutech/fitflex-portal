@@ -8,46 +8,45 @@ import {
 } from '@/lib/api';
 import { Alert, Badge, Button, Card, CardContent, CardHeader, Input, PageHeader, Segmented, Select, Spinner, Table, TBody, Td, Th, THead, Tr } from '@/components/shared';
 import { Dialog } from '@/components/dialog';
-import { Aging, day } from '@/components/b2b-finance';
+import { Aging } from '@/components/b2b-finance';
 import { money } from '@/lib/admin-utils';
 import { OrgFrame, useMyOrganization } from '@/components/b2b-org';
+import { useApp } from '../../app/providers';
+import { MessageKey } from '@/lib/i18n';
+import { OrgT, useOrgT } from '@/lib/org-i18n';
 
 const BRAND = '#079455';
 const SECOND = '#7a5af8';
 const GRID = 'var(--color-border-secondary)';
 const INK = 'var(--color-fg-quaternary)';
 
+/** English labels, for the FitFlex admin console; this screen shows the `org.insights.period.*` messages. */
 export const PERIODS: Array<[string, string]> = [
   ['today', 'Today'], ['yesterday', 'Yesterday'], ['last_7_days', 'Last 7 days'], ['last_30_days', 'Last 30 days'], ['this_month', 'This month'], ['last_month', 'Last month'],
   ['this_quarter', 'This quarter'], ['last_quarter', 'Last quarter'], ['year_to_date', 'Year to date'], ['last_year', 'Last year'], ['custom', 'Custom dates'],
 ];
-const REPORTS: Array<{ key: string; title: string; about: string; needs: 'read' | 'people' | 'billing' }> = [
-  { key: 'beneficiaries', title: 'Beneficiaries', about: 'Each person with their usage and activity totals.', needs: 'people' },
-  { key: 'usage', title: 'Sponsored usage', about: 'Every sponsored visit and session: who, when, where and what it cost.', needs: 'people' },
-  { key: 'activity', title: 'Member activity', about: 'Every workout and activity your people recorded.', needs: 'people' },
-  { key: 'benefits', title: 'Benefit utilisation', about: 'Each benefit: who could use it, who did, and its cost.', needs: 'read' },
-  { key: 'programs', title: 'Programme performance', about: 'Each programme side by side.', needs: 'read' },
-  { key: 'providers', title: 'Provider utilisation', about: 'Each gym and trainer your people used.', needs: 'read' },
-  { key: 'invoices', title: 'Invoices', about: 'Invoices issued in the period.', needs: 'billing' },
-  { key: 'payments', title: 'Payments', about: 'Payments FitFlex received in the period.', needs: 'billing' },
+const REPORTS: Array<{ key: string; needs: 'read' | 'people' | 'billing' }> = [
+  { key: 'beneficiaries', needs: 'people' }, { key: 'usage', needs: 'people' }, { key: 'activity', needs: 'people' },
+  { key: 'benefits', needs: 'read' }, { key: 'programs', needs: 'read' }, { key: 'providers', needs: 'read' },
+  { key: 'invoices', needs: 'billing' }, { key: 'payments', needs: 'billing' },
 ];
-const SERVICE: Record<string, string> = { gym_access: 'Gym visit', trainer_session: 'Trainer session', sponsored_pass: 'Sponsored pass' };
 
 const num = (v: number | null | undefined) => (v == null ? '—' : v.toLocaleString('en-US'));
 const pct = (v: number | null | undefined) => (v == null ? '—' : `${v}%`);
 const cash = (v: number | null | undefined) => (v == null ? '—' : money(v));
-const shortDay = (d: string) => new Date(`${d}T00:00:00Z`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' });
 const words = (s: string) => s.replace(/_/g, ' ');
-const failed = (e: unknown, fallback: string) => {
+const failed = (o: OrgT, e: unknown, fallback: MessageKey) => {
   const body = e instanceof ApiError ? (e.body as { error?: string; requiredPermission?: string } | null) : null;
-  if (body?.error === 'forbidden') return 'Your role doesn’t include this. Ask your organisation’s owner or admin.';
-  if (body?.error === 'date_range_too_long') return 'That range is too long. Choose 800 days or fewer.';
-  if (body?.error === 'invalid_date_range') return 'Choose a start date and an end date, in that order.';
-  if (body?.error === 'report_too_large') return 'That report is too big to download in one file (over 50,000 rows). Choose a shorter period, or one programme or group.';
-  return fallback;
+  if (body?.error === 'forbidden') return o.t('org.insights.err.forbidden');
+  if (body?.error === 'date_range_too_long') return o.t('org.insights.err.rangeTooLong');
+  if (body?.error === 'invalid_date_range') return o.t('org.insights.err.invalidRange');
+  if (body?.error === 'report_too_large') return o.t('org.insights.err.tooLarge');
+  return o.t(fallback);
 };
-const change = (v: number | null): { direction: 'up' | 'down' | 'neutral'; label: string } | undefined =>
-  (v == null ? undefined : { direction: v > 0 ? 'up' : v < 0 ? 'down' : 'neutral', label: `${v > 0 ? '+' : ''}${v}% on the period before` });
+const change = (o: OrgT, v: number | null): { direction: 'up' | 'down' | 'neutral'; label: string } | undefined =>
+  (v == null ? undefined : { direction: v > 0 ? 'up' : v < 0 ? 'down' : 'neutral', label: o.t('org.insights.change', { v: `${v > 0 ? '+' : ''}${v}` }) });
+/** A status the server names in snake case: its translation, or the words as sent. */
+const status = (o: OrgT, prefix: string, v: string) => o.label(prefix, v, words(v));
 
 /** Save text the server produced as a file. */
 function saveCsv(filename: string, csv: string) {
@@ -80,6 +79,9 @@ type Tab = 'overview' | 'people' | 'benefits' | 'providers' | 'billing' | 'repor
  * every tab. FitFlex staff open any organisation with the same screen.
  */
 export function OrgInsights({ token, orgId, orgName, can }: { token: string; orgId: string; orgName: string; can: InsightsCan }) {
+  const { t } = useApp();
+  const o = useOrgT();
+  const day = o.day;
   const [tab, setTab] = useState<Tab>('overview');
   const [preset, setPreset] = useState('this_month');
   const [custom, setCustom] = useState({ from: '', to: '' });
@@ -100,7 +102,7 @@ export function OrgInsights({ token, orgId, orgName, can }: { token: string; org
     if (!query) return;
     let live = true;
     setError(null);
-    api.orgDashboard(token, orgId, query).then(d => live && setDash(d)).catch(e => live && setError(failed(e, 'Could not load the figures.')));
+    api.orgDashboard(token, orgId, query).then(d => live && setDash(d)).catch(e => live && setError(failed(o, e, 'org.insights.err.figures')));
     return () => { live = false; };
   }, [token, orgId, query, tick]);
   useEffect(() => {
@@ -108,41 +110,41 @@ export function OrgInsights({ token, orgId, orgName, can }: { token: string; org
     api.orgProgramAnalytics(token, orgId, range).then(r => setPrograms(r.items)).catch(() => setPrograms([]));
   }, [token, orgId, range, tick]);
 
-  const tabs: Array<[Tab, string]> = [['overview', 'Overview'], ...(can.people ? [['people', 'People'] as [Tab, string]] : []), ['benefits', 'Programmes & benefits'], ['providers', 'Gyms & trainers'],
-    ...(can.billing ? [['billing', 'Billing'] as [Tab, string]] : []), ['reports', 'Reports']];
+  const tabs: Array<[Tab, string]> = [['overview', o.t('org.billing.tab.overview')], ...(can.people ? [['people', t('org.nav.people')] as [Tab, string]] : []), ['benefits', o.t('org.insights.tab.benefits')], ['providers', o.t('org.insights.tab.providers')],
+    ...(can.billing ? [['billing', t('org.nav.billing')] as [Tab, string]] : []), ['reports', o.t('org.insights.tab.reports')]];
 
   return (
     <div className="space-y-5" data-testid="org-insights">
-      <PageHeader title="Insights" description={`${orgName} · who is taking part, what is being used, and what it costs.`}
-        actions={<Button variant="secondary" size="sm" onClick={() => setTick(t => t + 1)}><RefreshCw className="h-4 w-4" />Refresh</Button>} />
+      <PageHeader title={t('org.nav.insights')} description={o.t('org.insights.description', { name: orgName })}
+        actions={<Button variant="secondary" size="sm" onClick={() => setTick(n => n + 1)}><RefreshCw className="h-4 w-4" />{t('admin.action.refresh')}</Button>} />
       <div className="flex flex-wrap items-end gap-2" data-testid="insights-filters">
-        <Select className="!w-auto" aria-label="Period" value={preset} onChange={e => setPreset(e.target.value)} data-testid="insights-period">
-          {PERIODS.map(([k, label]) => <option key={k} value={k}>{label}</option>)}
+        <Select className="!w-auto" aria-label={o.t('org.insights.period')} value={preset} onChange={e => setPreset(e.target.value)} data-testid="insights-period">
+          {PERIODS.map(([k, label]) => <option key={k} value={k}>{o.label('org.insights.period', k, label)}</option>)}
         </Select>
         {preset === 'custom' && (
           <>
-            <Input className="!w-auto" type="date" aria-label="From" value={custom.from} onChange={e => setCustom({ ...custom, from: e.target.value })} />
-            <Input className="!w-auto" type="date" aria-label="To" value={custom.to} onChange={e => setCustom({ ...custom, to: e.target.value })} />
+            <Input className="!w-auto" type="date" aria-label={o.t('org.common.from')} value={custom.from} onChange={e => setCustom({ ...custom, from: e.target.value })} />
+            <Input className="!w-auto" type="date" aria-label={o.t('org.common.to')} value={custom.to} onChange={e => setCustom({ ...custom, to: e.target.value })} />
           </>
         )}
         {programs.length > 1 && (
-          <Select className="!w-auto" aria-label="Programme" value={programId} onChange={e => setProgramId(e.target.value)}>
-            <option value="">All programmes</option>
+          <Select className="!w-auto" aria-label={o.t('org.insights.programme')} value={programId} onChange={e => setProgramId(e.target.value)}>
+            <option value="">{o.t('org.insights.allProgrammes')}</option>
             {programs.map(p => <option key={p.programId} value={p.programId}>{p.name}</option>)}
           </Select>
         )}
         {dash && dash.beneficiaries.groups.length > 0 && (
-          <Select className="!w-auto" aria-label="Group" value={group} onChange={e => setGroup(e.target.value)}>
-            <option value="">All groups</option>
+          <Select className="!w-auto" aria-label={o.t('org.common.group')} value={group} onChange={e => setGroup(e.target.value)}>
+            <option value="">{o.t('org.insights.allGroups')}</option>
             {(group && !dash.beneficiaries.groups.includes(group) ? [group, ...dash.beneficiaries.groups] : dash.beneficiaries.groups).map(g => <option key={g} value={g}>{g}</option>)}
           </Select>
         )}
-        {dash && <span className="pb-2 text-xs text-[var(--color-fg-quaternary)]">{day(dash.period.from)} to {day(dash.period.to)} · East Africa Time · live figures</span>}
+        {dash && <span className="pb-2 text-xs text-[var(--color-fg-quaternary)]">{o.t('org.insights.rangeNote', { from: day(dash.period.from), to: day(dash.period.to) })}</span>}
       </div>
       {error && <Alert tone="error">{error}</Alert>}
       <Segmented className="w-fit max-w-full overflow-x-auto" value={tab} onChange={v => setTab(v as Tab)} options={tabs} />
 
-      {!query ? <Alert tone="info">Choose a start date and an end date.</Alert> : (
+      {!query ? <Alert tone="info">{o.t('org.insights.chooseDates')}</Alert> : (
         <>
           {tab === 'overview' && (dash ? <Overview d={dash} /> : !error && <Spinner className="h-6 w-6" />)}
           {tab === 'people' && can.people && <People token={token} orgId={orgId} query={query} tick={tick} />}
@@ -158,21 +160,23 @@ export function OrgInsights({ token, orgId, orgName, can }: { token: string; org
 
 function Overview({ d }: { d: B2BDashboard }) {
   const p = d.participation;
+  const o = useOrgT();
+  const { day, shortDay } = o;
   return (
     <div className="space-y-4">
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4" data-testid="insights-kpis">
-        <Kpi label="People on your list" value={num(d.beneficiaries.total)} sub={`${num(d.beneficiaries.enrolled)} enrolled · ${num(d.beneficiaries.pending)} pending · ${num(d.beneficiaries.enrolledInPeriod)} joined this period`} />
-        <Kpi label="Used a benefit" value={num(p.activeBeneficiaries)} sub={`${pct(p.utilisationRatePct)} of enrolled · ${num(p.inactiveBeneficiaries)} did not`} trend={change(p.changePct)} />
-        <Kpi label="Sponsored visits" value={num(d.usage.sponsoredVisits)} sub={`${num(d.usage.uses)} pay-per-use · ${num(d.usage.passCheckins)} on sponsored passes`} trend={change(d.usage.usesChangePct)} />
-        <Kpi label="Your spend on usage" value={cash(d.spend.sponsorTotalTzs)} sub={`${cash(d.spend.sponsorPerUseTzs)} per use · ${cash(d.spend.sponsorPassFeesTzs)} pass fees`} />
-        <Kpi label="Cost per person who used a benefit" value={cash(d.spend.costPerActiveBeneficiaryTzs)} sub="An operating figure, not a return on investment" />
-        <Kpi label="Cost per sponsored visit" value={cash(d.spend.costPerSponsoredVisitTzs)} sub={d.usage.averagePerActiveBeneficiary == null ? undefined : `${d.usage.averagePerActiveBeneficiary} visits per person on average`} />
-        <Kpi label="Benefits in use" value={`${num(d.benefits.usedInPeriod)} of ${num(d.benefits.active)}`} sub={d.benefits.endingWithin30Days ? `${d.benefits.endingWithin30Days} ending within 30 days` : 'active benefits used this period'} />
-        <Kpi label="Gyms and trainers used" value={num(d.providers.used)} sub={`Members paid ${cash(d.spend.memberPerUseTzs + d.spend.memberPassSharesTzs)} themselves`} />
+        <Kpi label={o.t('org.insights.kpi.people')} value={num(d.beneficiaries.total)} sub={o.t('org.insights.kpi.people.sub', { enrolled: num(d.beneficiaries.enrolled), pending: num(d.beneficiaries.pending), joined: num(d.beneficiaries.enrolledInPeriod) })} />
+        <Kpi label={o.t('org.insights.kpi.used')} value={num(p.activeBeneficiaries)} sub={o.t('org.insights.kpi.used.sub', { pct: pct(p.utilisationRatePct), n: num(p.inactiveBeneficiaries) })} trend={change(o, p.changePct)} />
+        <Kpi label={o.t('org.insights.kpi.visits')} value={num(d.usage.sponsoredVisits)} sub={o.t('org.insights.kpi.visits.sub', { uses: num(d.usage.uses), pass: num(d.usage.passCheckins) })} trend={change(o, d.usage.usesChangePct)} />
+        <Kpi label={o.t('org.insights.kpi.spend')} value={cash(d.spend.sponsorTotalTzs)} sub={o.t('org.insights.kpi.spend.sub', { perUse: cash(d.spend.sponsorPerUseTzs), fees: cash(d.spend.sponsorPassFeesTzs) })} />
+        <Kpi label={o.t('org.insights.kpi.costPerPerson')} value={cash(d.spend.costPerActiveBeneficiaryTzs)} sub={o.t('org.insights.kpi.costPerPerson.sub')} />
+        <Kpi label={o.t('org.insights.kpi.costPerVisit')} value={cash(d.spend.costPerSponsoredVisitTzs)} sub={d.usage.averagePerActiveBeneficiary == null ? undefined : o.t('org.insights.kpi.costPerVisit.sub', { n: d.usage.averagePerActiveBeneficiary })} />
+        <Kpi label={o.t('org.insights.kpi.benefitsInUse')} value={o.t('org.insights.kpi.xOfY', { x: num(d.benefits.usedInPeriod), y: num(d.benefits.active) })} sub={d.benefits.endingWithin30Days ? o.t('org.insights.kpi.ending', { n: d.benefits.endingWithin30Days }) : o.t('org.insights.kpi.activeUsed')} />
+        <Kpi label={o.t('org.insights.kpi.providers')} value={num(d.providers.used)} sub={o.t('org.insights.kpi.providers.sub', { amount: cash(d.spend.memberPerUseTzs + d.spend.memberPassSharesTzs) })} />
       </div>
 
       <Card>
-        <CardHeader><span className="text-sm font-semibold">Sponsored visits and people using benefits, by {d.period.bucket}</span></CardHeader>
+        <CardHeader><span className="text-sm font-semibold">{o.t('org.insights.chart.title', { bucket: o.label('org.insights.bucket', d.period.bucket) })}</span></CardHeader>
         <CardContent>
           <ResponsiveContainer width="100%" height={240}>
             <AreaChart data={d.trend.map(t => ({ ...t, visits: t.uses + t.passCheckins }))} margin={{ left: -16, right: 8 }}>
@@ -181,8 +185,8 @@ function Overview({ d }: { d: B2BDashboard }) {
               <YAxis allowDecimals={false} tick={{ fontSize: 11, fill: INK }} tickLine={false} axisLine={false} />
               <Tooltip labelFormatter={v => shortDay(String(v))} />
               <Legend wrapperStyle={{ fontSize: 12 }} />
-              <Area type="monotone" name="Sponsored visits" dataKey="visits" stroke={BRAND} strokeWidth={2} fill={BRAND} fillOpacity={0.12} />
-              <Area type="monotone" name="People using a benefit" dataKey="activeBeneficiaries" stroke={SECOND} strokeWidth={2} fill={SECOND} fillOpacity={0.08} />
+              <Area type="monotone" name={o.t('org.insights.kpi.visits')} dataKey="visits" stroke={BRAND} strokeWidth={2} fill={BRAND} fillOpacity={0.12} />
+              <Area type="monotone" name={o.t('org.insights.chart.people')} dataKey="activeBeneficiaries" stroke={SECOND} strokeWidth={2} fill={SECOND} fillOpacity={0.08} />
             </AreaChart>
           </ResponsiveContainer>
         </CardContent>
@@ -190,11 +194,11 @@ function Overview({ d }: { d: B2BDashboard }) {
 
       <div className="grid gap-4 lg:grid-cols-2">
         <Card>
-          <CardHeader><span className="text-sm font-semibold">Where people went</span></CardHeader>
+          <CardHeader><span className="text-sm font-semibold">{o.t('org.insights.where')}</span></CardHeader>
           <CardContent>
-            {d.providers.top.length === 0 ? <p className="text-sm text-[var(--color-fg-quaternary)]">No sponsored visits in this period.</p> : (
-              <Table aria-label="Where people went" data-testid="insights-top-providers">
-                <THead><Tr><Th>Gym or trainer</Th><Th className="!text-right">Visits</Th><Th className="!text-right">Your spend</Th></Tr></THead>
+            {d.providers.top.length === 0 ? <p className="text-sm text-[var(--color-fg-quaternary)]">{o.t('org.insights.noVisits')}</p> : (
+              <Table aria-label={o.t('org.insights.where')} data-testid="insights-top-providers">
+                <THead><Tr><Th>{o.t('org.insights.col.provider')}</Th><Th className="!text-right">{o.t('org.insights.col.visits')}</Th><Th className="!text-right">{o.t('org.insights.col.yourSpend')}</Th></Tr></THead>
                 <TBody>
                   {d.providers.top.map(r => (
                     <Tr key={`${r.providerType}:${r.providerId}`}>
@@ -207,24 +211,24 @@ function Overview({ d }: { d: B2BDashboard }) {
           </CardContent>
         </Card>
         <Card>
-          <CardHeader><span className="text-sm font-semibold">Activity on FitFlex</span></CardHeader>
+          <CardHeader><span className="text-sm font-semibold">{o.t('org.insights.activity')}</span></CardHeader>
           <CardContent className="space-y-1 text-sm" data-testid="insights-engagement">
-            {([['People who were active', num(d.engagement.peopleWithActivity)], ['Gym check-ins (all, sponsored or not)', num(d.engagement.gymCheckins)], ['Workouts recorded', num(d.engagement.workouts)],
-              ['Activities recorded', num(d.engagement.activities)], ['Steps', num(d.engagement.steps)], ['Distance', `${num(d.engagement.distanceKm)} km`], ['Active minutes', num(d.engagement.activeMinutes)],
-              ['People in your challenges', num(d.engagement.peopleInChallenges)]] as Array<[string, string]>).map(([label, value]) => (
+            {([[o.t('org.insights.eng.active'), num(d.engagement.peopleWithActivity)], [o.t('org.insights.eng.checkins'), num(d.engagement.gymCheckins)], [o.t('org.insights.eng.workouts'), num(d.engagement.workouts)],
+              [o.t('org.insights.eng.activities'), num(d.engagement.activities)], [o.t('org.insights.eng.steps'), num(d.engagement.steps)], [o.t('org.insights.eng.distance'), `${num(d.engagement.distanceKm)} km`], [o.t('org.insights.eng.activeMinutes'), num(d.engagement.activeMinutes)],
+              [o.t('org.insights.eng.inChallenges'), num(d.engagement.peopleInChallenges)]] as Array<[string, string]>).map(([label, value]) => (
               <div key={label} className="flex justify-between gap-3"><span className="text-[var(--color-fg-tertiary)]">{label}</span><span className="font-medium">{value}</span></div>
             ))}
-            <p className="pt-2 text-xs text-[var(--color-fg-quaternary)]">What your people recorded, whoever paid. These are counts of activity, not health results.</p>
+            <p className="pt-2 text-xs text-[var(--color-fg-quaternary)]">{o.t('org.insights.eng.note')}</p>
           </CardContent>
         </Card>
       </div>
 
       {d.billing && (
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4" data-testid="insights-billing-kpis">
-          <Kpi label="Invoiced this period" value={cash(d.billing.invoicedTzs)} sub={`${num(d.billing.invoices)} invoice${d.billing.invoices === 1 ? '' : 's'}`} />
-          <Kpi label="Paid this period" value={cash(d.billing.paidTzs)} sub={`${num(d.billing.payments)} payment${d.billing.payments === 1 ? '' : 's'}`} />
-          <Kpi label="Outstanding now" value={cash(d.billing.outstandingTzs)} sub={`as of ${day(d.billing.asOf)}`} />
-          <Kpi label="Overdue now" value={<span className={d.billing.overdueTzs > 0 ? 'text-[var(--color-error-600)]' : ''}>{cash(d.billing.overdueTzs)}</span>} />
+          <Kpi label={o.t('org.insights.bill.invoiced')} value={cash(d.billing.invoicedTzs)} sub={o.n('org.insights.bill.invoices', d.billing.invoices, { n: num(d.billing.invoices) })} />
+          <Kpi label={o.t('org.insights.bill.paid')} value={cash(d.billing.paidTzs)} sub={o.n('org.insights.bill.payments', d.billing.payments, { n: num(d.billing.payments) })} />
+          <Kpi label={o.t('org.insights.bill.outstanding')} value={cash(d.billing.outstandingTzs)} sub={o.t('org.insights.bill.asOf', { date: day(d.billing.asOf) })} />
+          <Kpi label={o.t('org.insights.bill.overdue')} value={<span className={d.billing.overdueTzs > 0 ? 'text-[var(--color-error-600)]' : ''}>{cash(d.billing.overdueTzs)}</span>} />
         </div>
       )}
     </div>
@@ -239,12 +243,14 @@ function People({ token, orgId, query, tick }: { token: string; orgId: string; q
   const [sort, setSort] = useState('name');
   const [open, setOpen] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const o = useOrgT();
+  const day = o.day;
   useEffect(() => {
     let live = true;
     setError(null);
     const t = setTimeout(() => {
       api.orgPeopleAnalytics(token, orgId, { ...query, search: search || undefined, activity: activity || undefined, sort, limit: 200 })
-        .then(r => { if (live) { setRows(r.items); setTotal(r.total); } }).catch(e => live && setError(failed(e, 'Could not load people.')));
+        .then(r => { if (live) { setRows(r.items); setTotal(r.total); } }).catch(e => live && setError(failed(o, e, 'org.insights.err.people')));
     }, 250);
     return () => { live = false; clearTimeout(t); };
   }, [token, orgId, query, search, activity, sort, tick]);
@@ -253,27 +259,27 @@ function People({ token, orgId, query, tick }: { token: string; orgId: string; q
     <Card>
       <CardContent className="space-y-3 py-4">
         <div className="flex flex-wrap items-center gap-2">
-          <Input className="!w-64" placeholder="Search by name, reference or group" aria-label="Search people" value={search} onChange={e => setSearch(e.target.value)} />
-          <Select className="!w-auto" aria-label="Show" value={activity} onChange={e => setActivity(e.target.value)}>
-            <option value="">Everyone</option><option value="active">Used a benefit</option><option value="inactive">Enrolled, did not use a benefit</option>
+          <Input className="!w-64" placeholder={o.t('org.insights.people.searchPlaceholder')} aria-label={o.t('org.insights.people.searchLabel')} value={search} onChange={e => setSearch(e.target.value)} />
+          <Select className="!w-auto" aria-label={o.t('org.common.show')} value={activity} onChange={e => setActivity(e.target.value)}>
+            <option value="">{o.t('org.insights.people.everyone')}</option><option value="active">{o.t('org.insights.kpi.used')}</option><option value="inactive">{o.t('org.insights.people.unused')}</option>
           </Select>
-          <Select className="!w-auto" aria-label="Sort" value={sort} onChange={e => setSort(e.target.value)}>
-            <option value="name">By name</option><option value="uses">Most visits first</option><option value="spend">Highest spend first</option><option value="last_active">Most recently active</option>
+          <Select className="!w-auto" aria-label={o.t('org.insights.people.sort')} value={sort} onChange={e => setSort(e.target.value)}>
+            <option value="name">{o.t('org.insights.people.sort.name')}</option><option value="uses">{o.t('org.insights.people.sort.uses')}</option><option value="spend">{o.t('org.insights.people.sort.spend')}</option><option value="last_active">{o.t('org.insights.people.sort.lastActive')}</option>
           </Select>
-          <span className="text-xs text-[var(--color-fg-quaternary)]">{rows ? `${rows.length} of ${total}` : ''}</span>
+          <span className="text-xs text-[var(--color-fg-quaternary)]">{rows ? o.t('org.insights.kpi.xOfY', { x: rows.length, y: total }) : ''}</span>
         </div>
         {error && <Alert tone="error">{error}</Alert>}
-        {!rows ? !error && <Spinner className="h-6 w-6" /> : rows.length === 0 ? <p className="text-sm text-[var(--color-fg-quaternary)]">Nobody matches.</p> : (
-            <Table aria-label="People" data-testid="insights-people">
+        {!rows ? !error && <Spinner className="h-6 w-6" /> : rows.length === 0 ? <p className="text-sm text-[var(--color-fg-quaternary)]">{o.t('org.insights.people.none')}</p> : (
+            <Table aria-label={o.t('org.nav.people')} data-testid="insights-people">
               <THead>
-                <Tr><Th>Name</Th><Th>Group</Th><Th>Status</Th><Th className="!text-right">Sponsored visits</Th><Th className="!text-right">Your spend</Th><Th className="!text-right">All gym check-ins</Th><Th className="!text-right">Workouts</Th><Th className="!text-right">Steps</Th><Th>Last active</Th></Tr>
+                <Tr><Th>{o.t('org.common.name')}</Th><Th>{o.t('org.common.group')}</Th><Th>{o.t('org.common.status')}</Th><Th className="!text-right">{o.t('org.insights.kpi.visits')}</Th><Th className="!text-right">{o.t('org.insights.col.yourSpend')}</Th><Th className="!text-right">{o.t('org.insights.people.col.allCheckins')}</Th><Th className="!text-right">{o.t('org.insights.people.col.workouts')}</Th><Th className="!text-right">{o.t('org.insights.eng.steps')}</Th><Th>{o.t('org.insights.people.col.lastActive')}</Th></Tr>
               </THead>
               <TBody>
                 {rows.map(r => (
                   <Tr key={r.beneficiaryId}>
-                    <Td><Button variant="link" className="h-auto px-0 text-left font-medium" onClick={() => setOpen(r.beneficiaryId)} data-testid={`person-${r.beneficiaryId}`}>{r.name ?? r.externalReference ?? 'Not linked yet'}</Button></Td>
+                    <Td><Button variant="link" className="h-auto px-0 text-left font-medium" onClick={() => setOpen(r.beneficiaryId)} data-testid={`person-${r.beneficiaryId}`}>{r.name ?? r.externalReference ?? o.t('org.insights.people.notLinked')}</Button></Td>
                     <Td>{r.group ?? ''}</Td>
-                    <Td>{r.status === 'active' ? (r.active ? <Badge tone="success">Used a benefit</Badge> : <Badge tone="gray">No use yet</Badge>) : <Badge tone="warning">{words(r.status)}</Badge>}</Td>
+                    <Td>{r.status === 'active' ? (r.active ? <Badge tone="success">{o.t('org.insights.kpi.used')}</Badge> : <Badge tone="gray">{o.t('org.insights.people.noUse')}</Badge>) : <Badge tone="warning">{status(o, 'org.personStatus', r.status)}</Badge>}</Td>
                     <Td className="text-right">{num(r.sponsoredUses + r.passCheckins)}</Td>
                     <Td className="text-right">{r.sponsorTzs ? cash(r.sponsorTzs) : ''}</Td>
                     <Td className="text-right">{num(r.gymCheckins)}</Td>
@@ -286,7 +292,7 @@ function People({ token, orgId, query, tick }: { token: string; orgId: string; q
             </Table>
         )}
         <p className="text-xs text-[var(--color-fg-quaternary)]">
-          You see what your people do on FitFlex, including activity you didn’t pay for. You never see their weight or height, or anything another employer, insurer or club gives them. Each person is told this in the app.
+          {o.t('org.insights.people.note')}
         </p>
       </CardContent>
       {open && <Person token={token} orgId={orgId} beneficiaryId={open} query={query} onClose={() => setOpen(null)} />}
@@ -297,63 +303,65 @@ function People({ token, orgId, query, tick }: { token: string; orgId: string; q
 function Person({ token, orgId, beneficiaryId, query, onClose }: { token: string; orgId: string; beneficiaryId: string; query: B2BAnalyticsQuery; onClose: () => void }) {
   const [p, setP] = useState<B2BPersonDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const o = useOrgT();
+  const day = o.day;
   useEffect(() => {
-    api.orgPersonAnalytics(token, orgId, beneficiaryId, { period: query.period, from: query.from, to: query.to }).then(setP).catch(e => setError(failed(e, 'Could not load this person.')));
+    api.orgPersonAnalytics(token, orgId, beneficiaryId, { period: query.period, from: query.from, to: query.to }).then(setP).catch(e => setError(failed(o, e, 'org.insights.err.person')));
   }, [token, orgId, beneficiaryId, query]);
   const section = (title: string, body: React.ReactNode) => (<div><div className="mb-1 text-xs font-semibold uppercase tracking-wide text-[var(--color-fg-quaternary)]">{title}</div>{body}</div>);
   const none = (text: string) => <p className="text-sm text-[var(--color-fg-quaternary)]">{text}</p>;
   return (
-    <Dialog open onClose={onClose} title={p?.beneficiary.name ?? 'Person'} description={p ? `${[p.beneficiary.group, words(p.beneficiary.status)].filter(Boolean).join(' · ')} · ${day(p.period.from)} to ${day(p.period.to)}` : undefined} size="xl">
+    <Dialog open onClose={onClose} title={p?.beneficiary.name ?? o.t('org.insights.person.title')} description={p ? `${[p.beneficiary.group, status(o, 'org.personStatus', p.beneficiary.status)].filter(Boolean).join(' · ')} · ${o.t('org.common.range', { from: day(p.period.from), to: day(p.period.to) })}` : undefined} size="xl">
       {error && <Alert tone="error">{error}</Alert>}
       {!p ? !error && <Spinner className="h-6 w-6" /> : (
         <div className="space-y-4" data-testid="person-detail">
-          {!p.beneficiary.linkedToAccount && <Alert tone="info">This person hasn’t joined FitFlex with the details you gave, so there is nothing to show yet.</Alert>}
+          {!p.beneficiary.linkedToAccount && <Alert tone="info">{o.t('org.insights.person.notJoined')}</Alert>}
           <div className="grid gap-3 sm:grid-cols-4">
-            <Kpi label="Sponsored visits" value={num(p.totals.uses + p.totals.passCheckins)} />
-            <Kpi label="You paid" value={cash(p.totals.sponsorTzs)} sub={p.totals.beneficiaryTzs ? `They paid ${cash(p.totals.beneficiaryTzs)}` : undefined} />
-            <Kpi label="Other gym visits" value={num(p.totals.otherGymVisits)} />
-            <Kpi label="Activities recorded" value={num(p.totals.activities)} />
+            <Kpi label={o.t('org.insights.kpi.visits')} value={num(p.totals.uses + p.totals.passCheckins)} />
+            <Kpi label={o.t('org.insights.person.youPaid')} value={cash(p.totals.sponsorTzs)} sub={p.totals.beneficiaryTzs ? o.t('org.insights.person.theyPaidAmount', { amount: cash(p.totals.beneficiaryTzs) }) : undefined} />
+            <Kpi label={o.t('org.insights.person.otherVisits')} value={num(p.totals.otherGymVisits)} />
+            <Kpi label={o.t('org.insights.eng.activities')} value={num(p.totals.activities)} />
           </div>
-          {section('Sponsored visits and sessions', p.sponsoredUsage.length === 0 && p.passCheckins.length === 0 ? none('None in this period.') : (
-            <Table aria-label="Sponsored visits and sessions">
-              <THead><Tr><Th>Date</Th><Th>What</Th><Th>Where</Th><Th>Benefit</Th><Th className="!text-right">You paid</Th><Th className="!text-right">They paid</Th></Tr></THead>
+          {section(o.t('org.insights.person.sponsored'), p.sponsoredUsage.length === 0 && p.passCheckins.length === 0 ? none(o.t('org.insights.person.nonePeriod')) : (
+            <Table aria-label={o.t('org.insights.person.sponsored')}>
+              <THead><Tr><Th>{o.t('org.common.date')}</Th><Th>{o.t('org.common.what')}</Th><Th>{o.t('org.insights.person.where')}</Th><Th>{o.t('org.programmes.col.benefit')}</Th><Th className="!text-right">{o.t('org.insights.person.youPaid')}</Th><Th className="!text-right">{o.t('org.insights.person.theyPaid')}</Th></Tr></THead>
               <TBody>
-                {[...p.sponsoredUsage.map(r => ({ key: r.id, day: r.day, what: SERVICE[r.serviceType] ?? words(r.serviceType), where: r.provider, benefit: r.benefitName, sponsor: r.sponsorTzs as number | null, member: r.memberTzs as number | null })),
-                  ...p.passCheckins.map(r => ({ key: r.id, day: r.day, what: 'Check-in on sponsored pass', where: r.gym, benefit: r.benefitName, sponsor: null, member: null }))]
+                {[...p.sponsoredUsage.map(r => ({ key: r.id, day: r.day, what: status(o, 'org.insights.service', r.serviceType), where: r.provider, benefit: r.benefitName, sponsor: r.sponsorTzs as number | null, member: r.memberTzs as number | null })),
+                  ...p.passCheckins.map(r => ({ key: r.id, day: r.day, what: o.t('org.insights.person.passCheckin'), where: r.gym, benefit: r.benefitName, sponsor: null, member: null }))]
                   .sort((a, b) => b.day.localeCompare(a.day)).map(r => (
                     <Tr key={r.key}>
                       <Td className="whitespace-nowrap">{day(r.day)}</Td><Td>{r.what}</Td><Td>{r.where ?? ''}</Td><Td>{r.benefit ?? ''}</Td>
-                      <Td className="text-right">{r.sponsor == null ? 'in pass fee' : cash(r.sponsor)}</Td><Td className="text-right">{r.member ? cash(r.member) : ''}</Td>
+                      <Td className="text-right">{r.sponsor == null ? o.t('org.insights.person.inPassFee') : cash(r.sponsor)}</Td><Td className="text-right">{r.member ? cash(r.member) : ''}</Td>
                     </Tr>
                   ))}
               </TBody>
             </Table>
           ))}
-          {p.passes.length > 0 && section('Sponsored passes', (
-            <ul className="space-y-1 text-sm">{p.passes.map(e => <li key={`${e.period}-${e.benefitName}`}>{e.period} · {e.passTier} pass · {words(e.status)} · you {cash(e.sponsorTzs)}{e.memberTzs ? ` · they ${cash(e.memberTzs)}` : ''}</li>)}</ul>
+          {p.passes.length > 0 && section(o.t('org.insights.person.passes'), (
+            <ul className="space-y-1 text-sm">{p.passes.map(e => <li key={`${e.period}-${e.benefitName}`}>{o.t('org.insights.person.passLine', { period: e.period, tier: e.passTier, status: status(o, 'org.insights.passStatus', e.status), amount: cash(e.sponsorTzs) })}{e.memberTzs ? o.t('org.insights.person.passLineThey', { amount: cash(e.memberTzs) }) : ''}</li>)}</ul>
           ))}
-          {section('Your challenges', p.challenges.length === 0 ? none('Not in any of your challenges.') : (
-            <ul className="space-y-1 text-sm">{p.challenges.map(c => <li key={c.id}>{c.name} · {num(c.progress)} of {num(c.target)} {c.completed ? <Badge tone="success">Completed</Badge> : <span className="text-[var(--color-fg-quaternary)]">({words(c.phase)})</span>}</li>)}</ul>
+          {section(o.t('org.insights.person.challenges'), p.challenges.length === 0 ? none(o.t('org.insights.person.noChallenges')) : (
+            <ul className="space-y-1 text-sm">{p.challenges.map(c => <li key={c.id}>{c.name} · {o.t('org.insights.kpi.xOfY', { x: num(c.progress), y: num(c.target) })} {c.completed ? <Badge tone="success">{o.t('org.challenges.completed')}</Badge> : <span className="text-[var(--color-fg-quaternary)]">({status(o, 'org.insights.phase', c.phase)})</span>}</li>)}</ul>
           ))}
-          {section('Other gym visits (not paid for by you)', p.otherGymVisits.length === 0 ? none('None in this period.') : (
-            <ul className="grid gap-x-6 gap-y-1 text-sm sm:grid-cols-2">{p.otherGymVisits.map(v => <li key={v.id}>{day(v.day)} · {v.gym ?? 'Gym'}</li>)}</ul>
+          {section(o.t('org.insights.person.otherVisitsTitle'), p.otherGymVisits.length === 0 ? none(o.t('org.insights.person.nonePeriod')) : (
+            <ul className="grid gap-x-6 gap-y-1 text-sm sm:grid-cols-2">{p.otherGymVisits.map(v => <li key={v.id}>{day(v.day)} · {v.gym ?? o.t('org.insights.person.gym')}</li>)}</ul>
           ))}
-          {section('Activities they recorded', p.activities.length === 0 ? none('None in this period.') : (
-            <Table aria-label="Activities they recorded">
-              <THead><Tr><Th>Date</Th><Th>Activity</Th><Th className="!text-right">Minutes</Th><Th className="!text-right">Distance</Th><Th className="!text-right">Steps</Th><Th>Recorded by</Th></Tr></THead>
+          {section(o.t('org.insights.person.activities'), p.activities.length === 0 ? none(o.t('org.insights.person.nonePeriod')) : (
+            <Table aria-label={o.t('org.insights.person.activities')}>
+              <THead><Tr><Th>{o.t('org.common.date')}</Th><Th>{o.t('org.insights.person.col.activity')}</Th><Th className="!text-right">{o.t('org.insights.person.col.minutes')}</Th><Th className="!text-right">{o.t('org.insights.eng.distance')}</Th><Th className="!text-right">{o.t('org.insights.eng.steps')}</Th><Th>{o.t('org.insights.person.col.recordedBy')}</Th></Tr></THead>
               <TBody>
                 {p.activities.map(a => (
                   <Tr key={a.id}>
                     <Td className="whitespace-nowrap">{day(a.day)}</Td><Td className="capitalize">{words(a.type)}{a.gym ? ` · ${a.gym}` : ''}</Td>
                     <Td className="text-right">{a.durationMinutes ?? a.activeMinutes ?? ''}</Td><Td className="text-right">{a.distanceKm ? `${a.distanceKm} km` : ''}</Td>
-                    <Td className="text-right">{a.steps ? num(a.steps) : ''}</Td><Td>{a.source === 'device' ? 'Phone or watch' : a.source === 'manual' ? 'Entered by hand' : words(a.source)}</Td>
+                    <Td className="text-right">{a.steps ? num(a.steps) : ''}</Td><Td>{status(o, 'org.insights.person.source', a.source)}</Td>
                   </Tr>
                 ))}
               </TBody>
             </Table>
           ))}
-          {p.totals.capped && <p className="text-xs text-[var(--color-fg-quaternary)]">Only the latest 300 of each list are shown. Use a shorter period or the reports for everything.</p>}
-          <p className="text-xs text-[var(--color-fg-quaternary)]">Not shown: {p.notShown.join(', ')}.</p>
+          {p.totals.capped && <p className="text-xs text-[var(--color-fg-quaternary)]">{o.t('org.insights.person.capped')}</p>}
+          <p className="text-xs text-[var(--color-fg-quaternary)]">{o.t('org.insights.person.notShown', { list: p.notShown.map(x => o.label('org.insights.notShown', x)).join(', ') })}</p>
         </div>
       )}
     </Dialog>
@@ -363,53 +371,55 @@ function Person({ token, orgId, beneficiaryId, query, onClose }: { token: string
 function Benefits({ token, orgId, query, programs, tick }: { token: string; orgId: string; query: B2BAnalyticsQuery; programs: B2BProgramAnalytics[]; tick: number }) {
   const [rows, setRows] = useState<B2BBenefitAnalytics[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const o = useOrgT();
+  const { t } = useApp();
   useEffect(() => {
     setError(null);
-    api.orgBenefitAnalytics(token, orgId, { period: query.period, from: query.from, to: query.to, programId: query.programId }).then(r => setRows(r.items)).catch(e => setError(failed(e, 'Could not load benefits.')));
+    api.orgBenefitAnalytics(token, orgId, { period: query.period, from: query.from, to: query.to, programId: query.programId }).then(r => setRows(r.items)).catch(e => setError(failed(o, e, 'org.insights.err.benefits')));
   }, [token, orgId, query, tick]);
   return (
     <div className="space-y-4">
       {error && <Alert tone="error">{error}</Alert>}
       <Card>
-        <CardHeader><span className="text-sm font-semibold">Programmes</span></CardHeader>
+        <CardHeader><span className="text-sm font-semibold">{t('org.nav.programmes')}</span></CardHeader>
         <CardContent>
-          {programs.length === 0 ? <p className="text-sm text-[var(--color-fg-quaternary)]">No programmes yet.</p> : (
-              <Table aria-label="Programmes" data-testid="insights-programs">
-                <THead><Tr><Th>Programme</Th><Th>Status</Th><Th className="!text-right">Eligible</Th><Th className="!text-right">Used a benefit</Th><Th className="!text-right">Participation</Th><Th className="!text-right">Visits</Th><Th className="!text-right">Your spend</Th><Th className="!text-right">Budget used</Th></Tr></THead>
+          {programs.length === 0 ? <p className="text-sm text-[var(--color-fg-quaternary)]">{o.t('org.insights.prog.none')}</p> : (
+              <Table aria-label={t('org.nav.programmes')} data-testid="insights-programs">
+                <THead><Tr><Th>{o.t('org.insights.programme')}</Th><Th>{o.t('org.common.status')}</Th><Th className="!text-right">{o.t('org.insights.prog.eligible')}</Th><Th className="!text-right">{o.t('org.insights.kpi.used')}</Th><Th className="!text-right">{o.t('org.insights.prog.participation')}</Th><Th className="!text-right">{o.t('org.insights.col.visits')}</Th><Th className="!text-right">{o.t('org.insights.col.yourSpend')}</Th><Th className="!text-right">{o.t('org.insights.prog.budgetUsed')}</Th></Tr></THead>
                 <TBody>
                   {programs.map(p => (
                     <Tr key={p.programId}>
-                      <Td className="font-medium">{p.name}</Td><Td className="capitalize">{words(p.status)}</Td><Td className="text-right">{num(p.eligible)}</Td>
+                      <Td className="font-medium">{p.name}</Td><Td className="capitalize">{status(o, 'org.status', p.status)}</Td><Td className="text-right">{num(p.eligible)}</Td>
                       <Td className="text-right">{num(p.activeBeneficiaries)}</Td><Td className="text-right">{pct(p.participationPct)}</Td><Td className="text-right">{num(p.uses + p.passCheckins)}</Td>
                       <Td className="text-right">{cash(p.sponsorTotalTzs)}</Td>
-                      <Td className="text-right">{p.budget.budgetTzs == null ? 'No budget set' : `${pct(p.budget.usedPct)} of ${cash(p.budget.budgetTzs)}`}</Td>
+                      <Td className="text-right">{p.budget.budgetTzs == null ? o.t('org.insights.prog.noBudget') : o.t('org.insights.kpi.xOfY', { x: pct(p.budget.usedPct), y: cash(p.budget.budgetTzs) })}</Td>
                     </Tr>
                   ))}
                 </TBody>
               </Table>
           )}
-          <p className="mt-2 text-xs text-[var(--color-fg-quaternary)]">Budget used counts pay-per-use spend over the programme’s whole life, not just this period.</p>
+          <p className="mt-2 text-xs text-[var(--color-fg-quaternary)]">{o.t('org.insights.prog.note')}</p>
         </CardContent>
       </Card>
       <Card>
-        <CardHeader><span className="text-sm font-semibold">Benefits</span></CardHeader>
+        <CardHeader><span className="text-sm font-semibold">{o.t('org.insights.benefits')}</span></CardHeader>
         <CardContent>
-          {!rows ? !error && <Spinner className="h-6 w-6" /> : rows.length === 0 ? <p className="text-sm text-[var(--color-fg-quaternary)]">No benefits yet.</p> : (
-              <Table aria-label="Benefits" data-testid="insights-benefits">
-                <THead><Tr><Th>Benefit</Th><Th className="!text-right">Eligible</Th><Th className="!text-right">Used it</Th><Th className="!text-right">Reach</Th><Th className="!text-right">Uses</Th><Th className="!text-right">Per user</Th><Th className="!text-right">Your spend</Th><Th className="!text-right">Members paid</Th><Th>Allowance now</Th></Tr></THead>
+          {!rows ? !error && <Spinner className="h-6 w-6" /> : rows.length === 0 ? <p className="text-sm text-[var(--color-fg-quaternary)]">{o.t('org.programmes.noBenefits')}</p> : (
+              <Table aria-label={o.t('org.insights.benefits')} data-testid="insights-benefits">
+                <THead><Tr><Th>{o.t('org.programmes.col.benefit')}</Th><Th className="!text-right">{o.t('org.insights.prog.eligible')}</Th><Th className="!text-right">{o.t('org.insights.ben.usedIt')}</Th><Th className="!text-right">{o.t('org.insights.ben.reach')}</Th><Th className="!text-right">{o.t('org.insights.ben.uses')}</Th><Th className="!text-right">{o.t('org.insights.ben.perUser')}</Th><Th className="!text-right">{o.t('org.insights.col.yourSpend')}</Th><Th className="!text-right">{o.t('org.insights.ben.membersPaid')}</Th><Th>{o.t('org.insights.ben.allowance')}</Th></Tr></THead>
                 <TBody>
                   {rows.map(b => (
                     <Tr key={b.benefitId}>
-                      <Td><div className="font-medium">{b.name}</div><div className="text-xs text-[var(--color-fg-quaternary)]">{b.programName} · {SERVICE[b.benefitType] ?? words(b.benefitType)}{b.status !== 'active' ? ` · ${words(b.status)}` : ''}</div></Td>
+                      <Td><div className="font-medium">{b.name}</div><div className="text-xs text-[var(--color-fg-quaternary)]">{b.programName} · {status(o, 'org.insights.service', b.benefitType)}{b.status !== 'active' ? ` · ${status(o, 'org.status', b.status)}` : ''}</div></Td>
                       <Td className="text-right">{num(b.eligible)}</Td><Td className="text-right">{num(b.users)}</Td><Td className="text-right">{pct(b.reachPct)}</Td>
                       <Td className="text-right">{num(b.uses)}</Td><Td className="text-right">{b.averageUsesPerUser ?? '—'}</Td><Td className="text-right">{cash(b.sponsorTzs)}</Td><Td className="text-right">{b.memberTzs ? cash(b.memberTzs) : ''}</Td>
-                      <Td className="text-xs">{b.allowance ? `${pct(b.allowance.usedPct)} used · ${b.allowance.peopleAtLimit} at limit · ${b.allowance.peopleNearLimit} near it` : b.usageLimit ? 'Not running today' : 'No limit'}</Td>
+                      <Td className="text-xs">{b.allowance ? o.t('org.insights.ben.allowanceLine', { pct: pct(b.allowance.usedPct), atLimit: b.allowance.peopleAtLimit, near: b.allowance.peopleNearLimit }) : b.usageLimit ? o.t('org.insights.ben.notRunning') : o.t('org.programmes.usage.noLimit')}</Td>
                     </Tr>
                   ))}
                 </TBody>
               </Table>
           )}
-          <p className="mt-2 text-xs text-[var(--color-fg-quaternary)]">Reach is the share of eligible people who used the benefit at all. Allowance is for the current day, week or month the limit runs over, whatever period is selected above.</p>
+          <p className="mt-2 text-xs text-[var(--color-fg-quaternary)]">{o.t('org.insights.ben.note')}</p>
         </CardContent>
       </Card>
     </div>
@@ -419,32 +429,33 @@ function Benefits({ token, orgId, query, programs, tick }: { token: string; orgI
 function Providers({ token, orgId, query, tick }: { token: string; orgId: string; query: B2BAnalyticsQuery; tick: number }) {
   const [rows, setRows] = useState<B2BProviderAnalytics[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const o = useOrgT();
   useEffect(() => {
     setError(null);
-    api.orgProviderAnalytics(token, orgId, { period: query.period, from: query.from, to: query.to, programId: query.programId }).then(r => setRows(r.items)).catch(e => setError(failed(e, 'Could not load gyms and trainers.')));
+    api.orgProviderAnalytics(token, orgId, { period: query.period, from: query.from, to: query.to, programId: query.programId }).then(r => setRows(r.items)).catch(e => setError(failed(o, e, 'org.insights.err.providers')));
   }, [token, orgId, query, tick]);
   const staff = rows?.some(r => r.settlement);
   return (
     <Card>
       <CardContent className="py-4">
         {error && <Alert tone="error">{error}</Alert>}
-        {!rows ? !error && <Spinner className="h-6 w-6" /> : rows.length === 0 ? <p className="text-sm text-[var(--color-fg-quaternary)]">No sponsored visits in this period.</p> : (
-            <Table aria-label="Gyms & trainers" data-testid="insights-providers">
-              <THead><Tr><Th>Gym or trainer</Th><Th>Location</Th><Th className="!text-right">Visits</Th><Th className="!text-right">People</Th><Th className="!text-right">Came back</Th><Th className="!text-right">Service value</Th><Th className="!text-right">Sponsor paid</Th>{staff && <Th className="!text-right">Not yet in settlement</Th>}</Tr></THead>
+        {!rows ? !error && <Spinner className="h-6 w-6" /> : rows.length === 0 ? <p className="text-sm text-[var(--color-fg-quaternary)]">{o.t('org.insights.noVisits')}</p> : (
+            <Table aria-label={o.t('org.insights.tab.providers')} data-testid="insights-providers">
+              <THead><Tr><Th>{o.t('org.insights.col.provider')}</Th><Th>{o.t('org.insights.prov.location')}</Th><Th className="!text-right">{o.t('org.insights.col.visits')}</Th><Th className="!text-right">{o.t('org.insights.prov.people')}</Th><Th className="!text-right">{o.t('org.insights.prov.cameBack')}</Th><Th className="!text-right">{o.t('org.insights.prov.serviceValue')}</Th><Th className="!text-right">{o.t('org.insights.prov.sponsorPaid')}</Th>{staff && <Th className="!text-right">{o.t('org.insights.prov.notSettled')}</Th>}</Tr></THead>
               <TBody>
                 {rows.map(r => (
                   <Tr key={`${r.providerType}:${r.providerId}`}>
-                    <Td className="font-medium">{r.name ?? r.providerId} <span className="text-xs font-normal text-[var(--color-fg-quaternary)]">{r.providerType}</span></Td><Td>{r.location ?? ''}</Td>
+                    <Td className="font-medium">{r.name ?? r.providerId} <span className="text-xs font-normal text-[var(--color-fg-quaternary)]">{o.label('org.insights.providerType', r.providerType)}</span></Td><Td>{r.location ?? ''}</Td>
                     <Td className="text-right">{num(r.visits)}</Td><Td className="text-right">{num(r.people)}</Td><Td className="text-right">{num(r.repeatPeople)}</Td>
                     <Td className="text-right">{cash(r.serviceValueTzs)}</Td><Td className="text-right">{cash(r.sponsorTzs)}</Td>
-                    {staff && <Td className="text-right">{r.settlement ? `${num(r.settlement.notYetSettled)} of ${num(r.settlement.perUseVisits)}` : ''}</Td>}
+                    {staff && <Td className="text-right">{r.settlement ? o.t('org.insights.kpi.xOfY', { x: num(r.settlement.notYetSettled), y: num(r.settlement.perUseVisits) }) : ''}</Td>}
                   </Tr>
                 ))}
               </TBody>
             </Table>
         )}
         <p className="mt-2 text-xs text-[var(--color-fg-quaternary)]">
-          Service value is the list price of pay-per-use visits; check-ins on a sponsored pass are covered by the pass fee.{staff ? ' Settlement progress is shown to FitFlex staff only; what a provider is paid is settled separately from what the organisation is billed.' : ''}
+          {o.t('org.insights.prov.note')}{staff ? o.t('org.insights.prov.staffNote') : ''}
         </p>
       </CardContent>
     </Card>
@@ -454,21 +465,22 @@ function Providers({ token, orgId, query, tick }: { token: string; orgId: string
 function Billing({ token, orgId, query, tick }: { token: string; orgId: string; query: B2BAnalyticsQuery; tick: number }) {
   const [f, setF] = useState<B2BFinanceAnalytics | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const o = useOrgT();
   useEffect(() => {
     setError(null);
-    api.orgFinanceAnalytics(token, orgId, query).then(setF).catch(e => setError(failed(e, 'Could not load billing.')));
+    api.orgFinanceAnalytics(token, orgId, query).then(setF).catch(e => setError(failed(o, e, 'org.insights.err.billing')));
   }, [token, orgId, query, tick]);
   if (error) return <Alert tone="error">{error}</Alert>;
   if (!f) return <Spinner className="h-6 w-6" />;
   return (
     <div className="space-y-4">
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <Kpi label="Invoiced this period" value={cash(f.billing.invoicedTzs)} /><Kpi label="Paid this period" value={cash(f.billing.paidTzs)} />
-        <Kpi label="Outstanding now" value={cash(f.billing.outstandingTzs)} /><Kpi label="Credit on account" value={cash(f.billing.creditTzs)} />
+        <Kpi label={o.t('org.insights.bill.invoiced')} value={cash(f.billing.invoicedTzs)} /><Kpi label={o.t('org.insights.bill.paid')} value={cash(f.billing.paidTzs)} />
+        <Kpi label={o.t('org.insights.bill.outstanding')} value={cash(f.billing.outstandingTzs)} /><Kpi label={o.t('org.billing.bal.credit')} value={cash(f.billing.creditTzs)} />
       </div>
       <Aging aging={f.billing.aging} />
       <Card>
-        <CardHeader><span className="text-sm font-semibold">By month</span></CardHeader>
+        <CardHeader><span className="text-sm font-semibold">{o.t('org.insights.bill.byMonth')}</span></CardHeader>
         <CardContent>
           <ResponsiveContainer width="100%" height={240}>
             <BarChart data={f.months.map(m => ({ ...m, usage: m.sponsorPerUseTzs + m.sponsorPassFeesTzs }))} margin={{ left: 8, right: 8 }}>
@@ -477,9 +489,9 @@ function Billing({ token, orgId, query, tick }: { token: string; orgId: string; 
               <YAxis tickFormatter={v => (Number(v) >= 1_000_000 ? `${Number(v) / 1_000_000}m` : Number(v) >= 1000 ? `${Number(v) / 1000}k` : String(v))} tick={{ fontSize: 11, fill: INK }} tickLine={false} axisLine={false} />
               <Tooltip formatter={v => money(Number(v))} />
               <Legend wrapperStyle={{ fontSize: 12 }} />
-              <Bar name="Used (your share)" dataKey="usage" fill={SECOND} radius={[4, 4, 0, 0]} />
-              <Bar name="Invoiced" dataKey="invoicedTzs" fill={BRAND} radius={[4, 4, 0, 0]} />
-              <Bar name="Paid" dataKey="collectedTzs" fill="#98a2b3" radius={[4, 4, 0, 0]} />
+              <Bar name={o.t('org.insights.bill.used')} dataKey="usage" fill={SECOND} radius={[4, 4, 0, 0]} />
+              <Bar name={o.t('org.insights.bill.invoicedBar')} dataKey="invoicedTzs" fill={BRAND} radius={[4, 4, 0, 0]} />
+              <Bar name={o.t('org.billing.status.paid')} dataKey="collectedTzs" fill="#98a2b3" radius={[4, 4, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
           <p className="mt-2 text-xs text-[var(--color-fg-quaternary)]">{f.note}</p>
@@ -493,14 +505,15 @@ function Reports({ token, orgId, query, can }: { token: string; orgId: string; q
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<string | null>(null);
+  const o = useOrgT();
   const get = async (report: string) => {
     setBusy(report); setError(null); setDone(null);
     try {
       const out = await api.orgExport(token, orgId, report, query);
       saveCsv(out.filename, out.csv);
-      setDone(`${out.title}: ${out.rows.toLocaleString('en-US')} row${out.rows === 1 ? '' : 's'} downloaded.`);
+      setDone(o.n('org.insights.report.done', out.rows, { n: out.rows.toLocaleString('en-US'), title: o.server(`org.insights.report.${report}`, 'title', out.title) }));
     } catch (e) {
-      setError(failed(e, 'Could not make that report.'));
+      setError(failed(o, e, 'org.insights.err.report'));
     } finally {
       setBusy(null);
     }
@@ -514,12 +527,12 @@ function Reports({ token, orgId, query, can }: { token: string; orgId: string; q
         <ul className="divide-y divide-[var(--color-border-secondary)]">
           {mine.map(r => (
             <li key={r.key} className="flex flex-wrap items-center justify-between gap-3 py-3">
-              <div><div className="text-sm font-medium">{r.title}</div><div className="text-xs text-[var(--color-fg-quaternary)]">{r.about}</div></div>
-              <Button variant="secondary" size="sm" disabled={busy !== null} onClick={() => get(r.key)} data-testid={`export-${r.key}`}><Download className="h-4 w-4" />{busy === r.key ? 'Preparing…' : 'Download CSV'}</Button>
+              <div><div className="text-sm font-medium">{o.label(`org.insights.report.${r.key}`, 'title')}</div><div className="text-xs text-[var(--color-fg-quaternary)]">{o.label(`org.insights.report.${r.key}`, 'about')}</div></div>
+              <Button variant="secondary" size="sm" disabled={busy !== null} onClick={() => get(r.key)} data-testid={`export-${r.key}`}><Download className="h-4 w-4" />{busy === r.key ? o.t('org.insights.report.preparing') : o.t('org.insights.report.download')}</Button>
             </li>
           ))}
         </ul>
-        <p className="text-xs text-[var(--color-fg-quaternary)]">Reports cover the period and filters selected above and open in Excel or Google Sheets. Each download is recorded. For a PDF, print the page from your browser.</p>
+        <p className="text-xs text-[var(--color-fg-quaternary)]">{o.t('org.insights.report.note')}</p>
       </CardContent>
     </Card>
   );
@@ -528,12 +541,14 @@ function Reports({ token, orgId, query, can }: { token: string; orgId: string; q
 /** Insights for an organisation's own users and for a company's HR login. */
 export function OrgInsightsPage() {
   const state = useMyOrganization();
+  const { t } = useApp();
+  const o = useOrgT();
   return (
-    <OrgFrame bare title="Insights" description="" state={state}>
+    <OrgFrame bare title={t('org.nav.insights')} description="" state={state}>
       {(mine, token) => (mine.permissions.includes('analytics.read')
         ? <OrgInsights token={token} orgId={mine.organization.id} orgName={mine.organization.tradingName || mine.organization.legalName}
           can={{ people: mine.permissions.includes('analytics.people'), billing: mine.permissions.includes('billing.read') }} />
-        : <Alert tone="info">Your role doesn’t include insights. Ask your organisation’s owner or admin.</Alert>)}
+        : <Alert tone="info">{o.t('org.insights.noRole')}</Alert>)}
     </OrgFrame>
   );
 }
