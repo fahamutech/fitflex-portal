@@ -171,6 +171,39 @@ export async function request<T>(
   return body as T;
 }
 
+/** Shared failure path of the multipart and blob helpers: same 401 / password rules as request(). */
+async function failFrom(res: Response): Promise<never> {
+  const body = await res.json().catch(() => null);
+  if (res.status === 401 && _onUnauthorized) _onUnauthorized();
+  if (res.status === 403 && (body as { error?: string } | null)?.error === 'password_change_required') _onPasswordChangeRequired?.();
+  throw new ApiError(res.status, body);
+}
+
+/**
+ * POST (or PUT) a FormData body. The Content-Type header is left unset on purpose: the browser adds
+ * multipart/form-data with the boundary. Errors are ApiError, as for request().
+ */
+export async function requestForm<T>(path: string, form: FormData, token?: string, method: 'POST' | 'PUT' = 'POST'): Promise<T> {
+  const res = await fetch(`${BASE}${path}`, {
+    method,
+    body: form,
+    headers: { 'x-fitflex-client': IDENTITY_V2_CLIENT, ...(token ? { authorization: `Bearer ${token}` } : {}) },
+  });
+  if (!res.ok) return failFrom(res);
+  return (await res.json().catch(() => null)) as T;
+}
+
+/** GET a file with the sign-in header (a plain link carries no token). fileName comes from Content-Disposition, else `fallbackName`. */
+export async function requestBlob(path: string, token?: string, fallbackName = 'download'): Promise<{ blob: Blob; fileName: string }> {
+  const res = await fetch(`${BASE}${path}`, {
+    headers: { 'x-fitflex-client': IDENTITY_V2_CLIENT, ...(token ? { authorization: `Bearer ${token}` } : {}) },
+  });
+  if (!res.ok) return failFrom(res);
+  const disposition = res.headers.get('content-disposition') ?? '';
+  const fileName = /filename="?([^";]+)"?/i.exec(disposition)?.[1] ?? fallbackName;
+  return { blob: await res.blob(), fileName };
+}
+
 /** "?a=1&b=2" from the set values of `params`, or "". */
 export function qs(params: object): string {
   const q = new URLSearchParams();
@@ -2383,6 +2416,10 @@ export interface VendorTools {
   canSeeOrderMoney?: boolean;
   /** S7 (VENDOR_TOOLS + VENDOR_WALKIN_SALES + VENDOR_REFUNDS): make, undo and share refunds on walk-in sales. Missing = off. */
   refunds?: boolean;
+  /** Smart import (VENDOR_IMPORT; functions#326): the CSV import area. Missing = off. */
+  import?: boolean;
+  /** The caps to show before uploading; the server enforces them. */
+  importLimits?: { maxBytes?: number; maxRows?: number };
   /** S9 (VENDOR_TOOLS + VENDOR_STOCK_LEDGER + VENDOR_PURCHASES): suppliers, receive stock, payables. Missing = off. */
   purchases?: boolean;
   [tool: string]: unknown;
