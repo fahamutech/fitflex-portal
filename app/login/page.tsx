@@ -341,7 +341,7 @@ export default function LoginPage() {
                     data-testid="pin-method-btn"
                     onClick={() => { setMethod('pin'); setError(null); setNotice(null); setPinError(null); }}
                   >
-                    {t(MEMBER_PORTAL ? 'login.pinMethodAll' : 'login.pinMethod')}
+                    {t(MEMBER_PORTAL ? 'login.pinHeading' : 'login.pinMethod')}
                   </Button>
                 )}
                 <Button
