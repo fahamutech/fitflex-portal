@@ -43,3 +43,11 @@ export const WEB_GYM_PROFILE = process.env.NEXT_PUBLIC_WEB_GYM_PROFILE === 'true
  * WEB_QR_CHECKIN flag. Default off.
  */
 export const WEB_QR_CHECKIN = process.env.NEXT_PUBLIC_WEB_QR_CHECKIN === 'true';
+
+/**
+ * Member web portal, slice 1 (/m, /m/signin, /m/pass, /m/check-in; design canvas page "06 Member portal"): members sign
+ * in with their phone or email and app PIN, see Today, buy, renew or move up a FitFlex Pass by mobile money, and show
+ * their rotating check-in QR. Off, every /m page shows the "not available yet" state and makes no request. Uses the
+ * server's existing V2_PIN_LOGIN and mobile-money flags; no new server flag. Default off.
+ */
+export const MEMBER_PORTAL = process.env.NEXT_PUBLIC_MEMBER_PORTAL === 'true';

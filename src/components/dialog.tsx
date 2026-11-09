@@ -63,6 +63,9 @@ export function Dialog({
   description,
   children,
   size = 'md',
+  sheetOnMobile = false,
+  testId,
+  focusTitle = false,
 }: {
   open: boolean;
   onClose: () => void;
@@ -70,6 +73,11 @@ export function Dialog({
   description?: ReactNode;
   children: ReactNode;
   size?: 'sm' | 'md' | 'lg' | 'xl' | 'full';
+  /** Below 640px the panel fills the screen (no rounded corners, no margin), e.g. a multi-line form at 375px. */
+  sheetOnMobile?: boolean;
+  testId?: string;
+  /** Focus the title on open instead of the first field (screen readers hear the title first). Off by default. */
+  focusTitle?: boolean;
 }) {
   const panelRef = useRef<HTMLDivElement>(null);
   const titleId = useId();
@@ -82,7 +90,7 @@ export function Dialog({
   const widths = { sm: 'max-w-sm', md: 'max-w-lg', lg: 'max-w-2xl', xl: 'max-w-4xl', full: 'max-w-[min(1400px,100%)]' };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+    <div className={cn('fixed inset-0 z-50 flex items-center justify-center p-4', sheetOnMobile && 'max-sm:p-0')}>
       {/* Backdrop */}
       <div
         className="absolute inset-0 bg-black/50 backdrop-blur-sm"
@@ -96,16 +104,18 @@ export function Dialog({
         aria-modal="true"
         aria-labelledby={titleId}
         tabIndex={-1}
+        data-testid={testId}
         className={cn(
           'relative z-10 w-full outline-none rounded-[var(--radius-2xl)] bg-[var(--color-bg-primary)]',
           'shadow-[var(--shadow-xl)] flex flex-col max-h-[90vh] max-h-[90dvh]',
           widths[size],
+          sheetOnMobile && 'max-sm:h-[100dvh] max-sm:max-h-[100dvh] max-sm:max-w-none max-sm:rounded-none',
         )}
       >
         {/* Header */}
         <div className="flex items-start justify-between gap-4 px-6 pt-6 pb-0">
           <div className="flex-1 min-w-0">
-            <h2 id={titleId} className="text-lg font-semibold text-[var(--color-fg-primary)] [overflow-wrap:anywhere]">{title}</h2>
+            <h2 id={titleId} tabIndex={focusTitle ? -1 : undefined} data-autofocus={focusTitle || undefined} className="text-lg font-semibold text-[var(--color-fg-primary)] outline-none [overflow-wrap:anywhere]">{title}</h2>
             {description && (
               <p className="mt-1 text-sm text-[var(--color-fg-quaternary)]">{description}</p>
             )}
@@ -114,7 +124,7 @@ export function Dialog({
             type="button"
             onClick={onClose}
             aria-label={t('pro.close')}
-            className="shrink-0 p-2.5 -m-1.5 rounded-[var(--radius-md)] text-[var(--color-fg-tertiary)] hover:bg-[var(--color-bg-tertiary)] hover:text-[var(--color-fg-primary)] transition-colors"
+            className="inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center -m-1.5 rounded-[var(--radius-md)] text-[var(--color-fg-tertiary)] hover:bg-[var(--color-bg-tertiary)] hover:text-[var(--color-fg-primary)] transition-colors"
           >
             <X className="h-5 w-5" />
           </button>

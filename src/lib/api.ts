@@ -171,6 +171,39 @@ export async function request<T>(
   return body as T;
 }
 
+/** Shared failure path of the multipart and blob helpers: same 401 / password rules as request(). */
+async function failFrom(res: Response): Promise<never> {
+  const body = await res.json().catch(() => null);
+  if (res.status === 401 && _onUnauthorized) _onUnauthorized();
+  if (res.status === 403 && (body as { error?: string } | null)?.error === 'password_change_required') _onPasswordChangeRequired?.();
+  throw new ApiError(res.status, body);
+}
+
+/**
+ * POST (or PUT) a FormData body. The Content-Type header is left unset on purpose: the browser adds
+ * multipart/form-data with the boundary. Errors are ApiError, as for request().
+ */
+export async function requestForm<T>(path: string, form: FormData, token?: string, method: 'POST' | 'PUT' = 'POST'): Promise<T> {
+  const res = await fetch(`${BASE}${path}`, {
+    method,
+    body: form,
+    headers: { 'x-fitflex-client': IDENTITY_V2_CLIENT, ...(token ? { authorization: `Bearer ${token}` } : {}) },
+  });
+  if (!res.ok) return failFrom(res);
+  return (await res.json().catch(() => null)) as T;
+}
+
+/** GET a file with the sign-in header (a plain link carries no token). fileName comes from Content-Disposition, else `fallbackName`. */
+export async function requestBlob(path: string, token?: string, fallbackName = 'download'): Promise<{ blob: Blob; fileName: string }> {
+  const res = await fetch(`${BASE}${path}`, {
+    headers: { 'x-fitflex-client': IDENTITY_V2_CLIENT, ...(token ? { authorization: `Bearer ${token}` } : {}) },
+  });
+  if (!res.ok) return failFrom(res);
+  const disposition = res.headers.get('content-disposition') ?? '';
+  const fileName = /filename="?([^";]+)"?/i.exec(disposition)?.[1] ?? fallbackName;
+  return { blob: await res.blob(), fileName };
+}
+
 /** "?a=1&b=2" from the set values of `params`, or "". */
 export function qs(params: object): string {
   const q = new URLSearchParams();
@@ -350,6 +383,15 @@ export const api = {
   vendorMe: (token: string) => request<VendorMe>('/vendor/me', {}, token),
   vendorProducts: (token: string) => request<VendorProduct[]>('/vendor/products', {}, token),
   vendorLowStock: (token: string) => request<LowStockRow[]>('/vendor/stock/low', {}, token),
+  /** S8: the product's whole set of codes (replace). Send only while tools.barcodes is true. */
+  vendorSetBarcodes: (token: string, productId: string, barcodes: BarcodeInput[]) =>
+    request<VendorProduct>(`/vendor/products/${encodeURIComponent(productId)}`, { method: 'PUT', body: JSON.stringify({ barcodes }) }, token),
+  /** S8: add codes, never removes any (a code already on this product and variant is a no-op). */
+  vendorAddBarcodes: (token: string, productId: string, addBarcodes: BarcodeInput[]) =>
+    request<VendorProduct>(`/vendor/products/${encodeURIComponent(productId)}`, { method: 'PUT', body: JSON.stringify({ addBarcodes }) }, token),
+  /** S8: find this vendor's product by a scanned or typed code (barcode first, then exact SKU). */
+  vendorProductLookup: (token: string, code: string) =>
+    request<ProductLookupResult>(`/vendor/products/lookup${qs({ code })}`, {}, token),
   vendorAdjustStock: (token: string, productId: string, body: StockAdjustmentInput) =>
     request<{ movement: StockMovement; product: ProductStock }>(`/vendor/products/${encodeURIComponent(productId)}/stock-adjustments`, { method: 'POST', body: JSON.stringify(body) }, token),
   vendorStockMovements: (token: string, productId: string, query: { from?: string; to?: string; variant?: string; limit?: number; cursor?: string }) =>
@@ -366,6 +408,17 @@ export const api = {
   vendorSale: (token: string, id: string) => request<{ sale: VendorSale }>(`/vendor/sales/${encodeURIComponent(id)}`, {}, token),
   vendorVoidSale: (token: string, id: string, reason: string) =>
     request<{ sale: VendorSale }>(`/vendor/sales/${encodeURIComponent(id)}/void`, { method: 'POST', body: JSON.stringify({ reason }) }, token),
+  // S7 refunds on walk-in sales (functions#318). The client never sends amounts: the server computes them.
+  // 201 = made; 200 (Idempotent-Replay) = the same clientRef answered again with the stored refund.
+  vendorRefundSale: (token: string, saleId: string, body: VendorRefundInput) =>
+    request<{ refund: VendorRefund; sale: VendorSale }>(`/vendor/sales/${encodeURIComponent(saleId)}/refunds`, { method: 'POST', body: JSON.stringify(body) }, token),
+  vendorRevertRefund: (token: string, refundId: string, reason: string) =>
+    request<{ refund: VendorRefund; sale: VendorSale }>(`/vendor/refunds/${encodeURIComponent(refundId)}/revert`, { method: 'POST', body: JSON.stringify({ reason }) }, token),
+  /** Needs the refunds tool (404 feature_disabled when off). One refund by id (vendorRefund) stays readable with it off. */
+  vendorRefunds: (token: string, query: { from?: string; to?: string; saleId?: string; status?: 'active' | 'reverted' | 'all'; limit?: number; cursor?: string | null } = {}) =>
+    request<{ refunds: VendorRefundRow[]; nextCursor: string | null }>(`/vendor/refunds${qs({ ...query, limit: query.limit ?? 50 })}`, {}, token),
+  vendorRefund: (token: string, refundId: string) =>
+    request<{ refund: VendorRefund }>(`/vendor/refunds/${encodeURIComponent(refundId)}`, {}, token),
   // ─── Vendor customers, pay-later balances, customer payments, aging (S4) ───
   vendorCustomers: (token: string, query: VendorCustomersQuery = {}) =>
     request<VendorCustomerPage>(`/vendor/customers${qs({ ...query, limit: query.limit ?? 50 })}`, {}, token),
@@ -2370,14 +2423,51 @@ export interface VendorTools {
   reports?: boolean;
   /** S6: this caller may see commission and payouts (the report App sales after commission). Missing = no. */
   canSeeOrderMoney?: boolean;
+  /** S7 (VENDOR_TOOLS + VENDOR_WALKIN_SALES + VENDOR_REFUNDS): make, undo and share refunds on walk-in sales. Missing = off. */
+  refunds?: boolean;
+  /** Smart import (VENDOR_IMPORT; functions#326): the CSV import area. Missing = off. */
+  import?: boolean;
+  /** The caps to show before uploading; the server enforces them. */
+  importLimits?: { maxBytes?: number; maxRows?: number };
+  /** S9 (VENDOR_TOOLS + VENDOR_STOCK_LEDGER + VENDOR_PURCHASES): suppliers, receive stock, payables. Missing = off. */
+  purchases?: boolean;
+  /** S8 (VENDOR_TOOLS + VENDOR_STOCK_LEDGER + VENDOR_BARCODES): barcodes on products and Enter-to-match in Receive
+   *  stock. Shown only when exactly true; missing, false or a failed options load = off. */
+  barcodes?: boolean;
   [tool: string]: unknown;
 }
 
 export interface VendorProduct extends ShopProduct {
   variants?: ProductVariant[];
+  /** Free text, not unique (S1). S8 matches it exactly on Enter in Receive stock (B-9). */
+  sku?: string | null;
+  /** S8 (tools.barcodes on): the product's codes, whole-product codes first; variant null = the whole product.
+   *  Absent while the tool is off. Private shop data: never on /shop/*. */
+  barcodes?: Array<{ code: string; variant: string | null }>;
   /** SHOP_FLASH_SALES: present while an approved sale of this product is scheduled or live (price and discount locked). */
   priceLock?: { saleId: string; startsAt: string; endsAt: string; effectiveStatus?: string } | null;
 }
+
+/** S8: one code in a product save. variant left out = the whole product. Never put inside a variant object. */
+export interface BarcodeInput { code: string; variant?: string }
+
+/** GET /vendor/products/lookup?code= (S8 §2.4). matches: [] (none), 1 (barcode) or 1–10 (SKU, by name). */
+export interface ProductLookupMatch {
+  productId: string;
+  name: string;
+  /** The code's variant; null for a whole-product code or a SKU match. */
+  variant: string | null;
+  /** Only when variant is null and the product's variants keep stock. */
+  variants: Array<{ name: string; stock: number | null }> | null;
+  priceTzs: number | null;
+  discountPriceTzs: number | null;
+  stock: number;
+  status: 'active' | 'paused' | 'archived';
+  approvalStatus?: 'pending' | 'approved' | 'rejected';
+  sku: string | null;
+  matchedBy: 'barcode' | 'sku';
+}
+export interface ProductLookupResult { code: string; codeKey: string; matches: ProductLookupMatch[] }
 
 export interface LowStockRow { productId: string; name: string; variant: string | null; stock: number; reorderLevel: number }
 
@@ -2484,6 +2574,11 @@ export interface VendorSaleRow {
   dueDate?: string | null;
   /** Never contact details. forgotten (being added on the backend): the app buyer deleted their account. */
   customer?: { id: string; name: string | null; forgotten?: boolean } | null;
+  /** S7: Σ active refunds, and none | partial | full. Older servers omit them. */
+  refundedTzs?: number;
+  refundState?: VendorRefundState;
+  /** S7 (functions#321): taken off the pay-later balance by active refunds (list and customer-profile rows). */
+  balanceReducedTzs?: number;
 }
 /** Completed sales over the whole from/to/createdBy range (not the page, not the status filter); cash net of change. */
 export interface VendorSaleSummary {
@@ -2501,6 +2596,12 @@ export interface VendorSaleSummary {
   payLaterTzs?: number;
   /** S4, only for callers who also hold `customers`: completed pay-later sales in the range, still owed now. */
   owedTzs?: number;
+  /** S7: refunds made in the range (by refund date); refundTzs = refunds − undos in the range; netTzs = totalTzs − refundTzs. */
+  refundCount?: number;
+  refundTzs?: number;
+  netTzs?: number;
+  /** S7: money paid back (paidOutTzs) by method; byMethod stays money received. */
+  refundsByMethod?: Array<{ method: string; amountTzs: number }>;
 }
 export interface VendorSalePage { sales: VendorSaleRow[]; nextCursor: string | null; summary?: VendorSaleSummary | null }
 /** A walk-in sale (GET /vendor/sales/:id, POST …/void). Never carries cost. */
@@ -2529,6 +2630,9 @@ export interface VendorSale {
   /** recordedAt − soldAt > 5 min (the UI falls back to comparing them if absent). */
   lateRecorded: boolean;
   lines: Array<{
+    /** The sale line id (refunds name lines by it). */
+    id?: string;
+    productId?: string | null;
     nameSnapshot: string;
     variant: string | null;
     qty: number;
@@ -2538,8 +2642,27 @@ export interface VendorSale {
     priceChangedBy: VendorSalePerson;
     discountTzs: number;
     lineTotalTzs: number;
+    /** S5: VAT inside the line (stored, half-up per line). */
+    vatTzs?: number;
+    vatCode?: string | null;
+    /** S7: lineTotalTzs − its share of the sale discount (what the customer paid for it), and the active refund counters. */
+    lineNetTzs?: number;
+    refundedQty?: number;
+    refundableQty?: number;
+    refundedTzs?: number;
+    /** S7 (functions#318 round 3): VAT already given back by active refunds; older answers omit it. */
+    refundedVatTzs?: number;
   }>;
   payments: Array<{ method: string; amountTzs: number; reference: string | null }>;
+  /** S7 (returned whatever the flags): Σ active refunds; Σ lineNet − refundedTzs; totalTzs − refundedTzs. */
+  refundedTzs?: number;
+  refundableTzs?: number;
+  netAfterRefundsTzs?: number;
+  refundState?: VendorRefundState;
+  /** S7: taken off the pay-later balance by active refunds. */
+  balanceReducedTzs?: number;
+  /** S7: every refund of the sale, active and undone, oldest first. */
+  refunds?: Array<{ id: string; number: string; status: VendorRefundStatus; refundedAt: string; amountTzs: number }>;
   /** S4 pay later. Older servers omit these. */
   customer?: { id: string; name: string | null; forgotten?: boolean } | null;
   dueDate?: string | null;
@@ -2549,6 +2672,59 @@ export interface VendorSale {
   paidAtSaleTzs?: number;
   /** Customer payments towards this sale; only for callers who also hold `customers`. */
   allocations?: Array<{ paymentId: string; number: string; amountTzs: number; receivedOn: string; voided: boolean }>;
+}
+
+// ─── Vendor refunds on walk-in sales (S7; functions#318) ───
+export type VendorRefundState = 'none' | 'partial' | 'full';
+export type VendorRefundStatus = 'active' | 'reverted';
+/** POST /vendor/sales/:id/refunds. Never amounts. */
+export interface VendorRefundInput {
+  clientRef: string;
+  lines: Array<{ saleLineId: string; qty: number; restock?: boolean }>;
+  reason: string;
+  method?: string;
+  reference?: string;
+}
+/** A refund (credit note CN-…) as GET /vendor/refunds/:id and the POSTs return it. Never cost. */
+export interface VendorRefund {
+  id: string;
+  number: string;
+  status: VendorRefundStatus;
+  saleId: string;
+  saleNumber: string;
+  saleInvoiceNumber: string | null;
+  saleKind: 'cash' | 'credit';
+  refundedAt: string;
+  createdBy: { id: string; name: string | null } | null;
+  reason: string;
+  method: string | null;
+  reference: string | null;
+  amountTzs: number;
+  balanceReducedTzs: number;
+  paidOutTzs: number;
+  vatTzs: number;
+  vatSummary: Array<{ code: string; ratePct: number | null; netTzs: number; vatTzs: number }>;
+  customer: { id: string; name: string | null; forgotten: boolean } | null;
+  lines: Array<{ saleLineId: string; productId: string | null; variant: string | null; nameSnapshot: string; qty: number; unitPriceTzs: number; amountTzs: number; vatTzs: number; vatCode: string | null; restock: boolean }>;
+  revertedBy: { id: string; name: string | null } | null;
+  revertedAt: string | null;
+  revertReason: string | null;
+}
+/** A row of GET /vendor/refunds (newest first). */
+export interface VendorRefundRow {
+  id: string;
+  number: string;
+  status: VendorRefundStatus;
+  refundedAt: string;
+  revertedAt: string | null;
+  saleId: string;
+  saleNumber: string;
+  amountTzs: number;
+  paidOutTzs: number;
+  balanceReducedTzs: number;
+  method: string | null;
+  restockedUnits: number;
+  createdBy: { id: string; name: string | null } | null;
 }
 
 // ─── Vendor customers (S4) ───

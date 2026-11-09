@@ -802,3 +802,11 @@ body {
   min-height: 48px; padding: 0 20px; border-radius: 9999px;
   background: var(--banner-cta-bg); color: var(--banner-cta-text); font-weight: 700; font-size: 15px;
 }
+
+/* Vendor S9 §5.3: printing a purchase (GRN) shows only its print block, not the portal shell. */
+@media print {
+  body.ff-print-purchase * { visibility: hidden; }
+  body.ff-print-purchase .ff-print-area,
+  body.ff-print-purchase .ff-print-area * { visibility: visible; }
+  body.ff-print-purchase .ff-print-area { display: block !important; position: absolute; left: 0; top: 0; width: 100%; }
+}

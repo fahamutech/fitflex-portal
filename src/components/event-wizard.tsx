@@ -21,6 +21,7 @@ import { TicketsStep } from '@/components/event-wizard-steps/tickets';
 import { KitStep } from '@/components/event-wizard-steps/kit';
 import { TermsStep } from '@/components/event-wizard-steps/terms';
 import { ReviewStep } from '@/components/event-wizard-steps/review';
+import { useFocusAfterRender } from '@/lib/use-focus-after-render';
 import { useApp } from '../../app/providers';
 
 const AUTOSAVE_MS = 1500;
@@ -125,14 +126,12 @@ export function EventWizard({ eventId, initialStep, view, onBack, onView }: {
     q.set('event', nextId ?? 'new'); q.set('step', WIZARD_STEPS[nextStep]); q.delete('view');
     window.history.replaceState(null, '', `${window.location.pathname}?${q.toString()}`);
   }, []);
+  const focusAfterRender = useFocusAfterRender();
   const goTo = useCallback((index: number, focusPath?: string) => {
     const next = Math.max(0, Math.min(WIZARD_STEPS.length - 1, index));
     setStep(next); replaceUrl(idRef.current, next);
-    setTimeout(() => {
-      const el = focusPath ? document.getElementById(fieldId(focusPath)) : null;
-      (el ?? headingRef.current)?.focus();
-    }, 50);
-  }, [replaceUrl]);
+    focusAfterRender(() => (focusPath ? document.getElementById(fieldId(focusPath)) : null) ?? headingRef.current);
+  }, [replaceUrl, focusAfterRender]);
 
   // ── Saving ──
   const flush = useCallback(async (): Promise<boolean> => {
@@ -243,7 +242,7 @@ export function EventWizard({ eventId, initialStep, view, onBack, onView }: {
     if (byStep[current] > 0) {
       setAttempted(a => new Set(a).add(current));
       const firstPath = Object.keys(allErrors).find(p => stepOfPath(p) === current);
-      if (firstPath) setTimeout(() => document.getElementById(fieldId(firstPath))?.focus(), 0);
+      if (firstPath) focusAfterRender(() => document.getElementById(fieldId(firstPath)));
       return;
     }
     if (autosaveOn) void flush();

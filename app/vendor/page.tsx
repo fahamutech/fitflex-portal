@@ -4,10 +4,11 @@ import Link from 'next/link';
 import { Inbox } from 'lucide-react';
 import { api, type LowStockRow, type VendorAgingPage, type VendorOrder, type VendorPayments, type VendorSaleSummary, type VendorStatementList } from '@/lib/api';
 import { money } from '@/lib/admin-utils';
-import { canCustomers, canWalkInSales, countsOf, eatDateTime, eatToday, fmt, isOpenOrder, itemsKey, payoutWhyKey, statusKey, statusTone, type OrderCounts } from '@/lib/vendor';
+import { canCustomers, canWalkInSales, countsOf, refundsOn, eatDateTime, eatToday, fmt, isOpenOrder, itemsKey, payoutWhyKey, statusKey, statusTone, type OrderCounts } from '@/lib/vendor';
 import { Badge, Button, Card, CardContent, CardHeader, EmptyState, PageHeader, Skeleton } from '@/components/shared';
 import { useVendor } from '@/components/vendor-context';
 import { reportAccess } from '@/lib/vendor-reports';
+import { canPurchases, purchasesApi, type PayablesPage } from '@/lib/vendor-purchases';
 import { useApp } from '../providers';
 
 type Loaded<T> = { state: 'loading' } | { state: 'failed' } | { state: 'ready'; data: T };
@@ -53,6 +54,8 @@ export default function VendorDashboardPage() {
   const canOwed = canCustomers(vendor.me);
   // S6: a link to Reports in the header when allowed (tool on and `reports`); no new dashboard cards.
   const canReports = reportAccess(vendor.me).open;
+  // S9: what the business owes its suppliers (tool on and `purchases`); never added to money in.
+  const canPayables = canPurchases(vendor.me);
 
   const [payments, retryPayments] = useLoad<VendorPayments>(!!token && canPay, () => api.vendorPayments(token!));
   const [statements, retryStatements] = useLoad<VendorStatementList>(!!token && canPay, () => api.vendorStatements(token!));
@@ -66,6 +69,7 @@ export default function VendorDashboardPage() {
     return (await api.vendorSales(token!, { from: day, to: day, limit: 1 })).summary ?? null;
   });
 
+  const [payables, retryPayables] = useLoad<PayablesPage['totals']>(!!token && canPayables, async () => (await purchasesApi.payables(token!, { limit: 1 })).totals);
   const [owed, retryOwed] = useLoad<VendorAgingPage['totals']>(!!token && canOwed, async () => (await api.vendorReceivablesAging(token!, { limit: 1 })).totals);
 
   const failed = (retry: () => void) => (
@@ -77,7 +81,7 @@ export default function VendorDashboardPage() {
   const loading = <div aria-busy="true"><Skeleton className="h-8 w-24" /></div>;
   const value = (v: ReactNode, testId?: string) => <p className="text-3xl font-semibold tracking-tight tabular-nums text-[var(--color-fg-primary)]" data-testid={testId}>{v}</p>;
 
-  if (!canPay && !canOrders && !vendor.can('products') && !canSales && !canOwed) {
+  if (!canPay && !canOrders && !vendor.can('products') && !canSales && !canOwed && !canPayables) {
     return (
       <div className="space-y-6">
         <PageHeader title={vendor.me?.businessName || t('vendor.nav.dashboard')} />
@@ -118,7 +122,10 @@ export default function VendorDashboardPage() {
           <Tile label={t('vendor.dash.shopSalesToday')} testId="dash-shop-sales">
             {shopSales.state === 'loading' ? loading : shopSales.state === 'failed' ? failed(retryShopSales) : (
               <>
-                {value(shopSales.data ? money(shopSales.data.totalTzs) : '—', 'dash-shop-sales-value')}
+                {/* S7 (AC-38): after refunds when the refunds tool is on. */}
+                {refundsOn(vendor.me) && typeof shopSales.data?.netTzs === 'number'
+                  ? <>{value(money(shopSales.data.netTzs), 'dash-shop-sales-value')}<p className="text-sm text-[var(--color-fg-quaternary)]" data-testid="dash-shop-sales-after">{t('vendor.dash.afterRefunds')}</p></>
+                  : value(shopSales.data ? money(shopSales.data.totalTzs) : '—', 'dash-shop-sales-value')}
                 <p className="mt-1 text-sm text-[var(--color-fg-quaternary)]">{t('vendor.dash.shopSalesHint')}</p>
                 <Link href="/vendor/sales/" className={linkCls}>{t('vendor.dash.viewAll')}</Link>
               </>
@@ -132,6 +139,17 @@ export default function VendorDashboardPage() {
                 {value(money(owed.data.owedTzs), 'dash-owed-value')}
                 <p className="mt-1 text-sm text-[var(--color-fg-quaternary)]" data-testid="dash-owed-hint">{fmt(t('vendor.dash.owedHint'), { n: owed.data.overdueSaleCount })}</p>
                 <Link href="/vendor/customers/?view=owed" className={linkCls}>{t('vendor.dash.viewAll')}</Link>
+              </>
+            )}
+          </Tile>
+        )}
+        {canPayables && (
+          <Tile label={t('vendor.payables.title')} testId="dash-payables">
+            {payables.state === 'loading' ? loading : payables.state === 'failed' ? failed(retryPayables) : (
+              <>
+                {value(money(payables.data.owedTzs), 'dash-payables-value')}
+                <p className="mt-1 text-sm text-[var(--color-fg-quaternary)]" data-testid="dash-payables-due">{fmt(t('vendor.dash.suppliersDueSoon'), { amount: money(payables.data.dueIn7DaysTzs) })}</p>
+                <Link href="/vendor/purchases/?view=payables" className={linkCls} aria-label={fmt(t('vendor.dash.owedToSuppliers'), { amount: money(payables.data.owedTzs), due: money(payables.data.dueIn7DaysTzs) })} data-testid="dash-payables-link">{t('vendor.dash.viewAll')}</Link>
               </>
             )}
           </Tile>

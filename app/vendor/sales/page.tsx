@@ -2,15 +2,17 @@
 import { type ReactNode, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
-import { ArrowLeft, ChevronRight, Copy, FileText, Receipt, RefreshCw } from 'lucide-react';
-import { api, type VendorSale, type VendorSaleRow, type VendorSalesQuery, type VendorSaleSummary } from '@/lib/api';
+import { ArrowLeft, ChevronRight, Copy, FileText, Receipt, RefreshCw, Undo2 } from 'lucide-react';
+import { api, type VendorRefund, type VendorSale, type VendorSaleRow, type VendorSalesQuery, type VendorSaleSummary } from '@/lib/api';
 import { money } from '@/lib/admin-utils';
 import type { MessageKey } from '@/lib/i18n';
 import {
-  addDays, canCustomers, customerName, documentsOn, eatDateTime, eatToday, errorBody, errorCode, fmt, isRefusal, itemsKey, mayVoidSale, receiptDay,
-  recordedOffline, saleMethodLabel, saleMethodsLabel, saleReceiptText,
+  addDays, canCustomers, creditClearedAs, customerName, documentsOn, eatDateTime, eatToday, errorBody, errorCode, fmt, isRefusal, itemsKey, mayRefundSale, mayVoidSale, receiptDay,
+  recordedOffline, refundsOn, saleMethodLabel, saleMethodsLabel, saleReceiptText,
 } from '@/lib/vendor';
-import { CreditBadges } from '@/components/vendor/customers/bits';
+import { RefundDialog } from '@/components/vendor/sales/refund-dialog';
+import { RefundsCard } from '@/components/vendor/sales/refunds-card';
+import { CreditBadges, RefundBadges } from '@/components/vendor/customers/bits';
 import { docLinkCls } from '@/components/vendor/documents/share-menu';
 import { documentHref } from '@/lib/vendor-documents';
 import {
@@ -32,7 +34,7 @@ const DAY = /^\d{4}-\d{2}-\d{2}$/;
 /** A row's tap target: at least 44px tall. */
 const refLink = 'inline-flex min-h-11 items-center whitespace-nowrap font-mono font-semibold text-[var(--color-brand-700)] underline-offset-4 hover:underline';
 
-function SaleBadges({ sale }: { sale: Pick<VendorSaleRow, 'status' | 'soldAt' | 'recordedAt' | 'lateRecorded' | 'hasOverride' | 'kind' | 'balanceTzs'> }) {
+function SaleBadges({ sale }: { sale: Pick<VendorSaleRow, 'status' | 'soldAt' | 'recordedAt' | 'lateRecorded' | 'hasOverride' | 'kind' | 'balanceTzs' | 'refundState'> }) {
   const { t } = useApp();
   return (
     <span className="inline-flex flex-wrap gap-1">
@@ -41,6 +43,8 @@ function SaleBadges({ sale }: { sale: Pick<VendorSaleRow, 'status' | 'soldAt' | 
         : <Badge tone="success">{t('vendor.sales.filter.completed')}</Badge>}
       {recordedOffline(sale) && <Badge tone="gray">{t('vendor.sales.offlineBadge')}</Badge>}
       {sale.hasOverride === true && <Badge tone="warning">{t('vendor.sales.priceChangedBadge')}</Badge>}
+      {/* S7: refunds stay visible whatever the flag (bookkeeping facts of the sale). */}
+      <RefundBadges sale={sale} />
       {/* S4: "Pay later" and what is still owed (or "Paid off"). */}
       <CreditBadges sale={sale} />
     </span>
@@ -163,7 +167,13 @@ function SalesInner() {
 
   /** A void changes the row and the summary (voided sales leave the totals). */
   const updated = (sale: VendorSale) => {
-    setSales(current => (current ?? []).map(s => (s.id === sale.id ? { ...s, status: sale.status, ...(typeof sale.balanceTzs === 'number' ? { balanceTzs: sale.balanceTzs } : {}) } : s)));
+    setSales(current => (current ?? []).map(s => (s.id === sale.id ? {
+      ...s, status: sale.status,
+      ...(typeof sale.balanceTzs === 'number' ? { balanceTzs: sale.balanceTzs } : {}),
+      ...(typeof sale.refundedTzs === 'number' ? { refundedTzs: sale.refundedTzs } : {}),
+      ...(sale.refundState ? { refundState: sale.refundState } : {}),
+      ...(typeof sale.balanceReducedTzs === 'number' ? { balanceReducedTzs: sale.balanceReducedTzs } : {}),
+    } : s)));
     if (!token) return;
     const id = requestId.current;
     api.vendorSales(token, { ...query(), limit: 1 }).then(p => { if (id === requestId.current) setSummary(p.summary ?? null); }).catch(() => {});
@@ -255,6 +265,12 @@ function SalesInner() {
             {typeof summary.payLaterTzs === 'number' && summary.payLaterTzs > 0 && <SummaryTile label={t('vendor.sales.payLaterTotal')} value={money(summary.payLaterTzs)} testId="sales-summary-paylater" />}
             {typeof summary.owedTzs === 'number' && summary.owedTzs > 0 && <SummaryTile label={t('vendor.pay.stillOwed')} value={money(summary.owedTzs)} testId="sales-summary-owed" />}
           </div>
+          {/* S7 (AC-38): refunds in the range and what is left after them. */}
+          {typeof summary.refundTzs === 'number' && summary.refundTzs > 0 && typeof summary.netTzs === 'number' && (
+            <p className="text-sm text-[var(--color-fg-secondary)]" data-testid="sales-summary-refunds">
+              {fmt(t('vendor.sales.refundsLine'), { amount: money(summary.refundTzs), net: money(summary.netTzs) })}
+            </p>
+          )}
           {summary.byMethod?.length > 0 && (
             <div>
               <h2 className="mb-2 text-sm font-semibold text-[var(--color-fg-secondary)]">{t('vendor.sales.byMethod')}</h2>
@@ -366,15 +382,28 @@ function SaleDetail({ id, onBack, onUpdated }: { id: string; onBack: () => void;
   /** S4 (Q-2): customer payments still allocated to this pay-later sale; void them first. */
   const [blockers, setBlockers] = useState<Array<{ id: string; number: string }> | null>(null);
   const [busy, setBusy] = useState(false);
+  /** S7: the refund dialog, the row to focus after a save or undo, and whether the browser is online (refunds are online only). */
+  const [refundOpen, setRefundOpen] = useState(false);
+  const [focusRefund, setFocusRefund] = useState<string | null>(null);
+  const [online, setOnline] = useState(true);
+  useEffect(() => {
+    const sync = () => setOnline(typeof navigator === 'undefined' || navigator.onLine !== false);
+    sync();
+    window.addEventListener('online', sync); window.addEventListener('offline', sync);
+    return () => { window.removeEventListener('online', sync); window.removeEventListener('offline', sync); };
+  }, []);
+  const clearFocusRefund = useCallback(() => setFocusRefund(null), []);
   const headingRef = useRef<HTMLHeadingElement>(null);
+  /** Set by load(); the heading takes focus once it has rendered (a timer can fire before the commit in production builds). */
+  const focusPending = useRef(false);
 
   const load = useCallback(async (focus = true) => {
     if (!token) return;
     setState(s => (s === 'ready' ? s : 'loading'));
     try {
       const res = await api.vendorSale(token, id);
+      if (focus) focusPending.current = true;
       setSale(res.sale); setState('ready');
-      if (focus) setTimeout(() => headingRef.current?.focus(), 0);
     } catch (err) {
       if (errorCode(err) === 'sale_not_found') { setState('notFound'); return; }
       if (vendor.handleError(err)) return;
@@ -383,6 +412,11 @@ function SaleDetail({ id, onBack, onUpdated }: { id: string; onBack: () => void;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token, id]);
   useEffect(() => { setNotice(null); void load(); }, [load]);
+  useEffect(() => {
+    if (state !== 'ready' || !sale || !focusPending.current) return;
+    focusPending.current = false;
+    headingRef.current?.focus();
+  }, [state, sale]);
 
   const business = vendor.me?.businessName || t('vendor.shell.unnamed');
 
@@ -420,8 +454,9 @@ function SaleDetail({ id, onBack, onUpdated }: { id: string; onBack: () => void;
         toast.info(t('vendor.sales.alreadyVoided'));
         try { const fresh = await api.vendorSale(token, sale.id); setSale(fresh.sale); onUpdated(fresh.sale); } catch { /* the toast still stands */ }
       } else if (code === 'has_refunds') {
-        // Not sent by #214; kept for S7 refunds (spec §5.3), harmless until then.
+        // S7 (functions#318): active refunds block a void. Reload so the Refunds card shows them and Void hides.
         toast.error(t('vendor.sales.voidHasRefunds'));
+        try { const fresh = await api.vendorSale(token, sale.id); setSale(fresh.sale); onUpdated(fresh.sale); } catch { /* the toast still stands */ }
       } else if (code === 'void_not_allowed') {
         const why = errorBody<{ reason?: string }>(err)?.reason;
         toast.error(t(why === 'too_old' ? 'vendor.sales.voidTooOld' : why === 'not_own' ? 'vendor.sales.voidNotOwn' : 'vendor.sales.err.voidNotAllowed'));
@@ -449,7 +484,23 @@ function SaleDetail({ id, onBack, onUpdated }: { id: string; onBack: () => void;
 
   const s = sale;
   const discounts = Number(s.lineDiscountTzs || 0) + Number(s.discountTzs || 0);
-  const canVoid = mayVoidSale(s, { userId: user?.id, userType: user?.userType, vendorRole: vendor.me?.vendorRole });
+  const who = { userId: user?.id, userType: user?.userType, vendorRole: vendor.me?.vendorRole };
+  // S7 §5.1: active refunds hide Void (undo them first); the server answers 409 has_refunds anyway.
+  const activeRefunds = (s.refunds ?? []).some(r => r.status === 'active');
+  const canVoid = mayVoidSale(s, who) && !activeRefunds;
+  const refundedTzs = Number(s.refundedTzs ?? 0);
+  const refundable = s.lines.some(l => !!l.id && Number(l.refundableQty ?? 0) > 0);
+  const refundTool = refundsOn(vendor.me) && vendor.can('sales') && s.status === 'completed';
+  const mayRefund = refundTool && mayRefundSale(s, who);
+  const refundNote: MessageKey | null = !refundTool ? null
+    : s.refundState === 'full' || !refundable ? 'vendor.refunds.fully'
+    : !mayRefund ? 'vendor.refunds.askOwner'
+    : null;
+  const onRefundSaved = (refund: VendorRefund, fresh: VendorSale) => {
+    setRefundOpen(false);
+    setSale(fresh); onUpdated(fresh);
+    setFocusRefund(refund.id);
+  };
   const credit = s.kind === 'credit';
   const seesCustomers = canCustomers(vendor.me);
   const customerHref = (extra = '') => (s.customer ? `/vendor/customers/?id=${encodeURIComponent(s.customer.id)}${extra}` : null);
@@ -509,6 +560,9 @@ function SaleDetail({ id, onBack, onUpdated }: { id: string; onBack: () => void;
                   {l.discountTzs > 0 && (
                     <div className={`${row} text-[var(--color-fg-tertiary)]`}><span>{t('vendor.pos.lineDiscountShort')}</span><span className="whitespace-nowrap tabular-nums">−{money(l.discountTzs)}</span></div>
                   )}
+                  {Number(l.refundedQty ?? 0) > 0 && (
+                    <p className="text-[var(--color-fg-tertiary)]" data-testid={`sale-line-${i}-refunded`}>{fmt(t('vendor.refunds.lineRefunded'), { n: Number(l.refundedQty) })}</p>
+                  )}
                 </li>
               );
             })}
@@ -517,6 +571,12 @@ function SaleDetail({ id, onBack, onUpdated }: { id: string; onBack: () => void;
             <div className={row}><dt>{t('vendor.pos.subtotal')}</dt><dd className="whitespace-nowrap tabular-nums">{money(s.subtotalTzs)}</dd></div>
             {discounts > 0 && <div className={row}><dt>{t('vendor.pos.discounts')}</dt><dd className="whitespace-nowrap tabular-nums" data-testid="sale-discounts">−{money(discounts)}</dd></div>}
             <div className={row}><dt className="font-semibold">{t('vendor.pos.total')}</dt><dd className="font-semibold" data-testid="sale-total"><Total sale={s} /></dd></div>
+            {refundedTzs > 0 && (
+              <>
+                <div className={row}><dt>{t('vendor.refunds.refundsRow')}</dt><dd className="whitespace-nowrap tabular-nums" data-testid="sale-refunded">−{money(refundedTzs)}</dd></div>
+                <div className={row}><dt className="font-semibold">{t('vendor.refunds.netAfter')}</dt><dd className="whitespace-nowrap font-semibold tabular-nums" data-testid="sale-net-after">{money(s.netAfterRefundsTzs ?? s.totalTzs - refundedTzs)}</dd></div>
+              </>
+            )}
           </dl>
         </CardContent>
       </Card>
@@ -537,7 +597,9 @@ function SaleDetail({ id, onBack, onUpdated }: { id: string; onBack: () => void;
               {s.dueDate && <div className={row}><span>{t('vendor.receipt.dueBy')}</span><span className="whitespace-nowrap">{receiptDay(s.dueDate, locale)}</span></div>}
               {s.status === 'completed' && (Number(s.balanceTzs) > 0
                 ? <div className={`${row} font-semibold`}><span>{t('vendor.pay.stillOwed')}</span><span className="whitespace-nowrap tabular-nums" data-testid="sale-balance">{money(s.balanceTzs)}</span></div>
-                : <p><Badge tone="success">{t('vendor.sales.paidOffBadge')}</Badge></p>)}
+                : creditClearedAs(s) === 'paidOff' ? <p><Badge tone="success">{t('vendor.sales.paidOffBadge')}</Badge></p>
+                : creditClearedAs(s) === 'settled' ? <p data-testid="sale-settled"><Badge tone="gray">{t('vendor.documents.status.settled_by_credit_note')}</Badge></p>
+                : null)}
               {(s.allocations ?? []).length > 0 && (
                 <div className="space-y-1 pt-1" data-testid="sale-allocations">
                   <p className="font-medium">{t('vendor.sales.customerPayments')}</p>
@@ -562,6 +624,13 @@ function SaleDetail({ id, onBack, onUpdated }: { id: string; onBack: () => void;
         </CardContent>
       </Card>
 
+      <RefundsCard
+        sale={s}
+        onSaleChanged={fresh => { setSale(fresh); onUpdated(fresh); }}
+        focusRefundId={focusRefund}
+        onFocused={clearFocusRefund}
+      />
+
       <Alert tone="info">{t('vendor.pos.moneyNotice')}</Alert>
 
       {s.note && (
@@ -584,11 +653,25 @@ function SaleDetail({ id, onBack, onUpdated }: { id: string; onBack: () => void;
           <Button variant="secondary" className="min-h-11" onClick={copyText} data-testid="sale-copy">
             <Copy aria-hidden="true" className="h-4 w-4" />{t('vendor.sales.copyText')}
           </Button>
+          {mayRefund && refundable && s.refundState !== 'full' && (
+            <Button variant="secondary" className="min-h-11" onClick={() => setRefundOpen(true)} disabled={!online}
+              aria-label={fmt(t('vendor.refunds.a11y.open'), { number: s.number })} aria-describedby={!online ? 'sale-refund-offline' : undefined} data-testid="sale-refund">
+              <Undo2 aria-hidden="true" className="h-4 w-4" />{t('vendor.refunds.open')}
+            </Button>
+          )}
           {canVoid && (
             <Button variant="destructive" className="min-h-11" onClick={openVoid} data-testid="sale-void">{t('vendor.sales.void')}</Button>
           )}
         </div>
       )}
+      {s.status === 'completed' && (
+        <div className="space-y-1 text-sm text-[var(--color-fg-tertiary)]">
+          {mayRefund && refundable && !online && <p id="sale-refund-offline" data-testid="sale-refund-offline">{t('vendor.refunds.offline')}</p>}
+          {refundNote && <p data-testid="sale-refund-note">{t(refundNote)}</p>}
+          {activeRefunds && mayVoidSale(s, who) && <p data-testid="sale-void-has-refunds">{t('vendor.sales.voidHasRefunds')}</p>}
+        </div>
+      )}
+      {refundOpen && <RefundDialog saleId={s.id} saleNumber={s.number} onClose={() => setRefundOpen(false)} onSaved={onRefundSaved} />}
 
       <Dialog
         open={voidOpen}

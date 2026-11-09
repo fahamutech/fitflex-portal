@@ -211,6 +211,6 @@ test('Swahili at 375 px: header buttons fit, status badge translated', async ({ 
   }
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
   await expect(page.getByText('Inauzwa', { exact: true })).toBeVisible();
-  await expect(page.getByText('Imesimamishwa', { exact: true })).toBeVisible();
+  await expect(page.getByText('Imesitishwa', { exact: true })).toBeVisible();
   await expect(page.getByText('active', { exact: true })).toHaveCount(0);
 });

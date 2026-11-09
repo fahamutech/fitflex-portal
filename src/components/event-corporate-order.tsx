@@ -26,6 +26,7 @@ import { CorporateCancelDialog, CorporatePaymentSection, CorporateRefundCard, Re
 import { EventRosterImport } from '@/components/event-roster-import';
 import { corporateEventsOpen, useEventsOptions } from '@/components/events-options';
 import { EventsUnavailable, PageError, PageLoading, useDocumentTitle } from '@/components/organizer/page-states';
+import { useFocusAfterRender } from '@/lib/use-focus-after-render';
 import { useApp } from '../../app/providers';
 
 const STEPS = ['event', 'people', 'check', 'confirm'] as const;
@@ -183,7 +184,8 @@ function CorporateWizard({ token, orgId, orgName, canPlace, holdTtlMinutes, cons
   const textBad = startsWithFormulaChar(costCentre) || startsWithFormulaChar(reference) || startsWithFormulaChar(teamName);
   const clean = !!validation && !!validation.quote && validation.summary.ok > 0 && validation.summary.problems === 0 && validation.duplicates.length === 0 && validation.capacityShort.length === 0;
   const maxReached = !eventId ? 0 : !validation ? 1 : clean ? 3 : 2;
-  const goTo = (i: number) => { setStep(Math.max(0, Math.min(STEPS.length - 1, i))); setTimeout(() => headingRef.current?.focus(), 50); };
+  const focusAfterRender = useFocusAfterRender();
+  const goTo = (i: number) => { setStep(Math.max(0, Math.min(STEPS.length - 1, i))); focusAfterRender(() => headingRef.current); };
 
   /** The message for a refusal: rate limit, `field_too_long` (row index from the server), else the §3.17 map. */
   const errorText = (err: unknown) => {

@@ -5,7 +5,7 @@ import { ReactNode, useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { BarChart3 } from 'lucide-react';
-import { money } from '@/lib/admin-utils';
+import { formatNumber, money } from '@/lib/admin-utils';
 import type { MessageKey } from '@/lib/i18n';
 import { canWalkInSales, errorBody, errorCode, fmt } from '@/lib/vendor';
 import {
@@ -120,32 +120,46 @@ export function Figure({ label, value, sub, testId, strong = false }: { label: s
 }
 export const figureGrid = 'grid gap-3 grid-cols-2 lg:grid-cols-4';
 
-/** Money going out (discounts, refunds, commission, cost): one format everywhere, "−TSh 39,000" (§0.4, UAT D11). */
-export const minus = (n: number) => (n > 0 ? `\u2212${money(n)}` : money(0));
-/** A percentage with one decimal, "25.0%" (UAT D12); "—" when there is none. */
-export const pct = (n: number | null | undefined) => (n == null || !Number.isFinite(Number(n)) ? '—' : `${Number(n).toFixed(1)}%`);
+const MINUS = '\u2212';
+/** Money, with one negative format on every report: "−TSh 60,000" (U+2212; the shared money() would print a hyphen). */
+export const tsh = (n: number | null | undefined) => {
+  const v = Number(n || 0);
+  return v < 0 ? `${MINUS}${money(-v)}` : money(v);
+};
+/**
+ * A figure taken off (discounts, refunds, commission, cost), shown signed: 39,000 → "−TSh 39,000". A reversal comes
+ * back from the server negative and adds back, −30,000 → "TSh 30,000", so a column always adds up to its Total.
+ */
+export const minus = (n: number | null | undefined) => tsh(-Number(n || 0));
+/** A count of units or sales: "1,234", and "−3" when refunds outweigh sales in the period. */
+export const qty = (n: number | null | undefined) => (n != null && Number(n) < 0 ? `${MINUS}${formatNumber(-Number(n))}` : formatNumber(n));
+/** A percentage with one decimal, "25.0%", "−12.5%" (UAT D12); "—" when there is none. */
+export const pct = (n: number | null | undefined) => {
+  if (n == null || !Number.isFinite(Number(n))) return '—';
+  const text = `${Math.abs(Number(n)).toFixed(1)}%`;
+  return Number(n) < 0 && text !== '0.0%' ? `${MINUS}${text}` : text;
+};
 
 /** "1 sale" / "3 sales" (UAT D10): the one-key for n = 1, else the many-key; {n} and the other values filled in. */
 export function plural(t: (k: MessageKey) => string, n: number, one: MessageKey, many: MessageKey, vars: Record<string, string | number> = {}) {
-  return fmt(t(n === 1 ? one : many), { n, ...vars });
+  return fmt(t(Math.abs(n) === 1 ? one : many), { n, ...vars });
 }
 
 /**
- * Profit of a row (UAT D1): a product without a cost price is never shown as "TSh 0". The server answers
- * profitTzs (or marginPct) null for it, and only then the cell says "—" + "No cost price". A 0 is a real zero
- * profit and is shown as "TSh 0".
+ * A profit figure, on every card, row and total (retest N1, N3). profitTzs null alone means no cost price: "—" +
+ * "No cost price". 0 is a real zero profit, "TSh 0", even when marginPct is null (a costed product that nets to zero).
  */
-export function ProfitCell({ row }: { row: { profitTzs?: number | null; marginPct?: number | null } }) {
+export function ProfitCell({ row }: { row: { profitTzs?: number | null } }) {
   const { t } = useApp();
-  if (row.profitTzs === null || row.marginPct === null) {
+  if (row.profitTzs === null) {
     return (
       <span data-testid="profit-unknown">
         <span aria-hidden="true">—</span>
-        <span className="block text-xs text-[var(--color-fg-quaternary)]">{t('vendor.reports.profit.noCostHeading')}</span>
+        <span className="block text-xs font-normal text-[var(--color-fg-quaternary)]">{t('vendor.reports.profit.noCostHeading')}</span>
       </span>
     );
   }
-  return <>{money(row.profitTzs ?? 0)}</>;
+  return <>{row.profitTzs === undefined ? '—' : tsh(row.profitTzs)}</>;
 }
 
 export function ViewLoading({ cards = 4 }: { cards?: number }) {
@@ -211,7 +225,7 @@ export function ViewState<T>({ value, onRetry, children, cards }: { value: Loade
 
 // ── Chart ──
 
-export type ChartRow = { start: string; end: string; app?: number; shop?: number; value?: number };
+export type ChartRow = { start: string; end: string; app?: number; shop?: number; value?: number | null };
 const APP_FILL = 'var(--color-brand-600)';
 const SHOP_FILL = 'var(--color-gray-400)';
 const GRID = 'var(--color-border-secondary)';
@@ -226,23 +240,24 @@ export function ReportBarChart({
 }: { rows: ChartRow[]; groupBy: ReportGroupBy | undefined; from: string; to: string; figureKey: MessageKey; twoSeries: boolean; testId?: string }) {
   const { t, locale } = useApp();
   const total = (r: ChartRow) => (twoSeries ? (r.app ?? 0) + (r.shop ?? 0) : r.value ?? 0);
-  const top = rows.reduce<ChartRow | null>((best, r) => (!best || total(r) > total(best) ? r : best), null);
-  const sum = rows.reduce((s, r) => s + total(r), 0);
+  // A bucket without a figure (profit with no cost price) has no bar and is not a 0 in the summary.
+  const known = rows.filter(r => twoSeries || r.value != null);
+  const top = known.reduce<ChartRow | null>((best, r) => (!best || total(r) > total(best) ? r : best), null);
+  const sum = known.reduce((s, r) => s + total(r), 0);
   const groupWord = t(`vendor.reports.group.${groupBy ?? 'day'}` as MessageKey).toLowerCase();
   const summary = fmt(t('vendor.reports.chartSummary'), {
     figure: t(figureKey), group: groupWord, period: periodWords(from, to, locale),
-    date: top ? bucketWords(top.start, top.end, groupBy, locale) : '—', amount: money(top ? total(top) : 0), total: money(sum),
+    date: top ? bucketWords(top.start, top.end, groupBy, locale) : '—', amount: tsh(top ? total(top) : 0), total: tsh(sum),
   });
   const data = rows.map(r => ({ ...r, label: bucketWords(r.start, r.end, groupBy, locale) }));
-  const tsh = (v: unknown) => money(Number(v));
-  return (
+    return (
     <div role="img" tabIndex={0} aria-label={summary} className="h-[200px] w-full sm:h-[260px]" data-testid={testId}>
       <ResponsiveContainer width="100%" height="100%">
         <BarChart data={data} margin={{ top: 8, right: 8, bottom: 0, left: 8 }}>
           <CartesianGrid stroke={GRID} vertical={false} />
           <XAxis dataKey="label" tick={{ fill: INK, fontSize: 12 }} tickLine={false} axisLine={false} minTickGap={12} />
-          <YAxis tick={{ fill: INK, fontSize: 12 }} tickLine={false} axisLine={false} width={72} tickFormatter={v => new Intl.NumberFormat('en-US').format(Number(v))} />
-          <Tooltip formatter={tsh} cursor={{ fill: 'var(--color-bg-tertiary)' }} />
+          <YAxis tick={{ fill: INK, fontSize: 12 }} tickLine={false} axisLine={false} width={72} tickFormatter={v => qty(Number(v))} />
+          <Tooltip formatter={v => tsh(Number(v))} cursor={{ fill: 'var(--color-bg-tertiary)' }} />
           {twoSeries ? (
             <>
               <Legend />
