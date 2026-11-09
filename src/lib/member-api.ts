@@ -207,7 +207,14 @@ export async function signIn(identifier: string, pin: string, keep = false): Pro
   const id = identifier.trim();
   const r = await call('POST', '/auth/pin/login', { body: { ...(id.includes('@') ? { email: id } : { phone: id }), pin } });
   if (r.status < 200 || r.status >= 300) return { ok: false, code: signInCodeOf(r) };
-  const b = r.body ?? {};
+  return adoptPinSignIn(r.body ?? {}, keep);
+}
+
+/**
+ * Opens the member area from a successful POST /auth/pin/login reply (its body). Used by the member sign-in above
+ * and by the portal sign-in (/login), which hands a person with no business or organisation role over to /m.
+ */
+export async function adoptPinSignIn(b: Record<string, unknown>, keep = false): Promise<SignInResult> {
   // A PIN still held only by Firebase, an invitation start PIN or a person with no profile: finish in the app.
   if (b.setupRequired || b.onboarding || b.startPin || typeof b.token !== 'string') return { ok: false, code: 'setup_required' };
   let token = b.token;
