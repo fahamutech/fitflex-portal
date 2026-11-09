@@ -15,7 +15,8 @@ import {
 } from '@/lib/firebase';
 import { Button, Card, CardContent, Alert, Spinner, Field } from '@/components/shared';
 import { PhotoPanel, LOGIN_HERO_PHOTO } from '@/components/photo-panel';
-import { EVENTS_MODULE, HERO_IMAGES_REMOTE, PHOTO_HERO_UI } from '@/lib/flags';
+import { EVENTS_MODULE, HERO_IMAGES_REMOTE, MEMBER_PORTAL, PHOTO_HERO_UI } from '@/lib/flags';
+import { adoptPinSignIn } from '@/lib/member-api';
 
 export default function LoginPage() {
   const { t, signIn } = useApp();
@@ -79,6 +80,11 @@ export default function LoginPage() {
       if (organizations.length) {
         handleSuccess(res.token, { ...res.user, organizationUser: true, organizationRoles: [...new Set(organizations.map(o => o.role))] });
         return;
+      }
+      // A member with no business or organisation role: open their member area (/m), the one sign-in for everyone.
+      if (MEMBER_PORTAL) {
+        const member = await adoptPinSignIn(res as unknown as Record<string, unknown>);
+        if (member.ok) { router.replace('/m/'); return; }
       }
       // Nothing usable: say why, and store nothing.
       const off = (type: string) => personas.some(p => p.userType === type && p.accountStatus === 'suspended');
@@ -335,7 +341,7 @@ export default function LoginPage() {
                     data-testid="pin-method-btn"
                     onClick={() => { setMethod('pin'); setError(null); setNotice(null); setPinError(null); }}
                   >
-                    {t('login.pinMethod')}
+                    {t(MEMBER_PORTAL ? 'login.pinMethodAll' : 'login.pinMethod')}
                   </Button>
                 )}
                 <Button
