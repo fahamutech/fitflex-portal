@@ -196,6 +196,8 @@ jobs:
           suite WEB_GYM_FLAG=false web-gym
           suite CI=true shop-merch
           suite CI=true admin-phase0
+          suite MEMBER_PORTAL_FLAG=true member-portal
+          suite MEMBER_PORTAL_FLAG=false member-portal
           exit $failed
 
       - name: Upload Playwright results

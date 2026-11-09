@@ -90,6 +90,7 @@ export default defineConfig({
     /web-gym-profile\.spec\.ts$/,
     /shop-(banners|flash-sales)\.spec\.ts$/,
     /admin-load-errors\.spec\.ts$/,
+    /member-portal\.spec\.ts$/,
   ],
   timeout: 30_000,
   // next dev compiles a page on its first visit, and again once it has been idle: on CI that can outlast the default 5s.
