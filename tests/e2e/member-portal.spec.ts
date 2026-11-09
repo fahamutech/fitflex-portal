@@ -469,7 +469,7 @@ test.describe('member portal, flag on', () => {
   test('portal sign-in (/login): a member with no business role is taken to their member area', async ({ page }) => {
     const h = await setup(page, {}, false);
     await page.goto('/login/');
-    await expect(page.getByTestId('pin-method-btn')).toHaveText(en['login.pinMethodAll'], { timeout: 30_000 });
+    await expect(page.getByTestId('pin-method-btn')).toHaveText(en['login.pinHeading'], { timeout: 30_000 });
     await page.getByTestId('pin-method-btn').click();
     await page.getByTestId('pin-identifier-input').fill('0754123678');
     await page.getByTestId('pin-input').fill('4821');
