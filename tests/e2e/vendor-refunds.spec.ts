@@ -430,6 +430,26 @@ test.describe('UAT fixes (S7 UAT on RC)', () => {
     await expect(qtyBox).toBeFocused();
   });
 
+  for (const [locale, width] of [['en', 1024], ['en', 1280], ['en', 1440], ['sw', 1024], ['sw', 1280], ['sw', 1440]] as const) {
+    test(`D1 (${locale}, ${width}px): the quantity digit is not clipped and the lines table does not overflow`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 900 });
+      await signedInAs(page, VENDOR, locale);
+      await mockApi(page, base());
+      await openSale(page);
+      await page.getByTestId('sale-refund').click();
+      const dialog = page.getByTestId('refund-dialog');
+      await expect(dialog.getByTestId('refund-lines-table')).toBeVisible();
+      await dialog.getByTestId('refund-inc-sln_whey').filter({ visible: true }).click();
+      const m = await dialog.getByTestId('refund-qty-sln_whey').filter({ visible: true }).evaluate(el => {
+        const wrap = el.closest('[role="region"]') as HTMLElement;
+        return { sw: el.scrollWidth, cw: el.clientWidth, wsw: wrap.scrollWidth, wcw: wrap.clientWidth };
+      });
+      expect(m.sw).toBeLessThanOrEqual(m.cw);
+      expect(m.cw).toBeGreaterThanOrEqual(56);
+      expect(m.wsw).toBeLessThanOrEqual(m.wcw);
+    });
+  }
+
   test('L-8: Close is at least 44×44px; the restock box is at least 24px with a 44px label target', async ({ page }) => {
     await signedInAs(page, VENDOR);
     await mockApi(page, base());
