@@ -2,7 +2,7 @@
 import { Fragment, Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
-import { ChevronDown, ChevronRight, History, PackageOpen, RefreshCw, SlidersHorizontal } from 'lucide-react';
+import { Barcode, ChevronDown, ChevronRight, History, PackageOpen, RefreshCw, SlidersHorizontal } from 'lucide-react';
 import { api, type LowStockRow, type ProductStock, type VendorProduct } from '@/lib/api';
 import { money } from '@/lib/admin-utils';
 import type { MessageKey } from '@/lib/i18n';
@@ -10,6 +10,9 @@ import { categoryLabel, eatWhen, fmt, lowKey, PRODUCTS_QS_KEY, tracksVariantStoc
 import { useShopFlashSalesAvailable } from '@/components/shop-banners-gate';
 import { Badge, Button, Card, EmptyState, ErrorState, Input, PageHeader, Segmented, Select, SkeletonCard, SkeletonTable, Table, TBody, Td, Th, THead, Tr } from '@/components/shared';
 import { AdjustStockDialog } from '@/components/vendor/adjust-stock-dialog';
+import { BarcodesDialog } from '@/components/vendor/barcodes/barcodes-dialog';
+import { barcodesOf, productHasCode } from '@/lib/barcode-rules';
+import { plural } from '@/lib/vendor-purchases';
 import { useVendor } from '@/components/vendor-context';
 import { useApp } from '../../providers';
 
@@ -33,6 +36,9 @@ function ProductsInner() {
   const params = useSearchParams();
   const ledger = vendor.me?.tools.stockLedger === true;
   const canSeeCost = vendor.me?.tools.canSeeCost === true;
+  // S8: barcodes only when the tool is exactly on (missing, false or failed options = off) and the person manages products.
+  const barcodesOn = vendor.me?.tools.barcodes === true;
+  const canBarcodes = barcodesOn && vendor.can('products');
   // Flash sales (SHOP_FLASH_SALES): the price lock line and "Start a flash sale" (spec §8.3, S4-AC-08).
   const salesHint = (vendor.me?.tools.merch as { flashSales?: unknown } | undefined)?.flashSales;
   const salesOn = useShopFlashSalesAvailable('vendor', token, vendor.status === 'ready' && !!vendor.me?.permissions?.includes('products'), typeof salesHint === 'boolean' ? salesHint : undefined);
@@ -42,6 +48,7 @@ function ProductsInner() {
   const [low, setLow] = useState<LowStockRow[]>([]);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [adjust, setAdjust] = useState<{ product: VendorProduct; variant: string | null } | null>(null);
+  const [barcodesFor, setBarcodesFor] = useState<VendorProduct | null>(null);
   const [categories, setCategories] = useState<Category[]>([]);
   useEffect(() => { api.shopCategories().then(r => setCategories(Array.isArray(r?.categories) ? r.categories : [])).catch(() => setCategories([])); }, []);
 
@@ -94,7 +101,7 @@ function ProductsInner() {
     (filter !== 'low' || isLow(p))
     && (filter !== 'noCost' || noCost(p))
     && matchesStatus(p, status)
-    && (!q.trim() || p.name.toLowerCase().includes(q.trim().toLowerCase())));
+    && (!q.trim() || p.name.toLowerCase().includes(q.trim().toLowerCase()) || (barcodesOn && productHasCode(p, q))));
 
   /** A refused change told us the real stock: show it on the row (the variant's, or the product's). */
   function applyKnownStock(productId: string, variant: string | null, stock: number) {
@@ -163,19 +170,33 @@ function ProductsInner() {
   const linkBtn = 'inline-flex min-h-11 items-center justify-center gap-1.5 rounded-[var(--radius-lg)] px-3.5 text-sm font-semibold text-[var(--color-fg-secondary)] hover:bg-[var(--color-bg-tertiary)] hover:text-[var(--color-fg-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand-500)]';
   const toggle = (id: string) => setExpanded(s => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
 
-  const actions = (p: VendorProduct, variant: string | null = null) => ledger ? (
+  const hasActions = ledger || canBarcodes;
+  const actions = (p: VendorProduct, variant: string | null = null) => hasActions ? (
     <div className="flex flex-wrap gap-2">
-      <Button variant="secondary" size="sm" className="min-h-11 max-md:flex-1" aria-label={fmt(t('vendor.stock.adjustFor'), { name: variant ? `${p.name} · ${variant}` : p.name })}
-        onClick={() => setAdjust({ product: p, variant })} data-testid={`adjust-${p.id}${variant ? `-${variant}` : ''}`}>
-        <SlidersHorizontal aria-hidden="true" className="h-4 w-4" />{t('vendor.stock.adjust')}
-      </Button>
-      {!variant && (
+      {ledger && (
+        <Button variant="secondary" size="sm" className="min-h-11 max-md:flex-1" aria-label={fmt(t('vendor.stock.adjustFor'), { name: variant ? `${p.name} · ${variant}` : p.name })}
+          onClick={() => setAdjust({ product: p, variant })} data-testid={`adjust-${p.id}${variant ? `-${variant}` : ''}`}>
+          <SlidersHorizontal aria-hidden="true" className="h-4 w-4" />{t('vendor.stock.adjust')}
+        </Button>
+      )}
+      {ledger && !variant && (
         <Link href={historyHref(p)} className={`${linkBtn} max-md:flex-1`} aria-label={fmt(t('vendor.stock.historyFor'), { name: p.name })} data-testid={`history-${p.id}`}>
           <History aria-hidden="true" className="h-4 w-4" />{t('vendor.stock.historyShort')}
         </Link>
       )}
+      {canBarcodes && !variant && (
+        <Button variant="ghost" size="sm" className="min-h-11 min-w-0 max-md:flex-1" aria-label={fmt(t('vendor.barcodes.openFor'), { name: p.name })}
+          onClick={() => setBarcodesFor(p)} data-testid={`barcodes-${p.id}`}>
+          <Barcode aria-hidden="true" className="h-4 w-4" />{t('vendor.barcodes.title')}
+        </Button>
+      )}
     </div>
   ) : null;
+  /** "· 3 barcodes" on the row's muted line (S8 §6.1), only while the tool is on. */
+  const codesText = (p: VendorProduct) => {
+    const n = barcodesOn ? barcodesOf(p).length : 0;
+    return n > 0 ? fmt(plural(t, 'vendor.barcodes.count', n), { n }) : null;
+  };
 
   const body = () => {
     if (rows == null) return (<div aria-busy="true"><SkeletonTable rows={6} columns={6} className="hidden md:block" /><div className="space-y-3 md:hidden"><SkeletonCard /><SkeletonCard /><SkeletonCard /><SkeletonCard /></div></div>);
@@ -199,7 +220,7 @@ function ProductsInner() {
                 {ledger && <Th className="!text-right">{t('vendor.stock.reorderLevel')}</Th>}
                 {showCost && <Th className="!text-right" data-testid="cost-column">{t('vendor.costPrice')}</Th>}
                 <Th>{t('vendor.products.colStatus')}</Th>
-                {ledger && <Th>{t('vendor.products.colActions')}</Th>}
+                {hasActions && <Th>{t('vendor.products.colActions')}</Th>}
               </Tr>
             </THead>
             <TBody>
@@ -225,7 +246,7 @@ function ProductsInner() {
                           <div className="min-w-0">
                             <p className="font-medium text-[var(--color-fg-primary)] [overflow-wrap:anywhere]">{p.name}</p>
                             <p className="text-xs text-[var(--color-fg-quaternary)]">
-                              {[categoryLabel(p.category, categories, locale), vs.length ? fmt(t('vendor.products.variantsCount'), { n: vs.length }) : null].filter(Boolean).join(' · ')}
+                              {[categoryLabel(p.category, categories, locale), vs.length ? fmt(t('vendor.products.variantsCount'), { n: vs.length }) : null, codesText(p)].filter(Boolean).join(' · ')}
                             </p>
                           </div>
                         </div>
@@ -238,7 +259,7 @@ function ProductsInner() {
                       {ledger && <Td className="text-right tabular-nums">{dash(p.reorderLevel)}</Td>}
                       {showCost && <Td className="whitespace-nowrap text-right tabular-nums">{dash(p.costTzs, true)}</Td>}
                       <Td>{statusBadge(p, t)}</Td>
-                      {ledger && <Td>{actions(p)}</Td>}
+                      {hasActions && <Td>{actions(p)}</Td>}
                     </Tr>
                     {open && vs.map(v => (
                       <Tr key={`${p.id}-${v.name}`} className="bg-[var(--color-bg-secondary)]" data-testid={`variant-row-${p.id}-${v.name}`}>
@@ -251,7 +272,7 @@ function ProductsInner() {
                         {ledger && <Td className="text-right tabular-nums">{dash(v.effectiveReorderLevel ?? v.reorderLevel)}</Td>}
                         {showCost && <Td className="whitespace-nowrap text-right tabular-nums">{dash(v.effectiveCostTzs ?? v.costTzs, true)}</Td>}
                         <Td />
-                        {ledger && <Td>{typeof v.stock === 'number' ? actions(p, v.name) : null}</Td>}
+                        {hasActions && <Td>{ledger && typeof v.stock === 'number' ? actions(p, v.name) : null}</Td>}
                       </Tr>
                     ))}
                   </Fragment>
@@ -271,6 +292,7 @@ function ProductsInner() {
                   {statusBadge(p, t)}
                 </div>
                 <p className="text-sm">{price(p)}</p>
+                {codesText(p) && <p className="text-xs text-[var(--color-fg-quaternary)]" data-testid={`barcode-count-${p.id}`}>{codesText(p)}</p>}
                 <p className="text-sm text-[var(--color-fg-secondary)]">
                   {t('vendor.products.colStock')}: <span className="tabular-nums">{stockText(p)}</span>
                   {isLow(p) && <span className="ml-2"><Badge tone="warning">{t('vendor.stock.lowBadge')}</Badge></span>}
@@ -352,6 +374,17 @@ function ProductsInner() {
           onSaved={applyStock}
           onGone={load}
           onStockKnown={(variant, stock) => applyKnownStock(adjust.product.id, variant, stock)}
+        />
+      )}
+
+      {barcodesFor && canBarcodes && (
+        <BarcodesDialog
+          // The current row (a reload may bring the `barcodes` key); a new key remounts it with the loaded codes.
+          key={`${barcodesFor.id}:${Array.isArray((rows ?? []).find(p => p.id === barcodesFor.id)?.barcodes)}`}
+          product={(rows ?? []).find(p => p.id === barcodesFor.id) ?? barcodesFor}
+          onClose={() => setBarcodesFor(null)}
+          onSaved={saved => setRows(current => (current ?? []).map(p => (p.id === saved.id ? { ...p, barcodes: saved.barcodes } : p)))}
+          onStale={() => { void vendor.refresh(); void load(); }}
         />
       )}
     </div>
