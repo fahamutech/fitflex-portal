@@ -383,6 +383,15 @@ export const api = {
   vendorMe: (token: string) => request<VendorMe>('/vendor/me', {}, token),
   vendorProducts: (token: string) => request<VendorProduct[]>('/vendor/products', {}, token),
   vendorLowStock: (token: string) => request<LowStockRow[]>('/vendor/stock/low', {}, token),
+  /** S8: the product's whole set of codes (replace). Send only while tools.barcodes is true. */
+  vendorSetBarcodes: (token: string, productId: string, barcodes: BarcodeInput[]) =>
+    request<VendorProduct>(`/vendor/products/${encodeURIComponent(productId)}`, { method: 'PUT', body: JSON.stringify({ barcodes }) }, token),
+  /** S8: add codes, never removes any (a code already on this product and variant is a no-op). */
+  vendorAddBarcodes: (token: string, productId: string, addBarcodes: BarcodeInput[]) =>
+    request<VendorProduct>(`/vendor/products/${encodeURIComponent(productId)}`, { method: 'PUT', body: JSON.stringify({ addBarcodes }) }, token),
+  /** S8: find this vendor's product by a scanned or typed code (barcode first, then exact SKU). */
+  vendorProductLookup: (token: string, code: string) =>
+    request<ProductLookupResult>(`/vendor/products/lookup${qs({ code })}`, {}, token),
   vendorAdjustStock: (token: string, productId: string, body: StockAdjustmentInput) =>
     request<{ movement: StockMovement; product: ProductStock }>(`/vendor/products/${encodeURIComponent(productId)}/stock-adjustments`, { method: 'POST', body: JSON.stringify(body) }, token),
   vendorStockMovements: (token: string, productId: string, query: { from?: string; to?: string; variant?: string; limit?: number; cursor?: string }) =>
@@ -2422,14 +2431,43 @@ export interface VendorTools {
   importLimits?: { maxBytes?: number; maxRows?: number };
   /** S9 (VENDOR_TOOLS + VENDOR_STOCK_LEDGER + VENDOR_PURCHASES): suppliers, receive stock, payables. Missing = off. */
   purchases?: boolean;
+  /** S8 (VENDOR_TOOLS + VENDOR_STOCK_LEDGER + VENDOR_BARCODES): barcodes on products and Enter-to-match in Receive
+   *  stock. Shown only when exactly true; missing, false or a failed options load = off. */
+  barcodes?: boolean;
   [tool: string]: unknown;
 }
 
 export interface VendorProduct extends ShopProduct {
   variants?: ProductVariant[];
+  /** Free text, not unique (S1). S8 matches it exactly on Enter in Receive stock (B-9). */
+  sku?: string | null;
+  /** S8 (tools.barcodes on): the product's codes, whole-product codes first; variant null = the whole product.
+   *  Absent while the tool is off. Private shop data: never on /shop/*. */
+  barcodes?: Array<{ code: string; variant: string | null }>;
   /** SHOP_FLASH_SALES: present while an approved sale of this product is scheduled or live (price and discount locked). */
   priceLock?: { saleId: string; startsAt: string; endsAt: string; effectiveStatus?: string } | null;
 }
+
+/** S8: one code in a product save. variant left out = the whole product. Never put inside a variant object. */
+export interface BarcodeInput { code: string; variant?: string }
+
+/** GET /vendor/products/lookup?code= (S8 §2.4). matches: [] (none), 1 (barcode) or 1–10 (SKU, by name). */
+export interface ProductLookupMatch {
+  productId: string;
+  name: string;
+  /** The code's variant; null for a whole-product code or a SKU match. */
+  variant: string | null;
+  /** Only when variant is null and the product's variants keep stock. */
+  variants: Array<{ name: string; stock: number | null }> | null;
+  priceTzs: number;
+  discountPriceTzs: number | null;
+  stock: number;
+  status: 'active' | 'paused' | 'archived';
+  approvalStatus?: 'pending' | 'approved' | 'rejected';
+  sku: string | null;
+  matchedBy: 'barcode' | 'sku';
+}
+export interface ProductLookupResult { code: string; codeKey: string; matches: ProductLookupMatch[] }
 
 export interface LowStockRow { productId: string; name: string; variant: string | null; stock: number; reorderLevel: number }
 

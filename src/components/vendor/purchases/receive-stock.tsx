@@ -2,10 +2,11 @@
 // Receive stock (S9 §4.2, §5.2): who it came from, what came in at what unit cost, what was paid, and the plan for the
 // rest. Online only; the form is kept as a local draft (Q-5) and cleared on success, Discard and sign-out. The server
 // computes every total and the GRN number; the client only previews.
-import { useCallback, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
 import { Minus, Plus, Trash2, UserPlus, X } from 'lucide-react';
-import { api, type VendorProduct } from '@/lib/api';
+import { api, type ProductLookupMatch, type VendorProduct } from '@/lib/api';
+import { barcodesOf, looksLikeCode, matchLocal } from '@/lib/barcode-rules';
 import { money } from '@/lib/admin-utils';
 import {
   addDays, dayMonth, receiptDateTime, eatToday, errorBody, errorCode, fmt, isRefusal, newClientRef, receiptDay, REFERENCE_REQUIRED,
@@ -15,7 +16,8 @@ import {
   clearDraft, DEFAULT_DUE_DAYS, draftKey, DUE_MAX_DAYS, loadDraft, MAX_INVOICE_REF, MAX_NOTE, MAX_QTY, MAX_TOTAL, MAX_UNIT_COST,
   plural, purchaseErrorKey, purchasesApi, RECEIVED_BACK_DAYS, saveDraft, scheduleFor, type LastCostRow, type ReceiveInput, type SupplierRow,
 } from '@/lib/vendor-purchases';
-import { Alert, Badge, Button, Card, CardContent, ErrorState, Field, Input, PageHeader, Segmented, Select, SkeletonCard, Textarea, useToast } from '@/components/shared';
+import { Alert, Badge, Button, Card, CardContent, ErrorState, Field, Input, PageHeader, Segmented, Select, SkeletonCard, Spinner, Textarea, useToast } from '@/components/shared';
+import { barcodeErrorText, serverMessage, type BarcodeRefusal } from '../barcodes/barcode-messages';
 import { Dialog, DialogFooter } from '@/components/dialog';
 import { useVendor } from '@/components/vendor-context';
 import { useFocusAfterRender } from '@/lib/use-focus-after-render';
@@ -48,31 +50,104 @@ const freshForm = (today: string): Form => ({
 
 const optionCls = (active: boolean) => `flex min-h-11 w-full cursor-pointer items-center justify-between gap-2 px-3 py-2 text-left text-sm ${active ? 'bg-[var(--color-brand-50)]' : 'hover:bg-[var(--color-bg-secondary)]'}`;
 
-/** A searchable product picker (name or SKU; archived products are not offered). */
-function ProductCombobox({ products, addedIds, onPick, label, inputTestId, autoFocus }: {
+/**
+ * What Enter with a code did (S8 §6.2): added (input clears), choose (several SKU matches: the listbox shows only
+ * those), a status to show under the input, or pass (normal text: today's Enter, the highlighted hit).
+ */
+export type CodeOutcome =
+  | { kind: 'added' }
+  | { kind: 'choose'; ids: string[] }
+  | { kind: 'notFound'; code: string }
+  | { kind: 'status'; tone: 'warning' | 'error'; text: string; retry?: boolean }
+  | { kind: 'pass' }
+  | { kind: 'none' };
+
+/** A searchable product picker (name or SKU; archived products are not offered). With `onCode` (S8), Enter matches codes. */
+function ProductCombobox({ products, addedIds, onPick, label, inputTestId, autoFocus, onCode, onAddCode }: {
   products: VendorProduct[]; addedIds: Set<string>; onPick: (p: VendorProduct) => void; label: string; inputTestId: string; autoFocus?: boolean;
+  /** S8 (tools.barcodes): resolve the typed / scanned text on Enter. */
+  onCode?: (text: string, hasTextHit: boolean) => Promise<CodeOutcome>;
+  /** S8: "Add this code to a product" for an unknown code; left out for people without `products`. */
+  onAddCode?: (code: string) => void;
 }) {
   const { t } = useApp();
   const listId = useId();
+  const statusId = `${listId}-status`;
   const [q, setQ] = useState('');
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(0);
+  const [restrict, setRestrict] = useState<string[] | null>(null);
+  const [busy, setBusy] = useState(false);
+  const busyRef = useRef(false);
+  const [status, setStatus] = useState<{ node: ReactNode; text: string; retry?: string } | null>(null);
   const needle = q.trim().toLowerCase();
-  const hits = useMemo(() => products.filter(p => !needle || p.name.toLowerCase().includes(needle) || String((p as { sku?: unknown }).sku ?? '').toLowerCase().includes(needle)).slice(0, 8), [products, needle]);
-  const pick = (p: VendorProduct) => { onPick(p); setQ(''); setOpen(false); };
+  const hits = useMemo(() => (restrict
+    ? products.filter(p => restrict.includes(p.id))
+    : products.filter(p => !needle || p.name.toLowerCase().includes(needle) || String(p.sku ?? '').toLowerCase().includes(needle)).slice(0, 8)), [products, needle, restrict]);
+  const pick = (p: VendorProduct) => { onPick(p); setQ(''); setOpen(false); setRestrict(null); setStatus(null); };
+
+  async function runCode(text: string, fallback: VendorProduct | null) {
+    if (!onCode || busyRef.current) return;
+    busyRef.current = true; setBusy(true); setStatus(null);
+    let out: CodeOutcome;
+    try { out = await onCode(text, !!fallback); } finally { busyRef.current = false; setBusy(false); }
+    if (out.kind === 'added') { setQ(''); setRestrict(null); setOpen(false); }
+    else if (out.kind === 'pass') { if (fallback) pick(fallback); }
+    else if (out.kind === 'choose') {
+      setRestrict(out.ids); setOpen(true); setActive(0);
+      setStatus({ node: <span>{t('vendor.scan.pickMatch')}</span>, text: t('vendor.scan.pickMatch') });
+    } else if (out.kind === 'notFound') {
+      const code = out.code;
+      setOpen(false);
+      setStatus({
+        text: fmt(t('vendor.scan.notFound'), { code }),
+        node: (
+          <Alert tone="warning">
+            <span className="block [overflow-wrap:anywhere]">{fmt(t('vendor.scan.notFound'), { code })}</span>
+            {onAddCode
+              ? <Button type="button" variant="secondary" size="sm" className="mt-2 min-h-11 whitespace-normal" onClick={() => onAddCode(code)} data-testid={`${inputTestId}-add-code`}>{t('vendor.scan.addToProduct')}</Button>
+              : <span className="mt-1 block font-normal text-[var(--color-fg-tertiary)]" data-testid={`${inputTestId}-ask-products`}>{t('vendor.scan.askProducts')}</span>}
+          </Alert>
+        ),
+      });
+    } else if (out.kind === 'status') {
+      setOpen(false);
+      setStatus({ text: out.text, retry: out.retry ? text : undefined, node: <Alert tone={out.tone}><span className="block [overflow-wrap:anywhere]">{out.text}</span></Alert> });
+    }
+  }
+
   const onKey = (e: KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'ArrowDown') { e.preventDefault(); setOpen(true); setActive(a => Math.min(hits.length - 1, a + 1)); }
     else if (e.key === 'ArrowUp') { e.preventDefault(); setActive(a => Math.max(0, a - 1)); }
+    else if (e.key === 'Enter' && onCode && q.trim() && !restrict) {
+      // S8 §6.2: code → SKU → lookup → today's highlighted hit. One code at a time: Enter waits for the answer.
+      e.preventDefault();
+      void runCode(q, open && hits[active] ? hits[active] : null);
+    }
     else if (e.key === 'Enter' && open && hits[active]) { e.preventDefault(); pick(hits[active]); }
     else if (e.key === 'Escape' && open) { e.stopPropagation(); setOpen(false); }
   };
   return (
     <div className="relative">
-      <Input role="combobox" aria-expanded={open} aria-controls={listId} aria-autocomplete="list" aria-label={label}
-        aria-activedescendant={open && hits[active] ? `${listId}-${active}` : undefined}
-        value={q} placeholder={t('vendor.purchases.searchProduct')} autoComplete="off" autoFocus={autoFocus} data-focus="product"
-        onChange={e => { setQ(e.target.value); setOpen(true); setActive(0); }} onFocus={() => setOpen(true)} onBlur={() => setTimeout(() => setOpen(false), 150)}
-        onKeyDown={onKey} data-testid={inputTestId} />
+      <div className="relative">
+        <Input role="combobox" aria-expanded={open} aria-controls={listId} aria-autocomplete="list" aria-label={label}
+          aria-activedescendant={open && hits[active] ? `${listId}-${active}` : undefined}
+          aria-busy={busy || undefined} aria-describedby={status ? statusId : undefined} className={busy ? 'pr-10' : undefined}
+          value={q} placeholder={t('vendor.purchases.searchProduct')} autoComplete="off" autoFocus={autoFocus} data-focus="product"
+          onChange={e => { setQ(e.target.value); setOpen(true); setActive(0); setRestrict(null); setStatus(null); }} onFocus={() => setOpen(true)} onBlur={() => setTimeout(() => setOpen(false), 150)}
+          onKeyDown={onKey} data-testid={inputTestId} />
+        {busy && (
+          <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center" data-testid={`${inputTestId}-busy`}>
+            <Spinner className="h-4 w-4" /><span className="sr-only">{fmt(t('vendor.scan.looking'), { code: q.trim() })}</span>
+          </span>
+        )}
+      </div>
+      {status && (
+        <div id={statusId} role="status" aria-live="polite" className="mt-2 space-y-2 text-sm" data-testid={`${inputTestId}-status`}>
+          {status.node}
+          {status.retry && <Button type="button" variant="secondary" size="sm" className="min-h-11" onClick={() => void runCode(status.retry!, null)} data-testid={`${inputTestId}-retry`}>{t('common.tryAgain')}</Button>}
+        </div>
+      )}
       {open && (
         <ul id={listId} role="listbox" aria-label={label} className="absolute z-20 mt-1 max-h-72 w-full overflow-auto rounded-[var(--radius-lg)] border border-[var(--color-border-primary)] bg-[var(--color-bg-primary)] shadow-[var(--shadow-lg)]">
           {hits.length === 0 && <li className="px-3 py-2 text-sm text-[var(--color-fg-tertiary)]">{t('vendor.purchases.noProductMatch')}</li>}
@@ -194,7 +269,9 @@ export function ReceiveStock({ initialSupplierId }: { initialSupplierId: string 
   const suspended = vendor.me?.accountStatus === 'suspended';
   const key = vendor.me && user?.id ? draftKey(vendor.me.vendorId, user.id) : null;
 
-  const [products, setProducts] = useState<VendorProduct[] | null>(null);
+  // Every product (archived too, so a scanned code of an archived product says so); lines use the others only.
+  const [allProducts, setAllProducts] = useState<VendorProduct[] | null>(null);
+  const products = useMemo(() => (allProducts ? allProducts.filter(p => p.status !== 'archived') : null), [allProducts]);
   const [productsFailed, setProductsFailed] = useState(false);
   const [form, setForm] = useState<Form>(() => freshForm(today));
   const [dirty, setDirty] = useState(false);
@@ -211,13 +288,13 @@ export function ReceiveStock({ initialSupplierId }: { initialSupplierId: string 
   const headingRef = useRef<HTMLHeadingElement>(null);
 
   // ── load: products, the supplier from ?supplier=, and any draft on this device ──
-  const loadProducts = useCallback(async () => {
-    if (!token) return;
+  const loadProducts = useCallback(async (): Promise<VendorProduct[] | null> => {
+    if (!token) return null;
     setProductsFailed(false);
-    try { setProducts((await api.vendorProducts(token)).filter(p => p.status !== 'archived')); }
+    try { const list = await api.vendorProducts(token); setAllProducts(list); return list; }
     // Staff of a suspended vendor get 403 vendor_suspended here: the shared handler shows the suspended banner;
     // the form stays empty with Review disabled (the server refuses writes too).
-    catch (err) { if (vendor.handleError(err)) setProducts([]); else setProductsFailed(true); }
+    catch (err) { if (vendor.handleError(err)) setAllProducts([]); else setProductsFailed(true); return null; }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
   useEffect(() => { void loadProducts(); }, [loadProducts]);
@@ -315,15 +392,19 @@ export function ReceiveStock({ initialSupplierId }: { initialSupplierId: string 
     return Number(p.stock ?? 0);
   };
   const focusLine = (k: string, what: 'qty' | 'product' | 'variant' | 'cost') => focus(() => document.querySelector<HTMLElement>(`[data-line="${k}"] [data-focus="${what}"]`));
-  /** Same product + variant twice → one line with the quantities added (P-1, AC-11). */
-  const mergeInto = (f: Form, k: string): Form => {
+  /** Same product + variant twice → one line with the quantities added (P-1, AC-11). No focus change. */
+  const mergeLines = (f: Form, k: string): { form: Form; into: string | null } => {
     const l = f.lines.find(x => x.key === k);
-    if (!l?.productId || needsVariant(l)) return f;
+    if (!l?.productId || needsVariant(l)) return { form: f, into: null };
     const other = f.lines.find(x => x.key !== k && x.productId === l.productId && x.variant === l.variant);
-    if (!other) return f;
+    if (!other) return { form: f, into: null };
     const qty = (Number.isFinite(intOf(other.qty)) ? intOf(other.qty) : 0) + (Number.isFinite(intOf(l.qty)) ? intOf(l.qty) : 1);
-    focusLine(other.key, 'qty');
-    return { ...f, lines: f.lines.filter(x => x.key !== k).map(x => (x.key === other.key ? { ...x, qty: String(Math.min(MAX_QTY, qty)) } : x)) };
+    return { form: { ...f, lines: f.lines.filter(x => x.key !== k).map(x => (x.key === other.key ? { ...x, qty: String(Math.min(MAX_QTY, qty)) } : x)) }, into: other.key };
+  };
+  const mergeInto = (f: Form, k: string): Form => {
+    const { form: next, into } = mergeLines(f, k);
+    if (into) focusLine(into, 'qty');
+    return next;
   };
   const setLine = (k: string, patch: Partial<Line>) => {
     update(f => ({ ...f, lines: f.lines.map(l => (l.key === k ? { ...l, ...patch } : l)) }));
@@ -338,6 +419,93 @@ export function ReceiveStock({ initialSupplierId }: { initialSupplierId: string 
     update(f => mergeInto({ ...f, lines: f.lines.map(l => (l.key === k ? { ...l, variant, cost: l.costTouched ? l.cost : '' } : l)) }, k));
   };
   const addRow = () => { const l = blankLine(); update(f => ({ ...f, lines: [...f.lines, l] })); focusLine(l.key, 'product'); };
+
+  // ── S8 §6.2: Enter with a code in an item search (USB / keyboard-wedge scanner or typed) ──
+  const barcodesOn = vendor.me?.tools?.barcodes === true;
+  const canAddCode = barcodesOn && vendor.can('products');
+  const [announce, setAnnounce] = useState('');
+  const [addCode, setAddCode] = useState<{ code: string; lineKey: string } | null>(null);
+  const say = (text: string) => setAnnounce(a => (a === text ? `${text}\u00a0` : text));
+  /** Put a matched product on line k (or +1 on its line), keep an empty item search at the end and move focus to it. */
+  const scanAdd = (k: string, p: VendorProduct, variant: string | null) => {
+    const vs = variantsOf(p);
+    const v = variant && vs.some(x => x.name === variant) ? variant : '';
+    const pickVariantNow = tracksVariantStock(p) && !v;
+    const existing = pickVariantNow ? undefined : form.lines.find(l => l.key !== k && l.productId === p.id && l.variant === v);
+    const qty = existing ? Math.min(MAX_QTY, (Number.isFinite(intOf(existing.qty)) ? intOf(existing.qty) : 0) + 1) : 1;
+    const tail = blankLine();
+    update(f => {
+      let next: Form = { ...f, lines: f.lines.map(l => (l.key === k ? { ...l, productId: p.id, variant: v, qty: '1', cost: '', costTouched: false } : l)) };
+      if (!pickVariantNow) {
+        // mergeLines reads byId, which may not hold a product found by the lookup yet: merge by id + variant here.
+        const other = next.lines.find(x => x.key !== k && x.productId === p.id && x.variant === v);
+        if (other) next = { ...next, lines: next.lines.filter(x => x.key !== k).map(x => (x.key === other.key ? { ...x, qty: String(qty) } : x)) };
+      }
+      if (!next.lines.some(l => !l.productId)) next = { ...next, lines: [...next.lines, tail] };
+      return next;
+    });
+    setErrors(e => { const lines = { ...e.lines }; delete lines[k]; return { ...e, lines }; });
+    if (pickVariantNow) focusLine(k, 'variant');
+    else focus(() => { const all = document.querySelectorAll<HTMLElement>('[data-testid="receive-lines"] input[data-focus="product"]'); return all[all.length - 1]; });
+    say(fmt(t('vendor.scan.addedLine'), { name: v ? `${p.name} (${v})` : p.name, qty }));
+  };
+  const archivedOutcome = (name: string): CodeOutcome => ({ kind: 'status', tone: 'warning', text: fmt(t('vendor.scan.archived'), { name }) });
+  /** One product chosen by a code: archived → refused; else added. */
+  const takeMatch = (k: string, p: VendorProduct, variant: string | null): CodeOutcome => {
+    if (p.status === 'archived') return archivedOutcome(p.name);
+    scanAdd(k, p, variant);
+    return { kind: 'added' };
+  };
+  const resolveCode = async (k: string, raw: string, hasTextHit: boolean): Promise<CodeOutcome> => {
+    const text = raw.trim();
+    const list = allProducts ?? [];
+    // 1–2: the loaded list first (barcode by codeKey, then exact SKU).
+    const local = matchLocal(list, text);
+    if (local?.kind === 'barcode') return takeMatch(k, local.product, local.variant);
+    if (local?.kind === 'sku') {
+      const live = local.products.filter(p => p.status !== 'archived');
+      if (!live.length) return archivedOutcome(local.products[0].name);
+      if (live.length === 1) return takeMatch(k, live[0], null);
+      return { kind: 'choose', ids: live.map(p => p.id) };
+    }
+    // 4: plain text (spaces, too short or long) keeps today's Enter.
+    if (!looksLikeCode(text) || !token) return { kind: 'pass' };
+    // 3: ask the server (a code saved on another device, or a SKU not in this list).
+    let matches: ProductLookupMatch[];
+    try {
+      matches = (await api.vendorProductLookup(token, text)).matches ?? [];
+    } catch (err) {
+      const code = errorCode(err);
+      if (code === 'rate_limited') {
+        const s = Number(errorBody<{ retryAfterSeconds?: number }>(err)?.retryAfterSeconds) || 60;
+        return { kind: 'status', tone: 'warning', text: fmt(t('vendor.scan.rateLimited'), { s }) };
+      }
+      if (code === 'feature_disabled') { toast.error(t('vendor.barcodes.unavailable')); void vendor.refresh(); return hasTextHit ? { kind: 'pass' } : { kind: 'none' }; }
+      if (code === 'code_required' || code === 'invalid_code') return hasTextHit ? { kind: 'pass' } : { kind: 'notFound', code: text };
+      if (err instanceof Error && isRefusal(err) && (err as { status?: number }).status === 403) {
+        if (!['vendor_suspended', 'vendor_staff_inactive', 'account_suspended'].includes(code ?? '')) toast.error(t('vendor.purchases.noAccess'));
+        else vendor.handleError(err);
+        return { kind: 'none' };
+      }
+      if (isRefusal(err) && vendor.handleError(err)) return { kind: 'none' };
+      return { kind: 'status', tone: 'error', text: t('vendor.scan.lookupFailed'), retry: true };
+    }
+    if (!matches.length) return hasTextHit ? { kind: 'pass' } : { kind: 'notFound', code: text };
+    // A product the list doesn't have yet (added on another device): load the list again, once.
+    let fresh = list;
+    if (matches.some(m => !fresh.some(p => p.id === m.productId))) fresh = (await loadProducts()) ?? fresh;
+    const found = matches.map(m => ({ m, p: fresh.find(p => p.id === m.productId) })).filter((x): x is { m: ProductLookupMatch; p: VendorProduct } => !!x.p);
+    if (!found.length) return { kind: 'notFound', code: text };
+    if (found.length === 1) {
+      const { m, p } = found[0];
+      if (m.status === 'archived' || p.status === 'archived') return archivedOutcome(m.name || p.name);
+      return takeMatch(k, p, m.variant);
+    }
+    const live = found.filter(x => x.m.status !== 'archived' && x.p.status !== 'archived');
+    if (!live.length) return archivedOutcome(found[0].m.name);
+    if (live.length === 1) return takeMatch(k, live[0].p, live[0].m.variant);
+    return { kind: 'choose', ids: live.map(x => x.p.id) };
+  };
   const removeRow = (k: string) => update(f => ({ ...f, lines: f.lines.length > 1 ? f.lines.filter(l => l.key !== k) : [blankLine()] }));
 
   // ── money ──
@@ -533,7 +701,9 @@ export function ReceiveStock({ initialSupplierId }: { initialSupplierId: string 
                           <div className="min-w-0 flex-1">
                             {p ? <p className="font-semibold [overflow-wrap:anywhere]" data-focus="product" tabIndex={-1}>{p.name}</p>
                               : <ProductCombobox products={products} addedIds={new Set(chosen.map(c => c.productId))} label={fmt(t('vendor.purchases.itemN'), { n: idx + 1 })}
-                                  onPick={pp => pickProduct(l.key, pp)} inputTestId={`receive-product-${idx}`} />}
+                                  onPick={pp => pickProduct(l.key, pp)} inputTestId={`receive-product-${idx}`}
+                                  onCode={barcodesOn ? (text, hasTextHit) => resolveCode(l.key, text, hasTextHit) : undefined}
+                                  onAddCode={canAddCode ? code => setAddCode({ code, lineKey: l.key }) : undefined} />}
                           </div>
                           <Button type="button" variant="ghost" className="min-h-11 min-w-11 px-2" aria-label={fmt(t('vendor.purchases.removeLine'), { name })}
                             onClick={() => removeRow(l.key)} data-testid={`receive-remove-${idx}`}><Trash2 aria-hidden="true" className="h-4 w-4" /></Button>
@@ -709,9 +879,94 @@ export function ReceiveStock({ initialSupplierId }: { initialSupplierId: string 
         </DialogFooter>
       </Dialog>
 
+      <p className="sr-only" aria-live="polite" data-testid="receive-scan-live">{announce}</p>
+      {addCode && products && canAddCode && (
+        <AddCodeDialog code={addCode.code} products={products}
+          onClose={() => setAddCode(null)}
+          onAdded={(p, variant) => {
+            setAllProducts(cur => (cur ?? []).map(x => (x.id === p.id ? { ...x, barcodes: p.barcodes } : x)));
+            const k = addCode.lineKey;
+            setAddCode(null);
+            // The line the code was typed in, else (it was used meanwhile) the empty item search at the end.
+            const target = form.lines.find(l => l.key === k && !l.productId) ?? form.lines.find(l => !l.productId);
+            if (target) scanAdd(target.key, p, variant);
+            else { const l = blankLine(); update(f => ({ ...f, lines: [...f.lines, l] })); scanAdd(l.key, p, variant); }
+          }} />
+      )}
+
       <SupplierFormDialog open={addSupplier != null} supplier={null} initialName={addSupplier ?? ''} onClose={() => setAddSupplier(null)}
         onSaved={s => { setAddSupplier(null); toast.success(t('vendor.suppliers.saved')); chooseSupplier({ id: s.id, name: s.name, phone: s.phone, owedTzs: 0 }); }} />
     </div>
   );
 }
 
+/**
+ * S8 §6.2 "Add this code to a product" (people with `products`): product → For → Add code. Sends addBarcodes, so a stale
+ * list never removes anyone else's code; the line is then added as if the code had matched.
+ */
+function AddCodeDialog({ code, products, onClose, onAdded }: {
+  code: string; products: VendorProduct[]; onClose: () => void; onAdded: (p: VendorProduct, variant: string | null) => void;
+}) {
+  const { token, t, locale } = useApp();
+  const vendor = useVendor();
+  const toast = useToast();
+  const labelId = useId();
+  const [product, setProduct] = useState<VendorProduct | null>(null);
+  const [forVariant, setForVariant] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const vs = product ? variantsOf(product) : [];
+
+  async function save() {
+    if (!token || !product || saving) return;
+    setSaving(true); setError(null);
+    try {
+      const res = await api.vendorAddBarcodes(token, product.id, [forVariant ? { code, variant: forVariant } : { code }]);
+      toast.success(fmt(t('vendor.scan.codeAdded'), { name: product.name }));
+      onAdded({ ...product, barcodes: Array.isArray(res?.barcodes) ? res.barcodes : [...barcodesOf(product), { code, variant: forVariant || null }] }, forVariant || null);
+    } catch (err) {
+      const c = errorCode(err);
+      const b = errorBody<BarcodeRefusal>(err);
+      if (c === 'feature_disabled') { toast.error(t('vendor.barcodes.unavailable')); void vendor.refresh(); onClose(); return; }
+      if (isRefusal(err) && vendor.handleError(err)) { onClose(); return; }
+      setError(barcodeErrorText(t, b) ?? (isRefusal(err) ? serverMessage(b, locale) : null) ?? t('vendor.barcodes.err.server'));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Dialog open onClose={() => { if (!saving) onClose(); }} title={t('vendor.scan.addToProduct')} sheetOnMobile testId="add-code-dialog">
+      <div className="space-y-4">
+        <p className="text-sm">{t('vendor.barcodes.field')}: <span className="font-mono tabular-nums [overflow-wrap:anywhere]" data-testid="add-code-value">{code}</span></p>
+        <div className="space-y-1.5">
+          <p id={labelId} className="text-sm font-medium text-[var(--color-fg-secondary)]">{t('vendor.scan.chooseProduct')}</p>
+          {product ? (
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span className="font-semibold [overflow-wrap:anywhere]" data-testid="add-code-chosen">{product.name}</span>
+              <Button type="button" variant="secondary" size="sm" className="min-h-11" disabled={saving}
+                onClick={() => { setProduct(null); setForVariant(''); setError(null); }} data-testid="add-code-change">{t('vendor.purchases.change')}</Button>
+            </div>
+          ) : (
+            <ProductCombobox products={products} addedIds={new Set()} label={t('vendor.scan.chooseProduct')} inputTestId="add-code-product"
+              onPick={p => { setProduct(p); setForVariant(''); setError(null); }} />
+          )}
+        </div>
+        {product && vs.length > 0 && (
+          <Field label={t('vendor.barcodes.for')}>
+            <Select value={forVariant} disabled={saving} onChange={e => setForVariant(e.target.value)} data-testid="add-code-for">
+              <option value="">{t('vendor.barcodes.wholeProduct')}</option>
+              {vs.map(v => <option key={v.name} value={v.name}>{v.name}</option>)}
+            </Select>
+          </Field>
+        )}
+        {product && <p className="text-sm [overflow-wrap:anywhere]" data-testid="add-code-confirm-text">{fmt(t('vendor.scan.confirmAddTitle'), { code, name: forVariant ? `${product.name} (${forVariant})` : product.name })}</p>}
+        {error && <div data-testid="add-code-error"><Alert tone="error">{error}</Alert></div>}
+      </div>
+      <DialogFooter className="flex-wrap">
+        <Button type="button" variant="secondary" className="min-h-11" disabled={saving} onClick={onClose}>{t('common.cancel')}</Button>
+        <Button type="button" className="min-h-11" disabled={!product} loading={saving} onClick={save} data-testid="add-code-save">{t('vendor.scan.confirmAdd')}</Button>
+      </DialogFooter>
+    </Dialog>
+  );
+}
