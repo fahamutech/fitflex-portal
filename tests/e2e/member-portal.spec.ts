@@ -466,6 +466,49 @@ test.describe('member portal, flag on', () => {
     expect(await page.evaluate(() => sessionStorage.getItem('ff_member_session'))).not.toContain('TRAINER-TOKEN');
   });
 
+  test('portal sign-in (/login): a member with no business role is taken to their member area', async ({ page }) => {
+    const h = await setup(page, {}, false);
+    await page.goto('/login/');
+    await expect(page.getByTestId('pin-method-btn')).toHaveText(en['login.pinMethodAll'], { timeout: 30_000 });
+    await page.getByTestId('pin-method-btn').click();
+    await page.getByTestId('pin-identifier-input').fill('0754123678');
+    await page.getByTestId('pin-input').fill('4821');
+    await page.getByTestId('pin-submit').click();
+    await expect(page.getByTestId('member-today-page')).toBeVisible({ timeout: 30_000 });
+    await expect(page).toHaveURL(/\/m\/$/);
+    expect(h.reqs.filter(r => r.path === '/auth/pin/login')).toHaveLength(1);
+    // Only the member session is stored: the staff portal keys stay empty.
+    const stored = await page.evaluate(() => ({ member: sessionStorage.getItem('ff_member_session'), token: localStorage.getItem('token'), user: localStorage.getItem('user') }));
+    expect(stored.member).toContain(TOKEN);
+    expect(stored.token).toBeNull();
+    expect(stored.user).toBeNull();
+  });
+
+  test('portal sign-in (/login): a trainer who is also a member opens the member role; a business role still opens the portal', async ({ page }) => {
+    const h = await setup(page, {
+      'POST /auth/pin/login': n => n === 1
+        ? ok({ token: 'TRAINER-TOKEN', user: { id: 'usr_t1', userType: 'trainer' }, personas: [{ id: 'usr_t1', userType: 'trainer' }, { id: 'usr_m1', userType: 'member', accountStatus: 'active' }] })
+        : ok({ token: 'ADMIN-TOKEN', user: { id: 'a1', userType: 'admin', portalUser: true } }),
+      'POST /auth/switch-persona': ok({ token: TOKEN, user: USER }),
+    }, false);
+    await page.goto('/login/');
+    await page.getByTestId('pin-method-btn').click({ timeout: 30_000 });
+    await page.getByTestId('pin-identifier-input').fill('0754123678');
+    await page.getByTestId('pin-input').fill('4821');
+    await page.getByTestId('pin-submit').click();
+    await expect(page.getByTestId('member-today-page')).toBeVisible({ timeout: 30_000 });
+    expect(h.reqs.find(r => r.path === '/auth/switch-persona')!.body).toEqual({ personaId: 'usr_m1' });
+    // An admin signing in on /login goes to the admin area, and no member session is kept.
+    await page.evaluate(() => { sessionStorage.clear(); localStorage.clear(); });
+    await page.goto('/login/');
+    await page.getByTestId('pin-method-btn').click({ timeout: 30_000 });
+    await page.getByTestId('pin-identifier-input').fill('0754000000');
+    await page.getByTestId('pin-input').fill('1234');
+    await page.getByTestId('pin-submit').click();
+    await expect(page).toHaveURL(/\/admin/, { timeout: 30_000 });
+    expect(await page.evaluate(() => sessionStorage.getItem('ff_member_session') ?? localStorage.getItem('ff_member_session'))).toBeNull();
+  });
+
   test('pass: a gym plan is not the FitFlex Pass; an unlimited tier says unlimited', async ({ page }) => {
     await setup(page, {
       'GET /me': ok({ user: USER, subscription: { id: 'sub_gym', tier: null, type: 'direct_sub', status: 'active' }, pendingPayment: null, visitsUsed: 3, visitCap: null,
