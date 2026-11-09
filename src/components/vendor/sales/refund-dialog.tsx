@@ -275,7 +275,7 @@ export function RefundDialog({
           onChange={e => setLineQty(l, Number(e.target.value))}
           aria-label={fmt(t('vendor.refunds.qtyLabel'), { name })} aria-describedby={`refund-qty-${id}-value-${at}`}
           aria-invalid={exceeded.has(id) || undefined}
-          className={`min-h-11 w-16 text-center tabular-nums ${exceeded.has(id) ? 'border-[var(--color-warning-600)]' : ''}`} data-testid={`refund-qty-${id}`} />
+          className={`min-h-11 w-16 shrink-0 text-center tabular-nums ${at === 't' ? '!px-1' : ''} ${exceeded.has(id) ? 'border-[var(--color-warning-600)]' : ''}`} data-testid={`refund-qty-${id}`} />
         <span id={`refund-qty-${id}-value-${at}`} className="sr-only">{fmt(t('vendor.refunds.a11y.qtyValue'), { qty: n, refundable: max })}</span>
         <Button type="button" variant="secondary" className="min-h-11 w-11 shrink-0 px-0" onClick={() => setLineQty(l, n + 1)} disabled={busy || n >= max}
           aria-label={fmt(t('vendor.refunds.increase'), { name })} data-testid={`refund-inc-${id}`}><Plus aria-hidden="true" className="h-4 w-4" /></Button>
@@ -307,7 +307,7 @@ export function RefundDialog({
       <Button type="button" variant="ghost" className="min-h-11 w-full sm:w-auto" onClick={refundAll} disabled={busy || voided} data-testid="refund-all">{t('vendor.refunds.refundAll')}</Button>
       <div className="@container">
         <div className="hidden @xl:block">
-          <Table aria-label={t('vendor.refunds.pickItems')} data-testid="refund-lines-table">
+          <Table className="ui-table-dense" aria-label={t('vendor.refunds.pickItems')} data-testid="refund-lines-table">
             <THead>
               <Tr>
                 <Th>{t('vendor.refunds.colItem')}</Th>
