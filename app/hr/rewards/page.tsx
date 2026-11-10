@@ -1,12 +1,14 @@
 'use client';
+import { useApp } from '../../providers';
 import { RewardQueue } from '@/components/reward-queue';
 
 export default function HrRewardsPage() {
+  const { t } = useApp();
   return (
     <RewardQueue
       scope="corporate"
-      title="Rewards"
-      description="Company-funded rewards your employees have earned. Approve, then mark issued once handed over. Rewards FitFlex funds are handed out by FitFlex."
+      title={t('hr.nav.rewards')}
+      description={t('org.rewards.hr.description')}
     />
   );
 }

@@ -13,7 +13,7 @@ function passTierTone(tier: string | null): 'brand' | 'warning' | 'gray' {
 }
 
 export default function CheckinsPage() {
-  const { token, t } = useApp();
+  const { token, t, locale } = useApp();
   const [rows, setRows]       = useState<CheckIn[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -36,7 +36,7 @@ export default function CheckinsPage() {
     <div className="space-y-6">
       <PageHeader
         title={t('checkins.heading')}
-        description="Live feed — auto-refreshes every 10 seconds."
+        description={t('ownerCheckins.description')}
         actions={
           <Button variant="secondary" size="sm" onClick={load} disabled={loading}>
             <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
@@ -48,7 +48,7 @@ export default function CheckinsPage() {
       <Card>
         <CardHeader>
           <div className="flex items-center gap-2">
-            <span className="text-sm font-semibold text-[var(--color-fg-primary)]">Check-ins</span>
+            <span className="text-sm font-semibold text-[var(--color-fg-primary)]">{t('nav.checkins')}</span>
             {!loading && (
               <Badge tone="gray">{rows.length}</Badge>
             )}
@@ -60,7 +60,7 @@ export default function CheckinsPage() {
           <div className="px-6 pb-6">
             <EmptyState
               title={t('checkins.empty')}
-              body="Check-ins will appear here as members scan in at your gym."
+              body={t('ownerCheckins.emptyBody')}
             />
           </div>
         ) : (
@@ -77,7 +77,7 @@ export default function CheckinsPage() {
               {rows.map(r => (
                 <Tr key={r.id}>
                   <Td className="tabular-nums whitespace-nowrap">
-                    {new Date(r.timestamp).toLocaleString()}
+                    {new Date(r.timestamp).toLocaleString(locale === 'sw' ? 'sw-TZ' : undefined)}
                   </Td>
                   <Td className="font-medium !text-[var(--color-fg-primary)]">
                     {r.displayName || r.memberPublicId || r.memberId}
@@ -90,7 +90,7 @@ export default function CheckinsPage() {
                   </Td>
                   <Td>
                     <Badge tone={passTierTone(r.passTier)}>
-                      {r.passTier ?? 'Direct'}
+                      {r.passTier ?? t('ownerCheckins.direct')}
                     </Badge>
                   </Td>
                   <Td className="tabular-nums">
