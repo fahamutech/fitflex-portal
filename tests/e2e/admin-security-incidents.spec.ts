@@ -33,7 +33,7 @@ type Opts = {
   locale?: 'en' | 'sw';
   incidents?: Json[];
   /** Answer for every security-incident route (e.g. the flag is off, or access was removed). */
-  all?: { status: number; json: Json };
+  all?: { status: number; json?: Json; body?: string; contentType?: string };
   /** The list fails while this is true (the test switches it off; next dev runs effects twice, so a count would not do). */
   listDown?: boolean;
   /** Someone else resolved the report first: the resolve route answers 409 and the report is resolved. */
@@ -145,7 +145,9 @@ test('the list shows reports in Dar es Salaam time, filters by status, and opens
   await expect(snap).toContainText('Web check-in (gym QR code in a browser)');
   await expect(snap).toContainText('usr_member1');
   await expect(page.getByTestId('secinc-protection')).toContainText('Applied');
-  await expect(page.getByTestId('secinc-protection')).toContainText('signed out everywhere');
+  await expect(page.getByTestId('secinc-protection')).toContainText('FitFlex sessions were ended when they reported this.');
+  await expect(page.getByTestId('secinc-protection')).toContainText("This does not change the member's Google or email sign-in.");
+  await expect(page.getByTestId('secinc-protection')).not.toContainText('everywhere');
   await expect(page.getByTestId('secinc-protection')).toContainText('must set a new PIN');
   await expect(page.getByTestId('secinc-trail')).toContainText('Member reported the check-in');
   await expect(page.getByTestId('secinc-trail')).toContainText('asked to secure the account');
@@ -172,6 +174,7 @@ test('acknowledge moves an open report on, and resolve needs an outcome and a 10
   await page.getByTestId('secinc-resolve').click();
   const dialog = page.getByRole('dialog', { name: 'Resolve this report' });
   await expect(dialog).toContainText(NO_VOID);
+  await expect(dialog).toContainText('Do not include phone numbers, names or PINs.');
   await expect(dialog.getByLabel('Outcome')).toBeFocused();
   await expect(dialog.getByRole('option')).toHaveText([
     'Choose an outcome', 'Confirmed: someone else checked in', 'The member made or allowed the check-in', 'Could not be confirmed either way',
@@ -275,6 +278,64 @@ test('a backend without the routes yet (plain 404) also reads as not available',
   await expect(page.getByTestId('secinc-off')).toContainText('Security reports are not available yet');
 });
 
+test('a report on a backend without the routes (plain 404) reads as not available; 404 not_found stays "not found"', async ({ page }) => {
+  await setup(page, SUPER, { all: { status: 404, body: 'Not Found', contentType: 'text/plain' } });
+  await page.goto('/admin/security-incidents?id=sin_open1');
+  await expect(page.getByTestId('secinc-off')).toContainText('Security reports are not available yet');
+  await expect(page.getByTestId('secinc-not-found')).toHaveCount(0);
+
+  const other = await page.context().newPage();
+  await setup(other, SUPER, { all: { status: 404, json: { error: 'not_found' } } });
+  await other.goto('/admin/security-incidents?id=sin_open1');
+  await expect(other.getByTestId('secinc-not-found')).toContainText('This report was not found.');
+});
+
+for (const bad of ['..', '../portal-users', 'sin_1%2F..', 'a b']) {
+  test(`report id "${bad}" is never sent to the API and reads as not found`, async ({ page }) => {
+    const calls = await setup(page, SUPER);
+    await page.goto(`/admin/security-incidents?id=${bad}`);
+    await expect(page.getByTestId('secinc-not-found')).toContainText('This report was not found.');
+    // The list behind the report still loads; nothing is asked of the API with the id in it.
+    expect(calls.filter(c => c.path !== '/admin/security-incidents')).toHaveLength(0);
+  });
+}
+
+test('a 403 that is not an ACL refusal is a general error, not "ask for the permission"', async ({ page }) => {
+  await setup(page, STAFF, { all: { status: 403, json: { error: 'account_suspended' } } });
+  await page.goto('/admin/security-incidents');
+  await expect(page.getByTestId('secinc-error')).toContainText('Security reports could not be loaded.');
+  await expect(page.getByTestId('secinc-forbidden')).toHaveCount(0);
+  await page.goto('/admin/security-incidents?id=sin_open1');
+  await expect(page.getByTestId('secinc-case-error')).toContainText('This report could not be loaded.');
+  await expect(page.getByTestId('secinc-forbidden')).toHaveCount(0);
+});
+
+test('half-failed protection, an account that cannot be secured, and an unknown channel', async ({ page }) => {
+  await setup(page, SUPER, {
+    incidents: [
+      incident({ id: 'sin_half', protection: { requested: true, applied: false, limited: false, sessionsEnded: false, pinResetRequired: true, failed: true, failure: 'sessions' } }),
+      incident({ id: 'sin_noperson', snapshot: { kind: 'web_checkin', eventId: 'sev_1', gymId: 'gym_1', gymName: 'Fit Zone Mikocheni', occurredAt: '2026-11-09T05:30:00.000Z', channel: 'kiosk_v2<raw>' },
+        protection: { requested: true, applied: false, limited: false, sessionsEnded: false, pinResetRequired: 'not_applicable', failed: true, failure: 'no_person' } }),
+      incident({ id: 'sin_nopin', protection: { requested: true, applied: true, limited: false, sessionsEnded: true, pinResetRequired: 'not_applicable' } }),
+    ],
+  });
+  await page.goto('/admin/security-incidents?id=sin_half');
+  const protection = page.getByTestId('secinc-protection');
+  await expect(protection).toContainText('Failed');
+  await expect(page.getByTestId('secinc-pin-off')).toHaveText('Their PIN was switched off, so they must use Forgot PIN to set a new one, even though ending their sessions did not work.');
+  await expect(page.getByTestId('secinc-no-person')).toHaveCount(0);
+
+  await page.goto('/admin/security-incidents?id=sin_noperson');
+  await expect(page.getByTestId('secinc-no-person')).toHaveText('This account cannot be secured automatically.');
+  await expect(page.getByTestId('secinc-pin-off')).toHaveCount(0);
+  // The raw server string is never shown.
+  await expect(page.getByTestId('secinc-snapshot')).toContainText('Another way of checking in');
+  await expect(page.getByTestId('secinc-snapshot')).not.toContainText('kiosk_v2');
+
+  await page.goto('/admin/security-incidents?id=sin_nopin');
+  await expect(protection).toContainText('Advise the member to change the password they sign in with, or to contact support.');
+});
+
 test('403 says who to ask; an unknown report says so', async ({ page }) => {
   await setup(page, STAFF, { all: { status: 403, json: { error: 'acl_forbidden', requiredScope: 'security_incidents' } } });
   await page.goto('/admin/security-incidents');
@@ -315,8 +376,10 @@ test('Swahili: the list, the report and the resolve form', async ({ page }) => {
   await setup(page, SUPER, { locale: 'sw' });
   await page.goto('/admin/security-incidents');
   await expect(page.getByRole('heading', { name: 'Ripoti za usalama' })).toBeVisible();
-  await expect(page.getByTestId('secinc-no-void')).toContainText('Kuhitimisha ripoti hakufuti kuingia gym na hakubadilishi ziara');
-  await expect(page.getByTestId('secinc-row-sin_open1')).toContainText('EAT');
+  await expect(page.getByTestId('secinc-no-void')).toContainText('Kuhitimisha ripoti hakubatilishi kuingia gym na hakubadilishi ziara');
+  // Swahili clock: 12-hour with the part of the day, still Dar es Salaam time labelled EAT.
+  await expect(page.getByTestId('secinc-row-sin_open1')).toContainText('8:30 asubuhi EAT');
+  await expect(page.getByTestId('secinc-row-sin_open1')).toContainText('12:45 usiku EAT');
   await page.getByTestId('secinc-row-sin_open1').click();
   await expect(page.getByTestId('secinc-snapshot')).toContainText('Kuingia gym kwa wavuti');
   await expect(page.getByTestId('secinc-protection')).toContainText('Umewekwa');

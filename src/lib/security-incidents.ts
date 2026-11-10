@@ -5,6 +5,7 @@
 // Resolving never voids the check-in or changes visits, payouts or settlement.
 import { ApiError, qs, request } from './api';
 import type { Locale, MessageKey } from './i18n';
+import { clock } from './events';
 
 export type SecurityIncidentStatus = 'open' | 'acknowledged' | 'resolved';
 export type SecurityIncidentOutcome = 'unauthorised_confirmed' | 'authorised_by_member' | 'inconclusive';
@@ -63,6 +64,9 @@ export const SECURITY_INCIDENT_OUTCOMES: SecurityIncidentOutcome[] = ['unauthori
 export const SECURITY_REASON_MIN = 10;
 export const SECURITY_REASON_MAX = 500;
 
+/** Incident ids are letters, digits and underscores (sin_…). Anything else in ?id= never reaches the API. */
+export const isSecurityIncidentId = (id: string | null | undefined): id is string => !!id && /^[A-Za-z0-9_]+$/.test(id);
+
 const base = '/admin/security-incidents';
 const one = (id: string) => `${base}/${encodeURIComponent(id)}`;
 
@@ -98,22 +102,32 @@ const TRAIL_KINDS = ['reported', 'protection', 'acknowledged', 'resolved'];
 export const trailKey = (kind: string): MessageKey =>
   (TRAIL_KINDS.includes(kind) ? `secInc.trail.${kind}` : 'secInc.trail.other') as MessageKey;
 
-/** Always Dar es Salaam time, whatever the staff member's own clock is; the caller labels it EAT. */
+/**
+ * Always Dar es Salaam time, whatever the staff member's own clock is; the caller labels it EAT.
+ * English "9 Nov 2026, 08:30"; Swahili keeps the date and uses the portal's 12-hour clock with the part of the day.
+ */
 export function eatTime(iso: string | null | undefined, locale: Locale): string | null {
   if (!iso) return null;
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return null;
-  return d.toLocaleString(locale === 'sw' ? 'sw-TZ' : 'en-GB', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Africa/Dar_es_Salaam' });
+  const date = d.toLocaleDateString(locale === 'sw' ? 'sw-TZ' : 'en-GB', { dateStyle: 'medium', timeZone: EAT_ZONE });
+  return `${date}, ${clock(d, EAT_ZONE, locale)}`;
 }
+
+const EAT_ZONE = 'Africa/Dar_es_Salaam';
 
 export type SecurityFailure = 'off' | 'forbidden' | 'not_found' | 'conflict' | 'invalid_reason' | 'invalid_outcome' | 'error';
 
-/** How a refused request should be shown. `list` = the list call, where any 404 means the feature is not there yet. */
+/**
+ * How a refused request should be shown. A 404 means the feature is not there yet (flag off, or a backend without
+ * the routes), except 404 `not_found` on one report. Only an ACL refusal reads as "ask for the permission"; other
+ * 403s (e.g. account_suspended) are a general error.
+ */
 export function securityFailure(err: unknown, list = false): SecurityFailure {
   if (!(err instanceof ApiError)) return 'error';
   const code = (err.body as { error?: string } | null)?.error ?? '';
-  if (err.status === 404) return code === 'feature_disabled' || list ? 'off' : 'not_found';
-  if (err.status === 403) return 'forbidden';
+  if (err.status === 404) return code === 'not_found' && !list ? 'not_found' : 'off';
+  if (err.status === 403) return code === 'acl_forbidden' || code === 'forbidden' ? 'forbidden' : 'error';
   if (err.status === 409) return 'conflict';
   if (err.status === 400 && code === 'invalid_reason') return 'invalid_reason';
   if (err.status === 400 && code === 'invalid_outcome') return 'invalid_outcome';

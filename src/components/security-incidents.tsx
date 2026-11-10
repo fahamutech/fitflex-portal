@@ -9,7 +9,7 @@ import type { Locale, MessageKey } from '@/lib/i18n';
 import {
   PROTECTION_TONE, SECURITY_INCIDENT_OUTCOMES, SECURITY_REASON_MAX, SECURITY_REASON_MIN, SECURITY_STATUS_TONE,
   SecurityIncident, SecurityIncidentDetail, SecurityIncidentEvent, SecurityIncidentOutcome, SecurityIncidentProtection,
-  eatTime, protectionState, securityFailure, securityIncidentsApi, trailKey,
+  eatTime, isSecurityIncidentId, protectionState, securityFailure, securityIncidentsApi, trailKey,
 } from '@/lib/security-incidents';
 import { useFocusAfterRender } from '@/lib/use-focus-after-render';
 import { Alert, Badge, Button, Card, CardContent, EmptyState, ErrorState, Field, PageHeader, Select, Spinner, Textarea } from './shared';
@@ -72,6 +72,8 @@ export function SecurityIncidentCase({ id, token, t, locale, onBack }: { id: str
 
   /** → true when the report is on screen. */
   const load = useCallback(async () => {
+    // An id that cannot be a report id (e.g. "..") is never sent to the API.
+    if (!isSecurityIncidentId(id)) { setView('not_found'); return false; }
     try {
       setData(await securityIncidentsApi.get(token, id));
       setView('ready');
@@ -174,7 +176,8 @@ export function SecurityIncidentCase({ id, token, t, locale, onBack }: { id: str
   const snap = inc.snapshot ?? {};
   const state = protectionState(inc.protection);
   const pin = inc.protection?.pinResetRequired;
-  const channel = !snap.channel || snap.channel === 'web' ? t('secInc.channel.web') : snap.channel;
+  const channel = t(!snap.channel || snap.channel === 'web' ? 'secInc.channel.web' : 'secInc.channel.other');
+  const failed = inc.protection?.failed === true;
   const closed = inc.status === 'resolved';
 
   return (
@@ -221,6 +224,9 @@ export function SecurityIncidentCase({ id, token, t, locale, onBack }: { id: str
           <p>{t(`secInc.protectionBody.${state}` as MessageKey)}</p>
           {state === 'applied' && pin === true && <p>{t('secInc.pin.required')}</p>}
           {state === 'applied' && pin === 'not_applicable' && <p>{t('secInc.pin.notApplicable')}</p>}
+          {/* Half-failed: the PIN was switched off before ending sessions failed. */}
+          {failed && pin === true && <p data-testid="secinc-pin-off">{t('secInc.pin.offSessionsFailed')}</p>}
+          {failed && inc.protection?.failure === 'no_person' && <p data-testid="secinc-no-person">{t('secInc.protection.noPerson')}</p>}
         </CardContent>
       </Card>
 
