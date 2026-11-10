@@ -327,6 +327,142 @@ test.describe('detail', () => {
   });
 });
 
+// Sale extras (docs/design/vendor-sale-extras-1110.md; functions#341): cash references (AC-6), the customer type line
+// (§2.8, AC-11) and "Print or save as PDF" when documents are off (Q-13, AC-35). The portal records no sales.
+test.describe('sale extras', () => {
+  /** Stubs window.print: records the body classes it was called with, then fires afterprint as a browser would. */
+  async function stubPrint(page: Page) {
+    await page.addInitScript(() => {
+      const w = window as unknown as { __printed: string[] };
+      w.__printed = [];
+      window.print = () => { w.__printed.push(document.body.className); window.dispatchEvent(new Event('afterprint')); };
+    });
+  }
+  const extras = (extra: Record<string, unknown> = {}) => sale({
+    payments: [{ method: 'cash', amountTzs: 60000, reference: 'TILL-889' }, { method: 'mpesa', amountTzs: 40000, reference: 'QK12AB34' }],
+    customer: { id: 'cus_asha', name: 'Asha Said' }, customerType: 'walk_in', ...extra,
+  });
+
+  test('a cash reference shows as "Cash (TILL-889)" on the detail and in the copied text', async ({ page }) => {
+    await signedInAs(page, VENDOR);
+    await mockApi(page, base({ 'GET /vendor/sales/sale_1': { json: { sale: extras() } } }));
+    await page.goto('/vendor/sales/?id=sale_1');
+    await expect(page.getByTestId('sale-payment-0')).toContainText('Cash (TILL-889)');
+    await expect(page.getByTestId('sale-payment-1')).toContainText('M-Pesa (QK12AB34)');
+    await page.getByTestId('sale-copy').click();
+    const text = await page.evaluate(() => (window as unknown as { __copied: string }).__copied);
+    expect(text).toMatch(/Cash \(TILL-889\) +60,000/);
+  });
+
+  test('customer type: a line under the customer; never in the receipt text or the print block', async ({ page }) => {
+    await signedInAs(page, VENDOR);
+    await mockApi(page, base({ 'GET /vendor/sales/sale_1': { json: { sale: extras() } } }));
+    await page.goto('/vendor/sales/?id=sale_1');
+    await expect(page.getByTestId('sale-customer')).toContainText('Asha Said');
+    await expect(page.getByTestId('sale-customer-type')).toHaveText('Customer type: Walk-in');
+    // Directly under the customer line.
+    expect(await page.getByTestId('sale-customer').evaluate(el => el.nextElementSibling?.getAttribute('data-testid'))).toBe('sale-customer-type');
+    await page.getByTestId('sale-copy').click();
+    const text = await page.evaluate(() => (window as unknown as { __copied: string }).__copied);
+    expect(text).toContain('Customer: Asha Said');
+    expect(text).not.toMatch(/Customer type|Walk-in/);
+    await expect(page.getByTestId('sale-print-area')).not.toContainText(/Customer type|Walk-in/);
+  });
+
+  for (const [type, label] of [['new', 'New'], ['returning', 'Returning'], ['online', 'Online'], ['other', 'Other']] as const) {
+    test(`customer type ${type} reads "${label}"`, async ({ page }) => {
+      await signedInAs(page, VENDOR);
+      await mockApi(page, base({ 'GET /vendor/sales/sale_1': { json: { sale: extras({ customer: null, customerType: type }) } } }));
+      await page.goto('/vendor/sales/?id=sale_1');
+      await expect(page.getByTestId('sale-customer-type')).toHaveText(`Customer type: ${label}`);
+    });
+  }
+
+  test('no type line when the type is null, missing (older server) or unknown (never shown raw)', async ({ page }) => {
+    await signedInAs(page, VENDOR);
+    let current: unknown = null;
+    await mockApi(page, base({ 'GET /vendor/sales/sale_1': () => ({ json: { sale: current } }) }));
+    for (const variant of [extras({ customerType: null }), sale(), extras({ customerType: 'vip' })]) {
+      current = variant;
+      await page.goto('/vendor/sales/?id=sale_1');
+      await expect(page.getByTestId('sale-heading')).toHaveText('Receipt R-000123');
+      await expect(page.getByTestId('sale-customer-type')).toHaveCount(0);
+      await expect(page.getByTestId('sale-detail')).not.toContainText('vip');
+    }
+  });
+
+  test('documents off: Print or save as PDF prints the receipt block only (44px target)', async ({ page }) => {
+    await signedInAs(page, VENDOR);
+    await stubPrint(page);
+    await mockApi(page, base({ 'GET /vendor/sales/sale_1': { json: { sale: extras() } } }));
+    await page.goto('/vendor/sales/?id=sale_1');
+    const print = page.getByTestId('sale-print');
+    await expect(print).toHaveText('Print or save as PDF');
+    expect((await print.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+    // The print block is the customer receipt (as Copy receipt text makes it); hidden on screen.
+    const area = page.getByTestId('sale-print-area');
+    await expect(area).toBeHidden();
+    await expect(area).toContainText('Receipt R-000123');
+    await expect(area).toContainText('Cash (TILL-889)');
+    await expect(area).toContainText('Customer: Asha Said');
+    expect((await area.textContent())!.trim().split('\n').at(-1)).toBe('This is not a TRA fiscal receipt.');
+
+    await print.click();
+    const printed = await page.evaluate(() => (window as unknown as { __printed: string[] }).__printed);
+    expect(printed).toHaveLength(1);
+    expect(printed[0]).toContain('ff-print-sale');
+    // afterprint takes the class off again.
+    expect(await page.evaluate(() => document.body.classList.contains('ff-print-sale'))).toBe(false);
+
+    // What the print shows: only the receipt block, not the portal or the rest of the sale.
+    await page.emulateMedia({ media: 'print' });
+    await page.evaluate(() => document.body.classList.add('ff-print-sale'));
+    await expect(area).toBeVisible();
+    await expect(page.getByTestId('sale-heading')).toBeHidden();
+    await expect(page.getByTestId('sale-customer-type')).toBeHidden();
+    await expect(page.getByTestId('sale-print')).toBeHidden();
+  });
+
+  test('documents on: no Print (the document view prints); a voided sale has no Print either', async ({ page, browser }) => {
+    await signedInAs(page, VENDOR);
+    await mockApi(page, base({
+      'GET /vendor/me': { json: me({ tools: tools({ documents: true }) }) },
+      'GET /vendor/sales/sale_1': { json: { sale: extras() } },
+    }));
+    await page.goto('/vendor/sales/?id=sale_1');
+    await expect(page.getByTestId('sale-document')).toBeVisible();
+    await expect(page.getByTestId('sale-copy')).toBeVisible();
+    await expect(page.getByTestId('sale-print')).toHaveCount(0);
+    await expect(page.getByTestId('sale-print-area')).toHaveCount(0);
+
+    const other = await browser.newPage();
+    await signedInAs(other, VENDOR);
+    await mockApi(other, base({ 'GET /vendor/sales/sale_1': { json: { sale: { ...voidedSale(), customerType: 'returning' } } } }));
+    await other.goto('/vendor/sales/?id=sale_1');
+    await expect(other.getByTestId('sale-voided')).toBeVisible();
+    await expect(other.getByTestId('sale-customer-type')).toHaveText('Customer type: Returning');
+    await expect(other.getByTestId('sale-print')).toHaveCount(0);
+    await other.close();
+  });
+
+  test('Swahili: type line and Print label', async ({ page }) => {
+    await signedInAs(page, VENDOR, 'sw');
+    await mockApi(page, base({ 'GET /vendor/sales/sale_1': { json: { sale: extras() } } }));
+    await page.goto('/vendor/sales/?id=sale_1');
+    await expect(page.getByTestId('sale-customer-type')).toHaveText('Aina ya mteja: Wa dukani');
+    await expect(page.getByTestId('sale-print')).toHaveText('Chapisha au hifadhi kama PDF');
+    await expect(page.getByTestId('sale-payment-0')).toContainText('Taslimu (TILL-889)');
+  });
+
+  test('a list row carrying customerType changes nothing in the list (not shown there, §2.8)', async ({ page }) => {
+    await signedInAs(page, VENDOR);
+    await mockApi(page, base({ 'GET /vendor/sales': { json: { sales: [row({ customerType: 'online', customer: { id: 'cus_asha', name: 'Asha Said' } })], nextCursor: null, summary: summary() } } }));
+    await page.goto('/vendor/sales/');
+    await expect(page.getByTestId('vendor-sales-table')).toContainText('R-000123');
+    await expect(page.getByTestId('vendor-sales-table')).not.toContainText('Online');
+  });
+});
+
 test.describe('void', () => {
   test('needs a reason; success updates panel and row; Escape closes and returns focus', async ({ page }) => {
     await signedInAs(page, VENDOR);

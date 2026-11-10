@@ -2434,6 +2434,12 @@ export interface VendorTools {
   /** S8 (VENDOR_TOOLS + VENDOR_STOCK_LEDGER + VENDOR_BARCODES): barcodes on products and Enter-to-match in Receive
    *  stock. Shown only when exactly true; missing, false or a failed options load = off. */
   barcodes?: boolean;
+  /** Sale extras (VENDOR_TOOLS + VENDOR_SALE_REFERENCE_OPTIONAL; functions#341): a reference is optional on every walk-in
+   *  sale payment method and kept for cash. The portal records no sales, so it only reads it. Missing = off. */
+  referenceOptional?: boolean;
+  /** Sale extras (VENDOR_TOOLS + VENDOR_SALE_CUSTOMER_DETAILS; functions#341): the app's customer section on a sale.
+   *  The portal records no sales; it shows a stored customer type whatever this says. Missing = off. */
+  saleCustomerDetails?: boolean;
   [tool: string]: unknown;
 }
 
@@ -2579,6 +2585,8 @@ export interface VendorSaleRow {
   refundState?: VendorRefundState;
   /** S7 (functions#321): taken off the pay-later balance by active refunds (list and customer-profile rows). */
   balanceReducedTzs?: number;
+  /** Sale extras (functions#341): what kind of customer this purchase was; null or absent (older servers) = not set. */
+  customerType?: VendorSaleCustomerType | null;
 }
 /** Completed sales over the whole from/to/createdBy range (not the page, not the status filter); cash net of change. */
 export interface VendorSaleSummary {
@@ -2672,7 +2680,12 @@ export interface VendorSale {
   paidAtSaleTzs?: number;
   /** Customer payments towards this sale; only for callers who also hold `customers`. */
   allocations?: Array<{ paymentId: string; number: string; amountTzs: number; receivedOn: string; voided: boolean }>;
+  /** Sale extras (functions#341): what kind of customer this purchase was. Never on the receipt. Null or absent = not set. */
+  customerType?: VendorSaleCustomerType | null;
 }
+/** Sale extras (functions#341): the five customer types a sale may carry. */
+export const VENDOR_SALE_CUSTOMER_TYPES = ['new', 'returning', 'walk_in', 'online', 'other'] as const;
+export type VendorSaleCustomerType = typeof VENDOR_SALE_CUSTOMER_TYPES[number];
 
 // ─── Vendor refunds on walk-in sales (S7; functions#318) ───
 export type VendorRefundState = 'none' | 'partial' | 'full';
