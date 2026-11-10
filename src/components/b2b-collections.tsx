@@ -11,6 +11,7 @@ import { money } from '@/lib/admin-utils';
 import { fill } from '@/components/communication-shared';
 import { errorCode, whenText } from '@/lib/money-approval';
 import type { MessageKey } from '@/lib/i18n';
+import { useOrgT } from '@/lib/org-i18n';
 
 const ERRORS: Record<string, string> = {
   invalid_amount: 'Enter a whole amount in TSh, more than zero.',
@@ -45,24 +46,24 @@ const payDetailsError = (e: unknown, t: (key: MessageKey) => string) => {
 const whole = (v: string) => (/^\d+$/.test(v.trim()) ? Number(v.trim()) : NaN);
 const todayEat = () => new Date(Date.now() + 3 * 3_600_000).toISOString().slice(0, 10);
 const NOTICE_TONE: Record<B2BPaymentNotice['status'], 'warning' | 'success' | 'danger' | 'gray'> = { submitted: 'warning', confirmed: 'success', rejected: 'danger', withdrawn: 'gray' };
-const NOTICE_LABEL: Record<B2BPaymentNotice['status'], string> = { submitted: 'Being checked', confirmed: 'Confirmed', rejected: 'Not confirmed', withdrawn: 'Withdrawn' };
 const STAGE: Record<string, string> = { before3: '3 days before', due: 'Due day', plus7: '7 days late', plus14: '14 days late', plus30: '30 days late', manual: 'Sent by hand' };
 
 /** FitFlex's bank and Lipa Namba details, as an organisation sees them. */
 export function PaymentDetails({ instructions, configured }: { instructions: B2BPaymentInstructions; configured: boolean }) {
+  const o = useOrgT();
   const row = (label: string, value: string | null) => (value ? <div><span className="text-[var(--color-fg-quaternary)]">{label}: </span><span className="font-medium">{value}</span></div> : null);
   return (
     <Card>
       <CardContent className="space-y-1 py-4 text-sm" data-testid="payment-details">
-        <div className="mb-1 font-semibold">How to pay FitFlex</div>
-        {!configured ? <p className="text-[var(--color-fg-quaternary)]">FitFlex hasn’t published its payment details here yet. Use the details on your agreement, or ask your FitFlex contact.</p> : (
+        <div className="mb-1 font-semibold">{o.t('org.pay.howTo')}</div>
+        {!configured ? <p className="text-[var(--color-fg-quaternary)]">{o.t('org.pay.notConfigured')}</p> : (
           <>
             {instructions.accountNumber && (
               <div className="space-y-0.5">
-                {row('Bank', instructions.bankName)}
-                {row('Account name', instructions.accountName)}
-                {row('Account number', instructions.accountNumber)}
-                {row('Branch', instructions.branch)}
+                {row(o.t('org.pay.bank'), instructions.bankName)}
+                {row(o.t('org.pay.accountName'), instructions.accountName)}
+                {row(o.t('org.pay.accountNumber'), instructions.accountNumber)}
+                {row(o.t('org.pay.branch'), instructions.branch)}
                 {row('SWIFT', instructions.swiftCode)}
               </div>
             )}
@@ -70,7 +71,7 @@ export function PaymentDetails({ instructions, configured }: { instructions: B2B
             {instructions.notes && <p className="pt-1 text-[var(--color-fg-tertiary)]">{instructions.notes}</p>}
           </>
         )}
-        <p className="pt-1 text-xs text-[var(--color-fg-quaternary)]">Quote the invoice number as your payment reference, then tell us below so we can confirm it. An invoice is settled when FitFlex confirms the money has arrived.</p>
+        <p className="pt-1 text-xs text-[var(--color-fg-quaternary)]">{o.t('org.pay.quote')}</p>
       </CardContent>
     </Card>
   );
@@ -83,6 +84,8 @@ export function PaymentDetails({ instructions, configured }: { instructions: B2B
 export function OrgPaying({ token, orgId, invoices, preselect, onChanged }: {
   token: string; orgId: string; invoices: B2BSponsorInvoice[]; preselect?: string | null; onChanged?: () => void;
 }) {
+  const o = useOrgT();
+  const day = o.day;
   const [paying, setPaying] = useState<B2BOrgPaying | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<string | null>(null);
@@ -94,7 +97,7 @@ export function OrgPaying({ token, orgId, invoices, preselect, onChanged }: {
   };
   const [f, setF] = useState(blank);
 
-  const load = () => api.orgPaying(token, orgId).then(setPaying).catch(e => setError(said(e, 'Could not load payment details.')));
+  const load = () => api.orgPaying(token, orgId).then(setPaying).catch(e => setError(o.err('org.pay.err', e, 'org.pay.loadFailed')));
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { setPaying(null); setError(null); setDone(null); setF(blank()); load(); }, [token, orgId, preselect]);
 
@@ -106,26 +109,26 @@ export function OrgPaying({ token, orgId, invoices, preselect, onChanged }: {
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     const amountTzs = whole(f.amount);
-    if (!Number.isFinite(amountTzs) || amountTzs <= 0) return setError(ERRORS.invalid_amount);
+    if (!Number.isFinite(amountTzs) || amountTzs <= 0) return setError(o.t('org.pay.err.invalid_amount'));
     setBusy(true); setError(null); setDone(null);
     try {
       const proofUrl = f.proof ? (await api.uploadFile(token, f.proof, f.proof.name)).url : undefined;
       const out = await api.submitPaymentNotice(token, orgId, {
         amountTzs, method: f.method, reference: f.reference.trim(), paidOn: f.paidOn, invoiceIds: f.invoiceIds, note: f.note.trim() || undefined, proofUrl,
       });
-      setDone(out.existing ? 'We already have this payment notice. FitFlex is checking it.' : 'Thank you. FitFlex will check its statement and confirm the payment.');
+      setDone(o.t(out.existing ? 'org.pay.doneExisting' : 'org.pay.done'));
       setF({ ...blank(), invoiceIds: [], amount: '' });
       await load();
       onChanged?.();
     } catch (err) {
-      setError(said(err, 'Could not send the payment notice.'));
+      setError(o.err('org.pay.err', err, 'org.pay.sendFailed'));
     } finally {
       setBusy(false);
     }
   };
   const withdraw = async (id: string) => {
     setError(null);
-    try { await api.withdrawPaymentNotice(token, orgId, id); await load(); } catch (err) { setError(said(err, 'Could not withdraw the notice.')); }
+    try { await api.withdrawPaymentNotice(token, orgId, id); await load(); } catch (err) { setError(o.err('org.pay.err', err, 'org.pay.withdrawFailed')); }
   };
 
   if (!paying) return error ? <Alert tone="error">{error}</Alert> : <Spinner className="h-6 w-6" />;
@@ -133,7 +136,7 @@ export function OrgPaying({ token, orgId, invoices, preselect, onChanged }: {
     <div className="space-y-4" data-testid="org-paying">
       {paying.onHold && (
         <Alert tone="error">
-          Your account is on hold for late payment{paying.holdReason ? `: ${paying.holdReason}` : '.'} New sponsored passes and pay-per-use benefits are paused until FitFlex lifts the hold. Passes already paid for carry on.
+          {o.t('org.pay.onHold', { reason: paying.holdReason ? `: ${paying.holdReason}` : '.' })}
         </Alert>
       )}
       {error && <Alert tone="error">{error}</Alert>}
@@ -142,34 +145,34 @@ export function OrgPaying({ token, orgId, invoices, preselect, onChanged }: {
         <PaymentDetails instructions={paying.instructions} configured={paying.configured} />
         <Card>
           <CardContent className="py-4">
-            <div className="mb-2 text-sm font-semibold">Tell us you’ve paid</div>
-            {!paying.canPay ? <p className="text-sm text-[var(--color-fg-quaternary)]">Your role can see billing but can’t send a payment notice. The owner, an admin or a finance user can.</p> : (
+            <div className="mb-2 text-sm font-semibold">{o.t('org.pay.tellUs')}</div>
+            {!paying.canPay ? <p className="text-sm text-[var(--color-fg-quaternary)]">{o.t('org.pay.cannotPay')}</p> : (
               <form className="space-y-3" onSubmit={submit} data-testid="payment-notice-form">
                 {open.length > 0 && (
-                  <Field label="Which invoices is it for?" hint="Optional. Leave empty and FitFlex applies it to your oldest invoices first.">
+                  <Field label={o.t('org.pay.whichInvoices')} hint={o.t('org.pay.whichInvoicesHint')}>
                     <div className="max-h-40 space-y-1 overflow-auto">
                       {open.map(i => (
                         <Checkbox key={i.id} aria-label={i.number ?? i.id} checked={f.invoiceIds.includes(i.id)} onChange={() => toggle(i.id)}
-                          label={<span className="font-normal text-[var(--color-fg-secondary)]">{i.number} · {money(i.outstandingTzs ?? 0)} owed{i.dueDate ? ` · due ${day(i.dueDate)}` : ''}</span>} />
+                          label={<span className="font-normal text-[var(--color-fg-secondary)]">{o.t('org.pay.invoiceOwed', { number: i.number, amount: money(i.outstandingTzs ?? 0) })}{i.dueDate ? o.t('org.pay.invoiceDue', { date: day(i.dueDate) }) : ''}</span>} />
                       ))}
                     </div>
                   </Field>
                 )}
                 <div className="grid gap-3 sm:grid-cols-2">
-                  <Field label="Amount paid (TSh)"><Input inputMode="numeric" required value={f.amount} onChange={e => setF({ ...f, amount: e.target.value })} data-testid="notice-amount" /></Field>
-                  <Field label="Date paid"><Input type="date" required max={todayEat()} value={f.paidOn} onChange={e => setF({ ...f, paidOn: e.target.value })} /></Field>
-                  <Field label="How">
+                  <Field label={o.t('org.pay.amountPaid')}><Input inputMode="numeric" required value={f.amount} onChange={e => setF({ ...f, amount: e.target.value })} data-testid="notice-amount" /></Field>
+                  <Field label={o.t('org.pay.datePaid')}><Input type="date" required max={todayEat()} value={f.paidOn} onChange={e => setF({ ...f, paidOn: e.target.value })} /></Field>
+                  <Field label={o.t('org.common.how')}>
                     <Select value={f.method} onChange={e => setF({ ...f, method: e.target.value })}>
-                      {Object.entries(PAYMENT_METHOD).map(([k, label]) => <option key={k} value={k}>{label}</option>)}
+                      {Object.keys(PAYMENT_METHOD).map(k => <option key={k} value={k}>{o.label('org.billing.method', k)}</option>)}
                     </Select>
                   </Field>
-                  <Field label="Bank or mobile-money reference"><Input required maxLength={200} value={f.reference} onChange={e => setF({ ...f, reference: e.target.value })} data-testid="notice-reference" /></Field>
+                  <Field label={o.t('org.pay.reference')}><Input required maxLength={200} value={f.reference} onChange={e => setF({ ...f, reference: e.target.value })} data-testid="notice-reference" /></Field>
                 </div>
-                <Field label="Note (optional)"><Input maxLength={1000} value={f.note} onChange={e => setF({ ...f, note: e.target.value })} /></Field>
-                <Field label="Proof of payment (optional)" hint="A photo or screenshot of the slip or confirmation message.">
+                <Field label={o.t('org.common.noteOptional')}><Input maxLength={1000} value={f.note} onChange={e => setF({ ...f, note: e.target.value })} /></Field>
+                <Field label={o.t('org.pay.proof')} hint={o.t('org.pay.proofHint')}>
                   <input type="file" accept="image/*" className="text-sm" onChange={e => setF({ ...f, proof: e.target.files?.[0] ?? null })} />
                 </Field>
-                <Button type="submit" disabled={busy} data-testid="notice-send">{busy ? 'Sending…' : 'Send payment notice'}</Button>
+                <Button type="submit" disabled={busy} data-testid="notice-send">{busy ? o.t('org.pay.sending') : o.t('org.pay.send')}</Button>
               </form>
             )}
           </CardContent>
@@ -178,28 +181,28 @@ export function OrgPaying({ token, orgId, invoices, preselect, onChanged }: {
 
       <Card>
         <CardContent className="py-4">
-          <div className="mb-2 text-sm font-semibold">Your payment notices</div>
-          {paying.notices.length === 0 ? <p className="text-sm text-[var(--color-fg-quaternary)]">None yet.</p> : (
-            <Table data-testid="org-notices" aria-label="Your payment notices">
+          <div className="mb-2 text-sm font-semibold">{o.t('org.pay.notices')}</div>
+          {paying.notices.length === 0 ? <p className="text-sm text-[var(--color-fg-quaternary)]">{o.t('org.common.noneYet')}</p> : (
+            <Table data-testid="org-notices" aria-label={o.t('org.pay.notices')}>
               <THead>
                 <Tr>
-                  <Th>Paid on</Th><Th>How</Th><Th>Reference</Th><Th>For</Th>
-                  <Th className="!text-right">Amount</Th><Th>Status</Th><Th />
+                  <Th>{o.t('org.pay.paidOn')}</Th><Th>{o.t('org.common.how')}</Th><Th>{o.t('org.common.reference')}</Th><Th>{o.t('org.common.for')}</Th>
+                  <Th className="!text-right">{o.t('org.common.amount')}</Th><Th>{o.t('org.common.status')}</Th><Th />
                 </Tr>
               </THead>
               <TBody>
                 {paying.notices.map(n => (
                   <Tr key={n.id} className="align-top">
                     <Td className="whitespace-nowrap">{day(n.paidOn)}</Td>
-                    <Td>{PAYMENT_METHOD[n.method] ?? n.method}</Td>
+                    <Td>{o.label('org.billing.method', n.method)}</Td>
                     <Td>{n.reference}</Td>
-                    <Td>{n.invoices?.length ? n.invoices.map(i => i.number).join(', ') : 'Oldest invoices first'}</Td>
+                    <Td>{n.invoices?.length ? n.invoices.map(i => i.number).join(', ') : o.t('org.pay.oldestFirst')}</Td>
                     <Td className="text-right">{money(n.amountTzs)}</Td>
                     <Td>
-                      <Badge tone={NOTICE_TONE[n.status]}>{NOTICE_LABEL[n.status]}</Badge>
+                      <Badge tone={NOTICE_TONE[n.status]}>{o.label('org.pay.notice', n.status)}</Badge>
                       {n.status === 'rejected' && n.decisionNote && <div className="mt-1 text-xs text-[var(--color-fg-tertiary)]">{n.decisionNote}</div>}
                     </Td>
-                    <Td className="text-right">{n.status === 'submitted' && paying.canPay && <Button variant="secondary" size="sm" onClick={() => withdraw(n.id)}>Withdraw</Button>}</Td>
+                    <Td className="text-right">{n.status === 'submitted' && paying.canPay && <Button variant="secondary" size="sm" onClick={() => withdraw(n.id)}>{o.t('org.pay.withdraw')}</Button>}</Td>
                   </Tr>
                 ))}
               </TBody>
