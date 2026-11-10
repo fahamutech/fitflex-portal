@@ -5,7 +5,7 @@ import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { api, type VendorSale } from '@/lib/api';
 import { money } from '@/lib/admin-utils';
-import { documentsOn, eatDateTime, errorCode, fmt, receiptDay, saleMethodLabel } from '@/lib/vendor';
+import { documentsOn, eatDateTime, errorCode, fmt, receiptDay, saleCustomerTypeLabel, saleMethodLabel } from '@/lib/vendor';
 import { documentHref } from '@/lib/vendor-documents';
 import { docLinkCls } from '@/components/vendor/documents/share-menu';
 import { Alert, Badge, Button, ErrorState, SkeletonCard } from '@/components/shared';
@@ -41,6 +41,8 @@ export function CustomerSaleDialog({ customerId, saleId, onClose }: { customerId
   const row = 'flex justify-between gap-3';
   const credit = s?.kind === 'credit';
   const paidNow = s ? (s.paidAtSaleTzs ?? s.payments.reduce((n, p) => n + p.amountTzs, 0)) : 0;
+  // Sale extras (functions#341): the stored customer type of this purchase; unknown values hide.
+  const customerType = s ? saleCustomerTypeLabel(s.customerType, t) : null;
   return (
     <Dialog open onClose={onClose} title={s ? fmt(t('vendor.pos.receiptNo'), { number: s.number }) : t('vendor.customers.shopSales')}>
       <div className="space-y-4 text-sm" data-testid="customer-sale-detail">
@@ -55,6 +57,7 @@ export function CustomerSaleDialog({ customerId, saleId, onClose }: { customerId
               <RefundBadges sale={s} />
             </div>
             <p className="text-[var(--color-fg-tertiary)]">{eatDateTime(s.soldAt, locale)}</p>
+            {customerType && <p className="text-[var(--color-fg-tertiary)]" data-testid="customer-sale-type">{fmt(t('vendor.sales.customerTypeLine'), { type: customerType })}</p>}
             {s.status === 'voided' && (
               <Alert tone="info">{fmt(t('vendor.sales.voidedBy'), { name: s.voidedBy?.name || '—', time: eatDateTime(s.voidedAt, locale), reason: s.voidReason || '—' })}</Alert>
             )}

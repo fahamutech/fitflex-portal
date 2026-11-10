@@ -545,6 +545,7 @@ test.describe('payments', () => {
         totalTzs: 20000, paidTzs: 0, changeTzs: 0, note: null, createdBy: { id: 'usr_vendor', name: 'Asha' }, voidedBy: null, voidedAt: null, voidReason: null, lateRecorded: false,
         lines: [{ nameSnapshot: 'Whey 1kg', variant: null, qty: 1, listPriceTzs: 20000, unitPriceTzs: 20000, priceChanged: false, priceChangedBy: null, discountTzs: 0, lineTotalTzs: 20000 }],
         payments: [], customer: { id: 'cus_juma', name: 'Juma Mussa' }, dueDate: addDays(TODAY, -5), balanceTzs: 20000, paidAtSaleTzs: 0,
+        customerType: 'returning',
       } } },
     }));
     await page.goto('/vendor/customers/?id=cus_juma');
@@ -553,6 +554,8 @@ test.describe('payments', () => {
     const detail = page.getByTestId('customer-sale-detail');
     await expect(detail).toContainText('Whey 1kg');
     await expect(page.getByTestId('customer-sale-balance')).toHaveText('TSh 20,000');
+    // Sale extras (functions#341): the stored customer type of the purchase.
+    await expect(page.getByTestId('customer-sale-type')).toHaveText('Customer type: Returning');
     await expect(page.getByTestId('sale-void')).toHaveCount(0);
     await expect(page.getByTestId('sale-copy')).toHaveCount(0);
     await expect(page.getByRole('dialog').getByRole('button', { name: /void|copy/i })).toHaveCount(0);
