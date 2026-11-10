@@ -2,13 +2,13 @@
 import { type ReactNode, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
-import { ArrowLeft, ChevronRight, Copy, FileText, Receipt, RefreshCw, Undo2 } from 'lucide-react';
+import { ArrowLeft, ChevronRight, Copy, FileText, Printer, Receipt, RefreshCw, Undo2 } from 'lucide-react';
 import { api, type VendorRefund, type VendorSale, type VendorSaleRow, type VendorSalesQuery, type VendorSaleSummary } from '@/lib/api';
 import { money } from '@/lib/admin-utils';
 import type { MessageKey } from '@/lib/i18n';
 import {
   addDays, canCustomers, creditClearedAs, customerName, documentsOn, eatDateTime, eatToday, errorBody, errorCode, fmt, isRefusal, itemsKey, mayRefundSale, mayVoidSale, receiptDay,
-  recordedOffline, refundsOn, saleMethodLabel, saleMethodsLabel, saleReceiptText,
+  recordedOffline, refundsOn, saleCustomerTypeLabel, saleMethodLabel, saleMethodsLabel, saleReceiptText,
 } from '@/lib/vendor';
 import { RefundDialog } from '@/components/vendor/sales/refund-dialog';
 import { RefundsCard } from '@/components/vendor/sales/refunds-card';
@@ -425,6 +425,13 @@ function SaleDetail({ id, onBack, onUpdated }: { id: string; onBack: () => void;
     const text = saleReceiptText(sale, { business, locale, t, totalLabel: money(sale.totalTzs) });
     try { await navigator.clipboard.writeText(text); toast.success(t('vendor.sales.copied')); } catch { toast.error(t('vendor.saveFailed')); }
   }
+  /** Q-13 (documents off): the browser prints the receipt block only (globals.css .ff-print-sale); "Save as PDF" is the browser's. */
+  function printReceipt() {
+    document.body.classList.add('ff-print-sale');
+    const done = () => { document.body.classList.remove('ff-print-sale'); window.removeEventListener('afterprint', done); };
+    window.addEventListener('afterprint', done);
+    window.print();
+  }
 
   const openVoid = () => { setReason(''); setReasonError(null); setVoidError(null); setBlockers(null); setVoidOpen(true); };
   async function confirmVoid() {
@@ -505,6 +512,10 @@ function SaleDetail({ id, onBack, onUpdated }: { id: string; onBack: () => void;
   const seesCustomers = canCustomers(vendor.me);
   const customerHref = (extra = '') => (s.customer ? `/vendor/customers/?id=${encodeURIComponent(s.customer.id)}${extra}` : null);
   const row = 'flex justify-between gap-2';
+  // Sale extras: an internal label of this purchase (never on the receipt, its text or the print). Unknown values hide.
+  const customerType = saleCustomerTypeLabel(s.customerType, t);
+  // Q-13: with documents off the portal has no PDF of the receipt; printing it lets the browser save one.
+  const mayPrint = s.status === 'completed' && !documentsOn(vendor.me);
 
   return (
     <div className="space-y-4" data-testid="sale-detail">
@@ -526,6 +537,7 @@ function SaleDetail({ id, onBack, onUpdated }: { id: string; onBack: () => void;
                 : fmt(t('vendor.receipt.customer'), { name: customerName(s.customer, t) })}
             </p>
           )}
+          {customerType && <p className="text-sm text-[var(--color-fg-tertiary)]" data-testid="sale-customer-type">{fmt(t('vendor.sales.customerTypeLine'), { type: customerType })}</p>}
         </CardContent>
       </Card>
 
@@ -653,6 +665,11 @@ function SaleDetail({ id, onBack, onUpdated }: { id: string; onBack: () => void;
           <Button variant="secondary" className="min-h-11" onClick={copyText} data-testid="sale-copy">
             <Copy aria-hidden="true" className="h-4 w-4" />{t('vendor.sales.copyText')}
           </Button>
+          {mayPrint && (
+            <Button variant="secondary" className="min-h-11" onClick={printReceipt} data-testid="sale-print">
+              <Printer aria-hidden="true" className="h-4 w-4" />{t('vendor.sales.print')}
+            </Button>
+          )}
           {mayRefund && refundable && s.refundState !== 'full' && (
             <Button variant="secondary" className="min-h-11" onClick={() => setRefundOpen(true)} disabled={!online}
               aria-label={fmt(t('vendor.refunds.a11y.open'), { number: s.number })} aria-describedby={!online ? 'sale-refund-offline' : undefined} data-testid="sale-refund">
@@ -670,6 +687,12 @@ function SaleDetail({ id, onBack, onUpdated }: { id: string; onBack: () => void;
           {refundNote && <p data-testid="sale-refund-note">{t(refundNote)}</p>}
           {activeRefunds && mayVoidSale(s, who) && <p data-testid="sale-void-has-refunds">{t('vendor.sales.voidHasRefunds')}</p>}
         </div>
+      )}
+      {/* Q-13: the only block that prints (globals.css .ff-print-sale): the customer receipt, as Copy receipt text makes it. */}
+      {mayPrint && (
+        <pre className="ff-print-area hidden whitespace-pre-wrap font-mono text-sm" data-testid="sale-print-area">
+          {saleReceiptText(s, { business, locale, t, totalLabel: money(s.totalTzs) })}
+        </pre>
       )}
       {refundOpen && <RefundDialog saleId={s.id} saleNumber={s.number} onClose={() => setRefundOpen(false)} onSaved={onRefundSaved} />}
 
