@@ -3,6 +3,14 @@
 // Kept in its own file so it does not overlap other open i18n.ts changes.
 
 const en = {
+  // Portal sign-in page (/login) while the member portal is on: one sign-in for members and partners.
+  'member.login.heading': 'Sign in to FitFlex',
+  'member.login.sub': 'For members, gyms, businesses, FitFlex staff and organisations. Use the account you already have.',
+  'member.login.newHere': 'New to FitFlex? Create your account in the FitFlex app. Partner accounts are created by a FitFlex admin.',
+  'member.login.hero.eyebrow': 'FITFLEX',
+  'member.login.hero.lead': 'All of FitFlex',
+  'member.login.hero.accent': 'in one place.',
+  'member.login.hero.sub': 'Your pass and gym visits as a member. Check-ins, statements and programmes for partners and companies.',
   'member.nav.label': 'Member portal',
   'member.nav.today': 'Today',
   'member.nav.pass': 'Pass',
@@ -460,6 +468,13 @@ const en = {
 } as const;
 
 const sw: Record<keyof typeof en, string> = {
+  'member.login.heading': 'Ingia FitFlex',
+  'member.login.sub': 'Kwa wanachama, gym, biashara, wafanyakazi wa FitFlex na mashirika. Tumia akaunti uliyonayo tayari.',
+  'member.login.newHere': 'Mgeni FitFlex? Fungua akaunti yako kwenye app ya FitFlex. Akaunti za washirika hufunguliwa na admin wa FitFlex.',
+  'member.login.hero.eyebrow': 'FITFLEX',
+  'member.login.hero.lead': 'FitFlex yote',
+  'member.login.hero.accent': 'mahali pamoja.',
+  'member.login.hero.sub': 'Pasi yako na ziara za gym kama mwanachama. Mahudhurio, taarifa za malipo na programu kwa washirika na makampuni.',
   'member.nav.label': 'Portal ya mwanachama',
   'member.nav.today': 'Leo',
   'member.nav.pass': 'Pasi',
