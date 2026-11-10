@@ -6215,6 +6215,7 @@ export const messages = {
     ...eventsS6Messages.en,
     ...eventsS7Messages.en,
     ...vendorImportMessages.en,
+    ...securityIncidentsMessages.en,
     ...memberMessages.en,
     // Owner/staff pages, shared widgets, HR and organisation pages (portal#52).
     ...ownerMessages.en,
@@ -12556,6 +12557,7 @@ export const messages = {
     ...eventsS6Messages.sw,
     ...eventsS7Messages.sw,
     ...vendorImportMessages.sw,
+    ...securityIncidentsMessages.sw,
     ...memberMessages.sw,
     // Owner/staff pages, shared widgets, HR and organisation pages (portal#52).
     ...ownerMessages.sw,
@@ -12683,6 +12685,7 @@ import { hrOrgMessages } from './i18n-hr-org';
 import { eventsS6Messages } from './i18n-events-s6';
 import { eventsS7Messages } from './i18n-events-s7';
 import { vendorImportMessages } from './i18n-vendor-import';
+import { securityIncidentsMessages } from './i18n-security-incidents';
 import { memberMessages } from './i18n-member';
 import { ownerMessages } from './i18n-owner';
 import { orgMessages } from './i18n-org';

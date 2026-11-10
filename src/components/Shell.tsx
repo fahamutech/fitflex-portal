@@ -36,7 +36,7 @@ import {
   Star,
   HandCoins,
   SlidersHorizontal,
-  Undo2, Receipt, KeyRound, FileUp, ShieldAlert, Images, Landmark, Percent, CalendarCheck, ImageUp, Plug, ScrollText, Truck,
+  Undo2, Receipt, KeyRound, FileUp, ShieldAlert, ShieldQuestionMark, Images, Landmark, Percent, CalendarCheck, ImageUp, Plug, ScrollText, Truck,
 } from 'lucide-react';
 import { useApp } from '../../app/providers';
 import { ChangePasswordGate } from './change-password-gate';
@@ -245,6 +245,9 @@ const ADMIN_NAV: NavItem[] = [
   { href: '/admin/payments-held', labelKey: 'heldPayments.nav',     icon: ShieldAlert,     groupKey: 'nav.group.operations', aclScope: 'payments' },
   { href: '/admin/kyc',           labelKey: 'admin.nav.kyc',            icon: BadgeCheck,      groupKey: 'nav.group.operations', aclScope: 'kyc' },
   { href: '/admin/account-recovery', labelKey: 'admin.nav.accountRecovery', icon: KeyRound,    groupKey: 'nav.group.operations', aclScope: 'account_recovery' },
+  // Security reports (S4b): members' reports of a web check-in they do not recognise. The page itself says
+  // "not available yet" while the server's SECURITY_INCIDENT_REPORTS is off (404 feature_disabled).
+  { href: '/admin/security-incidents', labelKey: 'admin.nav.securityIncidents', icon: ShieldQuestionMark, groupKey: 'nav.group.operations', aclScope: 'security_incidents' },
   { href: '/admin/approvals',     labelKey: 'admin.nav.approvals',      icon: ShieldCheck,     groupKey: 'nav.group.operations', aclScope: 'approvals' },
   { href: '/admin/settings',      labelKey: 'admin.nav.settings',       icon: Settings,        groupKey: 'nav.group.system',   aclScope: 'settings' },
   { href: '/admin/users',         labelKey: 'admin.nav.users',          icon: UserCog,         groupKey: 'nav.group.system',   aclScope: 'users' },

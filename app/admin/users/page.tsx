@@ -34,6 +34,8 @@ const ALL_ACL_SCOPES = [
   { key: 'approvals', label: 'Approvals' },
   { key: 'kyc',       label: 'Partner verification' },
   { key: 'account_recovery', label: 'Account recovery' },
+  // Security reports (S4b, /admin/security-incidents). Its label is translated (secInc.scope) where it is drawn.
+  { key: 'security_incidents', label: 'Security reports: unrecognised check-ins' },
   { key: 'exercises', label: 'Exercises' },
   // Events S2: the moderation queue (/admin/events). Only offered in builds with NEXT_PUBLIC_EVENTS_MODULE=true.
   { key: 'events',    label: 'Events' },
@@ -80,7 +82,7 @@ const EMPTY_FORM: CreateForm = { email: '', password: '', displayName: '', aclPe
 
 export default function PortalUsersPage() {
   const { token, user, t, hasPermission } = useApp();
-  const scopeLabel = (s: typeof ALL_ACL_SCOPES[number]) => (s.key === 'brand_media' ? t('admin.nav.heroImages') : s.key === 'refunds_approve' || s.key === 'refunds_pay' || s.key === 'audit' ? t(`refundMoney.scope.${s.key}` as MessageKey) : s.label);
+  const scopeLabel = (s: typeof ALL_ACL_SCOPES[number]) => (s.key === 'brand_media' ? t('admin.nav.heroImages') : s.key === 'security_incidents' ? t('secInc.scope') : s.key === 'refunds_approve' || s.key === 'refunds_pay' || s.key === 'audit' ? t(`refundMoney.scope.${s.key}` as MessageKey) : s.label);
   const [users, setUsers]           = useState<PortalUser[]>([]);
   const [loading, setLoading]       = useState(true);
   const [error, setError]           = useState<string | null>(null);
