@@ -810,3 +810,10 @@ body {
   body.ff-print-purchase .ff-print-area * { visibility: visible; }
   body.ff-print-purchase .ff-print-area { display: block !important; position: absolute; left: 0; top: 0; width: 100%; }
 }
+/* Vendor sale extras Q-13: "Print or save as PDF" on a sale (documents off) prints only its receipt block. */
+@media print {
+  body.ff-print-sale * { visibility: hidden; }
+  body.ff-print-sale .ff-print-area,
+  body.ff-print-sale .ff-print-area * { visibility: visible; }
+  body.ff-print-sale .ff-print-area { display: block !important; position: absolute; left: 0; top: 0; width: 100%; }
+}

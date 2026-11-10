@@ -1,7 +1,7 @@
 // Small helpers for the vendor area (S2). No strings here: every label is an i18n key.
 import {
   ApiError, type AgingBucket, type ProductVariant, type VendorCustomerOpenSale, type VendorCustomerPayment, type VendorCustomerProfile, type VendorOrder,
-  type VendorSale, type VendorTools,
+  type VendorSale, type VendorTools, VENDOR_SALE_CUSTOMER_TYPES,
 } from '@/lib/api';
 import type { BadgeTone } from '@/lib/admin-utils';
 import type { Locale, MessageKey } from '@/lib/i18n';
@@ -212,6 +212,12 @@ const SALE_METHOD_KEYS: Record<string, MessageKey> = {
 };
 /** A walk-in payment method code in the chosen language; an unknown code falls back to "Other". */
 export const saleMethodLabel = (method: string, t: (k: MessageKey) => string) => t(SALE_METHOD_KEYS[method] ?? 'vendor.pos.method.other');
+/**
+ * Sale extras (functions#341): the label of a sale's stored customer type, or null when none is set or the value is
+ * one this portal does not know (a newer server): an unknown value is never shown raw.
+ */
+export const saleCustomerTypeLabel = (type: string | null | undefined, t: (k: MessageKey) => string) =>
+  type && (VENDOR_SALE_CUSTOMER_TYPES as readonly string[]).includes(type) ? t(`vendor.customerType.${type}` as MessageKey) : null;
 /** "Cash + M-Pesa". */
 export const saleMethodsLabel = (methods: string[] | null | undefined, t: (k: MessageKey) => string) =>
   (methods ?? []).map(m => saleMethodLabel(m, t)).join(' + ');
