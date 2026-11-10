@@ -40,10 +40,25 @@ NEXT_PUBLIC_FIREBASE_APP_ID=...
 
 ## E2E tests (Playwright)
 
+The suite starts its own backend (from a `fitflex-functions` checkout) and portal dev server on ports 4310/4311, on an isolated database it creates and migrates. It refuses to run against a non-localhost API, or a database that is not local and named `fitflex_ci_*` / `fitflex_e2e_*`.
+
 ```bash
 npx playwright install chromium
+export FITFLEX_FUNCTIONS_DIR=/path/to/fitflex-functions   # default ../fitflex-functions; a fresh worktree (no .env) is best
+export FITFLEX_E2E_DATABASE_URL=postgresql://localhost:5432/fitflex_e2e_portal_mine   # use a new name
 npm run test:e2e
 ```
+
+Servers already on those ports are reused only with `FITFLEX_E2E_REUSE_SERVERS=1` (never in CI). `tests/e2e/flutter-marketplace-web.spec.ts` runs only when `FITFLEX_FLUTTER_WEB_URL` points at a Flutter web build. CI runs the suite in the Portal Checks workflow, split into three shards.
+
+Specs that need a build flag are left out of that run: a flag is fixed when the portal starts, so each has its own `playwright.<name>.config.ts` (events, partner-media, web-checkin, web-gym, shop-merch, admin-phase0). These mock the API, so they need no backend or database:
+
+```bash
+npx playwright test --config playwright.events.config.ts
+EVENTS_FLAG=false npx playwright test --config playwright.events.config.ts
+```
+
+They reuse a server already on their port, so set `FITFLEX_PORTAL_PORT` if another checkout is using it.
 
 The spec at `tests/e2e/checkin-flow.spec.ts` exercises the full member-→ operator check-in slice end to end.
 
