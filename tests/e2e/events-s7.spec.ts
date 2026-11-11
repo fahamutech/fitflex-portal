@@ -878,6 +878,8 @@ test.describe('per race settings (AC-H18)', () => {
   test('saves per-race time basis, cut-off and tolerance through the existing route; "Same for all races" sets every race', async ({ page }) => {
     const mock = await setupEvents(page, OWNER, { me: organizerMe('active', 'owner'), s6: {}, s7: {} });
     await page.goto(RESULTS);
+    // The rows reset when the saved settings arrive, so anything chosen before that is lost.
+    await page.waitForLoadState('networkidle');
     const card = page.getByTestId('results-per-race');
     await expect(card).toBeVisible();
     await card.getByTestId('per-race-basis-cat_1').selectOption('gun');

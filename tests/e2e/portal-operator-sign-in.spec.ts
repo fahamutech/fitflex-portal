@@ -82,7 +82,8 @@ test('a gym owner signs in with the PIN they use in the app', async ({ page }) =
   await mockBackend(page, body => (body.requestedRole === 'admin' ? NOT_ADMIN : body.requestedRole === 'gym_operator' ? session('gym_operator') : NO_PROFILE), asked);
 
   await signIn(page, '1234');
-  await expect(page).toHaveURL(/\/dashboard/);
+  // The first visit to /dashboard compiles the page in dev.
+  await expect(page).toHaveURL(/\/dashboard/, { timeout: 25_000 });
   expect(tried).toEqual(['1234', 'fitflex-pin:1234']);
   expect(asked).toEqual([{ requestedRole: 'admin' }, { requestedRole: 'gym_operator', existingOnly: true }]);
   expect((await storedUser(page)).userType).toBe('gym_operator');
@@ -123,8 +124,17 @@ test('an account with no portal role gets no session, and nothing asks to create
   await signIn(page, '1234');
   await expect(page.getByText('This account has no portal access.')).toBeVisible();
   await expect(page).toHaveURL(/\/login/);
-  expect(asked).toHaveLength(3);
-  expect(asked.slice(1).every(body => body.existingOnly === true)).toBe(true);
+  // Every portal role, then an existing member profile (B2B organisation users); none is created.
+  expect(asked).toEqual([
+    { requestedRole: 'admin' },
+    { requestedRole: 'gym_operator', existingOnly: true },
+    { requestedRole: 'gym_staff', existingOnly: true },
+    { requestedRole: 'vendor', existingOnly: true },
+    { requestedRole: 'vendor_staff', existingOnly: true },
+    { requestedRole: 'event_organizer', existingOnly: true },
+    { requestedRole: 'organizer_staff', existingOnly: true },
+    { requestedRole: 'member', existingOnly: true },
+  ]);
   expect(await storedUser(page)).toBeNull();
 });
 

@@ -19,6 +19,7 @@ async function signedInAsOwner(page: Page) {
 }
 
 test('lists only portal personas and switches the session', async ({ page }) => {
+  test.setTimeout(60_000);
   const headers: string[] = [];
   const switched: string[] = [];
   await signedInAsOwner(page);
@@ -54,7 +55,8 @@ test('lists only portal personas and switches the session', async ({ page }) => 
   expect(options).toEqual(['Company HR'], 'no app-only, suspended, admin or current persona');
 
   await select.selectOption('usr_hr');
-  await expect(page).toHaveURL(/\/hr/);
+  // The first visit to /hr compiles the page in dev.
+  await expect(page).toHaveURL(/\/hr/, { timeout: 30_000 });
   expect(switched).toEqual(['usr_hr']);
   // Polled: the first visit to /hr can still be compiling in dev.
   await expect.poll(() => page.evaluate(() => localStorage.getItem('token'))).toBe('hr-token');
