@@ -1,7 +1,7 @@
 {
-  "name": "FitFlex Af Operator Portal",
+  "name": "FitFlex Africa Portal",
   "short_name": "FitFlex Portal",
-  "description": "FitFlex Af operator and admin portal for gym check-ins, payments, and pilot operations.",
+  "description": "FitFlex Africa portal for members, gyms, trainers and admins: passes, check-ins and payments.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
