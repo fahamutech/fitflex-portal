@@ -6,8 +6,8 @@ import { Providers } from './providers';
 import { Shell } from '../src/components/Shell';
 
 export const metadata = {
-  title: 'FitFlex Af — Operator Portal',
-  description: 'FitFlex Af operator and admin portal for gym check-ins, payments, and pilot operations.',
+  title: 'FitFlex Africa Portal',
+  description: 'FitFlex Africa portal for members, gyms, trainers and admins: passes, check-ins and payments.',
   manifest: '/manifest.webmanifest',
   appleWebApp: {
     capable: true,
