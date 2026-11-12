@@ -6,7 +6,7 @@ test('portal exposes install metadata without enabling offline caching in develo
 
   const manifest = await manifestResponse.json();
   expect(manifest).toMatchObject({
-    name: 'FitFlex Af Operator Portal',
+    name: 'FitFlex Africa Portal',
     short_name: 'FitFlex Portal',
     start_url: '/',
     scope: '/',
