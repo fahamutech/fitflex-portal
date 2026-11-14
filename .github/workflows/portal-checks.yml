@@ -43,6 +43,13 @@ jobs:
       # Member web portal /m (src/lib/flags.ts MEMBER_PORTAL). Off unless the repository variable is exactly 'true'.
       # Needs the server's IDENTITY_V2 + V2_PIN_LOGIN for sign-in, and Tunzaa or Lipa Namba to pay for a pass.
       NEXT_PUBLIC_MEMBER_PORTAL: ${{ vars.NEXT_PUBLIC_MEMBER_PORTAL || 'false' }}
+      # Public gym page /g from a gym's printed QR (src/lib/flags.ts WEB_GYM_PROFILE). Off unless the repository
+      # variable is exactly 'true'. Needs the server's WEB_GYM_PROFILE + QR_HMAC_SECRET.
+      NEXT_PUBLIC_WEB_GYM_PROFILE: ${{ vars.NEXT_PUBLIC_WEB_GYM_PROFILE || 'false' }}
+      # Browser check-in from that page (src/lib/flags.ts WEB_QR_CHECKIN): "Visit this gym", PIN sign-in, confirm.
+      # Off unless the repository variable is exactly 'true'. Needs NEXT_PUBLIC_WEB_GYM_PROFILE and the server's
+      # WEB_QR_CHECKIN + QR_HMAC_SECRET + IDENTITY_V2 + V2_PIN_LOGIN.
+      NEXT_PUBLIC_WEB_QR_CHECKIN: ${{ vars.NEXT_PUBLIC_WEB_QR_CHECKIN || 'false' }}
       # Marathon & events module (src/lib/flags.ts EVENTS_MODULE): the member Events page AND the staff organizer
       # (/organizer) and admin events areas. Off unless the repository variable is exactly 'true'. Needs the server's
       # EVENTS_MODULE (+ EVENTS_REGISTRATION and event payments for members to register).
