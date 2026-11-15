@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import QRCode from 'qrcode';
 import { messages } from '../../src/lib/i18n';
 import { hoursView, mapUrl, safeImage } from '../../src/lib/web-gym';
 
@@ -191,5 +192,154 @@ test.describe('flag off', () => {
     await expect(page.getByTestId('web-gym-not-found')).toBeVisible();
     await expect(page.getByTestId('web-gym-profile')).toHaveCount(0);
     expect(calls.bodies).toHaveLength(0);
+  });
+});
+
+// ── Gym QR dialog (src/components/gym-entrance-qr.tsx): a printable QR of the gym's WEB LINK, on Manage gym (owner, or
+// staff with `checkins`) and on the admin gyms page (`gyms`). Backend GET /operator|admin/gyms/:gymId/entrance-qr is
+// mocked; every request outside localhost is aborted. Shown only with the flag on. ──
+const API = process.env.FITFLEX_API_URL || 'http://localhost:3000';
+const WEB_URL = `https://portal.fitflex.test/g/?q=${encodeURIComponent(Q)}`;
+const OWNER = { id: 'own_1', userType: 'gym_operator', email: 'owner@fitflex.test', displayName: 'Owner One' };
+const gymStaff = (aclPermissions: string[]) => ({ id: 'stf_1', userType: 'gym_staff', email: 'staff@fitflex.test', aclPermissions });
+const ADMIN = { id: 'adm_1', userType: 'admin', email: 'one@fitflex.test' };
+const GYM = { id: 'gym_001', name: 'Iron Temple', tier: 'standard', location: 'Mikocheni', perVisitRate: 0, commissionRate: 0, status: 'active', verified: true };
+const qrReply = (webUrl?: string) => ({ gymId: 'gym_001', gymName: 'Iron Temple', payload: Q, ...(webUrl ? { webUrl } : {}) });
+type QrReply = { status?: number; json?: unknown };
+
+async function openSignedIn(page: Page, user: Record<string, unknown>, path: string, qr: () => QrReply) {
+  const qrCalls: string[] = [];
+  await page.addInitScript(u => {
+    localStorage.setItem('locale', 'en');
+    localStorage.setItem('token', 'tok');
+    localStorage.setItem('user', JSON.stringify(u));
+    // Print is recorded, never opened: the body class at that moment is what scopes the print stylesheet.
+    (window as unknown as { __printed: string[] }).__printed = [];
+    window.print = () => { (window as unknown as { __printed: string[] }).__printed.push(document.body.className); };
+  }, user);
+  await page.context().route(/^https?:\/\/(?!localhost[:/]|127\.0\.0\.1[:/])/, route => route.abort());
+  const routes: Record<string, unknown> = {
+    'GET /owner/gyms': [GYM],
+    'GET /owner/members': { members: [], stats: {} },
+    'GET /owner/staff': [],
+    'GET /owner/trainers': [],
+    'GET /owner/trainers/pending': [],
+    'GET /admin/gyms': [GYM],
+    'GET /admin/gym-owners': [],
+    'GET /admin/trainers': [],
+  };
+  await page.context().route(`${API}/**`, async route => {
+    const url = new URL(route.request().url());
+    const key = `${route.request().method()} ${url.pathname}`;
+    if (/^GET \/(operator|admin)\/gyms\/gym_001\/entrance-qr$/.test(key)) {
+      qrCalls.push(url.pathname);
+      const r = qr();
+      return route.fulfill({ status: r.status ?? 200, json: r.json ?? null });
+    }
+    return key in routes ? route.fulfill({ status: 200, json: routes[key] }) : route.fulfill({ status: 404, json: { error: 'not_found' } });
+  });
+  await page.goto(path);
+  return qrCalls;
+}
+/** The QR modules as drawn by `qrcode` for this text (same options as the dialog). */
+const qrPath = async (text: string) => (await QRCode.toString(text, { type: 'svg', margin: 2, errorCorrectionLevel: 'M' })).match(/<path stroke[^>]* d="([^"]+)"/)?.[1];
+
+test.describe('gym QR: keys', () => {
+  test('every gymQr key has an English and a Swahili entry', () => {
+    const en = Object.keys(messages.en).filter(k => k.startsWith('gymQr.'));
+    expect(en).toHaveLength(5);
+    for (const k of en) expect(Object.keys(messages.sw)).toContain(k);
+  });
+});
+
+test.describe(FLAG_ON ? 'gym QR: flag on' : 'gym QR: flag off', () => {
+  test.skip(!FLAG_ON, 'flag-on specs');
+
+  test('owner: Manage gym draws the QR of webUrl (never the app payload), and Print prints only the QR block', async ({ page }) => {
+    const calls = await openSignedIn(page, OWNER, '/owner/manage', () => ({ json: qrReply(WEB_URL) }));
+    await page.getByTestId('owner-gym-qr').click();
+    const dialog = page.getByTestId('gym-qr-dialog');
+    await expect(dialog.getByTestId('gym-qr-ready')).toBeVisible();
+    expect(calls).toEqual(['/operator/gyms/gym_001/entrance-qr']);
+    await expect(dialog).toContainText('Iron Temple');
+    await expect(dialog.getByTestId('gym-qr-hint')).toHaveText(messages.en['gymQr.hint']);
+    const drawn = await dialog.getByTestId('gym-qr-code').locator('svg path').last().getAttribute('d');
+    expect(drawn).toBeTruthy();
+    expect(drawn).toBe(await qrPath(WEB_URL));
+    expect(drawn).not.toBe(await qrPath(Q));
+    await expect(dialog).not.toContainText('SECRETSIG');
+
+    const area = page.getByTestId('gym-qr-print-area');
+    await expect(area).toBeHidden();
+    await dialog.getByTestId('gym-qr-print').click();
+    expect(await page.evaluate(() => (window as unknown as { __printed: string[] }).__printed)).toEqual([expect.stringContaining('ff-print-gym-qr')]);
+    await page.emulateMedia({ media: 'print' });
+    await expect(area).toBeVisible();
+    await expect(area).toContainText('Iron Temple');
+    await expect(area).toContainText(messages.en['gymQr.hint']);
+    expect(await area.locator('svg path').last().getAttribute('d')).toBe(drawn);
+    await expect(dialog.getByTestId('gym-qr-print')).toBeHidden();
+    await expect(page.getByTestId('owner-gym-qr')).toBeHidden();
+    await page.emulateMedia({ media: 'screen' });
+    await page.evaluate(() => window.dispatchEvent(new Event('afterprint')));
+    expect(await page.evaluate(() => document.body.classList.contains('ff-print-gym-qr'))).toBe(false);
+  });
+
+  test('no webUrl in the reply: a neutral notice, no QR and no Print', async ({ page }) => {
+    await openSignedIn(page, OWNER, '/owner/manage', () => ({ json: qrReply() }));
+    await page.getByTestId('owner-gym-qr').click();
+    const dialog = page.getByTestId('gym-qr-dialog');
+    await expect(dialog.getByTestId('gym-qr-no-link')).toHaveText(messages.en['gymQr.noWebLink']);
+    await expect(dialog.getByTestId('gym-qr-code')).toHaveCount(0);
+    await expect(dialog.getByTestId('gym-qr-print')).toHaveCount(0);
+    await expect(page.getByTestId('gym-qr-print-area')).toHaveCount(0);
+  });
+
+  test('a failed load shows an error with a retry, and retry works', async ({ page }) => {
+    let down = true;
+    const calls = await openSignedIn(page, OWNER, '/owner/manage', () => (down ? { status: 500, json: { error: 'boom' } } : { json: qrReply(WEB_URL) }));
+    await page.getByTestId('owner-gym-qr').click();
+    const dialog = page.getByTestId('gym-qr-dialog');
+    await expect(dialog.getByTestId('gym-qr-error')).toContainText(messages.en['gymQr.loadFailed']);
+    down = false;
+    await dialog.getByRole('button', { name: messages.en['common.tryAgain'] }).click();
+    await expect(dialog.getByTestId('gym-qr-ready')).toBeVisible();
+    expect(calls).toHaveLength(2);
+  });
+
+  test('gym staff without the checkins permission do not see the action', async ({ page }) => {
+    await openSignedIn(page, gymStaff(['members', 'gyms']), '/owner/manage', () => ({ json: qrReply(WEB_URL) }));
+    await expect(page.getByRole('button', { name: messages.en['ownerManage.save'] }).first()).toBeVisible();
+    await expect(page.getByTestId('owner-gym-qr')).toHaveCount(0);
+  });
+
+  test('gym staff with checkins sees the action', async ({ page }) => {
+    await openSignedIn(page, gymStaff(['members', 'checkins']), '/owner/manage', () => ({ json: qrReply(WEB_URL) }));
+    await expect(page.getByTestId('owner-gym-qr')).toBeVisible();
+  });
+
+  test('admin gyms page: the row action opens the QR from the admin endpoint', async ({ page }) => {
+    const calls = await openSignedIn(page, ADMIN, '/admin/gyms', () => ({ json: qrReply(WEB_URL) }));
+    await page.getByTestId('gym-qr-row-gym_001').click();
+    const dialog = page.getByTestId('gym-qr-dialog');
+    await expect(dialog.getByTestId('gym-qr-ready')).toBeVisible();
+    expect(calls).toEqual(['/admin/gyms/gym_001/entrance-qr']);
+    expect(await dialog.getByTestId('gym-qr-code').locator('svg path').last().getAttribute('d')).toBe(await qrPath(WEB_URL));
+  });
+});
+
+test.describe('gym QR: flag off', () => {
+  test.skip(FLAG_ON, 'flag-off spec');
+  test('Manage gym has no Gym QR action, and nothing is requested', async ({ page }) => {
+    const ownerCalls = await openSignedIn(page, OWNER, '/owner/manage', () => ({ json: qrReply(WEB_URL) }));
+    await expect(page.getByRole('button', { name: messages.en['ownerManage.save'] }).first()).toBeVisible();
+    await expect(page.getByTestId('owner-gym-qr')).toHaveCount(0);
+    expect(ownerCalls).toHaveLength(0);
+  });
+  test('the admin gyms row has no Gym QR action', async ({ page }) => {
+    const calls = await openSignedIn(page, ADMIN, '/admin/gyms', () => ({ json: qrReply(WEB_URL) }));
+    await expect(page.getByText('Iron Temple').first()).toBeVisible();
+    await expect(page.getByTestId('gym-qr-row-gym_001')).toHaveCount(0);
+    expect(calls).toHaveLength(0);
   });
 });
