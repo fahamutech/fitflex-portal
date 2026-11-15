@@ -34,21 +34,24 @@ export default function GymPassInvitePage() {
     if (!ctl.signal.aborted) setView(r);
   }, []);
 
+  // On mount, before any flag or ready check: take the token out of the address bar and history entry, whatever the
+  // flag says. It is kept in memory only when the page is on.
+  useEffect(() => {
+    if (tokenRef.current !== undefined) return;
+    let h = '';
+    try { h = window.location.hash; } catch { /* unreadable address */ }
+    tokenRef.current = GYM_CUSTOM_PASSES ? inviteTokenFromHash(h) : null;
+    if (h) {
+      try { window.history.replaceState(window.history.state, '', window.location.pathname + window.location.search); } catch { /* not allowed: leave it */ }
+    }
+  }, []);
+
   useEffect(() => {
     if (!ready) return;
     if (!GYM_CUSTOM_PASSES) { setView({ kind: 'off' }); return; }
     // One request per visit: an effect that runs twice (development) must not ask twice.
     if (startedRef.current) return;
     startedRef.current = true;
-    if (tokenRef.current === undefined) {
-      let h = '';
-      try { h = window.location.hash; } catch { /* unreadable address */ }
-      tokenRef.current = inviteTokenFromHash(h);
-      if (h) {
-        // Keep the token out of the address bar and history entry.
-        try { window.history.replaceState(window.history.state, '', window.location.pathname + window.location.search); } catch { /* not allowed: leave it */ }
-      }
-    }
     void load();
   }, [ready, load]);
 

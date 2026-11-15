@@ -133,8 +133,8 @@ const en = {
   'gp.sales.slots': '{used} of {limit} places used',
   'gp.sales.buyerUnknown': 'Member',
   'gp.purchase.status.pending_payment': 'Waiting for payment',
-  'gp.purchase.status.active': 'Running',
-  'gp.purchase.status.expired': 'Ended',
+  'gp.purchase.status.active': 'Active',
+  'gp.purchase.status.expired': 'Expired',
   'gp.purchase.status.cancelled': 'Cancelled',
   'gp.payment.status.pending': 'Pending',
   'gp.payment.status.approved': 'Paid',
@@ -142,8 +142,8 @@ const en = {
   'gp.payment.status.cancelled': 'Cancelled',
 
   // Memberships
-  'gp.mem.running': 'Running',
-  'gp.mem.ended': 'Ended',
+  'gp.mem.running': 'Active',
+  'gp.mem.ended': 'Expired',
   'gp.mem.state': 'Show memberships',
   'gp.mem.empty': 'No memberships here',
   'gp.mem.emptyBody': 'Passes that members have paid for appear here, with the people each one covers.',
@@ -212,6 +212,8 @@ const en = {
   'gp.err.invalid_contact': 'Enter a valid phone number or email.',
   'gp.err.cannot_add_yourself': 'You cannot add the buyer again.',
   'gp.err.not_found': 'This was not found. Refresh and try again.',
+  'gp.err.gym_not_found': 'This gym was not found.',
+  'gp.err.acl_forbidden': 'Your account does not have the permission for this. Ask the gym owner to give it to you.',
 
   // Attendance
   'gp.att.title': 'Visits',
@@ -221,6 +223,15 @@ const en = {
   'gp.att.col.when': 'When',
   'gp.att.col.method': 'Method',
   'gp.att.col.status': 'Status',
+  'gp.att.method.gym_scanned': 'Gym QR scanned by staff',
+  'gp.att.method.member_scanned': 'Gym QR scanned by the member',
+  'gp.att.method.web_scanned': 'Gym QR scanned in the browser',
+  'gp.att.method.other': 'Other',
+  'gp.att.status.valid': 'Valid',
+  'gp.att.status.disputed': 'Disputed',
+  'gp.att.status.flagged': 'Flagged',
+  'gp.att.status.voided': 'Voided',
+  'gp.att.status.other': 'Other',
   'gp.att.close': 'Close',
 
   // Invite landing page /gym-pass/

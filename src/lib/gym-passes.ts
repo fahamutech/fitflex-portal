@@ -151,6 +151,8 @@ const KNOWN: Record<string, MessageKey> = {
   invalid_contact: 'gp.err.invalid_contact',
   cannot_add_yourself: 'gp.err.cannot_add_yourself',
   not_found: 'gp.err.not_found',
+  gym_not_found: 'gp.err.gym_not_found',
+  acl_forbidden: 'gp.err.acl_forbidden',
 };
 const FIELD_KEYS = new Set(['name', 'description', 'terms', 'category', 'durationUnit', 'durationValue', 'priceTzs', 'beneficiaryLimit']);
 const REASON_KEYS = new Set(['name_required', 'too_long', 'too_large', 'group_limit_required', 'group_limit_range', 'category_fixes_limit']);

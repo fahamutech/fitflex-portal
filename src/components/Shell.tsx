@@ -590,6 +590,9 @@ export function Shell({ children }: { children: ReactNode }) {
     // Block non-admin users from admin routes
     if (user?.userType !== 'admin' && path.startsWith('/admin')) return '/dashboard';
 
+    // Custom gym passes page: gym owners and gym staff only.
+    if ((path === '/owner/memberships' || path.startsWith('/owner/memberships/')) && user?.userType !== 'gym_operator' && user?.userType !== 'gym_staff') return homeFor(user);
+
     // All admin users (including portal staff) go to /admin, not operator pages
     if (user?.userType === 'admin' && ['/dashboard', '/scan', '/checkins'].includes(path)) return '/admin';
 

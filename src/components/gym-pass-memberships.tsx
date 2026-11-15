@@ -11,6 +11,9 @@ import type { MessageKey } from '@/lib/i18n';
 
 const PAGE = 25;
 type Action = 'suspend' | 'resume' | 'remove';
+// Check-in values the backend records (check-in-service methods; CHECKIN_STATUS). Anything else reads "Other".
+const KNOWN_METHODS = new Set(['gym_scanned', 'member_scanned', 'web_scanned']);
+const KNOWN_VISIT_STATUS = new Set(['valid', 'disputed', 'flagged', 'voided']);
 
 const personName = (p: PassPerson, fallback: string) => p.displayName || p.contact || fallback;
 
@@ -226,7 +229,7 @@ export function GymPassMemberships({ gymId, onChanged }: { gymId: string; onChan
             <THead><Tr><Th>{t('gp.att.col.when')}</Th><Th>{t('gp.att.col.method')}</Th><Th>{t('gp.att.col.status')}</Th></Tr></THead>
             <TBody>
               {visits.list.map(v => (
-                <Tr key={v.id} data-testid="gp-visit-row"><Td className="whitespace-nowrap">{fmtr.dateTime(v.timestamp)}</Td><Td>{v.method || '—'}</Td><Td>{v.status || '—'}</Td></Tr>
+                <Tr key={v.id} data-testid="gp-visit-row"><Td className="whitespace-nowrap">{fmtr.dateTime(v.timestamp)}</Td><Td>{v.method ? t(`gp.att.method.${KNOWN_METHODS.has(v.method) ? v.method : 'other'}` as MessageKey) : '—'}</Td><Td>{v.status ? t(`gp.att.status.${KNOWN_VISIT_STATUS.has(v.status) ? v.status : 'other'}` as MessageKey) : '—'}</Td></Tr>
               ))}
             </TBody>
           </Table>

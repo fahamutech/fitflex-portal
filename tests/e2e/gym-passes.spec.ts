@@ -61,7 +61,7 @@ async function mockOwnerApi(page: Page, over: (method: string, path: string, bod
     if (p.startsWith('/owner/gyms/gym-1/pass-plans/')) return route.fulfill({ json: { plan: plan() } });
     if (p === '/owner/gyms/gym-1/pass-sales') return route.fulfill({ json: { sales: [membership] } });
     if (p === '/owner/gyms/gym-1/pass-memberships') return route.fulfill({ json: { state: 'active', memberships: [membership] } });
-    if (p.endsWith('/attendance')) return route.fulfill({ json: { beneficiaryId: 'ben-2', visits: [{ id: 'v1', gymId: 'gym-1', timestamp: '2026-11-10T08:00:00.000Z', method: 'qr', status: 'valid', businessDate: '2026-11-10' }] } });
+    if (p.endsWith('/attendance')) return route.fulfill({ json: { beneficiaryId: 'ben-2', visits: [{ id: 'v1', gymId: 'gym-1', timestamp: '2026-11-10T08:00:00.000Z', method: 'member_scanned', status: 'valid', businessDate: '2026-11-10' }] } });
     if (/\/(suspend|resume|remove)$/.test(p)) return route.fulfill({ json: { beneficiary: { id: 'ben-2' } } });
     if (p.endsWith('/beneficiaries')) return route.fulfill({ status: 201, json: { beneficiary: { id: 'ben-3', status: 'invited', contactType: 'phone', contact: '+255 7•• ••• 999' } } });
     return route.fulfill({ json: {} });
@@ -87,6 +87,7 @@ test.describe('pure helpers', () => {
     expect(classifyGymPassError(new ApiError(429, { error: 'rate_limited', retryAfterSeconds: 42 }))).toEqual({ kind: 'rate_limited', retryAfterSeconds: 42 });
     expect(classifyGymPassError(new ApiError(409, { error: 'cannot_add_person' }))).toMatchObject({ kind: 'message', key: 'gp.err.cannot_add_person' });
     expect(classifyGymPassError(new ApiError(400, { error: 'invalid_field', field: 'beneficiaryLimit', reason: 'group_limit_range' }))).toMatchObject({ key: 'gp.err.reason.group_limit_range' });
+    expect(classifyGymPassError(new ApiError(403, { error: 'acl_forbidden', requiredScope: 'members' }))).toMatchObject({ key: 'gp.err.acl_forbidden' });
     expect(classifyGymPassError(new ApiError(500, {}))).toMatchObject({ key: 'gp.generic' });
   });
 });
@@ -152,7 +153,7 @@ test.describe('flag on', () => {
     await expect(row).toContainText('Couples 3 months');
     await expect(row).toContainText('240,000');
     await expect(row).toContainText('Paid');
-    await expect(row).toContainText('Running');
+    await expect(row).toContainText('Active');
   });
 
   test('memberships: masked contacts as given, confirm before suspend, remove, add, attendance', async ({ page }) => {
@@ -177,7 +178,8 @@ test.describe('flag on', () => {
     await expect.poll(() => seen.calls.some(c => c.path.endsWith('/ben-2/remove'))).toBe(true);
 
     await page.getByTestId('gp-person-ben-2').getByTestId('gp-person-visits').click();
-    await expect(page.getByTestId('gp-visits-dialog')).toContainText('qr');
+    await expect(page.getByTestId('gp-visits-dialog')).toContainText('Gym QR scanned by the member');
+    await expect(page.getByTestId('gp-visits-dialog')).toContainText('Valid');
     await page.getByRole('button', { name: 'Close', exact: true }).last().click();
 
     await page.getByTestId('gp-add-person').click();
@@ -194,6 +196,20 @@ test.describe('flag on', () => {
     await expect(page.getByTestId('gp-disabled')).toContainText('not available yet');
     await page.getByRole('button', { name: 'Sales', exact: true }).click();
     await expect(page.getByTestId('gp-rate-limited')).toContainText('42 seconds');
+  });
+
+  test('a member session is sent away from the owner page', async ({ page }) => {
+    await page.addInitScript(() => {
+      localStorage.setItem('token', 'member-e2e-token');
+      localStorage.setItem('user', JSON.stringify({ id: 'm-1', userType: 'member', email: 'm@example.com' }));
+    });
+    const seen = await mockOwnerApi(page);
+    await page.goto('/owner/memberships');
+    // The Shell redirects (the dev server may be slow to open the target page): the owner page never renders or loads.
+    await expect(page.getByTestId('shell-redirecting')).toBeVisible();
+    await page.waitForTimeout(1000);
+    await expect(page.getByTestId('gp-page')).toHaveCount(0);
+    expect(seen.calls.filter(c => c.path.includes('pass-'))).toEqual([]);
   });
 
   test('Swahili is the pending placeholder', async ({ page }) => {
@@ -295,6 +311,7 @@ test.describe('flag off', () => {
     await page.route(`${API}/**`, async route => { calls.push(route.request().url()); await route.fulfill({ json: {} }); });
     await page.goto(`/gym-pass/#${TOKEN}`);
     await expect(page.getByTestId('gp-invite-off')).toBeVisible();
+    expect(page.url()).not.toContain(TOKEN);
     expect(calls.filter(u => u.includes('gym-pass'))).toEqual([]);
   });
 });
