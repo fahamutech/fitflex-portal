@@ -51,3 +51,11 @@ export const WEB_QR_CHECKIN = process.env.NEXT_PUBLIC_WEB_QR_CHECKIN === 'true';
  * server's existing V2_PIN_LOGIN and mobile-money flags; no new server flag. Default off.
  */
 export const MEMBER_PORTAL = process.env.NEXT_PUBLIC_MEMBER_PORTAL === 'true';
+
+/**
+ * Custom gym passes & flexible membership (backend functions#355): the owner page /owner/memberships ("Membership & Pass
+ * Management") and its nav item, and the invite landing page /gym-pass/. Off, the nav item is absent, both pages show the
+ * "not available yet" state and make no request. The server has its own GYM_CUSTOM_PASSES flag (every route answers
+ * 404 feature_disabled while it is off). Default off.
+ */
+export const GYM_CUSTOM_PASSES = process.env.NEXT_PUBLIC_GYM_CUSTOM_PASSES === 'true';

@@ -205,6 +205,8 @@ jobs:
           suite CI=true admin-phase0
           suite MEMBER_PORTAL_FLAG=true member-portal
           suite MEMBER_PORTAL_FLAG=false member-portal
+          suite GYM_PASSES_FLAG=true gym-passes
+          suite GYM_PASSES_FLAG=false gym-passes
           exit $failed
 
       - name: Upload Playwright results

@@ -49,7 +49,7 @@ import { useVendor } from './vendor-context';
 import { BrandLogo } from './brand-logo';
 import { LanguageToggle } from './language-toggle';
 import { PhotoPanel } from './photo-panel';
-import { EVENTS_MODULE, HERO_IMAGES_ADMIN, PARTNER_MEDIA_ADMIN, PHOTO_HERO_UI } from '@/lib/flags';
+import { EVENTS_MODULE, GYM_CUSTOM_PASSES, HERO_IMAGES_ADMIN, PARTNER_MEDIA_ADMIN, PHOTO_HERO_UI } from '@/lib/flags';
 import { eventsAreaOpen, staffAreaOpen } from '@/lib/events';
 import { useAdminEventsSummary, useOrganizer } from './organizer-context';
 import { useCorporateEventsAvailable, useEventsOptions } from './events-options';
@@ -132,6 +132,9 @@ const OPERATOR_NAV: NavItem[] = [
   { href: '/scan',      labelKey: 'nav.scan',       icon: QrCode },
   { href: '/checkins',  labelKey: 'nav.checkins',   icon: ClipboardList },
   { href: '/owner/manage', labelKey: 'nav.manageGym', icon: BriefcaseBusiness },
+  // Custom gym passes: only in builds with NEXT_PUBLIC_GYM_CUSTOM_PASSES=true. Owners always; gym staff with any of the
+  // permissions its tabs need (plans: gyms, sales: payments, people: members).
+  ...(GYM_CUSTOM_PASSES ? [{ href: '/owner/memberships', labelKey: 'nav.memberships', icon: BadgeCheck, aclScope: 'members', aclAny: ['gyms', 'payments'] }] : []),
   // Owners always; gym staff only with the communications permission.
   { href: '/owner/communications', labelKey: 'nav.communications', icon: Megaphone, aclScope: 'communications' },
   // Owners always; gym staff only with the gyms permission (read-only).
@@ -532,7 +535,7 @@ export function Shell({ children }: { children: ReactNode }) {
         : item))
     : isOrgUser ? orgNav(user?.organizationRoles, corporateEvents)
     : isHr ? hrNav(corporateEvents)
-    : OPERATOR_NAV.filter(item => !item.aclScope || user?.userType !== 'gym_staff' || hasPermission(item.aclScope));
+    : OPERATOR_NAV.filter(item => !item.aclScope || user?.userType !== 'gym_staff' || scopesOf(item).some(hasPermission));
 
   // Where this person must go instead of the current page, or null when they may see it. One decision
   // drives both the redirect and the render: a page's content (and its requests) waits until it passes.
@@ -545,7 +548,8 @@ export function Shell({ children }: { children: ReactNode }) {
   // S6 reports (spec §0.1): with the tool switched off, back home with no message (never "feature off").
   const vendorBounceQuiet = !!vendorArea?.quietWhenOff && !!vendorArea.tool && vendor.me?.tools?.[vendorArea.tool] !== true;
   // The public gym page (/g, opened from a gym's QR code) is for everyone, signed in or not: no redirect, no sidebar.
-  const isPublicGymPage = path === '/g' || path.startsWith('/g/');
+  // The gym pass invite page (/gym-pass, opened from an invitation link) is public in the same way.
+  const isPublicGymPage = path === '/g' || path.startsWith('/g/') || path === '/gym-pass' || path.startsWith('/gym-pass/');
   // The member portal (/m) has its own session, its own frame and its own sign-in: the staff shell stays out of it.
   const isMemberArea = path === '/m' || path.startsWith('/m/');
   const redirectTo = ((): string | null => {
