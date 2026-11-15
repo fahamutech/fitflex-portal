@@ -18,6 +18,7 @@ import { TrainerInlineForm, TrainerFormDraft, BLANK_TRAINER_DRAFT, validateTrain
 import { TrainerPassFields, trainerPassError, trainerPassOptions } from '@/components/trainer-pass-fields';
 import { PartnerMediaDetailSection, PartnerMediaRowAction, PartnerMediaSetDialog } from '@/components/partner-media-set-dialog';
 import type { PartnerSubject } from '@/lib/partner-media';
+import { GymQrDialog, GymQrRowAction, type GymQrSubject } from '@/components/gym-entrance-qr';
 import { GymPayoutOwnerDialog, PayoutOwnerCell, PayoutOwnerRequiredAlert, PayoutOwnerSummary, fill, needsPayoutOwner, ownerName } from '@/components/gym-payout-owner';
 
 const TIERS = ['standard', 'midtier', 'premium', 'luxury_executive'];
@@ -58,6 +59,7 @@ export default function GymsPage() {
   const [detailGym, setDetailGym] = useState<Gym | null>(null);
   const [detailImagesLoading, setDetailImagesLoading] = useState(false);
   const [mediaSubject, setMediaSubject] = useState<PartnerSubject | null>(null);
+  const [qrGym, setQrGym] = useState<GymQrSubject | null>(null);
   const [editLoading, setEditLoading] = useState(false);
   const [slideIndex, setSlideIndex] = useState(0);
   const [ownerDialogOpen, setOwnerDialogOpen] = useState(false);
@@ -519,6 +521,7 @@ export default function GymsPage() {
                     <Eye className="h-3.5 w-3.5" />
                   </Button>
                   <PartnerMediaRowAction subject={{ type: 'gym', id: gym.id, name: gym.name }} onOpen={setMediaSubject} />
+                  <GymQrRowAction gym={{ id: gym.id, name: gym.name }} onOpen={setQrGym} />
                   <Button variant="ghost" size="sm" disabled={editLoading} onClick={(e) => { e.stopPropagation(); openEdit(gym); }} title="Edit gym">
                     <Pencil className="h-3.5 w-3.5" />
                   </Button>
@@ -974,6 +977,7 @@ export default function GymsPage() {
       </Dialog>
 
       <PartnerMediaSetDialog subject={mediaSubject} onClose={() => setMediaSubject(null)} />
+      <GymQrDialog gym={qrGym} scope="admin" onClose={() => setQrGym(null)} />
     </div>
   );
 }
