@@ -22,6 +22,12 @@ type PaymentFilter = 'pending' | 'approved' | 'rejected' | 'cancelled' | 'all';
 type KindFilter = 'all' | 'trainer_pass' | 'event_order';
 type Translate = (key: MessageKey) => string;
 
+/**
+ * A custom gym pass (GYM_CUSTOM_PASSES) is paid with ONE request for the whole purchase: it carries `passPurchaseId`,
+ * no subscription and no plan of its own. The list gives no plan name, so the label is the generic "Gym pass".
+ */
+const isGymPass = (payment: PaymentRequest) => !!payment.passPurchaseId;
+
 /** A trainer pass is known by its subscription type; `note` can be edited. */
 function isTrainerPass(payment: PaymentRequest): boolean {
   return payment.subscription?.type === 'trainer_pass' || (!payment.subscription && payment.note === 'trainer_pass');
@@ -47,6 +53,7 @@ function paymentKindLabel(payment: PaymentRequest, t: Translate): string {
   if (payment.bookingGroupId) return upper(t('payments.kind.trainerSession'));
   if (payment.orderId) return upper(t('payments.kind.shopOrder'));
   if (isTrainerPass(payment)) return upper(t('payments.kind.trainerPass'));
+  if (isGymPass(payment)) return upper(t('payments.kind.gymPass'));
   if (payment.subscription?.type === 'direct_sub') return upper(t('payments.kind.gymPlan'));
   const tier = payment.tier || payment.subscription?.tier;
   return typeof tier === 'string' && tier.trim() ? upper(tier) : '—';

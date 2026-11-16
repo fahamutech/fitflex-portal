@@ -2209,6 +2209,8 @@ export interface PaymentRequest {
   bookingGroupId?: string | null;
   /** Set when the request pays for a marketplace order. */
   orderId?: string | null;
+  /** Set when the request pays for a custom gym pass purchase (GYM_CUSTOM_PASSES): one request for the whole sale. */
+  passPurchaseId?: string | null;
   plan?: string | null;
   currency?: string | null;
   tier: string | null;
