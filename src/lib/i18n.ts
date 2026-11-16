@@ -6216,10 +6216,17 @@ export const messages = {
     ...eventsS7Messages.en,
     ...vendorImportMessages.en,
     ...securityIncidentsMessages.en,
+    ...gymPassMessages.en,
     ...memberMessages.en,
     // Owner/staff pages, shared widgets, HR and organisation pages (portal#52).
     ...ownerMessages.en,
     ...orgMessages.en,
+    // ── Gym QR dialog (printable QR of the /g web link; flag NEXT_PUBLIC_WEB_GYM_PROFILE). Print, Close and Try again reuse existing keys. ──
+    'gymQr.action': 'Gym QR',
+    'gymQr.hint': 'Members scan this code with their phone camera to open the gym page.',
+    'gymQr.alt': 'QR code for {name}',
+    'gymQr.noWebLink': 'The web link for this gym is not set up yet, so there is no QR code to show.',
+    'gymQr.loadFailed': 'The gym QR could not be loaded.',
     // ── Public gym page (/g, flag NEXT_PUBLIC_WEB_GYM_PROFILE); Swahili marked for native review ──
     // ── Browser gym check-in (/g/signin, /g/confirm, /g/done; flag NEXT_PUBLIC_WEB_QR_CHECKIN); Swahili marked for native review ──
     "web.checkin.visitHint": "Sign in with your FitFlex account to check in. Signing in does not prove you are at the gym.",
@@ -12558,6 +12565,7 @@ export const messages = {
     ...eventsS7Messages.sw,
     ...vendorImportMessages.sw,
     ...securityIncidentsMessages.sw,
+    ...gymPassMessages.sw,
     ...memberMessages.sw,
     // Owner/staff pages, shared widgets, HR and organisation pages (portal#52).
     ...ownerMessages.sw,
@@ -12633,6 +12641,12 @@ export const messages = {
     "web.checkin.err.confirmation_required": "Kuna hitilafu. Tafadhali jaribu tena.",
     "web.checkin.err.invalid_idempotency_key": "Kuna hitilafu. Tafadhali jaribu tena.",
     "web.checkin.tz.eat": "EAT",
+    // Gym QR dialog. PLACEHOLDERS: kept in English until native Swahili review (no Swahili drafted for these five).
+    'gymQr.action': 'Gym QR',
+    'gymQr.hint': 'Members scan this code with their phone camera to open the gym page.',
+    'gymQr.alt': 'QR code for {name}',
+    'gymQr.noWebLink': 'The web link for this gym is not set up yet, so there is no QR code to show.',
+    'gymQr.loadFailed': 'The gym QR could not be loaded.',
     'web.gym.visit': 'Tembelea gym hii',
     'web.gym.signInToVisit': 'Kuingia (check-in) kwa akaunti yako ya FitFlex kutapatikana hivi karibuni. Huhitaji kuingia kwenye akaunti ili kuangalia gym.',
     'web.gym.notProof': 'Ukurasa huu unaonyesha taarifa tu. Haurekodi ziara.',
@@ -12686,6 +12700,7 @@ import { eventsS6Messages } from './i18n-events-s6';
 import { eventsS7Messages } from './i18n-events-s7';
 import { vendorImportMessages } from './i18n-vendor-import';
 import { securityIncidentsMessages } from './i18n-security-incidents';
+import { gymPassMessages } from './i18n-gym-passes';
 import { memberMessages } from './i18n-member';
 import { ownerMessages } from './i18n-owner';
 import { orgMessages } from './i18n-org';

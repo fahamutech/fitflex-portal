@@ -13,6 +13,13 @@ export interface PartnerPersonalDetails {
   source: 'person' | 'member' | null;
 }
 
+/**
+ * GET /operator/gyms/:gymId/entrance-qr and GET /admin/gyms/:gymId/entrance-qr. `payload` is the app-only code
+ * (fitflex:gym:<id>:<sig>); `webUrl` (<portal>/g/?q=<payload>) is what a phone camera opens, and is present only
+ * when the server has PORTAL_PUBLIC_URL set.
+ */
+export interface GymEntranceQr { gymId: string; gymName: string; payload: string; webUrl?: string }
+
 export class ApiError extends Error {
   status: number;
   body: unknown;
@@ -1101,6 +1108,9 @@ export const api = {
   /** Who a gym's payouts go to, and its owners (ACL gyms or owners). */
   gymPayoutOwner: (token: string, gymId: string) =>
     request<GymPayoutOwnerView>(`/admin/gyms/${encodeURIComponent(gymId)}/payout-owner`, {}, token),
+  /** A gym's entrance QR (ACL gyms). Same reply as operatorGymEntranceQr. */
+  adminGymEntranceQr: (token: string, gymId: string) =>
+    request<GymEntranceQr>(`/admin/gyms/${encodeURIComponent(gymId)}/entrance-qr`, {}, token),
   /** Name one of the gym's owners as its payout owner, or clear it with null. Audited; stored even while GYM_PAYOUT_OWNER is off. */
   setGymPayoutOwner: (token: string, gymId: string, ownerId: string | null) =>
     request<GymPayoutOwnerView>(`/admin/gyms/${encodeURIComponent(gymId)}/payout-owner`, { method: 'PUT', body: JSON.stringify({ ownerId }) }, token),
@@ -1242,6 +1252,9 @@ export const api = {
 
   // ─── Owner/Operator role ───
   ownerGyms: (token: string) => request<Gym[]>('/owner/gyms', {}, token),
+  /** The gym's entrance QR (owner, or gym staff with `checkins`). `webUrl` is absent until the server has PORTAL_PUBLIC_URL. */
+  operatorGymEntranceQr: (token: string, gymId: string) =>
+    request<GymEntranceQr>(`/operator/gyms/${encodeURIComponent(gymId)}/entrance-qr`, {}, token),
   ownerInvoices: (token: string) => request<Invoice[]>('/owner/invoices', {}, token),
   ownerEarnings: (token: string) => request<OwnerEarnings>('/owner/earnings', {}, token),
   ownerGymCheckins: (token: string, gymId: string) => request<CheckIn[]>(`/owner/gyms/${gymId}/checkins`, {}, token),
@@ -2196,6 +2209,8 @@ export interface PaymentRequest {
   bookingGroupId?: string | null;
   /** Set when the request pays for a marketplace order. */
   orderId?: string | null;
+  /** Set when the request pays for a custom gym pass purchase (GYM_CUSTOM_PASSES): one request for the whole sale. */
+  passPurchaseId?: string | null;
   plan?: string | null;
   currency?: string | null;
   tier: string | null;

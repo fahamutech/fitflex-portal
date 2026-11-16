@@ -817,3 +817,10 @@ body {
   body.ff-print-sale .ff-print-area * { visibility: visible; }
   body.ff-print-sale .ff-print-area { display: block !important; position: absolute; left: 0; top: 0; width: 100%; }
 }
+/* Gym QR dialog (src/components/gym-entrance-qr.tsx): Print shows only the QR, the gym name and the hint. */
+@media print {
+  body.ff-print-gym-qr * { visibility: hidden; }
+  body.ff-print-gym-qr .ff-print-area,
+  body.ff-print-gym-qr .ff-print-area * { visibility: visible; }
+  body.ff-print-gym-qr .ff-print-area { display: block !important; position: absolute; left: 0; top: 0; width: 100%; }
+}
