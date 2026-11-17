@@ -10,6 +10,7 @@ import { FailureView } from '@/components/gym-pass-shared';
 import { GymPassPlans } from '@/components/gym-pass-plans';
 import { GymPassSales } from '@/components/gym-pass-sales';
 import { GymPassMemberships } from '@/components/gym-pass-memberships';
+import { GymPassAnalytics, hasAnalytics, type DateRange } from '@/components/gym-pass-analytics';
 import { useApp } from '../../providers';
 
 type Tab = 'plans' | 'sales' | 'memberships';
@@ -27,6 +28,7 @@ export default function OwnerMembershipsPage() {
   const [gymId, setGymId] = useState('');
   const [tab, setTab] = useState<Tab | null>(null);
   const [summary, setSummary] = useState<PassSummary | null>(null);
+  const [range, setRange] = useState<DateRange>({ from: '', to: '' });
   const [pageFailure, setPageFailure] = useState<GymPassFailure | null>(null);
   const [gymsFailed, setGymsFailed] = useState(false);
 
@@ -39,11 +41,12 @@ export default function OwnerMembershipsPage() {
 
   const loadSummary = useCallback(async () => {
     if (!GYM_CUSTOM_PASSES || !token || !gymId || !can('payments')) return;
-    try { setSummary(await gymPassesApi.summary(token, gymId)); setPageFailure(null); }
+    try { setSummary(await gymPassesApi.summary(token, gymId, range.from && range.to && range.to <= range.from ? {} : range)); setPageFailure(null); }
     catch (e) { setSummary(null); const f = classifyGymPassError(e); if (f.kind === 'disabled' || f.kind === 'rate_limited') setPageFailure(f); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token, gymId, user]);
-  useEffect(() => { setSummary(null); void loadSummary(); }, [loadSummary]);
+  }, [token, gymId, user, range]);
+  useEffect(() => { setSummary(null); setRange({ from: '', to: '' }); }, [gymId]);
+  useEffect(() => { void loadSummary(); }, [loadSummary]);
 
   if (!GYM_CUSTOM_PASSES || pageFailure?.kind === 'disabled') {
     return (
@@ -85,6 +88,7 @@ export default function OwnerMembershipsPage() {
                 sub={fill(t('gp.summary.peopleSplit'), { active: summary.beneficiaries.active, pending: summary.beneficiaries.pendingRegistration, suspended: summary.beneficiaries.suspended })} />
             </div>
           )}
+          {summary && hasAnalytics(summary) && <GymPassAnalytics gymId={gymId} summary={summary} range={range} onRange={setRange} canMembers={can('members')} />}
           <div role="group" aria-label={t('gp.tabs')}>
             <Segmented value={activeTab} onChange={v => setTab(v as Tab)} options={tabs.map(id => [id, t(`gp.tab.${id}`)] as [string, string])} />
           </div>

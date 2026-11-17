@@ -102,6 +102,12 @@ export interface PassSummary {
   byCategory?: Record<string, { sales: number; revenueTzs: number; beneficiaries: number }>;
   beneficiaries: { active: number; pendingRegistration: number; suspended: number };
   memberships: { active: number; expired: number };
+  // Additive (backend functions#365): present only while the server flag is on; a missing key reads as "not available".
+  byPlan?: Array<{ planId: string; name: string | null; category: PassCategory; sales: number; revenueTzs: number; people: number }>;
+  byDuration?: Array<{ durationValue: number; durationUnit: DurationUnit; sales: number; revenueTzs: number }>;
+  expiring?: { withinDays: number; purchases: number; people: number };
+  utilisation?: { visits: number; peopleWithVisit: number; peopleNeverVisited: number; activePeople: number; visitsPerActivePerson: number };
+  groups?: { slots: number; filled: number; fillRate: number };
 }
 
 const g = (gymId: string) => `/owner/gyms/${encodeURIComponent(gymId)}`;
@@ -122,7 +128,8 @@ export const gymPassesApi = {
     request<{ plan: PassPlan }>(`${g(gymId)}/pass-plans/${encodeURIComponent(planId)}/${status === 'active' ? 'activate' : 'deactivate'}`, { method: 'POST' }, token),
   sales: (token: string, gymId: string, q: { status?: string; before?: string; limit?: number } = {}) =>
     request<{ sales: PassSale[] }>(`${g(gymId)}/pass-sales${qs(q)}`, {}, token),
-  summary: (token: string, gymId: string) => request<PassSummary>(`${g(gymId)}/pass-summary`, {}, token),
+  /** from (inclusive) / to (exclusive): only sales whose payment was approved in the range. */
+  summary: (token: string, gymId: string, q: { from?: string; to?: string } = {}) => request<PassSummary>(`${g(gymId)}/pass-summary${qs(q)}`, {}, token),
   memberships: (token: string, gymId: string, q: { state?: 'active' | 'expired'; before?: string; limit?: number } = {}) =>
     request<{ state: string; memberships: PassMembership[] }>(`${g(gymId)}/pass-memberships${qs(q)}`, {}, token),
   attendance: (token: string, gymId: string, purchaseId: string, beneficiaryId: string, limit = 50) =>
