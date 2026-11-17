@@ -324,20 +324,4 @@ test.describe('reasons', () => {
     expect(puts[0].body).not.toHaveProperty('reason');
     expect(puts[1].body).toMatchObject({ reason: 'Price review', currency: 'TZS' });
   });
-
-  test('settings: the manual payment card sends its own reason', async ({ page }) => {
-    const calls = await open(page, SUPER, {
-      'GET /admin/settings': { json: SETTINGS },
-      'GET /admin/settings/specialties': { json: [] },
-      'GET /payments/options': { json: { manual: { enabled: true } } },
-      'PUT /admin/settings': req => ({ json: { ...SETTINGS, manualPayment: (req.postDataJSON() as { manualPayment: unknown }).manualPayment } }),
-    }, '/admin/settings/');
-    const card = page.getByTestId('manual-payment-settings');
-    await card.locator('input').nth(0).fill('123456');
-    await card.locator('input').nth(1).fill('FitFlex Ltd');
-    await card.getByTestId('manual-pay-reason').fill('New till number');
-    await card.getByRole('button', { name: /^Save/ }).click();
-    await expect.poll(() => calls.filter(c => c.method === 'PUT').length).toBe(1);
-    expect(calls.find(c => c.method === 'PUT')!.body).toMatchObject({ reason: 'New till number', manualPayment: { lipaNamba: '123456', accountName: 'FitFlex Ltd' } });
-  });
 });

@@ -875,7 +875,7 @@ test.describe('review fixes: real backend shapes and scope rules', () => {
     expect(mock.writes(/\/decision$/)[0].body).toEqual({ decision: 'reject', reasonCode: 'other', memberNote: 'Please check the ID', memberNoteSw: 'Tafadhali kagua namba' });
   });
 
-  test('corporate: the payment form shows while next.payment is provider (Tunzaa on), and a "none" payment prefills the form', async ({ page }) => {
+  test('corporate: the payment form shows while next.payment is provider (AzamPay on), and a "none" payment prefills the form', async ({ page }) => {
     const mock = await setupEvents(page, orgUser(['owner']), { s4: { payment: 'provider' } });
     await page.goto('/org/events/?order=ord_c_new');
     await expect(page.getByTestId('corp-pay-form')).toBeVisible();

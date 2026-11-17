@@ -348,7 +348,6 @@ test.describe('Settings (H5, D1)', () => {
     let fail = true;
     const calls = await mockApi(page, ({ method, path }) => {
       if (method === 'GET' && path === '/admin/settings') return fail ? { status: 503, json: { error: 'unavailable' } } : { json: SETTINGS };
-      if (method === 'GET' && path === '/payments/options') return { json: {} };
       return null;
     });
     await page.goto('/admin/settings');

@@ -73,9 +73,9 @@ function PassPage({ session }: { session: MemberSession | null }) {
     const c = choices.find(x => x.key === choice);
     if (!c) { setChooseError(true); return; }
     setTarget({
-      label: c.label, amountTzs: c.amount, product: 'FITFLEX_PASS', manual: true,
-      create: async extra => {
-        const body = { tier: c.key, ...(extra ?? {}) };
+      label: c.label, amountTzs: c.amount, product: 'FITFLEX_PASS',
+      create: async () => {
+        const body = { tier: c.key };
         const r = c.kind === 'upgrade' ? await memberApi.upgrade(body) : await memberApi.subscribe(body);
         return { id: r.paymentRequest.id, amountTzs: r.paymentRequest.amountTzs };
       },
@@ -108,8 +108,10 @@ function PassPage({ session }: { session: MemberSession | null }) {
           {pending && (
             <section className="flex flex-col gap-3 rounded-3xl border-2 border-[#ff8a6b] bg-[#0f172a] p-6" data-testid="member-pass-pending">
               <p>{fmt(t('member.pay.pendingExisting'), { amount: formatTzs(pending.amountTzs, locale), tier: tierLabel(pending.tier, passes) })}</p>
-              {/* A Lipa Namba payment already sent with its transaction ID (memberReference): it waits for the team. */}
-              {(pending.memberReference || (pending.reference && pending.provider !== 'tunzaa'))
+              {/* A request that carries a typed transaction ID (memberReference, from before paying by hand ended), or a
+                  reference that is not an AzamPay prompt's, waits for the team. An AzamPay request is continued here: a
+                  prompt still out is picked up, one that ran out is sent again. */}
+              {(pending.memberReference || (pending.reference && pending.provider !== 'azampay'))
                 ? <p className={muted}>{t('member.pay.pendingManual')}</p>
                 : (
                   <button type="button" className="inline-flex min-h-11 items-center justify-center self-start rounded-full bg-[#c8f04a] px-5 text-sm font-extrabold text-[#020617]"
