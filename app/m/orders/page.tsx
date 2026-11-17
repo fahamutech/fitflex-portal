@@ -1,13 +1,14 @@
 'use client';
 import { useCallback, useEffect, useState } from 'react';
 import { useApp } from '../../providers';
-import { LoadError, Loading, MemberFrame, PageTitle, card, muted } from '@/components/member/member-frame';
+import { LoadError, Loading, MemberFrame, PageTitle, card, muted, primaryBtn } from '@/components/member/member-frame';
+import { PayPanel, type PayTarget } from '@/components/member/pay-panel';
 import { fmt } from '@/components/member/member-shared';
-import { formatDate, formatTzs, memberApi, type Gym, type ShopOrder } from '@/lib/member-api';
+import { canPayByMobileMoney, formatDate, formatTzs, MEMBER_ROUTES, memberApi, type Gym, type MemberSession, type PaymentOptions, type ShopOrder } from '@/lib/member-api';
 import type { MessageKey } from '@/lib/i18n';
 
 export default function MemberOrdersPage() {
-  return <MemberFrame testId="member-orders-page">{() => <Orders />}</MemberFrame>;
+  return <MemberFrame testId="member-orders-page">{s => <Orders session={s} />}</MemberFrame>;
 }
 
 // Where an order is on its way to the member (server: src/shared/order-lifecycle.mjs). Pickup orders only show
@@ -26,18 +27,20 @@ function statusKey(o: ShopOrder): MessageKey {
   return 'member.orders.status.inProgress';
 }
 
-function Orders() {
+function Orders({ session }: { session: MemberSession | null }) {
   const { t } = useApp();
   const [orders, setOrders] = useState<ShopOrder[]>([]);
   const [gyms, setGyms] = useState<Map<string, Gym>>(new Map());
   const [state, setState] = useState<'loading' | 'ready' | 'error'>('loading');
   const [tab, setTab] = useState<'active' | 'past'>('active');
+  const [options, setOptions] = useState<PaymentOptions | null>(null);
+  const [paying, setPaying] = useState<PayTarget | null>(null);
 
   const load = useCallback(async () => {
     setState('loading');
     try {
-      const [o, g] = await Promise.all([memberApi.shopOrders(), memberApi.gyms().catch(() => [])]);
-      setOrders(o);
+      const [o, g, op] = await Promise.all([memberApi.shopOrders(), memberApi.gyms().catch(() => []), memberApi.paymentOptions().catch(() => null)]);
+      setOrders(o); setOptions(op);
       setGyms(new Map(g.map(x => [x.id, x]))); setState('ready');
     } catch { setState('error'); }
   }, []);
@@ -45,6 +48,24 @@ function Orders() {
 
   if (state === 'loading') return <Loading />;
   if (state === 'error') return <LoadError onRetry={load} />;
+  if (paying) {
+    return (
+      <div className="mx-auto max-w-xl">
+        <PageTitle eyebrow={t('member.orders.eyebrow')} title={t('member.orders.title')} />
+        <PayPanel target={paying} options={options} defaultPhone={session?.user.phone ?? ''} onBack={() => { setPaying(null); void load(); }} />
+      </div>
+    );
+  }
+  // "Pay now" only while the server lists shop orders as payable (the same rule as the app): an order then waits on
+  // its own payment request, which the server names on the order until it is paid, cancelled or free.
+  const canPay = canPayByMobileMoney(options, 'SHOP_ORDER');
+  const pay = (o: ShopOrder) => {
+    if (!o.paymentRequestId) return;
+    setPaying({
+      label: fmt(t('member.orders.number'), { id: shortId(o.id) }), amountTzs: o.totalTzs, product: 'SHOP_ORDER', paymentId: o.paymentRequestId,
+      doneTitleKey: 'member.orders.paidTitle', doneBody: t('member.orders.paidBody'), doneHref: MEMBER_ROUTES.orders,
+    });
+  };
   const active = orders.filter(o => !isClosed(o));
   const past = orders.filter(isClosed);
   const list = tab === 'active' ? active : past;
@@ -61,20 +82,21 @@ function Orders() {
         <button type="button" role="tab" aria-selected={tab === 'past'} className={tabCls(tab === 'past')} onClick={() => setTab('past')} data-testid="member-orders-tab-past">{fmt(t('member.orders.past'), { n: past.length })}</button>
       </div>
       <div role="tabpanel" className="flex flex-col gap-4" data-testid="member-orders-list">
-        {list.length === 0 ? <p className={`${card} ${muted}`}>{t('member.orders.empty')}</p> : list.map(o => <OrderCard key={o.id} order={o} gym={o.pickupGymId ? gyms.get(o.pickupGymId) ?? null : null} />)}
+        {list.length === 0 ? <p className={`${card} ${muted}`}>{t('member.orders.empty')}</p> : list.map(o => <OrderCard key={o.id} order={o} gym={o.pickupGymId ? gyms.get(o.pickupGymId) ?? null : null} onPay={canPay ? pay : null} />)}
       </div>
       {tab === 'past' && past.length > 0 && <p className={`mt-6 text-sm ${muted}`}>{t('member.orders.orderAgain')}</p>}
     </>
   );
 }
 
-function OrderCard({ order, gym }: { order: ShopOrder; gym: Gym | null }) {
+function OrderCard({ order, gym, onPay }: { order: ShopOrder; gym: Gym | null; onPay: ((o: ShopOrder) => void) | null }) {
   const { t, locale } = useApp();
   const ready = order.status === 'ready_for_pickup';
   const rank = RANK[order.status] ?? 0;
   const names = order.items.map(i => i.qty > 1 ? fmt(t('member.orders.itemQty'), { name: i.name ?? t('member.unknown'), n: i.qty }) : (i.name ?? t('member.unknown'))).join(', ');
   const gymName = order.pickupGym?.name ?? gym?.name ?? null;
   const paid = order.paymentStatus === 'paid' || !order.paymentStatus;
+  const payable = !!onPay && !!order.paymentRequestId && order.status !== 'cancelled' && order.paymentStatus !== 'paid';
   return (
     <section aria-labelledby={`o-${order.id}`} data-testid={`member-order-${order.id}`}
       className={`flex flex-col gap-4 rounded-3xl bg-[#0f172a] p-6 ${ready ? 'border-2 border-[#ff8a6b]' : 'border border-[#1e293b]'}`}>
@@ -106,6 +128,11 @@ function OrderCard({ order, gym }: { order: ShopOrder; gym: Gym | null }) {
             {ready && <span className="text-sm text-[#cbd5e1]">{t('member.orders.collectHint')} <strong className="font-mono tracking-wider">{shortId(order.id)}</strong></span>}
           </div>
         )}
+      {payable && (
+        <button type="button" className={`${primaryBtn} self-start`} onClick={() => onPay?.(order)} data-testid={`member-order-pay-${order.id}`}>
+          {fmt(t('member.orders.payNow'), { amount: formatTzs(order.totalTzs, locale) })}
+        </button>
+      )}
     </section>
   );
 }
