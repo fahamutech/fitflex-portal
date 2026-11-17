@@ -1,6 +1,7 @@
 import { expect, test, Page } from '@playwright/test';
 
-// Slice A3 (functions#188): manual Lipa Namba settings + the member's transaction ID on payments.
+// The transaction ID a member typed on an older payment request (slice A3, functions#188) is still shown to staff.
+// Members no longer pay by hand (AzamPay is the only payment method, 2026-11-17): the Lipa Namba settings card is gone.
 const API = process.env.FITFLEX_API_URL || 'http://localhost:3000';
 
 const BASE_SETTINGS = {
@@ -13,8 +14,6 @@ const BASE_SETTINGS = {
   updatedAt: '2026-10-19T08:00:00.000Z',
 };
 
-const MANUAL_OFF = { enabled: false, lipaNamba: null, accountName: null, network: null, instructions: null, referenceRequired: false };
-
 async function signInAsAdmin(page: Page, locale: 'en' | 'sw' = 'en') {
   await page.addInitScript((l) => {
     localStorage.setItem('token', 'admin-e2e-token');
@@ -23,106 +22,25 @@ async function signInAsAdmin(page: Page, locale: 'en' | 'sw' = 'en') {
   }, locale);
 }
 
-test('settings: manual payment saves, and a manual_payment_invalid field shows against that field', async ({ page }) => {
+test('settings: there is no manual payment card any more (AzamPay is the only payment method)', async ({ page }) => {
   const runtimeErrors: Error[] = [];
   page.on('pageerror', error => runtimeErrors.push(error));
   await signInAsAdmin(page);
 
-  let manualPayment: unknown = null;
-  let enabled = false;
-  const puts: unknown[] = [];
-
+  const asked: string[] = [];
   await page.route(`${API}/**`, async route => {
-    const req = route.request();
-    const url = new URL(req.url());
-    if (url.pathname === '/admin/settings' && req.method() === 'PUT') {
-      const body = req.postDataJSON();
-      puts.push(body);
-      if (body.manualPayment?.lipaNamba === '12') {
-        return route.fulfill({ status: 400, json: { error: 'manual_payment_invalid', field: 'lipaNamba' } });
-      }
-      manualPayment = { ...body.manualPayment, lipaNamba: String(body.manualPayment.lipaNamba).replace(/[\s-]/g, '') };
-      enabled = true;
-      return route.fulfill({ json: { ...BASE_SETTINGS, manualPayment } });
-    }
-    if (url.pathname === '/admin/settings') return route.fulfill({ json: { ...BASE_SETTINGS, manualPayment } });
-    if (url.pathname === '/payments/options') {
-      return route.fulfill({ json: { available: false, manual: enabled ? { ...MANUAL_OFF, enabled: true, referenceRequired: true } : MANUAL_OFF } });
-    }
+    const url = new URL(route.request().url());
+    asked.push(url.pathname);
+    // An older settings row may still carry the saved number: it is not shown.
+    if (url.pathname === '/admin/settings') return route.fulfill({ json: { ...BASE_SETTINGS, manualPayment: { lipaNamba: '5123456', accountName: 'FitFlex Africa' } } });
     return route.fulfill({ json: [] });
   });
 
   await page.goto('/admin/settings');
-  const card = page.getByTestId('manual-payment-settings');
-  await expect(card.getByText('Manual payment (Lipa Namba)')).toBeVisible();
-  await expect(page.getByTestId('manual-pay-live')).toContainText('MANUAL_PAY_INSTRUCTIONS is on, but a Lipa Namba and account name must be saved here first');
-
-  const lipa = card.getByLabel('Lipa Namba');
-  await lipa.fill('12');
-  await card.getByLabel('Account name').fill('FitFlex Africa Ltd');
-  await card.getByLabel('Network', { exact: true }).selectOption('M-Pesa');
-  await card.getByLabel('Extra instructions in English (optional)').fill('Pay the exact amount.');
-  await card.getByLabel('Extra instructions in Swahili (optional)').fill('Lipa kiasi kamili.');
-  await card.getByRole('button', { name: 'Save payment details' }).click();
-
-  await expect(card.getByText('Enter 4 to 20 digits.')).toBeVisible();
-  await expect(lipa).toHaveAttribute('aria-invalid', 'true');
-  await expect(card.getByText('Payment details saved.')).toHaveCount(0);
-
-  await lipa.fill('512 3456');
-  await expect(card.getByText('Enter 4 to 20 digits.')).toHaveCount(0);
-  await card.getByRole('button', { name: 'Save payment details' }).click();
-  await expect(card.getByText('Payment details saved.')).toBeVisible();
-  await expect(lipa).toHaveValue('5123456');
-  await expect(page.getByTestId('manual-pay-live')).toContainText('Live for members');
-
-  expect(puts).toHaveLength(2);
-  // Saved on its own: only manualPayment is sent, never the tiers or bands.
-  expect(puts[1]).toEqual({
-    manualPayment: {
-      lipaNamba: '512 3456',
-      accountName: 'FitFlex Africa Ltd',
-      network: 'M-Pesa',
-      instructions: { en: 'Pay the exact amount.', sw: 'Lipa kiasi kamili.' },
-    },
-  });
-  expect(runtimeErrors).toEqual([]);
-});
-
-test('settings: flag off is explained, another network is kept, and clearing sends null (Swahili)', async ({ page }) => {
-  const runtimeErrors: Error[] = [];
-  page.on('pageerror', error => runtimeErrors.push(error));
-  await signInAsAdmin(page, 'sw');
-
-  let manualPayment: unknown = { lipaNamba: '987654', accountName: 'FitFlex Africa', network: 'T-Pesa', instructions: null };
-  const puts: unknown[] = [];
-  await page.route(`${API}/**`, async route => {
-    const req = route.request();
-    const url = new URL(req.url());
-    if (url.pathname === '/admin/settings' && req.method() === 'PUT') {
-      const body = req.postDataJSON();
-      puts.push(body);
-      manualPayment = body.manualPayment;
-      return route.fulfill({ json: { ...BASE_SETTINGS, manualPayment } });
-    }
-    if (url.pathname === '/admin/settings') return route.fulfill({ json: { ...BASE_SETTINGS, manualPayment } });
-    // Flag off: the response has no `manual` key at all.
-    if (url.pathname === '/payments/options') return route.fulfill({ json: { available: false } });
-    return route.fulfill({ json: [] });
-  });
-
-  await page.goto('/admin/settings');
-  const card = page.getByTestId('manual-payment-settings');
-  await expect(card.getByText('Malipo kwa Lipa Namba')).toBeVisible();
-  await expect(page.getByTestId('manual-pay-live')).toContainText('MANUAL_PAY_INSTRUCTIONS umezimwa');
-  await expect(card.getByLabel('Mtandao', { exact: true })).toHaveValue('__other__');
-  await expect(card.getByLabel('Jina la mtandao')).toHaveValue('T-Pesa');
-
-  await card.getByRole('button', { name: 'Futa taarifa za malipo' }).click();
-  await page.getByRole('alertdialog').getByRole('button', { name: 'Futa taarifa za malipo' }).click();
-  await expect(card.getByText('Taarifa za malipo zimefutwa.')).toBeVisible();
-  await expect(card.getByLabel('Lipa Namba')).toHaveValue('');
-  expect(puts).toEqual([{ manualPayment: null }]);
+  await expect(page.getByTestId('settings-reason')).toBeVisible();
+  await expect(page.getByTestId('manual-payment-settings')).toHaveCount(0);
+  await expect(page.getByText('5123456')).toHaveCount(0);
+  expect(asked).not.toContain('/payments/options');
   expect(runtimeErrors).toEqual([]);
 });
 

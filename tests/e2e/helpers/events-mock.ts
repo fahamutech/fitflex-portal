@@ -276,8 +276,9 @@ const PAYMENT_BODY_KEYS = ['method', 'reference', 'paidOn', 'note'];
 const eatToday = () => new Date(Date.now() + 3 * 3_600_000).toISOString().slice(0, 10);
 
 function makeS4(user: Json, me: Json | null, orgRole: string, o: S4Opts, setup: { orgStatus?: string }) {
-  const payment = o.payment ?? 'manual';
-  const options = { ...OPTIONS_S3, payment, ...(payment !== 'none' ? { manualConfirmHours: 24, refundDays: 5, hold: { manualExtendHours: 24, manualMaxHours: 48, providerExtendMinutes: 10, lateGraceHours: 24 }, tickets: { qr: true, scanning: false } } : {}) };
+  // GET /events/options: `payment` is 'provider' (AzamPay) or 'none'; there is no `manualConfirmHours` any more (members do not pay by hand).
+  const payment = o.payment ?? 'provider';
+  const options = { ...OPTIONS_S3, payment, ...(payment !== 'none' ? { refundDays: 5, hold: { manualExtendHours: 24, manualMaxHours: 48, providerExtendMinutes: 10, lateGraceHours: 24 }, tickets: { qr: true, scanning: false } } : {}) };
   const two = !!o.secondApprover;
   const scopes: string[] | null = user.portalUser ? (user.aclPermissions ?? []) : null; // null = super admin
   const hasScope = (scope: string) => scopes === null || scopes.includes(scope);

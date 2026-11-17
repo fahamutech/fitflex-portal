@@ -8,22 +8,21 @@ import { CheckCircle2 } from 'lucide-react';
 import { useApp } from '../../../app/providers';
 import { card, ghostBtn, input, muted, primaryBtn } from './member-frame';
 import { fmt } from './member-shared';
-import { MEMBER_PASSTHROUGH, canPayByMobileMoney, instructionsText, formatTzs, MEMBER_ROUTES, MemberApiError, memberApi, type MemberCode, type PaymentOptions } from '@/lib/member-api';
+import { MEMBER_PASSTHROUGH, MOMO_WALLETS, canPayByMobileMoney, formatTzs, MEMBER_ROUTES, MemberApiError, memberApi, momoWalletGuess, type MemberCode, type MomoWallet, type PaymentOptions } from '@/lib/member-api';
 import { ERROR_KEYS, type CheckinCode } from '@/lib/web-checkin';
 import type { MessageKey } from '@/lib/i18n';
 
 /**
  * What is being paid. `create` makes the payment request (once; it is then reused for retries); without it,
- * `paymentId` is an existing request. `manual` allows the Lipa Namba path (passes only: the server takes the
- * transaction ID when the request is created).
+ * `paymentId` is an existing request. It is paid by the phone prompt (AzamPay, the only payment method).
  */
 export interface PayTarget {
   label: string; amountTzs: number; product: 'FITFLEX_PASS' | 'TRAINER_SERVICE' | 'EVENT_ORDER'; paymentId?: string;
   /** Makes the request and answers its id and the amount the server set on it (what is then shown). */
-  create?: (extra?: { reference: string; payerPhone: string }) => Promise<{ id: string; amountTzs: number }>; manual?: boolean;
+  create?: () => Promise<{ id: string; amountTzs: number }>;
   doneTitleKey?: MessageKey; doneBody?: string; doneHref?: string;
 }
-type Step = 'form' | 'waiting' | 'slow' | 'done' | 'failed' | 'held' | 'manual_done';
+type Step = 'form' | 'waiting' | 'slow' | 'done' | 'failed' | 'held' | 'expired';
 
 const POLL_MS = 4000;
 const POLL_MAX = 45; // about three minutes, then "still waiting"
@@ -37,14 +36,14 @@ const MEMBER_ERR = MEMBER_PASSTHROUGH;
 
 export function PayPanel({ target, options, defaultPhone, onBack }: { target: PayTarget; options: PaymentOptions | null; defaultPhone: string; onBack: () => void }) {
   const { t, locale } = useApp();
-  // While Lipa Namba is on (MANUAL_PAY_INSTRUCTIONS with a saved number), the server requires a transaction ID on every
-  // new pass request (subscription-service memberReferenceFor), so a pass goes the Lipa Namba way even when mobile money
-  // is on too; a request that already exists (no ID needed any more) can still be paid by mobile money.
-  const manualOn = !!(target.manual && target.create && !target.paymentId && options?.manual?.enabled);
-  const manual = manualOn ? options!.manual! : null;
-  const mobile = !manualOn && canPayByMobileMoney(options, target.product);
+  const mobile = canPayByMobileMoney(options, target.product);
+  // AzamPay asks which wallet pays (the same rule as the mobile app's picker): guessed from the number until the member
+  // picks one; a pick wins and is never changed by later typing.
+  const picksWallet = options?.provider === 'azampay';
   const [phone, setPhone] = useState(defaultPhone);
-  const [reference, setReference] = useState('');
+  const [wallet, setWallet] = useState<MomoWallet | null>(() => momoWalletGuess(defaultPhone));
+  const [walletPicked, setWalletPicked] = useState(false);
+  const [walletError, setWalletError] = useState(false);
   const [step, setStep] = useState<Step>('form');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<MemberCode | null>(null);
@@ -60,10 +59,10 @@ export function PayPanel({ target, options, defaultPhone, onBack }: { target: Pa
   useEffect(() => { if (step !== 'form') headingRef.current?.focus(); }, [step]);
 
   /** The payment request to pay: the existing one, or a new one for this pass (created once, then reused). */
-  async function ensureRequest(extra?: { reference: string; payerPhone: string }): Promise<string> {
+  async function ensureRequest(): Promise<string> {
     if (paymentId.current) return paymentId.current;
     if (!target.create) throw new MemberApiError(409, 'payment_not_pending');
-    const made = await target.create(extra);
+    const made = await target.create();
     paymentId.current = made.id;
     if (Number.isFinite(made.amountTzs)) setServerAmount(made.amountTzs);
     return made.id;
@@ -76,6 +75,8 @@ export function PayPanel({ target, options, defaultPhone, onBack }: { target: Pa
       if (r.state === 'completed') { setStep('done'); return; }
       if (r.state === 'failed') { setStep('failed'); return; }
       if (r.state === 'held') { setStep('held'); return; }
+      // The prompt was not answered in time and the server gave the request back: it can be sent again.
+      if (r.state === 'none') { setStep('expired'); return; }
     } catch { /* a failed check is retried on the next tick */ }
     polls.current += 1;
     if (polls.current >= POLL_MAX) { setStep('slow'); return; }
@@ -85,29 +86,24 @@ export function PayPanel({ target, options, defaultPhone, onBack }: { target: Pa
   async function sendMobile(e?: React.FormEvent) {
     e?.preventDefault();
     if (busy) return;
-    setError(null); setBusy(true);
+    if (timer.current) window.clearTimeout(timer.current);
+    setError(null); setWalletError(false);
+    if (picksWallet && !wallet) { setWalletError(true); setStep('form'); return; }
+    setBusy(true);
     try {
       const id = await ensureRequest();
-      const r = await memberApi.payByMobileMoney(id, phone.trim());
+      const r = await memberApi.payByMobileMoney(id, phone.trim(), picksWallet ? wallet : null);
       if (r.state === 'completed') { setStep('done'); return; }
       polls.current = 0; setStep('waiting');
       timer.current = window.setTimeout(() => { void check(); }, POLL_MS);
     } catch (err) {
-      setError(err instanceof MemberApiError ? err.code : 'unknown');
+      const code: MemberCode = err instanceof MemberApiError ? err.code : 'unknown';
+      // The server could not tell the wallet from the number: ask for it beside the wallet choice.
+      if (picksWallet && code === 'network_required') setWalletError(true); else setError(code);
+      setStep('form');
     } finally { setBusy(false); }
   }
-
-  async function sendManual(e: React.FormEvent) {
-    e.preventDefault();
-    if (busy) return;
-    setError(null); setBusy(true);
-    try {
-      await ensureRequest({ reference: reference.trim(), payerPhone: phone.trim() });
-      setStep('manual_done');
-    } catch (err) {
-      setError(err instanceof MemberApiError ? err.code : 'unknown');
-    } finally { setBusy(false); }
-  }
+  const phoneChanged = (v: string) => { setPhone(v); if (picksWallet && !walletPicked) setWallet(momoWalletGuess(v)); };
 
   const checkNow = () => { if (timer.current) window.clearTimeout(timer.current); polls.current = 0; setStep('waiting'); void check(); };
   const retry = () => { if (timer.current) window.clearTimeout(timer.current); setStep('form'); };
@@ -129,9 +125,20 @@ export function PayPanel({ target, options, defaultPhone, onBack }: { target: Pa
       </section>
     );
   }
-  if (step === 'manual_done' || step === 'held' || step === 'slow') {
-    const [title, body] = step === 'manual_done' ? ['member.pay.manualDoneTitle', 'member.pay.manualDoneBody']
-      : step === 'held' ? ['member.pay.heldTitle', 'member.pay.heldBody'] : ['member.pay.slowTitle', 'member.pay.slowBody'];
+  if (step === 'expired') {
+    return (
+      <section className={`${card} flex flex-col gap-4`} data-testid="member-pay-expired">
+        <h2 ref={headingRef} tabIndex={-1} className="text-2xl font-extrabold">{t('member.pay.expiredTitle')}</h2>
+        <p className={muted}>{t('member.pay.expiredBody')}</p>
+        <div className="flex flex-wrap gap-3">
+          <button type="button" className={primaryBtn} disabled={busy} onClick={() => void sendMobile()} data-testid="member-pay-send-again">{busy ? t('member.pay.sending') : t('member.pay.sendAgain')}</button>
+          <Link href={MEMBER_ROUTES.home} className={ghostBtn}>{t('member.pay.backToday')}</Link>
+        </div>
+      </section>
+    );
+  }
+  if (step === 'held' || step === 'slow') {
+    const [title, body] = step === 'held' ? ['member.pay.heldTitle', 'member.pay.heldBody'] : ['member.pay.slowTitle', 'member.pay.slowBody'];
     return (
       <section className={`${card} flex flex-col gap-4`} data-testid={`member-pay-${step}`}>
         <h2 ref={headingRef} tabIndex={-1} className="text-2xl font-extrabold">{t(title as MessageKey)}</h2>
@@ -173,41 +180,26 @@ export function PayPanel({ target, options, defaultPhone, onBack }: { target: Pa
         {ErrorBox}
         <label className="flex flex-col gap-1.5 text-sm font-semibold">
           {t('member.pay.phone')}
-          <input className={input} value={phone} onChange={e => setPhone(e.target.value)} type="tel" inputMode="tel" autoComplete="tel" required data-testid="member-pay-phone" />
+          <input className={input} value={phone} onChange={e => phoneChanged(e.target.value)} type="tel" inputMode="tel" autoComplete="tel" required data-testid="member-pay-phone" />
           <span className={`font-normal ${muted}`}>{t('member.pay.phoneHint')}</span>
         </label>
+        {picksWallet && (
+          <fieldset className="flex flex-col gap-2" data-testid="member-pay-wallets" aria-describedby={walletError ? 'member-pay-wallet-error' : undefined}>
+            <legend className="mb-2 text-sm font-semibold">{t('member.pay.wallet')}</legend>
+            <div className="flex flex-wrap gap-2">
+              {MOMO_WALLETS.map(w => (
+                <label key={w} className={`flex min-h-11 cursor-pointer items-center gap-2 rounded-2xl px-4 py-2 text-sm font-semibold ${wallet === w ? 'border-2 border-[#c8f04a]' : 'border border-[#334155]'}`}>
+                  <input type="radio" name="member-pay-wallet" value={w} checked={wallet === w} disabled={busy} className="h-5 w-5 accent-[#c8f04a]"
+                    onChange={() => { setWallet(w); setWalletPicked(true); setWalletError(false); }} data-testid={`member-pay-wallet-${w}`} />
+                  {t(`member.pay.wallet.${w}` as MessageKey)}
+                </label>
+              ))}
+            </div>
+            {walletError && <p id="member-pay-wallet-error" role="alert" className="text-sm text-[#ff8a6b]" data-testid="member-pay-wallet-error">{t('member.err.network_required')}</p>}
+          </fieldset>
+        )}
         <div className="flex flex-wrap gap-3">
           <button type="submit" className={primaryBtn} disabled={busy || !phone.trim()} data-testid="member-pay-send">{busy ? t('member.pay.sending') : t('member.pay.send')}</button>
-          <button type="button" className={ghostBtn} onClick={onBack}>{t('member.pay.cancel')}</button>
-        </div>
-      </form>
-    );
-  }
-  if (manual) {
-    return (
-      <form onSubmit={sendManual} noValidate className={`${card} flex flex-col gap-5`} data-testid="member-pay-manual">
-        {Summary}
-        <div>
-          <h2 className="text-xl font-extrabold">{t('member.pay.manualTitle')}</h2>
-          <p className={`mt-1 ${muted}`}>{fmt(t('member.pay.manualBody'), { amount })}</p>
-        </div>
-        <dl className="grid gap-3 rounded-2xl border border-[#1e293b] bg-[#020617] p-4 sm:grid-cols-2">
-          <div><dt className={`text-sm ${muted}`}>{t('member.pay.manualNumber')}</dt><dd className="font-mono text-xl font-bold">{manual.lipaNamba}</dd></div>
-          <div><dt className={`text-sm ${muted}`}>{t('member.pay.manualName')}</dt><dd className="font-bold">{manual.accountName}{manual.network ? ` · ${manual.network}` : ''}</dd></div>
-        </dl>
-        {instructionsText(manual, locale) && <p className={`text-sm ${muted}`}>{instructionsText(manual, locale)}</p>}
-        {ErrorBox}
-        <label className="flex flex-col gap-1.5 text-sm font-semibold">
-          {t('member.pay.manualRef')}
-          <input className={`${input} font-mono uppercase`} value={reference} onChange={e => setReference(e.target.value)} autoComplete="off" required data-testid="member-pay-reference" />
-          <span className={`font-normal ${muted}`}>{t('member.pay.manualRefHint')}</span>
-        </label>
-        <label className="flex flex-col gap-1.5 text-sm font-semibold">
-          {t('member.pay.manualPhone')}
-          <input className={input} value={phone} onChange={e => setPhone(e.target.value)} type="tel" inputMode="tel" autoComplete="tel" required data-testid="member-pay-payer-phone" />
-        </label>
-        <div className="flex flex-wrap gap-3">
-          <button type="submit" className={primaryBtn} disabled={busy || !reference.trim() || !phone.trim()} data-testid="member-pay-manual-submit">{t('member.pay.manualSubmit')}</button>
           <button type="button" className={ghostBtn} onClick={onBack}>{t('member.pay.cancel')}</button>
         </div>
       </form>

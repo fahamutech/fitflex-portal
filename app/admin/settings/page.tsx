@@ -11,7 +11,6 @@ import { ReasonField } from '@/components/reason-field';
 import { isReasonRequired, reasonOf, REASON_REQUIRED_KEY } from '@/lib/admin-reason';
 import { Button, PageHeader, Alert, Spinner, Card, Field, Input, Select, Table, TBody, Td, Th, THead, Tr, ErrorState } from '@/components/shared';
 import { whenText } from '@/lib/money-approval';
-import { ManualPaymentSettingsCard } from '@/components/manual-payment-settings';
 
 const EMPTY_BAND: PayoutBandConfig = { key: '', label: '', minVisits: 0, maxVisits: 0, payoutTiming: 'weekly', commissionPct: 10 };
 const TIMING_OPTIONS: PayoutBandConfig['payoutTiming'][] = ['daily', 'weekly', 'biweekly', 'monthly'];
@@ -311,9 +310,6 @@ export default function SettingsPage() {
           <ReasonField value={reason} onChange={v => { setReason(v); setReasonMissing(false); }} error={reasonMissing ? t(REASON_REQUIRED_KEY) : null} testId="settings-reason" />
         </div>
       </Card>
-
-      {/* Manual payment (Lipa Namba), slice A3: saved on its own, not by "Save all". */}
-      <ManualPaymentSettingsCard initial={settings?.manualPayment} />
 
       {/* Trainer Specialties */}
       <Card>

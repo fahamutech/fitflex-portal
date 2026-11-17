@@ -1237,10 +1237,9 @@ export const api = {
     request<Invoice>(`/admin/invoices/${id}`, { method: 'PUT', body: JSON.stringify(data) }, token),
   periodDistribution: (token: string) => request<PeriodDistribution[]>('/admin/distributions/periods', {}, token),
   getSettings: (token: string) => request<PlatformSettings>('/admin/settings', {}, token),
-  /** `reason` goes in the body (ADMIN_REASONS_REQUIRED: required when tiers, bands, period, model, currency or manualPayment change). */
+  /** `reason` goes in the body (ADMIN_REASONS_REQUIRED: required when tiers, bands, period, model or currency change). */
   updateSettings: (token: string, data: Partial<PlatformSettings> & { reason?: string }) =>
     request<PlatformSettings>('/admin/settings', { method: 'PUT', body: JSON.stringify(data) }, token),
-  paymentOptions: (token: string) => request<PaymentOptions>('/payments/options', {}, token),
   getSpecialties: () => request<string[]>('/settings/specialties'),
   /** Public: the FitFlex Pass tiers on sale today (fitflex-functions#189 lists only sellable tiers). */
   subscriptionTiers: () => request<unknown>('/subscription-tiers'),
@@ -2006,30 +2005,7 @@ export interface PlatformSettings {
   paymentPeriodDays: number;
   payoutModel: 'commission' | 'discounted_rate';
   currency: string;
-  /** Slice A3: the Lipa Namba members pay manually; null when not saved. */
-  manualPayment?: ManualPaymentSettings | null;
   updatedAt: string;
-}
-
-/** Slice A3 (PUT /admin/settings `manualPayment`; null clears it). */
-export interface ManualPaymentSettings {
-  lipaNamba: string;
-  accountName: string;
-  network?: string | null;
-  instructions?: { en: string | null; sw: string | null } | null;
-}
-
-/** GET /payments/options. `manual` is present only while MANUAL_PAY_INSTRUCTIONS is on. */
-export interface PaymentOptions {
-  manual?: {
-    enabled: boolean;
-    lipaNamba: string | null;
-    accountName: string | null;
-    network: string | null;
-    instructions: { en: string | null; sw: string | null } | null;
-    referenceRequired: boolean;
-  };
-  [key: string]: unknown;
 }
 
 export interface PeriodMemberDetail {

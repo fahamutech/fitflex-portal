@@ -51,7 +51,7 @@ function base(): Mock {
     'GET /me': ok({ user: USER, subscription: null, pendingPayment: null, visitsUsed: 0, visitCap: null }),
     'GET /passes': ok(PASSES),
     'GET /me/upgrade-options': ok({ options: [{ tier: 'premium', label: 'Premium', monthlyPrice: 250000, visits: 20, differenceTzs: 100000 }] }),
-    'GET /payments/options': ok({ enabled: true, provider: 'tunzaa', environment: 'production' }),
+    'GET /payments/options': ok({ enabled: true, provider: 'azampay', environment: 'production' }),
     'GET /me/payments': ok([]),
     'GET /me/checkins': ok([{ id: 'c1', timestamp: '2026-11-02T06:10:00.000Z', gym: { id: 'g1', name: 'Kijiweni Strength Club' } }]),
     'GET /me/qr': ok({ token: QR, expiresAt: new Date(Date.now() + 60_000).toISOString(), rotatesEverySeconds: 60 }),
@@ -183,7 +183,8 @@ test.describe('member portal, flag on', () => {
     await expect(page.getByTestId('member-pay-waiting')).toBeVisible();
     await expect(page.getByTestId('member-pay-done')).toBeVisible({ timeout: 20_000 });
     expect(h.reqs.find(r => r.path === '/me/subscribe')!.body).toEqual({ type: 'platform_pass', tier: 'basic' });
-    expect(h.reqs.find(r => r.path === '/me/payments/pay_1/mobile-money')!.body).toEqual({ phone: '0754123678' });
+    // The wallet is preselected from the number (075 → M-Pesa) and sent as `network`.
+    expect(h.reqs.find(r => r.path === '/me/payments/pay_1/mobile-money')!.body).toEqual({ phone: '0754123678', network: 'Mpesa' });
     expect(h.count('POST /me/payments/pay_1/mobile-money/refresh')).toBeGreaterThanOrEqual(2);
   });
 
@@ -210,20 +211,93 @@ test.describe('member portal, flag on', () => {
     await expect(page.getByTestId('member-pass-option-basic')).toHaveCount(0);
   });
 
-  test('manual payment mode: Lipa Namba, transaction ID sent with the request', async ({ page }) => {
-    const h = await setup(page, {
-      'GET /payments/options': ok({ enabled: false, manual: { enabled: true, lipaNamba: '5123456', accountName: 'FITFLEX AFRICA', network: 'M-Pesa', instructions: { en: 'Use the business number.', sw: 'Tumia namba ya biashara.' }, referenceRequired: true, payerPhoneRequired: true } }),
-    });
+  test('wallet: guessed from the number, a pick wins over later typing, and the choice is sent as network', async ({ page }) => {
+    const h = await setup(page);
+    await page.goto('/m/pass/');
+    await page.getByTestId('member-pass-option-basic').check();
+    await page.getByTestId('member-pass-continue').click();
+    await expect(page.getByTestId('member-pay-wallet-Mpesa')).toBeChecked();
+    await page.getByTestId('member-pay-phone').fill('0684123678');
+    await expect(page.getByTestId('member-pay-wallet-Airtel')).toBeChecked();
+    await page.getByTestId('member-pay-wallet-Azampesa').check();
+    await page.getByTestId('member-pay-phone').fill('0714123678');
+    await expect(page.getByTestId('member-pay-wallet-Azampesa')).toBeChecked();
+    await page.getByTestId('member-pay-send').click();
+    await expect(page.getByTestId('member-pay-waiting')).toBeVisible();
+    expect(h.reqs.find(r => r.path === '/me/payments/pay_1/mobile-money')!.body).toEqual({ phone: '0714123678', network: 'Azampesa' });
+  });
+
+  test('wallet: a number that names no wallet asks for one before sending; network_required from the server shows beside the choice', async ({ page }) => {
+    const h = await setup(page, { 'POST /me/payments/pay_1/mobile-money': ok({ error: 'network_required' }, 400) });
+    await page.goto('/m/pass/');
+    await page.getByTestId('member-pass-option-basic').check();
+    await page.getByTestId('member-pass-continue').click();
+    await page.getByTestId('member-pay-phone').fill('0734123678');
+    for (const w of ['Mpesa', 'Tigo', 'Airtel', 'Halopesa', 'Azampesa']) await expect(page.getByTestId(`member-pay-wallet-${w}`)).not.toBeChecked();
+    await page.getByTestId('member-pay-send').click();
+    await expect(page.getByTestId('member-pay-wallet-error')).toHaveText(en['member.err.network_required']);
+    expect(h.count('POST /me/subscribe')).toBe(0);
+    await page.getByTestId('member-pay-wallet-Tigo').check();
+    await expect(page.getByTestId('member-pay-wallet-error')).toHaveCount(0);
+    await page.getByTestId('member-pay-send').click();
+    await expect(page.getByTestId('member-pay-wallet-error')).toHaveText(en['member.err.network_required']);
+    await expect(page.getByTestId('member-pay-error')).toHaveCount(0);
+    expect(h.reqs.find(r => r.path === '/me/payments/pay_1/mobile-money')!.body).toEqual({ phone: '0734123678', network: 'Tigo' });
+  });
+
+  test('a prompt that ran out (state none) offers to send it again on the same request', async ({ page }) => {
+    const h = await setup(page, { 'POST /me/payments/pay_1/mobile-money/refresh': n => ok({ state: n < 2 ? 'none' : 'completed', paymentRequest: PAY }) });
+    await page.goto('/m/pass/');
+    await page.getByTestId('member-pass-option-basic').check();
+    await page.getByTestId('member-pass-continue').click();
+    await page.getByTestId('member-pay-send').click();
+    await expect(page.getByTestId('member-pay-expired')).toContainText(en['member.pay.expiredTitle'], { timeout: 15_000 });
+    await page.getByTestId('member-pay-send-again').click();
+    await expect(page.getByTestId('member-pay-done')).toBeVisible({ timeout: 15_000 });
+    expect(h.count('POST /me/subscribe')).toBe(1);
+    expect(h.count('POST /me/payments/pay_1/mobile-money')).toBe(2);
+  });
+
+  test('a held payment (no_open_attempt) says the team is checking it and offers no second prompt', async ({ page }) => {
+    const h = await setup(page, { 'POST /me/payments/pay_1/mobile-money/refresh': ok({ state: 'held', reason: 'no_open_attempt', paymentRequest: PAY }) });
+    await page.goto('/m/pass/');
+    await page.getByTestId('member-pass-option-basic').check();
+    await page.getByTestId('member-pass-continue').click();
+    await page.getByTestId('member-pay-send').click();
+    await expect(page.getByTestId('member-pay-held')).toContainText(en['member.pay.heldBody'], { timeout: 15_000 });
+    await expect(page.getByTestId('member-pay-send-again')).toHaveCount(0);
+    expect(h.count('POST /me/payments/pay_1/mobile-money')).toBe(1);
+  });
+
+  test('a pending AzamPay request whose prompt is out can be continued', async ({ page }) => {
+    const prompted = { ...PAY, provider: 'azampay', reference: 'AZM-TXN-1' };
+    const h = await setup(page, { 'GET /me': ok({ user: USER, subscription: null, pendingPayment: prompted, visitsUsed: 0, visitCap: null }) });
+    await page.goto('/m/pass/');
+    await page.getByTestId('member-pass-pay-existing').click();
+    await page.getByTestId('member-pay-send').click();
+    await expect(page.getByTestId('member-pay-waiting')).toBeVisible();
+    expect(h.count('POST /me/subscribe')).toBe(0);
+    expect(h.count('POST /me/payments/pay_1/mobile-money')).toBe(1);
+  });
+
+  test('a pending request with a typed transaction ID (from before paying by hand ended) waits for the team', async ({ page }) => {
+    await setup(page, { 'GET /me': ok({ user: USER, subscription: null, pendingPayment: { ...PAY, memberReference: 'QGH7XK2L9P' }, visitsUsed: 0, visitCap: null }) });
+    await page.goto('/m/pass/');
+    await expect(page.getByTestId('member-pass-pending')).toContainText(en['member.pay.pendingManual']);
+    await expect(page.getByTestId('member-pass-pay-existing')).toHaveCount(0);
+  });
+
+  test('the options answer has no manual block: a stale one is ignored and the pass is paid by the phone prompt', async ({ page }) => {
+    const h = await setup(page, { 'GET /payments/options': ok({ enabled: true, provider: 'azampay', environment: 'production', manual: { enabled: true, lipaNamba: '5123456', accountName: 'FITFLEX AFRICA', referenceRequired: true, payerPhoneRequired: true } }) });
     await page.goto('/m/pass/');
     await page.getByTestId('member-pass-option-pro').check();
     await page.getByTestId('member-pass-continue').click();
-    await expect(page.getByTestId('member-pay-manual')).toContainText('5123456');
-    // The server keeps the instructions as { en, sw } (shape from GET /payments/options).
-    await expect(page.getByTestId('member-pay-manual')).toContainText('Use the business number.');
-    await page.getByTestId('member-pay-reference').fill('QGH7XK2L9P');
-    await page.getByTestId('member-pay-manual-submit').click();
-    await expect(page.getByTestId('member-pay-manual_done')).toBeVisible();
-    expect(h.reqs.find(r => r.path === '/me/subscribe')!.body).toEqual({ type: 'platform_pass', tier: 'pro', reference: 'QGH7XK2L9P', payerPhone: '0754123678' });
+    await expect(page.getByTestId('member-pay-mobile')).toBeVisible();
+    await expect(page.getByTestId('member-pay-manual')).toHaveCount(0);
+    await expect(page.getByTestId('member-pay-mobile')).not.toContainText('5123456');
+    await page.getByTestId('member-pay-send').click();
+    await expect(page.getByTestId('member-pay-waiting')).toBeVisible();
+    expect(h.reqs.find(r => r.path === '/me/subscribe')!.body).toEqual({ type: 'platform_pass', tier: 'pro' });
   });
 
   test('check-in QR is drawn in the page (no image service) and the token never appears in an address', async ({ page }) => {
@@ -522,16 +596,6 @@ test.describe('member portal, flag on', () => {
     await expect(page.getByTestId('member-pass-current')).toContainText(en['member.pass.none']);
     await expect(page.getByTestId('member-pass-option-executive').locator('xpath=ancestor::label')).toContainText(en['member.pass.planUnlimited']);
     await expect(page.getByTestId('member-pass-choose')).not.toContainText('-1');
-  });
-
-  test('pass: with mobile money AND Lipa Namba on, the pass goes the Lipa Namba way (the server needs the transaction ID)', async ({ page }) => {
-    const h = await setup(page, { 'GET /payments/options': ok({ enabled: true, environment: 'production', manual: { enabled: true, lipaNamba: '5123456', accountName: 'FITFLEX', referenceRequired: true, payerPhoneRequired: true } }) });
-    await page.goto('/m/pass/');
-    await page.getByTestId('member-pass-option-basic').check();
-    await page.getByTestId('member-pass-continue').click();
-    await expect(page.getByTestId('member-pay-manual')).toBeVisible();
-    await expect(page.getByTestId('member-pay-mobile')).toHaveCount(0);
-    expect(h.count('POST /me/subscribe')).toBe(0);
   });
 
   test('prices say TSh and Swahili times use the 12-hour clock with the part of the day', async ({ page }) => {
