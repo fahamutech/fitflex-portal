@@ -28,8 +28,8 @@ export interface MeResponse {
 }
 export interface Pass { id: string; key: string; label: string; price: number; visitCap: number | null; visits?: number | null; gymAccess?: string | null }
 export interface UpgradeOption { tier: string; label: string; monthlyPrice: number; visits?: number | null; differenceTzs: number }
-export interface ManualPayment { enabled: boolean; lipaNamba?: string; accountName?: string; network?: string | null; instructions?: { en?: string | null; sw?: string | null } | null; referenceRequired?: boolean; payerPhoneRequired?: boolean }
-export interface PaymentOptions { enabled: boolean; provider?: string; environment?: string | null; manual?: ManualPayment; mobileMoney?: { products: string[] } }
+/** GET /payments/options. AzamPay is the only payment method (owner decision 2026-11-17): `provider` is "azampay". */
+export interface PaymentOptions { enabled: boolean; provider?: string; environment?: string | null; mobileMoney?: { products: string[] } }
 export interface MemberQr { token: string; expiresAt: string; rotatesEverySeconds: number }
 export interface Checkin { id: string; timestamp: string; status?: string; visitConsumed?: boolean; gym?: { id: string; name: string } | null }
 export interface OperatingHours { [day: string]: { open?: string; close?: string; closed?: boolean } | string | null }
@@ -59,8 +59,7 @@ export type PayState = 'in_progress' | 'completed' | 'failed' | 'held' | 'none';
 export interface PayReply { state: PayState; reason?: string; paymentRequest?: PaymentRequest }
 
 /** Error codes the member pages show. Sign-in codes come from the web check-in (same PIN sign-in, same EN/SW messages). */
-export type MemberCode = CheckinCode | 'not_member' | 'payment_already_pending' | 'no_active_pass' | 'payment_reference_required'
-  | 'payment_reference_invalid' | 'payment_reference_duplicate' | 'payer_phone_required' | 'payer_phone_invalid' | 'invalid_phone'
+export type MemberCode = CheckinCode | 'not_member' | 'payment_already_pending' | 'no_active_pass' | 'invalid_phone' | 'network_required'
   | 'feature_disabled' | 'payment_not_pending' | 'too_many_attempts' | 'active_subscription_required'
   | 'slot_already_booked' | 'slot_in_past' | 'slot_not_available' | 'trainer_unavailable' | 'trainer_not_available_at_gym' | 'cannot_book_own_sessions'
   | 'challenge_closed' | 'challenge_paused' | 'team_required' | 'gym_required' | 'not_your_gym' | 'already_joined' | 'not_joined' | 'gym_owner_has_checkin_activity' | 'trainer_has_bookings'
@@ -69,8 +68,8 @@ export type MemberCode = CheckinCode | 'not_member' | 'payment_already_pending' 
   | 'too_many_attempts' | 'password_change_required' | 'open_paid_order' | 'idempotency_key_reused' | 'capacity_unavailable'
   | 'manual_payment_submitted' | 'provider_unavailable' | 'ticket_not_issued' | 'ticket_revoked' | 'not_member_owned' | 'invalid_team';
 /** Codes with their own member.err.* message (src/lib/i18n-member.ts). */
-export const MEMBER_PASSTHROUGH: ReadonlySet<string> = new Set<string>(['payment_already_pending', 'no_active_pass', 'payment_reference_required', 'payment_reference_invalid',
-  'payment_reference_duplicate', 'payer_phone_required', 'payer_phone_invalid', 'invalid_phone', 'feature_disabled', 'payment_not_pending',
+export const MEMBER_PASSTHROUGH: ReadonlySet<string> = new Set<string>(['payment_already_pending', 'no_active_pass',
+  'invalid_phone', 'network_required', 'feature_disabled', 'payment_not_pending',
   'active_subscription_required', 'slot_already_booked', 'slot_in_past', 'slot_not_available', 'trainer_unavailable',
   'trainer_not_available_at_gym', 'cannot_book_own_sessions', 'challenge_closed', 'challenge_paused', 'team_required', 'gym_required', 'not_your_gym', 'already_joined', 'not_joined',
   'gym_owner_has_checkin_activity', 'trainer_has_bookings', 'organizer_owner', 'account_deletion_failed', 'invalid_field',
@@ -246,9 +245,9 @@ export const memberApi = {
   payments: () => authed<PaymentRequest[] | { payments: PaymentRequest[] }>('GET', '/me/payments').then(r => Array.isArray(r) ? r : (r.payments ?? [])),
   checkins: () => authed<Checkin[] | { checkins: Checkin[] }>('GET', '/me/checkins').then(r => Array.isArray(r) ? r : (r.checkins ?? [])),
   qr: () => authed<MemberQr>('GET', '/me/qr'),
-  subscribe: (body: { tier: string; reference?: string; payerPhone?: string }) =>
+  subscribe: (body: { tier: string }) =>
     authed<{ paymentRequest: PaymentRequest }>('POST', '/me/subscribe', { type: 'platform_pass', ...body }),
-  upgrade: (body: { tier: string; reference?: string; payerPhone?: string }) =>
+  upgrade: (body: { tier: string }) =>
     authed<{ paymentRequest: PaymentRequest }>('POST', '/me/upgrade', body),
   gyms: () => authed<Gym[]>('GET', '/gyms').then(r => Array.isArray(r) ? r : []),
   favoriteGymIds: () => authed<{ favoriteGymIds: string[] }>('GET', '/me/favorites/gyms').then(r => r.favoriteGymIds ?? []),
@@ -261,8 +260,9 @@ export const memberApi = {
     authed<{ bookings: TrainerBooking[]; paymentRequest: PaymentRequest | null }>('POST', '/me/trainer-bookings', body),
   myBookings: () => authed<TrainerBooking[] | { bookings: TrainerBooking[] }>('GET', '/me/trainer-bookings').then(r => Array.isArray(r) ? r : (r.bookings ?? [])),
   shopOrders: () => authed<ShopOrder[] | { orders: ShopOrder[] }>('GET', '/me/shop-orders').then(r => Array.isArray(r) ? r : (r.orders ?? [])),
-  payByMobileMoney: (paymentId: string, phone: string) =>
-    authed<PayReply>('POST', `/me/payments/${encodeURIComponent(paymentId)}/mobile-money`, { phone }),
+  /** `network` is the wallet paid from; without it the server takes the network from the number (400 network_required when it cannot). */
+  payByMobileMoney: (paymentId: string, phone: string, network?: MomoWallet | null) =>
+    authed<PayReply>('POST', `/me/payments/${encodeURIComponent(paymentId)}/mobile-money`, network ? { phone, network } : { phone }),
   refreshMobileMoney: (paymentId: string) =>
     authed<PayReply>('POST', `/me/payments/${encodeURIComponent(paymentId)}/mobile-money/refresh`),
 };
@@ -272,13 +272,33 @@ export function canPayPassByMobileMoney(o: PaymentOptions | null): boolean {
   return canPayByMobileMoney(o, 'FITFLEX_PASS');
 }
 /**
- * Whether mobile money can pay this product now. Without the `mobileMoney` key (TUNZAA_TRAINER_PRODUCTS off) only
- * passes and gym plans are payable this way; trainer sessions then are not.
+ * Whether mobile money can pay this product now. Without the `mobileMoney` key (the server's trainer, event and shop
+ * switches off) only passes and gym plans are payable this way; trainer sessions then are not.
  */
 export function canPayByMobileMoney(o: PaymentOptions | null, product: 'FITFLEX_PASS' | 'TRAINER_SERVICE' | 'EVENT_ORDER'): boolean {
   if (!o?.enabled) return false;
   if (!o.mobileMoney) return product === 'FITFLEX_PASS';
   return o.mobileMoney.products.includes(product);
+}
+
+/** The wallets AzamPay takes, as the server expects them (`network` on POST /me/payments/:id/mobile-money), in the order offered. */
+export const MOMO_WALLETS = ['Mpesa', 'Tigo', 'Airtel', 'Halopesa', 'Azampesa'] as const;
+export type MomoWallet = typeof MOMO_WALLETS[number];
+/**
+ * The wallet a Tanzanian number most likely pays from, or null (the same table as the mobile app's momoWalletGuess).
+ * ASSUMPTION: the prefixes follow the TCRA ranges; numbers port between networks, so this is only a starting choice the
+ * member can change. AzamPesa is a wallet, not a number range: it is never guessed.
+ */
+export function momoWalletGuess(raw: string): MomoWallet | null {
+  let d = raw.replace(/[^0-9]/g, '');
+  if (d.startsWith('255')) d = d.slice(3); else if (d.startsWith('0')) d = d.slice(1);
+  if (d.length < 2) return null;
+  const p = d.slice(0, 2);
+  if (['74', '75', '76'].includes(p)) return 'Mpesa';
+  if (['65', '67', '71', '77'].includes(p)) return 'Tigo';
+  if (['68', '69', '78'].includes(p)) return 'Airtel';
+  if (['61', '62'].includes(p)) return 'Halopesa';
+  return null;
 }
 
 /** Today in East Africa as YYYY-MM-DD. */
@@ -291,13 +311,6 @@ export function localText(v: { en?: string | null; sw?: string | null } | string
   if (!v) return null;
   if (typeof v === 'string') return v;
   return (locale === 'sw' ? v.sw || v.en : v.en || v.sw) || null;
-}
-
-/** The admin's Lipa Namba instructions in the page language (the server stores { en, sw }). */
-export function instructionsText(m: ManualPayment | null | undefined, locale: 'en' | 'sw'): string | null {
-  const i = m?.instructions;
-  if (!i || typeof i !== 'object') return null;
-  return (locale === 'sw' ? i.sw || i.en : i.en || i.sw) || null;
 }
 
 /** "TSh 60,000": the glossary's display label in English and Swahili (TZS stays the code in data). */
@@ -416,8 +429,9 @@ export const eventsApi = {
     authed<EventQuote>('POST', '/me/event-orders/quote', body),
   place: (key: string, body: { eventId: string; lines: Array<{ ticketTypeId: string; quantity: number }>; participants: Participant[]; acceptedTerms: true; consentTextVersion?: string; expectedTotalTzs: number }) =>
     authed<{ order: EventOrder }>('POST', '/me/event-orders', body, { 'Idempotency-Key': key }),
-  startPayment: (orderId: string, key: string, body: { reference?: string; payerPhone?: string }) =>
-    authed<{ next: { payment: string; paymentRequestId?: string | null }; order: EventOrder }>('POST', `/me/event-orders/${encodeURIComponent(orderId)}/payment`, body, { 'Idempotency-Key': key }),
+  /** A member's order: the body is empty; `next.payment` is "provider" (the phone prompt) or "none". */
+  startPayment: (orderId: string, key: string) =>
+    authed<{ next: { payment: string; paymentRequestId?: string | null }; order: EventOrder }>('POST', `/me/event-orders/${encodeURIComponent(orderId)}/payment`, {}, { 'Idempotency-Key': key }),
   tickets: () => authed<{ items: EventTicket[] }>('GET', '/me/event-tickets').then(r => r.items ?? []),
   ticket: (registrationId: string) => authed<{ ticket: { displayCode: string; state: string }; qrPayload: string }>('GET', `/me/event-registrations/${encodeURIComponent(registrationId)}/ticket`),
   joinWaitlist: (eventId: string, body: { ticketTypeId: string; participants: Participant[]; consent: { accepted: true; textVersion?: string } }) =>

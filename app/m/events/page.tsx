@@ -7,7 +7,7 @@ import { errorKey, PayPanel, type PayTarget } from '@/components/member/pay-pane
 import { fmt, revealPanel } from '@/components/member/member-shared';
 import { EVENTS_MODULE } from '@/lib/flags';
 import {
-  eventsApi, formatDate, formatTzs, instructionsText, localText, MEMBER_ROUTES, MemberApiError, memberApi, newIdempotencyKey,
+  eventsApi, formatDate, formatTzs, localText, MEMBER_ROUTES, MemberApiError, memberApi, newIdempotencyKey,
   type EventDetail, type EventQuote, type EventsOptions, type EventSummary, type EventTicket, type MemberCode, type MemberSession,
   type Participant, type PaymentOptions, type TicketType,
 } from '@/lib/member-api';
@@ -104,7 +104,7 @@ function Events({ session }: { session: MemberSession | null }) {
               );
             })}
           </ul>
-          {selected ? <EventPanel key={selected.id} id={selected.id} opts={opts} payOpts={payOpts} session={session} onPay={setPaying} onRegistered={() => void load(true)} />
+          {selected ? <EventPanel key={selected.id} id={selected.id} opts={opts} session={session} onPay={setPaying} onRegistered={() => void load(true)} />
             : <p className={`${card} ${muted}`}>{t('member.events.selectHint')}</p>}
         </div>
       )}
@@ -112,8 +112,8 @@ function Events({ session }: { session: MemberSession | null }) {
   );
 }
 
-function EventPanel({ id, opts, payOpts, session, onPay, onRegistered }: {
-  id: string; opts: EventsOptions; payOpts: PaymentOptions | null; session: MemberSession | null; onPay: (t: PayTarget) => void; onRegistered: () => void;
+function EventPanel({ id, opts, session, onPay, onRegistered }: {
+  id: string; opts: EventsOptions; session: MemberSession | null; onPay: (t: PayTarget) => void; onRegistered: () => void;
 }) {
   const { t, locale } = useApp();
   const [ev, setEv] = useState<EventDetail | null | 'error'>(null);
@@ -134,9 +134,7 @@ function EventPanel({ id, opts, payOpts, session, onPay, onRegistered }: {
   const [terms, setTerms] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<MemberCode | null>(null);
-  const [done, setDone] = useState<'registered' | 'manual' | { waitlist: number | null } | null>(null);
-  const [manualOrder, setManualOrder] = useState<{ id: string; total: number } | null>(null);
-  const [reference, setReference] = useState('');
+  const [done, setDone] = useState<'registered' | { waitlist: number | null } | null>(null);
   const orderKey = useRef(newIdempotencyKey());
 
   useEffect(() => {
@@ -191,22 +189,18 @@ function EventPanel({ id, opts, payOpts, session, onPay, onRegistered }: {
     if (order.status === 'confirmed') { setDone('registered'); onRegistered(); return; }
     // A free place is confirmed by the payment step too (it answers next.payment "none" at once).
     if (order.totalTzs === 0) {
-      await eventsApi.startPayment(order.id, newIdempotencyKey(), {});
+      await eventsApi.startPayment(order.id, newIdempotencyKey());
       setDone('registered'); onRegistered(); return;
     }
     if (opts.payment === 'provider') {
-      const r = await eventsApi.startPayment(order.id, newIdempotencyKey(), {});
+      const r = await eventsApi.startPayment(order.id, newIdempotencyKey());
       if (r.next.payment === 'none' || !r.next.paymentRequestId) { setDone('registered'); onRegistered(); return; }
       onPay({ label: `${ev.title} · ${chosen?.name ?? ''}`, amountTzs: order.totalTzs, product: 'EVENT_ORDER', paymentId: r.next.paymentRequestId,
         doneTitleKey: 'member.events.registeredTitle', doneBody: t('member.events.registeredBody'), doneHref: MEMBER_ROUTES.events });
       return;
     }
-    setManualOrder({ id: order.id, total: order.totalTzs });
-  });
-  const sendManual = () => run(async () => {
-    if (!manualOrder) return;
-    await eventsApi.startPayment(manualOrder.id, newIdempotencyKey(), { reference: reference.trim(), payerPhone: phone.trim() });
-    setDone('manual');
+    // A member's paid order is paid by the phone prompt only; without it nothing is taken here (the button is not shown then).
+    throw new MemberApiError(409, 'feature_disabled');
   });
   const joinWaitlist = () => run(async () => {
     if (!terms) return;
@@ -248,26 +242,10 @@ function EventPanel({ id, opts, payOpts, session, onPay, onRegistered }: {
 
       {done ? (
         <div className="flex flex-col gap-2 rounded-2xl border-2 border-[#3dd98e] p-4" data-testid="member-event-done" role="status">
-          <strong className="text-lg">{done === 'registered' ? t('member.events.registeredTitle') : done === 'manual' ? t('member.pay.manualDoneTitle') : fmt(t('member.events.waitlistJoined'), { n: done.waitlist ?? t('member.unknown') })}</strong>
-          <span className={`text-sm ${muted}`}>{done === 'registered' ? t('member.events.registeredBody') : done === 'manual' ? t('member.pay.manualDoneBody') : t('member.events.waitlistBody')}</span>
+          <strong className="text-lg">{done === 'registered' ? t('member.events.registeredTitle') : fmt(t('member.events.waitlistJoined'), { n: done.waitlist ?? t('member.unknown') })}</strong>
+          <span className={`text-sm ${muted}`}>{done === 'registered' ? t('member.events.registeredBody') : t('member.events.waitlistBody')}</span>
         </div>
-      ) : !opts.registration ? null : manualOrder ? (
-        <div className="flex flex-col gap-4" data-testid="member-event-manual">
-          <h3 className="text-lg font-extrabold">{t('member.pay.manualTitle')}</h3>
-          <p className={`text-sm ${muted}`}>{fmt(t('member.pay.manualBody'), { amount: formatTzs(manualOrder.total, locale) })}</p>
-          {payOpts?.manual?.lipaNamba && (
-            <dl className="grid gap-3 rounded-2xl border border-[#1e293b] bg-[#020617] p-4 sm:grid-cols-2">
-              <div><dt className={`text-sm ${muted}`}>{t('member.pay.manualNumber')}</dt><dd className="font-mono text-xl font-bold">{payOpts.manual.lipaNamba}</dd></div>
-              <div><dt className={`text-sm ${muted}`}>{t('member.pay.manualName')}</dt><dd className="font-bold">{payOpts.manual.accountName}</dd></div>
-            </dl>
-          )}
-          {instructionsText(payOpts?.manual, locale) && <p className={`text-sm ${muted}`}>{instructionsText(payOpts?.manual, locale)}</p>}
-          {errBox}
-          <label className="flex flex-col gap-1.5 text-sm font-semibold">{t('member.pay.manualRef')}
-            <input className={`${input} font-mono uppercase`} value={reference} onChange={e => setReference(e.target.value)} data-testid="member-event-reference" /></label>
-          <button type="button" className={`${primaryBtn} self-start`} disabled={busy || !reference.trim()} onClick={() => void sendManual()}>{t('member.pay.manualSubmit')}</button>
-        </div>
-      ) : (
+      ) : !opts.registration ? null : (
         <>
           <fieldset className="flex flex-col gap-2">
             <legend className="mb-2 text-sm font-semibold">{t('member.events.choose')}</legend>
