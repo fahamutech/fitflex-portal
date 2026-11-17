@@ -9,7 +9,7 @@ import { clock } from './events';
 export const MEMBER_ROUTES = {
   home: '/m/', signin: '/m/signin/', pass: '/m/pass/', checkIn: '/m/check-in/',
   gyms: '/m/gyms/', trainers: '/m/trainers/', orders: '/m/orders/',
-  activity: '/m/activity/', challenges: '/m/challenges/', events: '/m/events/', me: '/m/me/',
+  activity: '/m/activity/', challenges: '/m/challenges/', events: '/m/events/', me: '/m/me/', paymentReturn: '/m/payment-return/',
 } as const;
 const SESSION_KEY = 'ff_member_session';
 const TIMEOUT_MS = 15_000;
@@ -28,8 +28,17 @@ export interface MeResponse {
 }
 export interface Pass { id: string; key: string; label: string; price: number; visitCap: number | null; visits?: number | null; gymAccess?: string | null }
 export interface UpgradeOption { tier: string; label: string; monthlyPrice: number; visits?: number | null; differenceTzs: number }
-/** GET /payments/options. AzamPay is the only payment method (owner decision 2026-11-17): `provider` is "azampay". */
-export interface PaymentOptions { enabled: boolean; provider?: string; environment?: string | null; mobileMoney?: { products: string[] } }
+/**
+ * GET /payments/options. AzamPay is the only payment method (owner decision 2026-11-17): `provider` is "azampay".
+ * `methods` lists the ways a request can be paid now ("mobile_money", "bank", "page"; [] while paying is off); an older
+ * server does not send it (mobile money only). `bank` and `page` come only while that way is on. `mobileMoney.products`
+ * applies to every method.
+ */
+export interface PaymentOptions {
+  enabled: boolean; provider?: string; environment?: string | null; mobileMoney?: { products: string[] };
+  methods?: string[]; bank?: { providers?: string[]; maxAmountTzs?: number | null }; page?: { returnTo?: string[]; languages?: string[] };
+}
+export type PayMethod = 'mobile_money' | 'bank' | 'page';
 export interface MemberQr { token: string; expiresAt: string; rotatesEverySeconds: number }
 export interface Checkin { id: string; timestamp: string; status?: string; visitConsumed?: boolean; gym?: { id: string; name: string } | null }
 export interface OperatingHours { [day: string]: { open?: string; close?: string; closed?: boolean } | string | null }
@@ -54,12 +63,17 @@ export interface OrderItem { productId: string; name?: string | null; qty: numbe
 export interface ShopOrder {
   id: string; items: OrderItem[]; totalTzs: number; status: string; deliveryMethod?: string; pickupGymId?: string | null; pickupGym?: { id: string; name: string } | null;
   paymentStatus?: string; timeline?: Array<{ status: string; at: string }>; createdAt: string; canCancel?: boolean;
+  /** The pending payment request this order waits on; null once it is paid, cancelled or free (absent from an older server). */
+  paymentRequestId?: string | null;
 }
 export type PayState = 'in_progress' | 'completed' | 'failed' | 'held' | 'none';
-export interface PayReply { state: PayState; reason?: string; paymentRequest?: PaymentRequest }
+/** `checkoutUrl` is present while AzamPay's payment page is open for the request (it can be opened again). */
+export interface PayReply { state: PayState; reason?: string; paymentRequest?: PaymentRequest; method?: string; alreadyRequested?: boolean; checkoutUrl?: string }
 
 /** Error codes the member pages show. Sign-in codes come from the web check-in (same PIN sign-in, same EN/SW messages). */
 export type MemberCode = CheckinCode | 'not_member' | 'payment_already_pending' | 'no_active_pass' | 'invalid_phone' | 'network_required'
+  | 'invalid_bank' | 'invalid_account_number' | 'invalid_otp' | 'amount_over_bank_limit' | 'provider_rejected'
+  | 'not_payable_this_way' | 'return_not_configured' | 'invalid_return_to' | 'invalid_language'
   | 'feature_disabled' | 'payment_not_pending' | 'too_many_attempts' | 'active_subscription_required'
   | 'slot_already_booked' | 'slot_in_past' | 'slot_not_available' | 'trainer_unavailable' | 'trainer_not_available_at_gym' | 'cannot_book_own_sessions'
   | 'challenge_closed' | 'challenge_paused' | 'team_required' | 'gym_required' | 'not_your_gym' | 'already_joined' | 'not_joined' | 'gym_owner_has_checkin_activity' | 'trainer_has_bookings'
@@ -70,6 +84,8 @@ export type MemberCode = CheckinCode | 'not_member' | 'payment_already_pending' 
 /** Codes with their own member.err.* message (src/lib/i18n-member.ts). */
 export const MEMBER_PASSTHROUGH: ReadonlySet<string> = new Set<string>(['payment_already_pending', 'no_active_pass',
   'invalid_phone', 'network_required', 'feature_disabled', 'payment_not_pending',
+  'invalid_bank', 'invalid_account_number', 'invalid_otp', 'amount_over_bank_limit', 'provider_rejected',
+  'not_payable_this_way', 'return_not_configured', 'invalid_return_to', 'invalid_language',
   'active_subscription_required', 'slot_already_booked', 'slot_in_past', 'slot_not_available', 'trainer_unavailable',
   'trainer_not_available_at_gym', 'cannot_book_own_sessions', 'challenge_closed', 'challenge_paused', 'team_required', 'gym_required', 'not_your_gym', 'already_joined', 'not_joined',
   'gym_owner_has_checkin_activity', 'trainer_has_bookings', 'organizer_owner', 'account_deletion_failed', 'invalid_field',
@@ -265,6 +281,18 @@ export const memberApi = {
     authed<PayReply>('POST', `/me/payments/${encodeURIComponent(paymentId)}/mobile-money`, network ? { phone, network } : { phone }),
   refreshMobileMoney: (paymentId: string) =>
     authed<PayReply>('POST', `/me/payments/${encodeURIComponent(paymentId)}/mobile-money/refresh`),
+  /**
+   * Bank checkout (CRDB | NMB). `otp` is the one-time code the member's bank gave them: it goes in this request body
+   * and nowhere else (never stored, never logged, never in an address).
+   */
+  payByBank: (paymentId: string, body: { bank: string; accountNumber: string; phone: string; otp: string }) =>
+    authed<PayReply>('POST', `/me/payments/${encodeURIComponent(paymentId)}/bank`, body),
+  /** AzamPay's hosted payment page. `returnTo` is a name the server knows ("web"), never an address. */
+  checkoutPage: (paymentId: string, body: { returnTo?: 'web'; language?: 'en' | 'sw' }) =>
+    authed<PayReply>('POST', `/me/payments/${encodeURIComponent(paymentId)}/checkout-page`, body),
+  /** Where the request stands, for every method (a server that lists `methods` has it). It settles nothing. */
+  refreshPayment: (paymentId: string) =>
+    authed<PayReply>('POST', `/me/payments/${encodeURIComponent(paymentId)}/refresh`),
 };
 
 /** Mobile money can pay a FitFlex Pass now (the `mobileMoney` key is absent while the B6a flag is off: passes are payable). */
@@ -275,7 +303,7 @@ export function canPayPassByMobileMoney(o: PaymentOptions | null): boolean {
  * Whether mobile money can pay this product now. Without the `mobileMoney` key (the server's trainer, event and shop
  * switches off) only passes and gym plans are payable this way; trainer sessions then are not.
  */
-export function canPayByMobileMoney(o: PaymentOptions | null, product: 'FITFLEX_PASS' | 'TRAINER_SERVICE' | 'EVENT_ORDER'): boolean {
+export function canPayByMobileMoney(o: PaymentOptions | null, product: 'FITFLEX_PASS' | 'TRAINER_SERVICE' | 'EVENT_ORDER' | 'SHOP_ORDER'): boolean {
   if (!o?.enabled) return false;
   if (!o.mobileMoney) return product === 'FITFLEX_PASS';
   return o.mobileMoney.products.includes(product);
@@ -299,6 +327,19 @@ export function momoWalletGuess(raw: string): MomoWallet | null {
   if (['68', '69', '78'].includes(p)) return 'Airtel';
   if (['61', '62'].includes(p)) return 'Halopesa';
   return null;
+}
+
+/** The address of AzamPay's payment page, only if it is an https URL (anything else is not opened). */
+export function httpsUrl(raw: unknown): string | null {
+  if (typeof raw !== 'string' || raw.length > 2048) return null;
+  try {
+    const u = new URL(raw);
+    return u.protocol === 'https:' && !!u.hostname && !u.username && !u.password ? u.toString() : null;
+  } catch { return null; }
+}
+/** A payment request id as it may come back in an address (untrusted): letters, digits, `_` and `-` only. */
+export function paymentIdFrom(raw: string | null): string | null {
+  return raw && /^[A-Za-z0-9_-]{1,80}$/.test(raw) ? raw : null;
 }
 
 /** Today in East Africa as YYYY-MM-DD. */
