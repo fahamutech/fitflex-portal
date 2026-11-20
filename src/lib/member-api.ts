@@ -5,11 +5,12 @@
 import { API_BASE } from './api';
 import { normaliseError, type CheckinCode } from './web-checkin';
 import { clock } from './events';
+import type { DurationUnit, PassCategory } from './gym-passes';
 
 export const MEMBER_ROUTES = {
   home: '/m/', signin: '/m/signin/', pass: '/m/pass/', checkIn: '/m/check-in/',
   gyms: '/m/gyms/', trainers: '/m/trainers/', orders: '/m/orders/',
-  activity: '/m/activity/', challenges: '/m/challenges/', events: '/m/events/', me: '/m/me/',
+  activity: '/m/activity/', challenges: '/m/challenges/', events: '/m/events/', me: '/m/me/', gymPasses: '/m/gym-passes/',
 } as const;
 const SESSION_KEY = 'ff_member_session';
 const TIMEOUT_MS = 15_000;
@@ -80,7 +81,8 @@ export const MEMBER_PASSTHROUGH: ReadonlySet<string> = new Set<string>(['payment
 
 export class MemberApiError extends Error {
   /** `serverMessage`: the server's own sentence where it sends one in both languages (account deletion). */
-  constructor(public status: number, public code: MemberCode, public serverMessage: { en?: string | null; sw?: string | null } | null = null) { super(code); }
+  /** `body`: the server's answer, for callers that read more than the code (a changed price, the server's own code). */
+  constructor(public status: number, public code: MemberCode, public serverMessage: { en?: string | null; sw?: string | null } | null = null, public body: Record<string, unknown> | null = null) { super(code); }
 }
 
 // ── Session (own storage key) ──────────────────────────────────────────────────────────────────────────────────
@@ -195,7 +197,7 @@ async function authed<T>(method: 'GET' | 'POST' | 'PUT' | 'DELETE', path: string
   if (r.status === 401 || (r.status === 404 && raw === 'user_not_found') || (r.status === 403 && (raw === 'account_suspended' || raw === 'person_not_active'))) {
     clearSession(); onEnded?.(); throw new MemberApiError(401, 'unauthorized');
   }
-  if (r.status < 200 || r.status >= 300) throw new MemberApiError(r.status, codeOf(r), messageOf(r));
+  if (r.status < 200 || r.status >= 300) throw new MemberApiError(r.status, codeOf(r), messageOf(r), r.body);
   touchSession();
   return r.body as T;
 }
@@ -267,6 +269,29 @@ export const memberApi = {
     authed<PayReply>('POST', `/me/payments/${encodeURIComponent(paymentId)}/mobile-money/refresh`),
 };
 
+// ── Custom gym passes (server flag GYM_CUSTOM_PASSES; docs/custom-gym-passes-api.md in fitflex-functions) ─────────────
+export interface GymPassSnapshot { name: string; description?: string | null; category: PassCategory; priceTzs: number; durationValue: number; durationUnit: DurationUnit; beneficiaryLimit: number }
+/** A person on a pass as its BUYER sees them: masked by the server, shown as given. */
+export interface GymPassPersonView { id: string; slot: number; isPurchaser: boolean; status: string; you?: boolean; displayName: string | null; contactType: 'phone' | 'email' | null; contact: string | null }
+export interface MyGymPassPurchase {
+  id: string; status: 'pending_payment' | 'active' | 'expired' | 'cancelled'; plan: GymPassSnapshot; priceTzs: number; paymentRequestId: string | null;
+  gym?: { id: string; name: string } | null; startsAt: string | null; expiresAt: string | null;
+  beneficiaries?: GymPassPersonView[]; slots?: { used: number; limit: number };
+}
+export interface MyGymPassMembership {
+  purchaseId: string; beneficiaryId: string; status: string; purchaseStatus: string; plan: GymPassSnapshot;
+  gym?: { id: string; name: string } | null; startsAt: string | null; expiresAt: string | null;
+}
+export const memberGymPassApi = {
+  /** Opening it also attaches the member to passes waiting on a contact they have verified (the server's rule). */
+  mine: () => authed<{ purchased?: MyGymPassPurchase[]; memberships?: MyGymPassMembership[] }>('GET', '/me/gym-passes')
+    .then(r => ({ purchased: r.purchased ?? [], memberships: r.memberships ?? [] })),
+  /** One payment request for the whole pass. The price is the server's; `expectedPriceTzs` makes it refuse a stale one (409 price_changed). */
+  purchase: (body: { planId: string; beneficiaries: Array<{ phone: string } | { email: string }>; termsVersion?: number; expectedPriceTzs: number }) =>
+    authed<{ purchase: MyGymPassPurchase; paymentRequest: PaymentRequest }>('POST', '/me/gym-pass-purchases', body),
+  cancel: (purchaseId: string) => authed<{ purchase: MyGymPassPurchase }>('POST', `/me/gym-pass-purchases/${encodeURIComponent(purchaseId)}/cancel`),
+};
+
 /** Mobile money can pay a FitFlex Pass now (the `mobileMoney` key is absent while the B6a flag is off: passes are payable). */
 export function canPayPassByMobileMoney(o: PaymentOptions | null): boolean {
   return canPayByMobileMoney(o, 'FITFLEX_PASS');
@@ -275,9 +300,9 @@ export function canPayPassByMobileMoney(o: PaymentOptions | null): boolean {
  * Whether mobile money can pay this product now. Without the `mobileMoney` key (the server's trainer, event and shop
  * switches off) only passes and gym plans are payable this way; trainer sessions then are not.
  */
-export function canPayByMobileMoney(o: PaymentOptions | null, product: 'FITFLEX_PASS' | 'TRAINER_SERVICE' | 'EVENT_ORDER'): boolean {
+export function canPayByMobileMoney(o: PaymentOptions | null, product: 'FITFLEX_PASS' | 'GYM_SUBSCRIPTION' | 'TRAINER_SERVICE' | 'EVENT_ORDER'): boolean {
   if (!o?.enabled) return false;
-  if (!o.mobileMoney) return product === 'FITFLEX_PASS';
+  if (!o.mobileMoney) return product === 'FITFLEX_PASS' || product === 'GYM_SUBSCRIPTION';
   return o.mobileMoney.products.includes(product);
 }
 

@@ -1,6 +1,7 @@
 // Public gym page (S1): POST /public/gyms/resolve (backend functions#281). No sign-in: no Authorization header,
 // no cookies, no referrer. The signed code `q` is only ever sent in the request body; it is never logged or stored.
 import { API_BASE } from './api';
+import type { WebGymPass } from './gym-pass-buy';
 
 export type DayHours = string | { open: string | null; close: string | null } | null;
 export type OperatingHours = null | string | Partial<Record<'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun' | 'default', DayHours>>;
@@ -22,6 +23,8 @@ export interface WebGymProfile {
     currency: 'TZS';
     gymPlans: { plan: string; label: string; period: string; priceTzs: number; days: number }[];
     passTiers: { key: string; label: string; monthlyPriceTzs: number | null; visits: number | null; visitsLabel: string }[];
+    /** The gym's own custom passes (server flag GYM_CUSTOM_PASSES). Absent in older replies; empty while that flag is off. */
+    gymPasses?: WebGymPass[];
   };
 }
 

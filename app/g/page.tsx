@@ -4,7 +4,10 @@ import { useRouter } from 'next/navigation';
 import { Globe, MapPin, ShieldCheck, Star } from 'lucide-react';
 import { useApp } from '../providers';
 import { Badge, Button, Card, CardContent, CardHeader } from '@/components/shared';
-import { WEB_GYM_PROFILE, WEB_QR_CHECKIN } from '@/lib/flags';
+import { GYM_CUSTOM_PASSES, MEMBER_PORTAL, WEB_GYM_PROFILE, WEB_QR_CHECKIN } from '@/lib/flags';
+import { isWebGymPass, saveBuyIntent, type WebGymPass } from '@/lib/gym-pass-buy';
+import { MEMBER_ROUTES } from '@/lib/member-api';
+import { useGymPassFormat } from '@/components/gym-pass-shared';
 import { CHECKIN_ROUTES, rememberQ } from '@/lib/web-checkin';
 import { fmt } from '@/lib/vendor';
 import { hoursView, mapUrl, resolveWebGym, safeImage, type WebGymProfile } from '@/lib/web-gym';
@@ -99,6 +102,13 @@ export default function PublicGymPage() {
     router.push(CHECKIN_ROUTES.signin);
   }, [router]);
 
+  // "Buy" on a custom gym pass (flags GYM_CUSTOM_PASSES + MEMBER_PORTAL): remember the chosen pass for this tab only,
+  // then go to the member portal, which asks for sign-in first. Nothing about the gym code is carried over.
+  const buyPass = useCallback((plan: WebGymPass, gymName: string) => {
+    saveBuyIntent(plan, gymName);
+    router.push(MEMBER_ROUTES.gymPasses);
+  }, [router]);
+
   const toggle = (
     <button
       type="button"
@@ -142,13 +152,14 @@ export default function PublicGymPage() {
           <Button onClick={() => void load(true)}>{t('web.gym.retry')}</Button>
         </div>
       )}
-      {view.kind === 'ok' && <Profile profile={view.profile} onVisit={WEB_QR_CHECKIN ? startCheckin : undefined} />}
+      {view.kind === 'ok' && <Profile profile={view.profile} onVisit={WEB_QR_CHECKIN ? startCheckin : undefined} onBuyPass={MEMBER_PORTAL ? buyPass : undefined} />}
     </div>
   );
 }
 
-function Profile({ profile, onVisit }: { profile: WebGymProfile; onVisit?: () => void }) {
+function Profile({ profile, onVisit, onBuyPass }: { profile: WebGymProfile; onVisit?: () => void; onBuyPass?: (plan: WebGymPass, gymName: string) => void }) {
   const { t, locale } = useApp();
+  const passFormat = useGymPassFormat();
   const g = profile.gym;
   const name = g.name ?? '';
   const photos = (g.photos ?? []).map(x => safeImage(x)).filter((x): x is string => !!x);
@@ -161,6 +172,8 @@ function Profile({ profile, onVisit }: { profile: WebGymProfile; onVisit?: () =>
   const trainers = g.trainers ?? [];
   const plans = profile.membership?.gymPlans ?? [];
   const tiers = profile.membership?.passTiers ?? [];
+  // The gym's own custom passes: only in builds with the flag, and only well-formed entries.
+  const gymPasses = GYM_CUSTOM_PASSES ? (profile.membership?.gymPasses ?? []).filter(isWebGymPass) : [];
   const hours = hoursView(g.operatingHours);
   const map = mapUrl(g.lat, g.lng);
   const price = (n: number) => fmt(t('web.gym.price'), { amount: n.toLocaleString(locale === 'sw' ? 'sw-TZ' : 'en-US') });
@@ -287,6 +300,32 @@ function Profile({ profile, onVisit }: { profile: WebGymProfile; onVisit?: () =>
               </li>
             ))}
           </ul>
+        </Section>
+      )}
+
+      {gymPasses.length > 0 && (
+        <Section title={t('gp.web.title')} testId="web-gym-custom-passes">
+          <ul className="divide-y divide-[var(--color-border-secondary)]">
+            {gymPasses.map(p => (
+              <li key={p.planId} className="space-y-2 py-3 text-sm" data-testid={`web-gym-pass-${p.planId}`}>
+                <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+                  <span className="font-medium text-[var(--color-fg-primary)]">{p.name}</span>
+                  <span className="text-[var(--color-fg-secondary)]">{price(p.priceTzs)}</span>
+                </div>
+                <p className="text-[var(--color-fg-tertiary)]">
+                  {t(`gp.category.${p.category}` as MessageKey)} · {passFormat.people(p.category, p.beneficiaryLimit)} · {passFormat.duration(p.durationValue, p.durationUnit)}
+                </p>
+                {p.description && <p className="whitespace-pre-line text-[var(--color-fg-secondary)]">{p.description}</p>}
+                {onBuyPass && (
+                  <Button variant="secondary" size="sm" onClick={() => onBuyPass(p, name)} data-testid={`web-gym-pass-buy-${p.planId}`}
+                    aria-label={`${t('gp.web.buy')}: ${p.name}`}>
+                    {t('gp.web.buy')}
+                  </Button>
+                )}
+              </li>
+            ))}
+          </ul>
+          <p className="mt-3 text-xs text-[var(--color-fg-tertiary)]" data-testid="web-gym-pass-hint">{t(onBuyPass ? 'gp.web.buyHint' : 'gp.web.appOnly')}</p>
         </Section>
       )}
 

@@ -82,6 +82,16 @@ test.describe('pure helpers', () => {
 test.describe(FLAG_ON ? 'flag on' : 'flag off', () => {
   test.skip(!FLAG_ON, 'flag-on specs');
 
+  test('custom gym passes in the answer are not shown in a build without NEXT_PUBLIC_GYM_CUSTOM_PASSES', async ({ page }) => {
+    const withPasses = profile('en');
+    (withPasses.membership as Record<string, unknown>).gymPasses = [{ planId: 'gpp_1', name: 'Couples 3 months', description: null, category: 'couples', durationValue: 3, durationUnit: 'months', beneficiaryLimit: 2, priceTzs: 240000, terms: null, termsVersion: 1 }];
+    await mockApi(page, () => ({ status: 200, body: withPasses }));
+    await open(page);
+    await expect(page.getByTestId('web-gym-plans')).toBeVisible();
+    await expect(page.getByTestId('web-gym-custom-passes')).toHaveCount(0);
+    await expect(page.getByText('Couples 3 months')).toHaveCount(0);
+  });
+
   test('loads without signing in: profile, no auth header, code stripped from the address', async ({ page }) => {
     const calls = await mockApi(page, (_n, lang) => ({ status: 200, body: profile(lang as 'en' | 'sw') }));
     await open(page);
