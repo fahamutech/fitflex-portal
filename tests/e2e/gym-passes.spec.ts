@@ -566,3 +566,121 @@ test.describe('flag off', () => {
     expect(calls.filter(u => u.includes('gym-pass'))).toEqual([]);
   });
 });
+
+// Analytics (backend functions#365): the new summary keys exist only while the server flag is on.
+const analytics = {
+  byPlan: [
+    { planId: 'plan-1', name: 'Couples 3 months', category: 'couples', sales: 3, revenueTzs: 720000, people: 6 },
+    { planId: 'plan-2', name: 'Family of 4', category: 'group', sales: 1, revenueTzs: 240000, people: 3 },
+  ],
+  expiring: { withinDays: 7, purchases: 1, people: 2 },
+  utilisation: { visits: 12, peopleWithVisit: 3, peopleNeverVisited: 2, activePeople: 5, visitsPerActivePerson: 2.4 },
+  groups: { slots: 4, filled: 3, fillRate: 0.75 },
+};
+const soonIso = () => new Date(Date.now() + 3 * 86_400_000).toISOString();
+
+test.describe('analytics, flag on', () => {
+  test.skip(!FLAG_ON, 'needs NEXT_PUBLIC_GYM_CUSTOM_PASSES=true');
+
+  test('renders by-plan, expiring, utilisation, group fill and the people lists', async ({ page }) => {
+    await signInOwner(page);
+    await mockOwnerApi(page, (m, p) => {
+      if (p.startsWith('/owner/gyms/gym-1/pass-summary')) return { json: { ...summary, ...analytics } };
+      if (p.startsWith('/owner/gyms/gym-1/pass-memberships')) return { json: { state: 'active', memberships: [{ ...membership, expiresAt: soonIso() }] } };
+      return null;
+    });
+    await page.goto('/owner/memberships');
+    await expect(page.getByTestId('gp-analytics')).toBeVisible();
+    await expect(page.getByTestId('gp-byplan-row')).toHaveCount(2);
+    await expect(page.getByTestId('gp-byplan-row').first()).toContainText('Couples 3 months');
+    await expect(page.getByTestId('gp-an-expiring')).toHaveText('2');
+    await expect(page.getByTestId('gp-utilisation')).toContainText('1 passes ending within 7 days');
+    await expect(page.getByTestId('gp-an-visits')).toHaveText('12');
+    await expect(page.getByTestId('gp-an-with-visit')).toHaveText('3');
+    await expect(page.getByTestId('gp-an-never')).toHaveText('2');
+    await expect(page.getByTestId('gp-an-per-person')).toHaveText('2.4');
+    await expect(page.getByTestId('gp-an-group-fill')).toHaveText('3 of 4');
+    await expect(page.getByTestId('gp-utilisation')).toContainText('Fill rate 75%');
+    // Lists from pass-memberships: Juma has 0 visits; the pass ends within 7 days.
+    await expect(page.getByTestId('gp-never-row')).toHaveCount(1);
+    await expect(page.getByTestId('gp-never-row')).toContainText('Juma Partner');
+    await expect(page.getByTestId('gp-expiring-row')).toHaveCount(1);
+  });
+
+  test('without the new keys the analytics section is absent and the totals still render', async ({ page }) => {
+    await signInOwner(page);
+    await mockOwnerApi(page);
+    await page.goto('/owner/memberships');
+    await expect(page.getByTestId('gp-summary')).toBeVisible();
+    await expect(page.getByTestId('gp-analytics')).toHaveCount(0);
+  });
+
+  test('a partial summary shows em-dash and "not available", not zeros', async ({ page }) => {
+    await signInOwner(page);
+    await mockOwnerApi(page, (m, p) => (p.startsWith('/owner/gyms/gym-1/pass-summary') ? { json: { ...summary, byPlan: [] } } : null));
+    await page.goto('/owner/memberships');
+    await expect(page.getByTestId('gp-byplan-empty')).toBeVisible();
+    await expect(page.getByTestId('gp-an-visits')).toHaveText('—');
+    await expect(page.getByTestId('gp-an-group-fill')).toHaveText('—');
+    await expect(page.getByTestId('gp-utilisation')).toContainText('Not available');
+  });
+
+  test('the date range is sent as from and to, explained, and can be cleared', async ({ page }) => {
+    await signInOwner(page);
+    const seen = await mockOwnerApi(page, (m, p) => (p.startsWith('/owner/gyms/gym-1/pass-summary') ? { json: { ...summary, ...analytics } } : null));
+    await page.goto('/owner/memberships');
+    await expect(page.getByTestId('gp-range-note')).toContainText('approved in that range');
+    await page.getByTestId('gp-range-from').fill('2026-11-01');
+    await page.getByTestId('gp-range-to').fill('2026-12-01');
+    await expect.poll(() => seen.calls.some(c => c.path === '/owner/gyms/gym-1/pass-summary?from=2026-11-01&to=2026-12-01')).toBe(true);
+    await page.getByTestId('gp-range-clear').click();
+    await expect(page.getByTestId('gp-range-from')).toHaveValue('');
+    await expect.poll(() => seen.calls.filter(c => c.path === '/owner/gyms/gym-1/pass-summary').length).toBeGreaterThan(1);
+  });
+});
+
+const checkin = (over: Record<string, unknown> = {}) => ({
+  id: 'c1', memberId: 'm1', memberPublicId: 'FF-1', displayName: 'Asha Buyer', memberPhone: null, timestamp: '2026-11-10T08:00:00.000Z', passTier: null, visitNumberInCycle: null, gymTier: 'standard', ...over,
+});
+const dashboardBase = {
+  gym: { id: 'gym-1', name: 'Mikocheni Fitness', tier: 'standard', perVisitRate: 0 }, todayCount: 1, monthVisits: 2,
+  periodVisits: 5, periodMembers: 3, directVisits: 3, directMembers: 2, fitflexVisits: 2, fitflexMembers: 1,
+};
+
+test.describe('check-in badge and dashboard (driven by the keys, either flag value)', () => {
+  test('a pass visit shows the pass name; other rows are unchanged', async ({ page }) => {
+    await signInOwner(page);
+    await mockOwnerApi(page, (m, p) => (p === '/operator/checkins'
+      ? { json: [checkin({ pass: { name: 'Couples 3 months', category: 'couples' } }), checkin({ id: 'c2', pass: null }), checkin({ id: 'c3', passTier: 'standard' })] }
+      : null));
+    await page.goto('/checkins');
+    await expect(page.getByTestId('checkin-pass')).toHaveCount(1);
+    await expect(page.getByTestId('checkin-pass')).toContainText('Couples 3 months');
+    await expect(page.getByTestId('checkin-pass')).toContainText('Couples');
+    await expect(page.getByText('Direct', { exact: true })).toHaveCount(1);
+  });
+
+  test('without the pass key the list is as before', async ({ page }) => {
+    await signInOwner(page);
+    await mockOwnerApi(page, (m, p) => (p === '/operator/checkins' ? { json: [checkin()] } : null));
+    await page.goto('/checkins');
+    await expect(page.getByText('Direct', { exact: true })).toBeVisible();
+    await expect(page.getByTestId('checkin-pass')).toHaveCount(0);
+  });
+
+  test('dashboard shows pass members and visits only when the keys are present', async ({ page }) => {
+    await signInOwner(page);
+    await mockOwnerApi(page, (m, p) => (p.startsWith('/operator/dashboard') ? { json: { ...dashboardBase, passVisits: 7, passMembers: 4 } } : null));
+    await page.goto('/dashboard');
+    await expect(page.getByTestId('dash-pass-members')).toHaveText('4');
+    await expect(page.getByTestId('dash-pass-visits')).toHaveText('7 visits');
+  });
+
+  test('dashboard has no pass card when the keys are missing', async ({ page }) => {
+    await signInOwner(page);
+    await mockOwnerApi(page, (m, p) => (p.startsWith('/operator/dashboard') ? { json: dashboardBase } : null));
+    await page.goto('/dashboard');
+    await expect(page.getByText('Direct members', { exact: true }).last()).toBeVisible();
+    await expect(page.getByTestId('dash-pass-members')).toHaveCount(0);
+  });
+});

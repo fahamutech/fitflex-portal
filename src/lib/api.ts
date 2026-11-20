@@ -1804,6 +1804,9 @@ export interface DashboardResponse {
   directMembers?: number;
   fitflexVisits?: number;
   fitflexMembers?: number;
+  /** Custom gym pass visits (not voided) and the distinct members behind them; absent while the server flag is off. */
+  passVisits?: number;
+  passMembers?: number;
   overall?: {
     gymCount: number;
     totalVisits: number;
@@ -1812,6 +1815,8 @@ export interface DashboardResponse {
     directMembers: number;
     fitflexVisits: number;
     fitflexMembers: number;
+    passVisits?: number;
+    passMembers?: number;
   };
   gymSummaries?: Array<{
     gymId: string;
@@ -1823,6 +1828,8 @@ export interface DashboardResponse {
     directMembers: number;
     fitflexVisits: number;
     fitflexMembers: number;
+    passVisits?: number;
+    passMembers?: number;
   }>;
   /** What FitFlex pays the gym. Null for staff without the payments permission. */
   settlement?: {
@@ -1846,6 +1853,8 @@ export interface CheckIn {
   passTier: string | null;
   visitNumberInCycle: number | null;
   gymTier: string;
+  /** Custom gym pass behind the visit (functions#365). Absent while the server flag is off; null for any other visit. */
+  pass?: { name: string; category: string } | null;
 }
 
 export interface CheckInResult {
