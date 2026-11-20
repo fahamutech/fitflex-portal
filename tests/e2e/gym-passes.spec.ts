@@ -684,3 +684,41 @@ test.describe('check-in badge and dashboard (driven by the keys, either flag val
     await expect(page.getByTestId('dash-pass-members')).toHaveCount(0);
   });
 });
+
+test.describe('door scan result (driven by the pass key, either flag value)', () => {
+  async function scanWith(page: Page, body: unknown) {
+    await page.addInitScript(() => {
+      localStorage.setItem('token', 'operator-e2e-token');
+      localStorage.setItem('user', JSON.stringify({ id: 'operator-1', userType: 'gym_operator', email: 'operator@example.com', gymId: 'gym-1' }));
+      localStorage.setItem('locale', 'en');
+    });
+    await page.route(`${API}/**`, async route => {
+      const url = new URL(route.request().url());
+      if (url.pathname === '/operator/checkins' && route.request().method() === 'POST') return route.fulfill({ status: 200, json: body });
+      return route.fulfill({ json: [] });
+    });
+    await page.goto('/scan');
+    await page.getByTestId('manual-token').fill('usr_test.123.sig');
+    await page.getByTestId('manual-submit').click();
+  }
+  const checkin = { id: 'chk_1', memberId: 'usr_1', memberPublicId: 'FFA-1', passTier: null, visitNumberInCycle: null, passPurchaseId: 'gpu_1' };
+
+  test('a custom-pass visit shows the pass name and when it ends, in place of "Gym membership"', async ({ page }) => {
+    await scanWith(page, { ok: true, checkin, pass: { name: 'Pair Pass', category: 'couples', expiresAt: '2026-12-20T00:00:00.000Z', daysLeft: 30, status: 'active' } });
+    await expect(page.getByTestId('scan-tier')).toHaveText('Pair Pass');
+    await expect(page.getByTestId('scan-pass-until')).toContainText('Ends ');
+    await expect(page.getByTestId('scan-result')).not.toContainText('Gym membership');
+  });
+
+  test('a visit without the pass key, or with null, is shown exactly as before', async ({ page }) => {
+    await scanWith(page, { ok: true, checkin: { ...checkin, passPurchaseId: null } });
+    await expect(page.getByTestId('scan-tier')).toHaveText('Gym membership');
+    await expect(page.getByTestId('scan-pass-until')).toHaveCount(0);
+  });
+
+  test('a pass with no name falls back to "Gym membership" and still shows the end date', async ({ page }) => {
+    await scanWith(page, { ok: true, checkin, pass: { name: null, category: null, expiresAt: '2026-12-20T00:00:00.000Z', daysLeft: 30, status: 'active' } });
+    await expect(page.getByTestId('scan-tier')).toHaveText('Gym membership');
+    await expect(page.getByTestId('scan-pass-until')).toBeVisible();
+  });
+});

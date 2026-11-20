@@ -8,6 +8,7 @@ import { MessageKey } from '@/lib/i18n';
 import { sellableFrom } from '@/lib/pass-tiers';
 import { QrScanner, type QrScannerState } from '@/components/qr-scanner';
 import { isEventTicketPayload } from '@/lib/events-ops';
+import { useGymPassFormat } from '@/components/gym-pass-shared';
 
 const FAILURE_KEYS: Record<string, MessageKey> = {
   subscription_inactive: 'scan.fail.subscription_inactive',
@@ -54,6 +55,7 @@ function refusalCode(body: unknown): string | null {
 
 export default function ScanPage() {
   const { token, user, t } = useApp();
+  const { date: passDate } = useGymPassFormat();
   // The camera itself lives in <QrScanner>; this page only says when it should run and what a decoded text means.
   const [scanning, setScanning] = useState(false);
   const [streaming, setStreaming] = useState(false);
@@ -245,8 +247,14 @@ export default function ScanPage() {
                   )}
                   <div className="flex items-center gap-1.5" data-testid="scan-tier">
                     <Tag aria-hidden="true" className="h-3.5 w-3.5 opacity-60" />
-                    {last.checkin.passTier ? tierLabel(last.checkin.passTier) : t('scan.gymMembership')}
+                    {last.pass?.name ?? (last.checkin.passTier ? tierLabel(last.checkin.passTier) : t('scan.gymMembership'))}
                   </div>
+                  {last.pass?.expiresAt && (
+                    <div className="flex items-center gap-1.5" data-testid="scan-pass-until">
+                      <Info aria-hidden="true" className="h-3.5 w-3.5 opacity-60" />
+                      {t('gp.mem.expires').replace('{date}', passDate(last.pass.expiresAt))}
+                    </div>
+                  )}
                   <div className="flex items-center gap-1.5">
                     <User aria-hidden="true" className="h-3.5 w-3.5 opacity-60" />
                     {last.checkin.memberPublicId ?? last.checkin.memberId}
