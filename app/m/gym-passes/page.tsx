@@ -236,7 +236,9 @@ function Purchased({ items, onPay, onChanged }: { items: MyGymPassPurchase[]; on
       {items.length === 0 ? <p className={muted} data-testid="member-gym-passes-empty">{t('gp.m.mine.empty')}</p> : (
         <ul className="divide-y divide-[#1e293b]">
           {items.map(p => {
-            const people = (p.beneficiaries ?? []).filter(b => b.status !== 'removed');
+            // A cancelled or expired purchase covers nobody: its rows still say "active" / "invited", so they are not listed.
+            const live = p.status === 'pending_payment' || p.status === 'active';
+            const people = live ? (p.beneficiaries ?? []).filter(b => b.status !== 'removed') : [];
             return (
               <li key={p.id} className="flex flex-col gap-2 py-4" data-testid={`member-gym-pass-${p.id}`}>
                 <div className="flex flex-wrap items-center justify-between gap-3">

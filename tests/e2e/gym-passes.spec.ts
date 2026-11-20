@@ -313,6 +313,7 @@ test.describe('buying on the web, flag on', () => {
 
     const pending = page.getByTestId('member-gym-pass-gpu_1');
     await expect(pending).toContainText('Waiting for payment');
+    await expect(pending).toContainText('+255 7•• ••• 678');
     await page.getByTestId('member-gym-pass-pay-gpu_1').click();
     await expect(page.getByTestId('member-pay-summary')).toContainText('Couples 3 months · TSh 240,000');
     await page.getByRole('button', { name: 'Back', exact: true }).click();
@@ -322,6 +323,10 @@ test.describe('buying on the web, flag on', () => {
     await expect(pending).toContainText('Nothing has been paid');
     await page.getByTestId('member-gym-pass-cancel-yes-gpu_1').click();
     await expect(pending).toContainText('Cancelled');
+    // A cancelled purchase covers nobody: its people and places are no longer listed (the server still sends the rows).
+    await expect(pending).not.toContainText('+255 7•• ••• 678');
+    await expect(pending).not.toContainText('places used');
+    await expect(active).toContainText('2 of 2 places used');
     await expect(page.getByTestId('member-gym-pass-pay-gpu_1')).toHaveCount(0);
     expect(seen.calls.filter(c => c.path.endsWith('/cancel'))).toHaveLength(1);
   });
