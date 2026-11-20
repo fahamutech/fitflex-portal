@@ -1866,6 +1866,8 @@ export interface CheckInResult {
   visitNumberInCycle?: number;
   /** True when the member already checked in at this gym today: the existing visit is returned, no new one is used. */
   idempotent?: boolean;
+  /** GYM_CUSTOM_PASSES: the custom pass the visit was made with (name, category and dates only), null for any other visit; absent while the server flag is off. */
+  pass?: { name: string | null; category: string | null; expiresAt: string | null; daysLeft: number | null; status: string } | null;
 }
 
 export interface Gym {
