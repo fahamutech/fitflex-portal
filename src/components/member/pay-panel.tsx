@@ -17,7 +17,7 @@ import type { MessageKey } from '@/lib/i18n';
  * `paymentId` is an existing request. It is paid by the phone prompt (AzamPay, the only payment method).
  */
 export interface PayTarget {
-  label: string; amountTzs: number; product: 'FITFLEX_PASS' | 'TRAINER_SERVICE' | 'EVENT_ORDER'; paymentId?: string;
+  label: string; amountTzs: number; product: 'FITFLEX_PASS' | 'GYM_SUBSCRIPTION' | 'TRAINER_SERVICE' | 'EVENT_ORDER'; paymentId?: string;
   /** Makes the request and answers its id and the amount the server set on it (what is then shown). */
   create?: () => Promise<{ id: string; amountTzs: number }>;
   doneTitleKey?: MessageKey; doneBody?: string; doneHref?: string;
