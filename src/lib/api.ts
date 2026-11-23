@@ -1804,6 +1804,9 @@ export interface DashboardResponse {
   directMembers?: number;
   fitflexVisits?: number;
   fitflexMembers?: number;
+  /** Custom gym pass visits (not voided) and the distinct members behind them; absent while the server flag is off. */
+  passVisits?: number;
+  passMembers?: number;
   overall?: {
     gymCount: number;
     totalVisits: number;
@@ -1812,6 +1815,8 @@ export interface DashboardResponse {
     directMembers: number;
     fitflexVisits: number;
     fitflexMembers: number;
+    passVisits?: number;
+    passMembers?: number;
   };
   gymSummaries?: Array<{
     gymId: string;
@@ -1823,6 +1828,8 @@ export interface DashboardResponse {
     directMembers: number;
     fitflexVisits: number;
     fitflexMembers: number;
+    passVisits?: number;
+    passMembers?: number;
   }>;
   /** What FitFlex pays the gym. Null for staff without the payments permission. */
   settlement?: {
@@ -1846,6 +1853,8 @@ export interface CheckIn {
   passTier: string | null;
   visitNumberInCycle: number | null;
   gymTier: string;
+  /** Custom gym pass behind the visit (functions#365). Absent while the server flag is off; null for any other visit. */
+  pass?: { name: string; category: string } | null;
 }
 
 export interface CheckInResult {
@@ -1857,6 +1866,8 @@ export interface CheckInResult {
   visitNumberInCycle?: number;
   /** True when the member already checked in at this gym today: the existing visit is returned, no new one is used. */
   idempotent?: boolean;
+  /** GYM_CUSTOM_PASSES: the custom pass the visit was made with (name, category and dates only), null for any other visit; absent while the server flag is off. */
+  pass?: { name: string | null; category: string | null; expiresAt: string | null; daysLeft: number | null; status: string } | null;
 }
 
 export interface Gym {
@@ -4386,6 +4397,9 @@ export interface ExerciseInput {
   alternatives?: string[];
   active?: boolean;
   i18n?: { sw?: ExerciseTranslation };
+  /** https links (Programmes P1); "" clears. Hosting and licence still open (PD-4). */
+  clipUrl?: string | null;
+  stillUrl?: string | null;
 }
 export interface Exercise extends ExerciseInput {
   id: string;

@@ -16,6 +16,7 @@ import {
   Users,
   UserCheck,
   Dumbbell,
+  CalendarDays,
   CreditCard,
   ShieldCheck,
   BadgeCheck,
@@ -210,6 +211,7 @@ const ADMIN_NAV: NavItem[] = [
   // Events S6 (spec §9.4): event rewards and medal art; shown only while the server's EVENTS_REWARDS is on (see visibleNav).
   ...(EVENTS_MODULE ? [{ href: '/admin/event-rewards', labelKey: 'admin.nav.eventRewards', icon: Gift, groupKey: 'nav.group.platform', aclScope: 'events' }] : []),
   { href: '/admin/exercises',     labelKey: 'admin.nav.exercises',      icon: Dumbbell,        groupKey: 'nav.group.platform', aclScope: 'exercises' },
+  { href: '/admin/programmes',    labelKey: 'admin.nav.programmes',     icon: CalendarDays,    groupKey: 'nav.group.platform', aclScope: 'exercises' },
   // App photos (spec photo-hero-screens §36): only in builds with NEXT_PUBLIC_HERO_IMAGES_ADMIN=true.
   ...(HERO_IMAGES_ADMIN ? [{ href: '/admin/hero-images', labelKey: 'admin.nav.heroImages', icon: Images, groupKey: 'nav.group.platform', aclScope: 'brand_media' }] : []),
   { href: '/admin/social',        labelKey: 'admin.nav.social',         icon: Flag,            groupKey: 'nav.group.platform', aclScope: 'social' },

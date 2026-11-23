@@ -7,15 +7,17 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { Globe, QrCode, UserRound } from 'lucide-react';
 import { useApp } from '../../../app/providers';
-import { EVENTS_MODULE, MEMBER_PORTAL } from '@/lib/flags';
+import { EVENTS_MODULE, GYM_CUSTOM_PASSES, MEMBER_PORTAL } from '@/lib/flags';
 import { loadSession, MEMBER_ROUTES, setOnSessionEnded, touchSession, watchOtherTabs, type MemberSession } from '@/lib/member-api';
 import type { MessageKey } from '@/lib/i18n';
 import { BrandLogo } from '@/components/brand-logo';
 
-// Events appear only in builds with the events module (NEXT_PUBLIC_EVENTS_MODULE), as on the staff side.
+// Events appear only in builds with the events module (NEXT_PUBLIC_EVENTS_MODULE), as on the staff side; custom gym
+// passes only in builds with NEXT_PUBLIC_GYM_CUSTOM_PASSES.
 const NAV: Array<{ href: string; key: MessageKey }> = [
   { href: MEMBER_ROUTES.home, key: 'member.nav.today' },
   { href: MEMBER_ROUTES.pass, key: 'member.nav.pass' },
+  ...(GYM_CUSTOM_PASSES ? [{ href: MEMBER_ROUTES.gymPasses, key: 'gp.m.nav' as MessageKey }] : []),
   { href: MEMBER_ROUTES.gyms, key: 'member.nav.gyms' },
   { href: MEMBER_ROUTES.trainers, key: 'member.nav.trainers' },
   { href: MEMBER_ROUTES.challenges, key: 'member.nav.challenges' },
