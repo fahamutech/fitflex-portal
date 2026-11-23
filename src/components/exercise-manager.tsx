@@ -32,6 +32,8 @@ const FIELD_ERRORS: Record<string, string> = {
   instructions: 'Write 1 to 8 short steps, one per line.',
   alternatives: 'Choose up to 6 alternatives, none of them the exercise itself.',
 };
+// Picture and clip links (Programmes P1); their words come from the en/sw dictionaries.
+const MEDIA_FIELDS = new Set(['clipUrl', 'stillUrl']);
 // What a row of an imported file can get wrong, in the file's own words.
 const CELL_ERRORS: Record<string, string> = {
   name: 'The name is missing or longer than 80 characters.',
@@ -88,9 +90,10 @@ const ERRORS: Record<string, string> = {
   exercise_library_unavailable: 'The exercise library couldn’t be loaded just now. Please try again in a minute.',
   acl_forbidden: 'You don’t have permission to manage exercises.',
 };
-const message = (e: unknown) => {
+const message = (e: unknown, mediaInvalid = 'Something in the form isn’t valid.') => {
   if (!(e instanceof ApiError)) return 'That didn’t work. Please try again.';
   const body = e.body as { error?: string; field?: string } | null;
+  if (body?.error === 'invalid_exercise' && MEDIA_FIELDS.has(body.field ?? '')) return mediaInvalid;
   if (body?.error === 'invalid_exercise') return FIELD_ERRORS[body.field ?? ''] ?? 'Something in the form isn’t valid.';
   return ERRORS[body?.error ?? ''] ?? FILE_ERRORS[body?.error ?? ''] ?? 'That didn’t work. Please try again.';
 };
@@ -349,6 +352,8 @@ export function ExerciseManager() {
 // ── Add / edit ────────────────────────────────────────────────────────────
 
 const lines = (s: string) => s.split('\n').map(x => x.trim()).filter(Boolean);
+/** Only an https link is previewed (the server refuses anything else). */
+const isHttps = (v: string) => { try { return new URL(v.trim()).protocol === 'https:'; } catch { return false; } };
 
 function Choices({ label, hint, all, value, onChange, testid }: {
   label: string; hint?: string; all: string[]; value: string[]; onChange: (v: string[]) => void; testid: string;
@@ -375,7 +380,7 @@ function Choices({ label, hint, all, value, onChange, testid }: {
 function ExerciseForm({ options, all, existing, onClose, onSaved }: {
   options: ExerciseOptions; all: Exercise[]; existing: Exercise | null; onClose: () => void; onSaved: () => Promise<void>;
 }) {
-  const { token } = useApp();
+  const { token, t } = useApp();
   const areas = options.targetAreaGroups.flatMap(g => g.areas);
   const [f, setF] = useState(() => ({
     name: existing?.name ?? '',
@@ -399,6 +404,8 @@ function ExerciseForm({ options, all, existing, onClose, onSaved }: {
     swName: existing?.i18n?.sw?.name ?? '',
     swDescription: existing?.i18n?.sw?.description ?? '',
     swInstructions: (existing?.i18n?.sw?.instructions ?? []).join('\n'),
+    stillUrl: existing?.stillUrl ?? '',
+    clipUrl: existing?.clipUrl ?? '',
   }));
   const [altSearch, setAltSearch] = useState('');
   const [busy, setBusy] = useState(false);
@@ -423,6 +430,8 @@ function ExerciseForm({ options, all, existing, onClose, onSaved }: {
     restSeconds: Number(f.restSeconds), tracksWeight: f.tracksWeight,
     instructions: lines(f.instructions), alternatives: f.alternatives, active: f.active,
     i18n: { sw: { name: f.swName.trim(), description: f.swDescription.trim(), instructions: lines(f.swInstructions) } },
+    // "" clears a link the exercise had.
+    stillUrl: f.stillUrl.trim(), clipUrl: f.clipUrl.trim(),
   });
 
   const save = async (e: React.FormEvent) => {
@@ -435,7 +444,7 @@ function ExerciseForm({ options, all, existing, onClose, onSaved }: {
       else await api.createExercise(token, body());
       await onSaved();
     } catch (err) {
-      setError(message(err));
+      setError(message(err, t('ex.media.invalid')));
       setBusy(false);
     }
   };
@@ -556,6 +565,26 @@ function ExerciseForm({ options, all, existing, onClose, onSaved }: {
           <Field label="How to do it, in Swahili" hint="One step per line.">
             <textarea className="ui-input" rows={3} value={f.swInstructions} onChange={e => set('swInstructions', e.target.value)} data-testid="exercise-sw-instructions" />
           </Field>
+        </fieldset>
+
+        <fieldset className="space-y-3 rounded-[var(--radius-lg)] border border-[var(--color-border-secondary)] p-4">
+          <legend className="px-1 text-sm font-medium text-[var(--color-fg-secondary)]">{t('ex.media.legend')}</legend>
+          <p className="text-xs text-[var(--color-fg-quaternary)]">{t('ex.media.help')}</p>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field label={t('ex.media.still')}>
+              <input className="ui-input" type="url" inputMode="url" maxLength={500} placeholder="https://" value={f.stillUrl} onChange={e => set('stillUrl', e.target.value)} data-testid="exercise-still-url" />
+            </Field>
+            <Field label={t('ex.media.clip')}>
+              <input className="ui-input" type="url" inputMode="url" maxLength={500} placeholder="https://" value={f.clipUrl} onChange={e => set('clipUrl', e.target.value)} data-testid="exercise-clip-url" />
+            </Field>
+          </div>
+          {(isHttps(f.stillUrl) || isHttps(f.clipUrl)) && (
+            <div className="flex flex-wrap items-center gap-4" data-testid="exercise-media-preview">
+              {/* eslint-disable-next-line @next/next/no-img-element -- an admin preview of any https link; next/image would need every host listed */}
+              {isHttps(f.stillUrl) && <img src={f.stillUrl.trim()} alt={t('ex.media.stillAlt').replace('{name}', f.name || '…')} className="h-24 w-auto rounded-[var(--radius-md)] border border-[var(--color-border-secondary)] object-cover" />}
+              {isHttps(f.clipUrl) && <a href={f.clipUrl.trim()} target="_blank" rel="noopener noreferrer" className="text-sm underline" data-testid="exercise-clip-open">{t('ex.media.openClip')}</a>}
+            </div>
+          )}
         </fieldset>
 
         <label className="flex items-center gap-2 text-sm">

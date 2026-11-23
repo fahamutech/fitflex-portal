@@ -4397,6 +4397,9 @@ export interface ExerciseInput {
   alternatives?: string[];
   active?: boolean;
   i18n?: { sw?: ExerciseTranslation };
+  /** https links (Programmes P1); "" clears. Hosting and licence still open (PD-4). */
+  clipUrl?: string | null;
+  stillUrl?: string | null;
 }
 export interface Exercise extends ExerciseInput {
   id: string;
