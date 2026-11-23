@@ -46,6 +46,11 @@ jobs:
       # Off unless the repository variable is exactly 'true'. Needs NEXT_PUBLIC_WEB_GYM_PROFILE and the server's
       # WEB_QR_CHECKIN + QR_HMAC_SECRET + IDENTITY_V2 + V2_PIN_LOGIN.
       NEXT_PUBLIC_WEB_QR_CHECKIN: ${{ vars.NEXT_PUBLIC_WEB_QR_CHECKIN || 'false' }}
+      # Custom gym passes (src/lib/flags.ts GYM_CUSTOM_PASSES): owner /owner/memberships and pass analytics, the
+      # /gym-pass invite page, the pass name on /scan, the gym's passes on /g and buying one on /m/gym-passes
+      # (buying also needs NEXT_PUBLIC_MEMBER_PORTAL). Off unless the repository variable is exactly 'true'.
+      # Needs the server's GYM_CUSTOM_PASSES.
+      NEXT_PUBLIC_GYM_CUSTOM_PASSES: ${{ vars.NEXT_PUBLIC_GYM_CUSTOM_PASSES || 'false' }}
       # Marathon & events module (src/lib/flags.ts EVENTS_MODULE): the member Events page AND the staff organizer
       # (/organizer) and admin events areas. Off unless the repository variable is exactly 'true'. Needs the server's
       # EVENTS_MODULE (+ EVENTS_REGISTRATION and event payments for members to register).
