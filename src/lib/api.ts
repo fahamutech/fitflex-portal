@@ -1178,8 +1178,15 @@ export const api = {
     request<{ refund: Refund }>('/admin/refunds', { method: 'POST', body: JSON.stringify(body) }, token),
   decideRefund: (token: string, id: string, body: { decision: 'approve' | 'reject'; note?: string; noteSw?: string; amountTzs?: number; endAccess?: boolean }) =>
     request<{ refund: Refund }>(`/admin/refunds/${encodeURIComponent(id)}/decision`, { method: 'POST', body: JSON.stringify(body) }, token),
+  /** `clawback` is present only with REFUND_STATEMENT_CLAWBACK on and a pass refund; flag off the answer is `{ refund }` as before. */
   markRefundPaid: (token: string, id: string, body: { paymentReference: string; paidTo?: string }) =>
-    request<{ refund: Refund }>(`/admin/refunds/${encodeURIComponent(id)}/paid`, { method: 'POST', body: JSON.stringify(body) }, token),
+    request<{ refund: Refund; clawback?: RefundClawbackResult }>(`/admin/refunds/${encodeURIComponent(id)}/paid`, { method: 'POST', body: JSON.stringify(body) }, token),
+  /** A settlements scope is needed. `enabled` is false while REFUND_STATEMENT_CLAWBACK is off. */
+  refundClawback: (token: string, id: string) =>
+    request<{ refundId: string; enabled: boolean; adjustments: RefundClawbackAdjustment[] }>(`/admin/refunds/${encodeURIComponent(id)}/clawback`, {}, token),
+  /** Idempotent retry: 404 feature_disabled / refund_not_found, 409 refund_not_paid. */
+  retryRefundClawback: (token: string, id: string) =>
+    request<RefundClawbackResult & { refundId: string }>(`/admin/refunds/${encodeURIComponent(id)}/clawback`, { method: 'POST', body: '{}' }, token),
   decidePayment: (token: string, id: string, decision: 'approve' | 'reject', reference?: string, note?: string) =>
     request<PaymentRequest>(`/admin/payment-requests/${id}/decision`, {
       method: 'POST',
@@ -2128,6 +2135,19 @@ export interface PartnerSettlementDetail {
 }
 
 export type RefundStatus = 'requested' | 'approved' | 'paid' | 'rejected';
+/** Slice D (functions#343, REFUND_STATEMENT_CLAWBACK): what happened to the gym share of a paid pass refund. */
+export type RefundClawbackStatus = 'raised' | 'pending' | 'already_raised' | 'unsettled' | 'nothing_to_claw_back' | 'not_applicable' | 'failed';
+export interface RefundClawbackResult {
+  status: RefundClawbackStatus;
+  raised?: unknown[]; existing?: unknown[]; pending?: unknown[]; skipped?: unknown[]; held?: unknown[];
+  error?: string;
+}
+export interface RefundClawbackAdjustment {
+  id: string; gymSettlementId: string; sourceSettlementId: string | null; gymId: string; amountTzs: number;
+  status: 'proposed' | 'applied' | 'rejected' | 'voided'; reason: string | null; createdBy: string | null; createdAt: string;
+  /** True when raising it put the source statement on hold (released again if it is rejected or voided). */
+  heldSource?: boolean;
+}
 export type RefundKind = 'subscription' | 'trainer_booking' | 'shop_order' | 'event_order';
 /** Events S4 (spec §3.2, §3.12): what an event refund covers. */
 export type EventRefundScope = 'registration' | 'order' | 'event_cancelled' | 'unfulfilled_payment';
