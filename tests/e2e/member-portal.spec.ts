@@ -128,7 +128,7 @@ test.describe('member portal, flag off', () => {
   test.skip(FLAG_ON, 'flag-off build only');
   test('every page shows "not available yet" and makes no request', async ({ page }) => {
     const h = await setup(page);
-    for (const p of ['/m/', '/m/signin/', '/m/pass/', '/m/check-in/', '/m/gyms/', '/m/trainers/', '/m/orders/', '/m/activity/', '/m/challenges/', '/m/events/', '/m/me/']) {
+    for (const p of ['/m/', '/m/signin/', '/m/pass/', '/m/check-in/', '/m/gyms/', '/m/trainers/', '/m/orders/', '/m/activity/', '/m/challenges/', '/m/events/', '/m/me/', '/m/payment-return/?paymentRequestId=pay_1&result=success']) {
       await page.goto(p);
       await expect(page.getByTestId('member-flag-off')).toBeVisible();
     }
@@ -681,5 +681,240 @@ test.describe('member portal, flag on', () => {
     await page.getByTestId('member-activity-act_tr').click();
     await expect(page.getByTestId('member-activity-detail')).toBeVisible();
     await expect(page.getByTestId('member-activity-delete')).toHaveCount(0);
+  });
+
+  // ── Three ways to pay (fitflex-functions#361): mobile money, bank checkout, AzamPay's payment page ─────────────────
+  const THREE = { enabled: true, provider: 'azampay', environment: 'production', methods: ['mobile_money', 'bank', 'page'],
+    bank: { providers: ['CRDB', 'NMB'], maxAmountTzs: 5000000 }, page: { returnTo: ['app', 'web'], languages: ['en', 'sw'] } };
+  const CHECKOUT = 'https://checkout.azampay.test/pay/abc123';
+  const toPay = async (page: Page, tier = 'basic') => {
+    await page.goto('/m/pass/');
+    await page.getByTestId(`member-pass-option-${tier}`).check();
+    await page.getByTestId('member-pass-continue').click();
+  };
+
+  test('ways to pay: an older server (no methods) and a mobile-money-only server show no choice and behave as before', async ({ page }) => {
+    const h = await setup(page);
+    await toPay(page);
+    await expect(page.getByTestId('member-pay-mobile')).toBeVisible();
+    await expect(page.getByTestId('member-pay-methods')).toHaveCount(0);
+    await page.getByTestId('member-pay-send').click();
+    await expect(page.getByTestId('member-pay-done')).toBeVisible({ timeout: 20_000 });
+    // The older server has only the mobile-money refresh: the new one is never asked.
+    expect(h.count('POST /me/payments/pay_1/mobile-money/refresh')).toBeGreaterThanOrEqual(2);
+    expect(h.count('POST /me/payments/pay_1/refresh')).toBe(0);
+
+    await setup(page, { 'GET /payments/options': ok({ enabled: true, provider: 'azampay', environment: 'production', methods: ['mobile_money'] }) });
+    await toPay(page);
+    await expect(page.getByTestId('member-pay-wallets')).toBeVisible();
+    await expect(page.getByTestId('member-pay-methods')).toHaveCount(0);
+  });
+
+  test('ways to pay: all three are offered; bank is hidden over its limit and the page when "web" is not a return target', async ({ page }) => {
+    await setup(page, { 'GET /payments/options': ok(THREE) });
+    await toPay(page);
+    for (const m of ['mobile_money', 'bank', 'page']) await expect(page.getByTestId(`member-pay-method-${m}`)).toBeVisible();
+    await expect(page.getByTestId('member-pay-method-mobile_money')).toBeChecked();
+    await expect(page.getByTestId('member-pay-wallets')).toBeVisible();
+
+    // Basic is TSh 60,000: over a 50,000 bank limit, and the page can only return to the app.
+    await setup(page, { 'GET /payments/options': ok({ ...THREE, bank: { providers: ['CRDB', 'NMB'], maxAmountTzs: 50000 }, page: { returnTo: ['app'], languages: ['en'] } }) });
+    await toPay(page);
+    await expect(page.getByTestId('member-pay-mobile')).toBeVisible();
+    await expect(page.getByTestId('member-pay-methods')).toHaveCount(0);
+
+    await setup(page, { 'GET /payments/options': ok({ ...THREE, bank: { providers: ['CRDB', 'NMB'], maxAmountTzs: 50000 } }) });
+    await toPay(page);
+    await expect(page.getByTestId('member-pay-method-page')).toBeVisible();
+    await expect(page.getByTestId('member-pay-method-bank')).toHaveCount(0);
+  });
+
+  test('bank: the steps for the chosen bank, details checked before anything is sent, then paid and confirmed by the server', async ({ page }) => {
+    const h = await setup(page, { 'GET /payments/options': ok(THREE),
+      'POST /me/payments/pay_1/bank': ok({ state: 'in_progress', method: 'bank', paymentRequest: PAY }, 202),
+      'POST /me/payments/pay_1/refresh': n => ok({ state: n < 2 ? 'in_progress' : 'completed', paymentRequest: PAY }) });
+    await toPay(page);
+    await page.getByTestId('member-pay-method-bank').check();
+    await expect(page.getByTestId('member-pay-wallets')).toHaveCount(0);
+    await expect(page.getByTestId('member-pay-bank-steps')).toHaveCount(0);
+    await page.getByTestId('member-pay-bank-CRDB').check();
+    await expect(page.getByTestId('member-pay-bank-steps')).toContainText('*150*03#');
+    await expect(page.getByTestId('member-pay-bank-steps')).toContainText(en['member.pay.bank.steps.CRDB.5']);
+    await page.getByTestId('member-pay-bank-NMB').check();
+    await expect(page.getByTestId('member-pay-bank-steps')).toContainText('*150*66#');
+    await expect(page.getByTestId('member-pay-bank-steps').locator('li')).toHaveCount(4);
+    await expect(page.getByTestId('member-pay-otp')).toHaveAttribute('autocomplete', 'one-time-code');
+
+    // A bad account number and a bad code are refused here: no payment request is made for a typo.
+    await page.getByTestId('member-pay-account').fill('12');
+    await page.getByTestId('member-pay-otp').fill('123456');
+    await page.getByTestId('member-pay-send').click();
+    await expect(page.getByTestId('member-pay-error')).toHaveText(en['member.err.invalid_account_number']);
+    await page.getByTestId('member-pay-account').fill('0150123456789');
+    await page.getByTestId('member-pay-otp').fill('12');
+    await page.getByTestId('member-pay-send').click();
+    await expect(page.getByTestId('member-pay-error')).toHaveText(en['member.err.invalid_otp']);
+    expect(h.count('POST /me/subscribe')).toBe(0);
+    expect(h.count('POST /me/payments/pay_1/bank')).toBe(0);
+
+    await page.getByTestId('member-pay-otp').fill('482913');
+    await page.getByTestId('member-pay-send').click();
+    await expect(page.getByTestId('member-pay-waiting')).toContainText(en['member.pay.confirmTitle']);
+    await expect(page.getByTestId('member-pay-done')).toBeVisible({ timeout: 20_000 });
+    expect(h.reqs.find(r => r.path === '/me/payments/pay_1/bank')!.body).toEqual({ bank: 'NMB', accountNumber: '0150123456789', phone: '0754123678', otp: '482913' });
+    expect(h.count('POST /me/payments/pay_1/refresh')).toBeGreaterThanOrEqual(2);
+    expect(h.count('POST /me/payments/pay_1/mobile-money/refresh')).toBe(0);
+    // The one-time code went in that one request body and nowhere else: no storage, no address.
+    const kept = await page.evaluate(() => JSON.stringify({ ...localStorage }) + JSON.stringify({ ...sessionStorage }));
+    expect(kept).not.toContain('482913');
+    for (const u of h.urls) expect(u).not.toContain('482913');
+    expect(h.reqs.filter(r => JSON.stringify(r.body ?? '').includes('482913'))).toHaveLength(1);
+  });
+
+  test('bank: refusals are explained and the one-time code is cleared after every try', async ({ page }) => {
+    const answers: Json[] = [ok({ error: 'provider_rejected' }, 422), ok({ error: 'amount_over_bank_limit', maxTzs: 5000000 }, 409), ok({ error: 'invalid_bank', allowed: ['CRDB', 'NMB'] }, 400), ok({ error: 'too_many_attempts' }, 429)];
+    const h = await setup(page, { 'GET /payments/options': ok(THREE), 'POST /me/payments/pay_1/bank': n => answers[n - 1] });
+    await toPay(page);
+    await page.getByTestId('member-pay-method-bank').check();
+    await page.getByTestId('member-pay-bank-CRDB').check();
+    await page.getByTestId('member-pay-account').fill('0150123456789');
+    for (const key of ['member.err.provider_rejected', 'member.err.amount_over_bank_limit', 'member.err.invalid_bank', 'member.err.too_many_attempts'] as const) {
+      await page.getByTestId('member-pay-otp').fill('777111');
+      await page.getByTestId('member-pay-send').click();
+      await expect(page.getByTestId('member-pay-error')).toHaveText(en[key]);
+      await expect(page.getByTestId('member-pay-otp')).toHaveValue('');
+      await expect(page.getByTestId('member-pay-send')).toBeDisabled();
+    }
+    // The same payment request is reused for every try.
+    expect(h.count('POST /me/subscribe')).toBe(1);
+    expect(h.count('POST /me/payments/pay_1/bank')).toBe(4);
+  });
+
+  test('payment page: asks for the "web" return and the page language, then goes to the https address the server answered', async ({ page }) => {
+    const h = await setup(page, { 'GET /payments/options': ok(THREE),
+      'POST /me/payments/pay_1/checkout-page': ok({ state: 'in_progress', method: 'page', checkoutUrl: CHECKOUT, paymentRequest: PAY }, 202),
+      'POST /me/payments/pay_1/refresh': ok({ state: 'in_progress', checkoutUrl: CHECKOUT, paymentRequest: PAY }) });
+    await page.route('https://checkout.azampay.test/**', route => route.fulfill({ status: 200, contentType: 'text/html', body: '<h1>AzamPay test page</h1>' }));
+    await toPay(page);
+    await page.getByTestId('member-pay-method-page').check();
+    await expect(page.getByTestId('member-pay-phone')).toHaveCount(0);
+    await expect(page.getByTestId('member-pay-page-intro')).toContainText('TSh 60,000');
+    await page.getByTestId('member-pay-send').click();
+    await page.waitForURL(CHECKOUT);
+    expect(h.reqs.find(r => r.path === '/me/payments/pay_1/checkout-page')!.body).toEqual({ returnTo: 'web', language: 'en' });
+  });
+
+  test('payment page: an address that is not https is never opened; a refusal offers another way', async ({ page }) => {
+    const answers: Json[] = [ok({ state: 'in_progress', method: 'page', checkoutUrl: 'javascript:alert(1)' }, 202), ok({ state: 'in_progress', method: 'page', checkoutUrl: 'http://checkout.azampay.test/pay' }, 202), ok({ error: 'return_not_configured' }, 409)];
+    const h = await setup(page, { 'GET /payments/options': ok({ ...THREE, page: { returnTo: ['web'], languages: ['sw'] } }), 'POST /me/payments/pay_1/checkout-page': n => answers[n - 1] });
+    await toPay(page);
+    await page.getByTestId('member-pay-method-page').check();
+    for (const key of ['member.err.provider_unavailable', 'member.err.provider_unavailable', 'member.err.method_unavailable'] as const) {
+      await page.getByTestId('member-pay-send').click();
+      await expect(page.getByTestId('member-pay-error')).toHaveText(en[key]);
+      await expect(page).toHaveURL(/\/m\/pass\/$/);
+    }
+    // English is not one of this server's page languages: none is sent (the server's default applies).
+    expect(h.reqs.find(r => r.path === '/me/payments/pay_1/checkout-page')!.body).toEqual({ returnTo: 'web' });
+  });
+
+  test('payment page open already: waiting shows a link to open it again', async ({ page }) => {
+    await setup(page, { 'GET /payments/options': ok(THREE),
+      'POST /me/payments/pay_1/mobile-money': ok({ state: 'in_progress', alreadyRequested: true, method: 'page', checkoutUrl: CHECKOUT, paymentRequest: PAY }),
+      'POST /me/payments/pay_1/refresh': ok({ state: 'in_progress', checkoutUrl: CHECKOUT, paymentRequest: PAY }) });
+    await toPay(page);
+    await page.getByTestId('member-pay-send').click();
+    await expect(page.getByTestId('member-pay-waiting')).toContainText(en['member.pay.confirmTitle']);
+    await expect(page.getByTestId('member-pay-page-link')).toHaveAttribute('href', CHECKOUT);
+    await expect(page).toHaveURL(/\/m\/pass\/$/);
+  });
+
+  test('return page: "success" in the address proves nothing; the server answer decides (confirmed)', async ({ page }) => {
+    const h = await setup(page, { 'POST /me/payments/pay_1/refresh': ok({ state: 'completed', paymentRequest: { ...PAY, status: 'approved' } }) });
+    await page.goto('/m/payment-return/?paymentRequestId=pay_1&result=success');
+    await expect(page.getByTestId('member-return-completed')).toContainText(en['member.return.doneBody']);
+    await expect(page.getByRole('heading', { name: en['member.pay.doneTitle'] })).toBeFocused();
+    expect(h.count('POST /me/payments/pay_1/refresh')).toBe(1);
+  });
+
+  test('return page: "success" with a payment the server calls failed shows failed and a way to pay again', async ({ page }) => {
+    await setup(page, { 'POST /me/payments/pay_1/refresh': ok({ state: 'failed', paymentRequest: { ...PAY, productType: 'SHOP_ORDER' } }) });
+    await page.goto('/m/payment-return/?paymentRequestId=pay_1&result=success');
+    await expect(page.getByTestId('member-return-failed')).toContainText(en['member.pay.failedTitle']);
+    await expect(page.getByTestId('member-return-completed')).toHaveCount(0);
+    await expect(page.getByTestId('member-return-pay-again')).toHaveAttribute('href', '/m/orders/');
+  });
+
+  test('return page: still being confirmed, then "check again" finds it confirmed; a "failed" hint offers paying again', async ({ page }) => {
+    let paid = false;
+    const h = await setup(page, { 'POST /me/payments/pay_1/refresh': () => ok({ state: paid ? 'completed' : 'in_progress', paymentRequest: PAY }) });
+    await page.goto('/m/payment-return/?paymentRequestId=pay_1&result=failed');
+    await expect(page.getByTestId('member-return-confirming')).toContainText(en['member.return.confirmingFailedHint']);
+    await expect(page.getByTestId('member-return-pay-again')).toHaveAttribute('href', '/m/pass/');
+    paid = true;
+    await page.getByTestId('member-return-check').click();
+    await expect(page.getByTestId('member-return-completed')).toBeVisible();
+    expect(h.count('POST /me/payments/pay_1/refresh')).toBeGreaterThanOrEqual(2);
+  });
+
+  test('return page: held says the team is checking; an attempt that ran out offers paying again', async ({ page }) => {
+    await setup(page, { 'POST /me/payments/pay_1/refresh': ok({ state: 'held', reason: 'amount_mismatch', paymentRequest: PAY }) });
+    await page.goto('/m/payment-return/?paymentRequestId=pay_1&result=success');
+    await expect(page.getByTestId('member-return-held')).toContainText(en['member.return.heldBody']);
+    await expect(page.getByTestId('member-return-pay-again')).toHaveCount(0);
+
+    await setup(page, { 'POST /me/payments/pay_1/refresh': ok({ state: 'none', paymentRequest: { ...PAY, productType: 'EVENT_ORDER' } }) });
+    await page.goto('/m/payment-return/?paymentRequestId=pay_1');
+    await expect(page.getByTestId('member-return-not_done')).toContainText(en['member.pay.notDoneTitle']);
+    await expect(page.getByTestId('member-return-pay-again')).toHaveAttribute('href', '/m/events/');
+  });
+
+  test('return page: someone else\'s or an unknown request, a malformed id and a missing id all get the same neutral answer; nothing from the address is shown', async ({ page }) => {
+    const h = await setup(page, { 'POST /me/payments/pay_other/refresh': ok({ error: 'not_found' }, 404) });
+    await page.goto('/m/payment-return/?paymentRequestId=pay_other&result=success');
+    await expect(page.getByTestId('member-return-not-found')).toContainText(en['member.return.notFoundTitle']);
+    await expect(page.getByTestId('member-payment-return-page')).not.toContainText('pay_other');
+    expect(h.count('POST /me/payments/pay_other/refresh')).toBe(1);
+
+    const before = h.reqs.length;
+    await page.goto(`/m/payment-return/?paymentRequestId=${encodeURIComponent('../../admin/users?x=<img src=x onerror=alert(1)>')}&result=${encodeURIComponent('<script>alert(2)</script>')}`);
+    await expect(page.getByTestId('member-return-not-found')).toBeVisible();
+    await expect(page.getByTestId('member-payment-return-page')).not.toContainText('alert');
+    await expect(page.getByTestId('member-payment-return-page')).not.toContainText('admin');
+    await page.goto('/m/payment-return/');
+    await expect(page.getByTestId('member-return-not-found')).toBeVisible();
+    // Neither of the two made a payment call at all.
+    expect(h.reqs.slice(before).filter(r => r.path.includes('/payments/'))).toHaveLength(0);
+  });
+
+  test('return page: needs the signed-in member (signed out goes to sign-in and asks the server nothing)', async ({ page }) => {
+    const h = await setup(page, {}, false);
+    await page.goto('/m/payment-return/?paymentRequestId=pay_1&result=success');
+    await expect(page).toHaveURL(/\/m\/signin\/$/);
+    expect(h.reqs.filter(r => r.path.includes('/payments/'))).toHaveLength(0);
+  });
+
+  test('orders: "Pay now" on an unpaid order only while the server lists shop orders, and it pays that order\'s request', async ({ page }) => {
+    const unpaid = { id: 'ord_new004', items: [{ productId: 'p4', name: 'Shaker bottle', qty: 1 }], totalTzs: 15000, status: 'pending', deliveryMethod: 'gym_pickup', pickupGymId: 'g1', paymentStatus: 'pending', paymentRequestId: 'pay_shop1', createdAt: '2026-11-03T08:00:00.000Z' };
+    const rows = [...ORDERS, unpaid, { ...unpaid, id: 'ord_old005', paymentRequestId: null }];
+    // Not listed (an older server, or the shop switch off): no button.
+    await setup(page, { 'GET /me/shop-orders': ok(rows) });
+    await page.goto('/m/orders/');
+    await expect(page.getByTestId('member-order-ord_new004')).toBeVisible();
+    await expect(page.getByTestId('member-order-pay-ord_new004')).toHaveCount(0);
+
+    const h = await setup(page, { 'GET /me/shop-orders': ok(rows),
+      'GET /payments/options': ok({ ...THREE, mobileMoney: { products: ['FITFLEX_PASS', 'SHOP_ORDER'] } }),
+      'POST /me/payments/pay_shop1/mobile-money': ok({ state: 'in_progress', method: 'mobile_money' }, 202),
+      'POST /me/payments/pay_shop1/refresh': ok({ state: 'completed' }) });
+    await page.goto('/m/orders/');
+    await expect(page.getByTestId('member-order-pay-ord_old005')).toHaveCount(0);
+    await expect(page.getByTestId('member-order-pay-ord_ready001')).toHaveCount(0);
+    await page.getByTestId('member-order-pay-ord_new004').click();
+    await expect(page.getByTestId('member-pay-summary')).toContainText('TSh 15,000');
+    await expect(page.getByTestId('member-pay-methods')).toBeVisible();
+    await page.getByTestId('member-pay-send').click();
+    await expect(page.getByTestId('member-pay-done')).toContainText(en['member.orders.paidTitle'], { timeout: 15_000 });
+    expect(h.reqs.find(r => r.path === '/me/payments/pay_shop1/mobile-money')!.body).toEqual({ phone: '0754123678', network: 'Mpesa' });
   });
 });
