@@ -6186,6 +6186,7 @@ export const messages = {
     ...securityIncidentsMessages.en,
     ...gymPassMessages.en,
     ...programmeMessages.en,
+    ...kpiTargetMessages.en,
     ...memberMessages.en,
     // Owner/staff pages, shared widgets, HR and organisation pages (portal#52).
     ...ownerMessages.en,
@@ -12504,6 +12505,7 @@ export const messages = {
     ...securityIncidentsMessages.sw,
     ...gymPassMessages.sw,
     ...programmeMessages.sw,
+    ...kpiTargetMessages.sw,
     ...memberMessages.sw,
     // Owner/staff pages, shared widgets, HR and organisation pages (portal#52).
     ...ownerMessages.sw,
@@ -12640,6 +12642,7 @@ import { vendorImportMessages } from './i18n-vendor-import';
 import { securityIncidentsMessages } from './i18n-security-incidents';
 import { gymPassMessages } from './i18n-gym-passes';
 import { programmeMessages } from './i18n-programmes';
+import { kpiTargetMessages } from './i18n-kpi-targets';
 import { memberMessages } from './i18n-member';
 import { ownerMessages } from './i18n-owner';
 import { orgMessages } from './i18n-org';
