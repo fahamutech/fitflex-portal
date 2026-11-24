@@ -6,11 +6,16 @@ import { useApp } from '../../providers';
 import { MemberFrame, card, input, linkCls, muted, primaryBtn } from '@/components/member/member-frame';
 import { loadSession, MEMBER_ROUTES, signIn, type MemberCode } from '@/lib/member-api';
 import { ERROR_KEYS, pinLoginAvailable, type CheckinCode } from '@/lib/web-checkin';
+import { GYM_CUSTOM_PASSES } from '@/lib/flags';
+import { loadBuyIntent } from '@/lib/gym-pass-buy';
 import type { MessageKey } from '@/lib/i18n';
 
 export default function MemberSignInPage() {
   return <MemberFrame testId="member-signin-page" needsSession={false}>{() => <SignInForm />}</MemberFrame>;
 }
+
+/** Where a signed-in member lands: back to the gym pass they chose on a gym page, else Today. */
+const afterSignIn = () => (GYM_CUSTOM_PASSES && loadBuyIntent() ? MEMBER_ROUTES.gymPasses : MEMBER_ROUTES.home);
 
 function messageFor(code: MemberCode): MessageKey {
   if (code === 'not_member') return 'member.signin.notMember';
@@ -32,7 +37,7 @@ function SignInForm() {
   const pinRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    if (loadSession()) { router.replace(MEMBER_ROUTES.home); return; }
+    if (loadSession()) { router.replace(afterSignIn()); return; }
     let live = true;
     // Only a definite "PIN sign-in is off" hides the form; a failed or slow check leaves it usable.
     void pinLoginAvailable().then(a => { if (live && a === 'off') setAvailable(false); });
@@ -48,7 +53,7 @@ function SignInForm() {
     sending.current = true; setBusy(true);
     const r = await signIn(identifier, pin, keep);
     setPin('');
-    if (r.ok) { router.replace(MEMBER_ROUTES.home); return; }
+    if (r.ok) { router.replace(afterSignIn()); return; }
     sending.current = false; setBusy(false);
     if (r.code === 'unavailable') { setAvailable(false); return; }
     // Locked and switched-off look the same to the person: do not reveal which.

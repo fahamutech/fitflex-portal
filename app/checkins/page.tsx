@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { RefreshCw } from 'lucide-react';
 import { useApp } from '../providers';
 import { api, CheckIn } from '@/lib/api';
+import type { MessageKey } from '@/lib/i18n';
 import { Card, CardHeader, PageHeader, Badge, EmptyState, Button, Spinner, Table, TBody, Td, Th, THead, Tr } from '@/components/shared';
 
 function passTierTone(tier: string | null): 'brand' | 'warning' | 'gray' {
@@ -89,9 +90,16 @@ export default function CheckinsPage() {
                     )}
                   </Td>
                   <Td>
-                    <Badge tone={passTierTone(r.passTier)}>
-                      {r.passTier ?? t('ownerCheckins.direct')}
-                    </Badge>
+                    {r.pass ? (
+                      <span data-testid="checkin-pass">
+                        <Badge tone="brand">{r.pass.name}</Badge>
+                        <span className="block text-xs text-[var(--color-fg-quaternary)]">{t(`gp.category.${r.pass.category}` as MessageKey)}</span>
+                      </span>
+                    ) : (
+                      <Badge tone={passTierTone(r.passTier)}>
+                        {r.passTier ?? t('ownerCheckins.direct')}
+                      </Badge>
+                    )}
                   </Td>
                   <Td className="tabular-nums">
                     {r.visitNumberInCycle != null ? `#${r.visitNumberInCycle}` : '—'}

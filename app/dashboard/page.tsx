@@ -186,6 +186,14 @@ export default function DashboardPage() {
           icon={<TrendingUp className="h-5 w-5" />}
           sub={`${data.fitflexVisits ?? 0} ${t('dash.visits')}`}
         />
+        {data.passMembers != null && (
+          <MetricCard
+            label={t('dash.passMembers')}
+            value={<span data-testid="dash-pass-members">{data.passMembers}</span>}
+            icon={<Users className="h-5 w-5" />}
+            sub={<span data-testid="dash-pass-visits">{`${data.passVisits ?? 0} ${t('dash.visits')}`}</span>}
+          />
+        )}
       </div>
 
       {data.overall && (

@@ -320,6 +320,14 @@ test.describe('member portal, flag on', () => {
     expect(s).toEqual({ member: null, staff: 'STAFF-TOKEN' });
   });
 
+  test('gym passes are off in a build without NEXT_PUBLIC_GYM_CUSTOM_PASSES: no nav item, no request', async ({ page }) => {
+    const h = await setup(page);
+    await page.goto('/m/gym-passes/');
+    await expect(page.getByTestId('member-gym-passes-off')).toBeVisible();
+    await expect(page.getByRole('link', { name: 'Gym passes', exact: true })).toHaveCount(0);
+    expect(h.reqs.filter(r => r.path.includes('gym-pass'))).toEqual([]);
+  });
+
   test('Swahili: the language switch translates the member pages', async ({ page }) => {
     await setup(page);
     await page.goto('/m/');

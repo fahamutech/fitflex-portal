@@ -3,6 +3,7 @@ import { messages } from '../../src/lib/i18n';
 import { gymPassMessages } from '../../src/lib/i18n-gym-passes';
 import { classifyGymPassError, inviteTokenFromHash } from '../../src/lib/gym-passes';
 import { ApiError } from '../../src/lib/api';
+import { contactOf, isWebGymPass, othersRange } from '../../src/lib/gym-pass-buy';
 
 // Custom gym passes (backend functions#355, docs/custom-gym-passes-api.md). The API is mocked. Run twice (the flag is
 // inlined when the portal is built):
@@ -89,6 +90,254 @@ test.describe('pure helpers', () => {
     expect(classifyGymPassError(new ApiError(400, { error: 'invalid_field', field: 'beneficiaryLimit', reason: 'group_limit_range' }))).toMatchObject({ key: 'gp.err.reason.group_limit_range' });
     expect(classifyGymPassError(new ApiError(403, { error: 'acl_forbidden', requiredScope: 'members' }))).toMatchObject({ key: 'gp.err.acl_forbidden' });
     expect(classifyGymPassError(new ApiError(500, {}))).toMatchObject({ key: 'gp.generic' });
+  });
+});
+
+// ── Buying on the web: the public gym page (/g) and the member portal (/m/gym-passes) ─────────────────────────────────
+const MEMBER_TOKEN = 'MEMBERTOKEN-gp';
+const MEMBER = { id: 'usr_m1', userType: 'member', name: 'Neema Mushi', phone: '0754123678' };
+const webPass = (over: Record<string, unknown> = {}) => ({
+  planId: 'gpp_couples', name: 'Couples 3 months', description: 'For two', category: 'couples', durationValue: 3, durationUnit: 'months',
+  beneficiaryLimit: 2, priceTzs: 240000, terms: 'No refunds after the first visit.', termsVersion: 2, ...over,
+});
+const gymProfile = (gymPasses: unknown[]) => ({
+  lang: 'en',
+  gym: { publicRef: 'abc123', name: 'Mikocheni Fitness', description: null, tier: 'standard', venueType: 'physical', verified: true, rating: null, reviewCount: null,
+    photos: [], thumbnail: null, area: null, address: null, lat: null, lng: null, directions: null, facilities: [], equipment: [], amenities: [], services: [],
+    operatingHours: null, classes: [], trainers: [] },
+  membership: { currency: 'TZS', gymPlans: [], passTiers: [], gymPasses },
+});
+const PASS_PAY = { id: 'pay_gp1', tier: null, amountTzs: 240000, status: 'pending', requestedAt: '2026-11-20T08:00:00.000Z', provider: 'admin_approved', reference: null, note: 'gym_pass' };
+const bought = (over: Record<string, unknown> = {}) => ({
+  id: 'gpu_1', status: 'pending_payment', gymId: 'gym-1', planId: 'gpp_couples', plan: snapshot, priceTzs: 240000, currency: 'TZS', paymentRequestId: 'pay_gp1',
+  startsAt: null, expiresAt: null, createdAt: '2026-11-20T08:00:00.000Z', gym: { id: 'gym-1', name: 'Mikocheni Fitness' }, payment: { status: 'pending', amountTzs: 240000 },
+  beneficiaries: [
+    { id: 'gpb_1', slot: 1, isPurchaser: true, status: 'awaiting_payment', you: true, displayName: 'Neema Mushi', contactType: null, contact: null },
+    { id: 'gpb_2', slot: 2, isPurchaser: false, status: 'awaiting_payment', you: false, displayName: null, contactType: 'phone', contact: '+255 7•• ••• 678' },
+  ],
+  slots: { used: 2, limit: 2 }, ...over,
+});
+
+type Answer = { status?: number; json: unknown };
+interface MemberSeen { calls: Array<{ method: string; path: string; body: any; auth: string | null }> }
+async function mockMemberApi(page: Page, over: Record<string, Answer | ((n: number, body: any) => Answer)> = {}, signedIn = true): Promise<MemberSeen> {
+  const seen: MemberSeen = { calls: [] };
+  const counts: Record<string, number> = {};
+  const routes: Record<string, Answer | ((n: number, body: any) => Answer)> = {
+    'GET /auth/options': { json: { pinLogin: true } },
+    'POST /auth/pin/login': { json: { token: MEMBER_TOKEN, user: MEMBER } },
+    'POST /public/gyms/resolve': { json: gymProfile([webPass()]) },
+    'GET /me/gym-passes': { json: { purchased: [], memberships: [] } },
+    'GET /payments/options': { json: { enabled: true, provider: 'azampay', environment: 'production' } },
+    'POST /me/gym-pass-purchases': { status: 202, json: { purchase: bought(), paymentRequest: PASS_PAY } },
+    'POST /me/payments/pay_gp1/mobile-money': { status: 202, json: { state: 'in_progress', paymentRequest: PASS_PAY } },
+    'POST /me/payments/pay_gp1/mobile-money/refresh': { json: { state: 'completed', paymentRequest: PASS_PAY } },
+    ...over,
+  };
+  await page.route(`${API}/**`, async route => {
+    const req = route.request();
+    const path = new URL(req.url()).pathname;
+    if (req.method() === 'OPTIONS') return route.fulfill({ status: 204, headers: { 'access-control-allow-origin': '*', 'access-control-allow-headers': '*', 'access-control-allow-methods': '*' } });
+    let body: any = null;
+    try { body = req.postData() ? JSON.parse(req.postData()!) : null; } catch { /* not json */ }
+    const key = `${req.method()} ${path}`;
+    seen.calls.push({ method: req.method(), path, body, auth: req.headers()['authorization'] ?? null });
+    counts[key] = (counts[key] ?? 0) + 1;
+    const v = routes[key];
+    const r = !v ? { status: 404, json: { error: 'not_found' } } : typeof v === 'function' ? v(counts[key], body) : v;
+    await route.fulfill({ status: r.status ?? 200, contentType: 'application/json', headers: { 'access-control-allow-origin': '*' }, body: JSON.stringify(r.json) });
+  });
+  await page.addInitScript(([signed, t, u]) => {
+    localStorage.setItem('locale', 'en');
+    if (signed) localStorage.setItem('ff_member_session', JSON.stringify({ token: t, user: u }));
+  }, [signedIn, MEMBER_TOKEN, MEMBER] as const);
+  return seen;
+}
+const chooseOnGymPage = async (page: Page, planId = 'gpp_couples') => {
+  await page.goto('/g/?q=fitflex%3Agym%3Agym_001%3ASIG');
+  await page.getByTestId(`web-gym-pass-buy-${planId}`).click();
+};
+
+test.describe('buying on the web: pure helpers', () => {
+  test('how many other people a pass asks for, and how a typed contact is sent', () => {
+    expect(othersRange({ category: 'individual', beneficiaryLimit: 1 })).toEqual({ min: 0, max: 0 });
+    expect(othersRange({ category: 'couples', beneficiaryLimit: 2 })).toEqual({ min: 1, max: 1 });
+    expect(othersRange({ category: 'group', beneficiaryLimit: 5 })).toEqual({ min: 2, max: 4 });
+    expect(othersRange({ category: 'group', beneficiaryLimit: 3 })).toEqual({ min: 2, max: 2 });
+    expect(contactOf(' 0712345678 ')).toEqual({ phone: '0712345678' });
+    expect(contactOf('a@b.co')).toEqual({ email: 'a@b.co' });
+    expect(contactOf('   ')).toBeNull();
+  });
+
+  test('only a well-formed pass is listed', () => {
+    expect(isWebGymPass(webPass())).toBe(true);
+    for (const bad of [null, {}, webPass({ planId: '' }), webPass({ category: 'family' }), webPass({ priceTzs: 0 }), webPass({ durationUnit: 'years' }), webPass({ beneficiaryLimit: 0 })]) {
+      expect(isWebGymPass(bad), JSON.stringify(bad)).toBe(false);
+    }
+  });
+});
+
+test.describe('buying on the web, flag on', () => {
+  test.skip(!FLAG_ON, 'needs NEXT_PUBLIC_GYM_CUSTOM_PASSES=true');
+
+  test('gym page lists the passes; Buy asks for sign-in, then returns to the chosen pass; one purchase, paid by the phone prompt', async ({ page }) => {
+    const seen = await mockMemberApi(page, { 'POST /public/gyms/resolve': { json: gymProfile([webPass(), webPass({ planId: 'gpp_bad', priceTzs: 0 }), webPass({ planId: 'gpp_solo', name: 'Solo month', category: 'individual', beneficiaryLimit: 1, durationValue: 1, terms: null })]) } }, false);
+    await page.goto('/g/?q=fitflex%3Agym%3Agym_001%3ASIG');
+    const section = page.getByTestId('web-gym-custom-passes');
+    await expect(section).toContainText('Couples 3 months');
+    await expect(section).toContainText('240,000');
+    await expect(section).toContainText('Couples · 2 people · 3 months');
+    await expect(section).toContainText('Individual · 1 person · 1 month');
+    await expect(page.getByTestId('web-gym-pass-gpp_bad')).toHaveCount(0);
+    await expect(page.getByTestId('web-gym-pass-hint')).toContainText('PIN');
+
+    await page.getByTestId('web-gym-pass-buy-gpp_couples').click();
+    await expect(page).toHaveURL(/\/m\/signin\/$/);
+    await page.getByTestId('member-signin-identifier').fill('0754123678');
+    await page.getByTestId('member-signin-pin').fill('1234');
+    await page.getByTestId('member-signin-submit').click();
+    await expect(page).toHaveURL(/\/m\/gym-passes\/$/);
+
+    const form = page.getByTestId('member-gym-pass-buy');
+    await expect(form).toContainText('Couples 3 months');
+    await expect(form).toContainText('At Mikocheni Fitness');
+    await expect(page.getByTestId('member-gym-pass-price')).toContainText('TSh 240,000');
+    await expect(page.getByTestId('member-gym-pass-terms')).toContainText('No refunds after the first visit.');
+    await expect(page.getByTestId('member-gym-pass-person-add')).toHaveCount(0);
+
+    // The other person and the terms are asked for before anything is sent.
+    await page.getByTestId('member-gym-pass-continue').click();
+    await expect(page.getByTestId('member-gym-pass-notice')).toContainText('mobile number or email for each person');
+    await page.getByTestId('member-gym-pass-person-0').fill('0712345678');
+    await page.getByTestId('member-gym-pass-continue').click();
+    await expect(page.getByTestId('member-gym-pass-notice')).toContainText('Accept the terms');
+    expect(seen.calls.filter(c => c.path === '/me/gym-pass-purchases')).toEqual([]);
+
+    await page.getByTestId('member-gym-pass-accept').check();
+    await page.getByTestId('member-gym-pass-continue').click();
+    await expect(page.getByTestId('member-pay-mobile')).toBeVisible();
+    await expect(page.getByTestId('member-pay-summary')).toContainText('Couples 3 months · TSh 240,000');
+    const purchases = seen.calls.filter(c => c.path === '/me/gym-pass-purchases');
+    expect(purchases).toHaveLength(1);
+    expect(purchases[0].body).toEqual({ planId: 'gpp_couples', beneficiaries: [{ phone: '0712345678' }], termsVersion: 2, expectedPriceTzs: 240000 });
+    expect(purchases[0].auth).toBe(`Bearer ${MEMBER_TOKEN}`);
+
+    await page.getByTestId('member-pay-send').click();
+    await expect(page.getByTestId('member-pay-done')).toContainText('Everyone on it can now check in', { timeout: 15_000 });
+    expect(seen.calls.find(c => c.path === '/me/payments/pay_gp1/mobile-money')!.body).toEqual({ phone: '0754123678', network: 'Mpesa' });
+    // The chosen pass is not offered again once it has been bought.
+    expect(await page.evaluate(() => sessionStorage.getItem('ff_gym_pass_buy'))).toBeNull();
+  });
+
+  test('a changed price is shown and asked again; nothing is created at the old price', async ({ page }) => {
+    const seen = await mockMemberApi(page, {
+      'POST /me/gym-pass-purchases': (n) => (n === 1
+        ? { status: 409, json: { error: 'price_changed', priceTzs: 260000, currency: 'TZS' } }
+        : { status: 202, json: { purchase: bought({ priceTzs: 260000 }), paymentRequest: { ...PASS_PAY, amountTzs: 260000 } } }),
+    });
+    await chooseOnGymPage(page);
+    await page.getByTestId('member-gym-pass-person-0').fill('friend@example.com');
+    await page.getByTestId('member-gym-pass-accept').check();
+    await page.getByTestId('member-gym-pass-continue').click();
+    await expect(page.getByTestId('member-gym-pass-notice')).toContainText('TSh 260,000');
+    await expect(page.getByTestId('member-gym-pass-price')).toContainText('TSh 260,000');
+    await expect(page.getByTestId('member-pay-mobile')).toHaveCount(0);
+    await page.getByTestId('member-gym-pass-continue').click();
+    await expect(page.getByTestId('member-pay-summary')).toContainText('TSh 260,000');
+    const sent = seen.calls.filter(c => c.path === '/me/gym-pass-purchases').map(c => c.body.expectedPriceTzs);
+    expect(sent).toEqual([240000, 260000]);
+    expect(seen.calls.filter(c => c.path === '/me/gym-pass-purchases')[1].body.beneficiaries).toEqual([{ email: 'friend@example.com' }]);
+  });
+
+  test('group pass: two to limit-1 other people; an individual pass asks for nobody; refusals read as sentences', async ({ page }) => {
+    const seen = await mockMemberApi(page, {
+      'POST /public/gyms/resolve': { json: gymProfile([
+        webPass({ planId: 'gpp_group', name: 'Family of 4', category: 'group', beneficiaryLimit: 4, terms: null }),
+        webPass({ planId: 'gpp_solo', name: 'Solo month', category: 'individual', beneficiaryLimit: 1, terms: null }),
+      ]) },
+      'POST /me/gym-pass-purchases': (n) => (n === 1 ? { status: 400, json: { error: 'cannot_add_yourself', index: 0 } } : { status: 409, json: { error: 'plan_not_available' } }),
+    });
+    await chooseOnGymPage(page, 'gpp_group');
+    await expect(page.getByTestId('member-gym-pass-buy')).toContainText('Name 2 to 3 other people');
+    await expect(page.getByTestId('member-gym-pass-person-1')).toBeVisible();
+    await expect(page.getByTestId('member-gym-pass-person-2')).toHaveCount(0);
+    await expect(page.getByTestId('member-gym-pass-person-remove-0')).toHaveCount(0);
+    await page.getByTestId('member-gym-pass-person-add').click();
+    await expect(page.getByTestId('member-gym-pass-person-add')).toHaveCount(0);
+    await page.getByTestId('member-gym-pass-person-remove-2').click();
+    await expect(page.getByTestId('member-gym-pass-person-2')).toHaveCount(0);
+    await expect(page.getByTestId('member-gym-pass-terms')).toHaveCount(0);
+    await page.getByTestId('member-gym-pass-person-0').fill('0754123678');
+    await page.getByTestId('member-gym-pass-person-1').fill('0711111111');
+    await page.getByTestId('member-gym-pass-continue').click();
+    await expect(page.getByTestId('member-gym-pass-notice')).toContainText('not your own');
+    await expect(page.getByTestId('member-gym-pass-notice')).not.toContainText('cannot_add_yourself');
+    expect(seen.calls.find(c => c.path === '/me/gym-pass-purchases')!.body).toEqual({ planId: 'gpp_group', beneficiaries: [{ phone: '0754123678' }, { phone: '0711111111' }], expectedPriceTzs: 240000 });
+    await page.getByTestId('member-gym-pass-continue').click();
+    await expect(page.getByTestId('member-gym-pass-notice')).toContainText('no longer on sale');
+
+    await chooseOnGymPage(page, 'gpp_solo');
+    await expect(page.getByTestId('member-gym-pass-buy')).toContainText('Solo month');
+    await expect(page.getByTestId('member-gym-pass-person-0')).toHaveCount(0);
+    await page.getByTestId('member-gym-pass-dismiss').click();
+    await expect(page.getByTestId('member-gym-pass-buy')).toHaveCount(0);
+    await expect(page.getByTestId('member-gym-passes-empty')).toBeVisible();
+  });
+
+  test('My gym passes: masked people as given, pay or cancel a purchase awaiting payment, passes I am on', async ({ page }) => {
+    let cancelled = false;
+    const seen = await mockMemberApi(page, {
+      'GET /me/gym-passes': () => ({ json: {
+        purchased: [
+          bought(cancelled ? { status: 'cancelled' } : {}),
+          bought({ id: 'gpu_2', status: 'active', paymentRequestId: 'pay_gp2', expiresAt: '2027-02-01T08:00:00.000Z',
+            beneficiaries: [{ id: 'gpb_3', slot: 1, isPurchaser: true, status: 'active', you: true, displayName: 'Neema Mushi', contactType: null, contact: null },
+              { id: 'gpb_4', slot: 2, isPurchaser: false, status: 'invited', you: false, displayName: null, contactType: 'phone', contact: '+255 7•• ••• 123' }] }),
+        ],
+        memberships: [{ purchaseId: 'gpu_9', beneficiaryId: 'gpb_9', status: 'suspended', purchaseStatus: 'active', gym: { id: 'gym-2', name: 'Msasani Bay Fitness' },
+          plan: { ...snapshot, name: 'Family of 4' }, startsAt: '2026-11-01T08:00:00.000Z', expiresAt: '2027-01-01T08:00:00.000Z', subscriptionId: 'sub_9' }],
+      } }),
+      'POST /me/gym-pass-purchases/gpu_1/cancel': () => { cancelled = true; return { json: { purchase: bought({ status: 'cancelled' }) } }; },
+    });
+    await page.goto('/m/gym-passes/');
+    await expect(page.getByRole('link', { name: 'Gym passes', exact: true }).first()).toBeVisible();
+    const active = page.getByTestId('member-gym-pass-gpu_2');
+    await expect(active).toContainText('Active');
+    await expect(active).toContainText('Valid until 1 Feb 2027');
+    await expect(active).toContainText('+255 7•• ••• 123 · Invited');
+    await expect(active).toContainText('You · Active');
+    await expect(active).toContainText('2 of 2 places used');
+    await expect(page.getByTestId('member-gym-pass-pay-gpu_2')).toHaveCount(0);
+    await expect(page.getByTestId('member-gym-passes-shared')).toContainText('Family of 4');
+    await expect(page.getByTestId('member-gym-passes-shared')).toContainText('Your place on this pass is suspended.');
+
+    const pending = page.getByTestId('member-gym-pass-gpu_1');
+    await expect(pending).toContainText('Waiting for payment');
+    await expect(pending).toContainText('+255 7•• ••• 678');
+    await page.getByTestId('member-gym-pass-pay-gpu_1').click();
+    await expect(page.getByTestId('member-pay-summary')).toContainText('Couples 3 months · TSh 240,000');
+    await page.getByRole('button', { name: 'Back', exact: true }).click();
+    expect(seen.calls.filter(c => c.path === '/me/gym-pass-purchases')).toEqual([]);
+
+    await page.getByTestId('member-gym-pass-cancel-gpu_1').click();
+    await expect(pending).toContainText('Nothing has been paid');
+    await page.getByTestId('member-gym-pass-cancel-yes-gpu_1').click();
+    await expect(pending).toContainText('Cancelled');
+    // A cancelled purchase covers nobody: its people and places are no longer listed (the server still sends the rows).
+    await expect(pending).not.toContainText('+255 7•• ••• 678');
+    await expect(pending).not.toContainText('places used');
+    await expect(active).toContainText('2 of 2 places used');
+    await expect(page.getByTestId('member-gym-pass-pay-gpu_1')).toHaveCount(0);
+    expect(seen.calls.filter(c => c.path.endsWith('/cancel'))).toHaveLength(1);
+  });
+
+  test('Swahili is the pending placeholder on the gym page section and the member page', async ({ page }) => {
+    await mockMemberApi(page);
+    await page.addInitScript(() => localStorage.setItem('locale', 'sw'));
+    await page.goto('/g/?q=fitflex%3Agym%3Agym_001%3ASIG');
+    await expect(page.getByTestId('web-gym-custom-passes')).toContainText('[SW pending review] Gym passes');
+    await page.goto('/m/gym-passes/');
+    await expect(page.getByTestId('member-gym-passes-mine')).toContainText('[SW pending review] Passes you bought');
   });
 });
 
@@ -306,6 +555,13 @@ test.describe('flag off', () => {
     expect(seen.calls.filter(c => c.path.includes('pass-'))).toEqual([]);
   });
 
+  test('the member Gym passes page is not available and asks the server for nothing', async ({ page }) => {
+    const seen = await mockMemberApi(page);
+    await page.goto('/m/gym-passes/');
+    await expect(page.getByTestId('member-flag-off')).toBeVisible();
+    expect(seen.calls.filter(c => c.path.includes('gym-pass'))).toEqual([]);
+  });
+
   test('the invite page shows the not-available state and makes no request', async ({ page }) => {
     const calls: string[] = [];
     await page.route(`${API}/**`, async route => { calls.push(route.request().url()); await route.fulfill({ json: {} }); });
@@ -313,5 +569,161 @@ test.describe('flag off', () => {
     await expect(page.getByTestId('gp-invite-off')).toBeVisible();
     expect(page.url()).not.toContain(TOKEN);
     expect(calls.filter(u => u.includes('gym-pass'))).toEqual([]);
+  });
+});
+
+// Analytics (backend functions#365): the new summary keys exist only while the server flag is on.
+const analytics = {
+  byPlan: [
+    { planId: 'plan-1', name: 'Couples 3 months', category: 'couples', sales: 3, revenueTzs: 720000, people: 6 },
+    { planId: 'plan-2', name: 'Family of 4', category: 'group', sales: 1, revenueTzs: 240000, people: 3 },
+  ],
+  expiring: { withinDays: 7, purchases: 1, people: 2 },
+  utilisation: { visits: 12, peopleWithVisit: 3, peopleNeverVisited: 2, activePeople: 5, visitsPerActivePerson: 2.4 },
+  groups: { slots: 4, filled: 3, fillRate: 0.75 },
+};
+const soonIso = () => new Date(Date.now() + 3 * 86_400_000).toISOString();
+
+test.describe('analytics, flag on', () => {
+  test.skip(!FLAG_ON, 'needs NEXT_PUBLIC_GYM_CUSTOM_PASSES=true');
+
+  test('renders by-plan, expiring, utilisation, group fill and the people lists', async ({ page }) => {
+    await signInOwner(page);
+    await mockOwnerApi(page, (m, p) => {
+      if (p.startsWith('/owner/gyms/gym-1/pass-summary')) return { json: { ...summary, ...analytics } };
+      if (p.startsWith('/owner/gyms/gym-1/pass-memberships')) return { json: { state: 'active', memberships: [{ ...membership, expiresAt: soonIso() }] } };
+      return null;
+    });
+    await page.goto('/owner/memberships');
+    await expect(page.getByTestId('gp-analytics')).toBeVisible();
+    await expect(page.getByTestId('gp-byplan-row')).toHaveCount(2);
+    await expect(page.getByTestId('gp-byplan-row').first()).toContainText('Couples 3 months');
+    await expect(page.getByTestId('gp-an-expiring')).toHaveText('2');
+    await expect(page.getByTestId('gp-utilisation')).toContainText('1 passes ending within 7 days');
+    await expect(page.getByTestId('gp-an-visits')).toHaveText('12');
+    await expect(page.getByTestId('gp-an-with-visit')).toHaveText('3');
+    await expect(page.getByTestId('gp-an-never')).toHaveText('2');
+    await expect(page.getByTestId('gp-an-per-person')).toHaveText('2.4');
+    await expect(page.getByTestId('gp-an-group-fill')).toHaveText('3 of 4');
+    await expect(page.getByTestId('gp-utilisation')).toContainText('Fill rate 75%');
+    // Lists from pass-memberships: Juma has 0 visits; the pass ends within 7 days.
+    await expect(page.getByTestId('gp-never-row')).toHaveCount(1);
+    await expect(page.getByTestId('gp-never-row')).toContainText('Juma Partner');
+    await expect(page.getByTestId('gp-expiring-row')).toHaveCount(1);
+  });
+
+  test('without the new keys the analytics section is absent and the totals still render', async ({ page }) => {
+    await signInOwner(page);
+    await mockOwnerApi(page);
+    await page.goto('/owner/memberships');
+    await expect(page.getByTestId('gp-summary')).toBeVisible();
+    await expect(page.getByTestId('gp-analytics')).toHaveCount(0);
+  });
+
+  test('a partial summary shows em-dash and "not available", not zeros', async ({ page }) => {
+    await signInOwner(page);
+    await mockOwnerApi(page, (m, p) => (p.startsWith('/owner/gyms/gym-1/pass-summary') ? { json: { ...summary, byPlan: [] } } : null));
+    await page.goto('/owner/memberships');
+    await expect(page.getByTestId('gp-byplan-empty')).toBeVisible();
+    await expect(page.getByTestId('gp-an-visits')).toHaveText('—');
+    await expect(page.getByTestId('gp-an-group-fill')).toHaveText('—');
+    await expect(page.getByTestId('gp-utilisation')).toContainText('Not available');
+  });
+
+  test('the date range is sent as from and to, explained, and can be cleared', async ({ page }) => {
+    await signInOwner(page);
+    const seen = await mockOwnerApi(page, (m, p) => (p.startsWith('/owner/gyms/gym-1/pass-summary') ? { json: { ...summary, ...analytics } } : null));
+    await page.goto('/owner/memberships');
+    await expect(page.getByTestId('gp-range-note')).toContainText('approved in that range');
+    await page.getByTestId('gp-range-from').fill('2026-11-01');
+    await page.getByTestId('gp-range-to').fill('2026-12-01');
+    await expect.poll(() => seen.calls.some(c => c.path === '/owner/gyms/gym-1/pass-summary?from=2026-11-01&to=2026-12-01')).toBe(true);
+    await page.getByTestId('gp-range-clear').click();
+    await expect(page.getByTestId('gp-range-from')).toHaveValue('');
+    await expect.poll(() => seen.calls.filter(c => c.path === '/owner/gyms/gym-1/pass-summary').length).toBeGreaterThan(1);
+  });
+});
+
+const checkin = (over: Record<string, unknown> = {}) => ({
+  id: 'c1', memberId: 'm1', memberPublicId: 'FF-1', displayName: 'Asha Buyer', memberPhone: null, timestamp: '2026-11-10T08:00:00.000Z', passTier: null, visitNumberInCycle: null, gymTier: 'standard', ...over,
+});
+const dashboardBase = {
+  gym: { id: 'gym-1', name: 'Mikocheni Fitness', tier: 'standard', perVisitRate: 0 }, todayCount: 1, monthVisits: 2,
+  periodVisits: 5, periodMembers: 3, directVisits: 3, directMembers: 2, fitflexVisits: 2, fitflexMembers: 1,
+};
+
+test.describe('check-in badge and dashboard (driven by the keys, either flag value)', () => {
+  test('a pass visit shows the pass name; other rows are unchanged', async ({ page }) => {
+    await signInOwner(page);
+    await mockOwnerApi(page, (m, p) => (p === '/operator/checkins'
+      ? { json: [checkin({ pass: { name: 'Couples 3 months', category: 'couples' } }), checkin({ id: 'c2', pass: null }), checkin({ id: 'c3', passTier: 'standard' })] }
+      : null));
+    await page.goto('/checkins');
+    await expect(page.getByTestId('checkin-pass')).toHaveCount(1);
+    await expect(page.getByTestId('checkin-pass')).toContainText('Couples 3 months');
+    await expect(page.getByTestId('checkin-pass')).toContainText('Couples');
+    await expect(page.getByText('Direct', { exact: true })).toHaveCount(1);
+  });
+
+  test('without the pass key the list is as before', async ({ page }) => {
+    await signInOwner(page);
+    await mockOwnerApi(page, (m, p) => (p === '/operator/checkins' ? { json: [checkin()] } : null));
+    await page.goto('/checkins');
+    await expect(page.getByText('Direct', { exact: true })).toBeVisible();
+    await expect(page.getByTestId('checkin-pass')).toHaveCount(0);
+  });
+
+  test('dashboard shows pass members and visits only when the keys are present', async ({ page }) => {
+    await signInOwner(page);
+    await mockOwnerApi(page, (m, p) => (p.startsWith('/operator/dashboard') ? { json: { ...dashboardBase, passVisits: 7, passMembers: 4 } } : null));
+    await page.goto('/dashboard');
+    await expect(page.getByTestId('dash-pass-members')).toHaveText('4');
+    await expect(page.getByTestId('dash-pass-visits')).toHaveText('7 visits');
+  });
+
+  test('dashboard has no pass card when the keys are missing', async ({ page }) => {
+    await signInOwner(page);
+    await mockOwnerApi(page, (m, p) => (p.startsWith('/operator/dashboard') ? { json: dashboardBase } : null));
+    await page.goto('/dashboard');
+    await expect(page.getByText('Direct members', { exact: true }).last()).toBeVisible();
+    await expect(page.getByTestId('dash-pass-members')).toHaveCount(0);
+  });
+});
+
+test.describe('door scan result (driven by the pass key, either flag value)', () => {
+  async function scanWith(page: Page, body: unknown) {
+    await page.addInitScript(() => {
+      localStorage.setItem('token', 'operator-e2e-token');
+      localStorage.setItem('user', JSON.stringify({ id: 'operator-1', userType: 'gym_operator', email: 'operator@example.com', gymId: 'gym-1' }));
+      localStorage.setItem('locale', 'en');
+    });
+    await page.route(`${API}/**`, async route => {
+      const url = new URL(route.request().url());
+      if (url.pathname === '/operator/checkins' && route.request().method() === 'POST') return route.fulfill({ status: 200, json: body });
+      return route.fulfill({ json: [] });
+    });
+    await page.goto('/scan');
+    await page.getByTestId('manual-token').fill('usr_test.123.sig');
+    await page.getByTestId('manual-submit').click();
+  }
+  const checkin = { id: 'chk_1', memberId: 'usr_1', memberPublicId: 'FFA-1', passTier: null, visitNumberInCycle: null, passPurchaseId: 'gpu_1' };
+
+  test('a custom-pass visit shows the pass name and when it ends, in place of "Gym membership"', async ({ page }) => {
+    await scanWith(page, { ok: true, checkin, pass: { name: 'Pair Pass', category: 'couples', expiresAt: '2026-12-20T00:00:00.000Z', daysLeft: 30, status: 'active' } });
+    await expect(page.getByTestId('scan-tier')).toHaveText('Pair Pass');
+    await expect(page.getByTestId('scan-pass-until')).toContainText('Ends ');
+    await expect(page.getByTestId('scan-result')).not.toContainText('Gym membership');
+  });
+
+  test('a visit without the pass key, or with null, is shown exactly as before', async ({ page }) => {
+    await scanWith(page, { ok: true, checkin: { ...checkin, passPurchaseId: null } });
+    await expect(page.getByTestId('scan-tier')).toHaveText('Gym membership');
+    await expect(page.getByTestId('scan-pass-until')).toHaveCount(0);
+  });
+
+  test('a pass with no name falls back to "Gym membership" and still shows the end date', async ({ page }) => {
+    await scanWith(page, { ok: true, checkin, pass: { name: null, category: null, expiresAt: '2026-12-20T00:00:00.000Z', daysLeft: 30, status: 'active' } });
+    await expect(page.getByTestId('scan-tier')).toHaveText('Gym membership');
+    await expect(page.getByTestId('scan-pass-until')).toBeVisible();
   });
 });
