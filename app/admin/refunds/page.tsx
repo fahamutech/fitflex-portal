@@ -1,12 +1,13 @@
 'use client';
 import { useEffect, useState } from 'react';
-import { RefreshCw, CheckCircle2, XCircle, Banknote } from 'lucide-react';
+import { RefreshCw, CheckCircle2, XCircle, Banknote, Undo2 } from 'lucide-react';
 import { useApp } from '../../providers';
-import { api, ApiError, Refund, RefundStatus } from '@/lib/api';
+import { api, ApiError, Refund, RefundStatus, RefundClawbackAdjustment, RefundClawbackResult } from '@/lib/api';
 import { Badge, Button, PageHeader, Alert, Spinner, Card, Field, ErrorState, Select } from '@/components/shared';
 import { DataTable, ColumnDef } from '@/components/data-table';
 import { ConfirmDialog, Dialog, DialogFooter } from '@/components/dialog';
 import { formatNumber, money } from '@/lib/admin-utils';
+import { ADJUSTMENT_STATUS } from '@/lib/settlements';
 import { REFUND_SCOPES, refundScopeKey } from '@/lib/events';
 import { REFUND_STAGE_TONE, flagOnErrorKey, moneyErrorKey, refundStageKey, whenText } from '@/lib/money-approval';
 import { refundMoneyErrorKey } from '@/lib/refund-money-errors';
@@ -43,6 +44,18 @@ const ERRORS: Record<string, MessageKey> = {
   payment_reference_required: 'refunds.err.payment_reference_required',
 };
 /** A known server refusal by its code; anything else (network, unknown) the generic "did not save". */
+/** What the end-access choice sends: nothing (the server decides), true or false. Untouched must not become an explicit false. */
+type EndAccessChoice = 'default' | 'end' | 'keep';
+const endAccessValue = (c: EndAccessChoice): boolean | undefined => (c === 'end' ? true : c === 'keep' ? false : undefined);
+/** A clawback outcome worth telling the admin about right after "mark paid"; the quiet ones say nothing. */
+const CLAWBACK_NOTICE: Partial<Record<RefundClawbackResult['status'], 'warning' | 'error' | 'info'>> = { raised: 'info', pending: 'warning', failed: 'error' };
+const clawbackErrorKey = (e: unknown): MessageKey => {
+  const code = e instanceof ApiError ? (e.body as { error?: string } | null)?.error : undefined;
+  if (code === 'feature_disabled') return 'refundClawback.err.disabled';
+  if (code === 'refund_not_paid') return 'refundClawback.err.not_paid';
+  if (code === 'acl_forbidden') return 'refundClawback.err.scope';
+  return 'refundClawback.err.generic';
+};
 const errorKey = (e: unknown): MessageKey => {
   const code = e instanceof ApiError ? (e.body as { error?: string } | null)?.error : undefined;
   return (code && ERRORS[code]) || 'money2.err.generic';
@@ -56,7 +69,7 @@ export default function RefundsPage() {
   const [loadFailed, setLoadFailed] = useState(false);
   const [filter, setFilter] = useState<Filter>('approved');
   const [action, setAction] = useState<Action | null>(null);
-  const [fields, setFields] = useState({ amount: '', note: '', noteSw: '', endAccess: false, reference: '', paidTo: '' });
+  const [fields, setFields] = useState({ amount: '', note: '', noteSw: '', endAccess: 'default' as EndAccessChoice, reference: '', paidTo: '' });
   const [actionError, setActionError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   // Events S4 (spec §6.3): filter by batch / scope / order reference (also set from the URL), batch approve and payouts.
@@ -71,6 +84,14 @@ export default function RefundsPage() {
   const [payoutIds, setPayoutIds] = useState<string[]>([]);
   const [payoutResult, setPayoutResult] = useState<Record<string, { saved: boolean; error?: string }> | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  // Slice D: the gym clawback of a paid pass refund (result after "mark paid", and a dialog to look again and retry).
+  const [clawbackAlert, setClawbackAlert] = useState<{ tone: 'warning' | 'error' | 'info'; text: string } | null>(null);
+  const [clawbackFor, setClawbackFor] = useState<Refund | null>(null);
+  const [clawbackRows, setClawbackRows] = useState<RefundClawbackAdjustment[] | null>(null);
+  const [clawbackEnabled, setClawbackEnabled] = useState(true);
+  const [clawbackError, setClawbackError] = useState<string | null>(null);
+  const [clawbackNote, setClawbackNote] = useState<string | null>(null);
+  const [clawbackBusy, setClawbackBusy] = useState(false);
   const setBatch = (v: string) => {
     setBatchState(v);
     const q = new URLSearchParams(window.location.search);
@@ -105,7 +126,7 @@ export default function RefundsPage() {
     setActionError(null);
     // An event refund goes back to the number the payer paid from; an organisation's account is typed by the admin (S4 §6.3).
     const paidTo = refund.kind === 'event_order' ? (refund.organizationName ? '' : (refund.payerPhone || refund.member?.phone || '')) : (refund.member?.phone || '');
-    setFields({ amount: String(refund.amountTzs), note: '', noteSw: '', endAccess: false, reference: '', paidTo });
+    setFields({ amount: String(refund.amountTzs), note: '', noteSw: '', endAccess: 'default', reference: '', paidTo });
   }
 
   async function submit() {
@@ -114,11 +135,12 @@ export default function RefundsPage() {
     try {
       const { refund, kind } = action;
       if (kind === 'paid') {
-        await api.markRefundPaid(token, refund.id, { paymentReference: fields.reference.trim(), paidTo: fields.paidTo.trim() || undefined });
+        const done = await api.markRefundPaid(token, refund.id, { paymentReference: fields.reference.trim(), paidTo: fields.paidTo.trim() || undefined });
+        setClawbackAlert(clawbackNotice(done?.clawback));
       } else if (kind === 'approve') {
         await api.decideRefund(token, refund.id, {
           decision: 'approve', amountTzs: Number(fields.amount), note: fields.note.trim() || undefined,
-          endAccess: refund.kind === 'subscription' ? fields.endAccess : undefined,
+          endAccess: refund.kind === 'subscription' ? endAccessValue(fields.endAccess) : undefined,
         });
       } else {
         await api.decideRefund(token, refund.id, { decision: 'reject', note: fields.note.trim(), ...(refund.kind === 'event_order' && fields.noteSw.trim() ? { noteSw: fields.noteSw.trim() } : {}) });
@@ -131,6 +153,39 @@ export default function RefundsPage() {
       setActionError(t(key ?? errorKey(e)));
     } finally {
       setBusy(false);
+    }
+  }
+
+  /** Slice D: one line for the outcomes that need a person to know about them. Flag off the answer has no clawback at all. */
+  function clawbackNotice(c: RefundClawbackResult | undefined): { tone: 'warning' | 'error' | 'info'; text: string } | null {
+    const tone = c && CLAWBACK_NOTICE[c.status];
+    if (!c || !tone) return null;
+    const held = c.held && c.held.length > 0 ? ` ${t('refundClawback.result.held')}` : '';
+    return { tone, text: `${t(`refundClawback.result.${c.status}` as MessageKey)}${held}` };
+  }
+  async function openClawback(refund: Refund) {
+    if (!token) return;
+    setClawbackFor(refund); setClawbackRows(null); setClawbackError(null); setClawbackNote(null); setClawbackEnabled(true);
+    try {
+      const out = await api.refundClawback(token, refund.id);
+      setClawbackEnabled(out.enabled !== false);
+      setClawbackRows(out.adjustments ?? []);
+    } catch (e) {
+      setClawbackRows([]);
+      setClawbackError(t(clawbackErrorKey(e)));
+    }
+  }
+  async function retryClawback() {
+    if (!token || !clawbackFor) return;
+    setClawbackBusy(true); setClawbackError(null); setClawbackNote(null);
+    try {
+      const out = await api.retryRefundClawback(token, clawbackFor.id);
+      setClawbackNote(clawbackNotice(out)?.text ?? t(`refundClawback.result.${out.status}` as MessageKey));
+      setClawbackRows((await api.refundClawback(token, clawbackFor.id)).adjustments ?? []);
+    } catch (e) {
+      setClawbackError(t(clawbackErrorKey(e)));
+    } finally {
+      setClawbackBusy(false);
     }
   }
 
@@ -320,6 +375,7 @@ export default function RefundsPage() {
       {loadFailed && refunds.length > 0 && <Alert tone="error">{t('refunds.loadFailedTitle')}. {t('refunds.loadFailedBody')}</Alert>}
 
       {notice && <Alert tone="success">{notice}</Alert>}
+      {clawbackAlert && <div data-testid="refund-clawback-alert"><Alert tone={clawbackAlert.tone}>{clawbackAlert.text}</Alert></div>}
       {batch && (
         <div className="space-y-2" data-testid="refund-batch-strip">
           <Alert tone="info">
@@ -412,6 +468,11 @@ export default function RefundsPage() {
                       </Button>
                     </>
                   )}
+                  {refund.status === 'paid' && refund.kind === 'subscription' && (
+                    <Button variant="ghost" size="sm" onClick={() => void openClawback(refund)} data-testid="refund-clawback-open">
+                      <Undo2 aria-hidden="true" className="h-3.5 w-3.5" /> {t('refundClawback.action')}
+                    </Button>
+                  )}
                   {refund.status === 'approved' && (payBlocked(refund) ? (
                     <span title={payBlocked(refund)!} data-testid="refund-paid-blocked">
                       <Button variant="ghost" size="sm" disabled title={payBlocked(refund)!} aria-describedby={`refund-hint-${refund.id}`} data-testid="refund-paid">
@@ -468,6 +529,41 @@ export default function RefundsPage() {
         </DialogFooter>
       </Dialog>
 
+      <Dialog open={!!clawbackFor} onClose={() => !clawbackBusy && setClawbackFor(null)} title={t('refundClawback.title')} description={t('refundClawback.intro')} size="lg">
+        <div className="space-y-3" data-testid="refund-clawback-dialog">
+          {clawbackError && <Alert tone="error">{clawbackError}</Alert>}
+          {clawbackNote && <Alert tone="info">{clawbackNote}</Alert>}
+          {clawbackRows === null ? (
+            <div className="flex h-24 items-center justify-center"><Spinner className="h-6 w-6" /></div>
+          ) : !clawbackEnabled ? (
+            <Alert tone="warning">{t('refundClawback.off')}</Alert>
+          ) : clawbackRows.length === 0 ? (
+            !clawbackError && <p className="text-sm text-[var(--color-fg-tertiary)]" data-testid="refund-clawback-empty">{t('refundClawback.empty')}</p>
+          ) : (
+            <table className="ui-table ui-table-dense w-full">
+              <thead><tr><th scope="col">{t('refundClawback.col.gym')}</th><th scope="col" className="text-right">{t('refundClawback.col.amount')}</th><th scope="col">{t('refundClawback.col.status')}</th><th scope="col">{t('refundClawback.col.raised')}</th></tr></thead>
+              <tbody>
+                {clawbackRows.map(a => (
+                  <tr key={a.id} data-testid={`refund-clawback-row-${a.id}`}>
+                    <td className="font-mono text-xs">{a.gymId}</td>
+                    <td className="text-right tabular-nums">{money(a.amountTzs)}</td>
+                    <td>
+                      <Badge tone={ADJUSTMENT_STATUS[a.status]?.tone ?? 'gray'}>{ADJUSTMENT_STATUS[a.status]?.label ?? a.status}</Badge>
+                      {a.heldSource && <div className="mt-1 text-xs text-[var(--color-warning-700)]">{t('refundClawback.held')}</div>}
+                    </td>
+                    <td className="whitespace-nowrap text-xs tabular-nums">{whenText(a.createdAt, locale)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+        <DialogFooter>
+          <Button variant="secondary" onClick={() => setClawbackFor(null)} disabled={clawbackBusy}>{t('money2.close')}</Button>
+          {clawbackEnabled && clawbackRows !== null && <Button loading={clawbackBusy} onClick={() => void retryClawback()} data-testid="refund-clawback-retry">{t('refundClawback.retry')}</Button>}
+        </DialogFooter>
+      </Dialog>
+
       <Dialog
         open={!!action}
         onClose={() => setAction(null)}
@@ -503,10 +599,13 @@ export default function RefundsPage() {
                 <input className="ui-input" inputMode="numeric" value={fields.amount} onChange={e => setFields({ ...fields, amount: e.target.value.replace(/[^0-9]/g, '') })} />
               </Field>
               {action.refund.kind === 'subscription' && (
-                <label className="flex items-start gap-3 text-sm text-[var(--color-fg-primary)]">
-                  <input type="checkbox" className="mt-1" checked={fields.endAccess} onChange={e => setFields({ ...fields, endAccess: e.target.checked })} />
-                  {t('refunds.dialog.endAccess')}
-                </label>
+                <Field label={t('refundClawback.endAccess.label')} hint={t('refundClawback.endAccess.hint')}>
+                  <Select value={fields.endAccess} onChange={e => setFields({ ...fields, endAccess: e.target.value as EndAccessChoice })} data-testid="refund-end-access">
+                    <option value="default">{t('refundClawback.endAccess.default')}</option>
+                    <option value="end">{t('refundClawback.endAccess.end')}</option>
+                    <option value="keep">{t('refundClawback.endAccess.keep')}</option>
+                  </Select>
+                </Field>
               )}
               <Field label={t('money2.noteOptional')}>
                 <textarea className="ui-input min-h-[70px]" value={fields.note} onChange={e => setFields({ ...fields, note: e.target.value })} />
