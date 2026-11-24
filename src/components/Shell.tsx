@@ -22,6 +22,7 @@ import {
   BadgeCheck,
   BarChart3,
   LineChart,
+  Target,
   Activity,
   BookOpen,
   UserCog,
@@ -203,6 +204,7 @@ const ADMIN_NAV: NavItem[] = [
   { href: '/admin/owners',        labelKey: 'admin.nav.owners',         icon: UserCheck,       groupKey: 'nav.group.platform', aclScope: 'owners' },
   { href: '/admin/members',       labelKey: 'admin.nav.members',        icon: Users,           groupKey: 'nav.group.platform', aclScope: 'members' },
   { href: '/admin/analytics',     labelKey: 'admin.nav.analytics',      icon: LineChart,       groupKey: 'nav.group.platform', aclScope: 'analytics' },
+  { href: '/admin/kpi-targets',   labelKey: 'admin.nav.kpiTargets',     icon: Target,          groupKey: 'nav.group.platform', aclScope: 'analytics' },
   { href: '/admin/challenges',    labelKey: 'admin.nav.challenges',     icon: Trophy,          groupKey: 'nav.group.platform', aclScope: 'challenges' },
   // Events S2 (spec §3): the moderation queue; only in builds with NEXT_PUBLIC_EVENTS_MODULE=true, and only while the
   // server answers GET /admin/events/summary (see visibleNav). The count is the number of submitted events.
