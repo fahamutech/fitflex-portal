@@ -2306,6 +2306,12 @@ export interface MemberSummary {
   memberProfile?: MemberProfile | null;
   subscription?: { tier?: string | null; status: string; renewsAt: string } | null;
   pendingPayment?: PaymentRequest | null;
+  /** The paid plan the account runs on (one still running wins over a later one that ended); status is derived from its dates. Absent on an older server. */
+  currentPlan?: { id: string; tier?: string | null; type?: string | null; plan?: string | null; status: string; expiresAt?: string | null } | null;
+  /** A paid renewal waiting for the current plan to end. */
+  scheduledPlan?: { id: string; tier?: string | null; type?: string | null; plan?: string | null; startsAt?: string | null } | null;
+  /** Every open payment request, newest first, labelled by what it buys (FITFLEX_PASS, GYM_SUBSCRIPTION, SHOP_ORDER…). */
+  openPayments?: Array<{ id: string; amountTzs: number; tier?: string | null; status: string; requestedAt: string; productType?: string | null }>;
 }
 
 export interface RoleApproval {

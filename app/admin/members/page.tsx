@@ -12,6 +12,40 @@ import { fill } from '@/components/communication-shared';
 import { ReasonField } from '@/components/reason-field';
 import { isReasonRequired, reasonOf, REASON_REQUIRED_KEY } from '@/lib/admin-reason';
 import { DOB_MIN, dobMax, dateOfBirthProblem, isDateOfBirthRefusal } from '@/lib/date-of-birth';
+import { formatDate } from '@/lib/member-api';
+
+type Translate = ReturnType<typeof useApp>['t'];
+type TKey = Parameters<Translate>[0];
+type PlanLike = { tier?: string | null; type?: string | null; status: string; expiresAt?: string | null };
+
+/**
+ * The plan the member's account runs on. The server's `currentPlan` prefers a plan that is still
+ * running over a later-started one that has ended; an older server sends only `subscription`.
+ */
+function planOf(m: MemberSummary): PlanLike | null {
+  return m.currentPlan !== undefined ? m.currentPlan : (m.subscription ?? null);
+}
+
+/** Open payment requests of any product; they say nothing about whether the current plan is paid. */
+function openPaymentsOf(m: MemberSummary): NonNullable<MemberSummary['openPayments']> {
+  return m.openPayments ?? (m.pendingPayment ? [m.pendingPayment] : []);
+}
+
+const PRODUCT_KEYS: Record<string, TKey> = {
+  FITFLEX_PASS: 'web.gym.passTiers',
+  GYM_SUBSCRIPTION: 'payments.kind.gymPlan',
+  TRAINER_GYM_PASS: 'payments.kind.trainerPass',
+  TRAINER_SERVICE: 'payments.kind.trainerSession',
+  SHOP_ORDER: 'payments.kind.shopOrder',
+  EVENT_ORDER: 'payments.kind.eventOrder',
+};
+
+function planName(p: { tier?: string | null; type?: string | null }, t: Translate): string {
+  if (p.tier) return p.tier;
+  if (p.type === 'direct_sub') return t('payments.kind.gymPlan');
+  if (p.type === 'trainer_pass') return t('payments.kind.trainerPass');
+  return '—';
+}
 
 const FITNESS_GOALS = ['build_muscle', 'lose_weight', 'stay_fit', 'flexibility', 'endurance'];
 const FITNESS_LEVELS = ['beginner', 'intermediate', 'advanced'];
@@ -29,7 +63,7 @@ const BLANK_MEMBER: Partial<MemberSummary> = {
 };
 
 export default function MembersPage() {
-  const { token, user, t } = useApp();
+  const { token, user, t, locale } = useApp();
   const [members, setMembers]   = useState<MemberSummary[]>([]);
   const [loading, setLoading]   = useState(true);
   const [error, setError]       = useState<string | null>(null);
@@ -82,7 +116,7 @@ export default function MembersPage() {
 
   useEffect(() => {
     if (!qrDialogOpen || !qrTarget || !token) return;
-    if (!qrTarget.subscription || qrTarget.subscription.status !== 'active') return;
+    if (planOf(qrTarget)?.status !== 'active') return;
 
     let cancelled = false;
     let firstLoad = true;
@@ -119,7 +153,7 @@ export default function MembersPage() {
 
   const filtered = (() => {
     if (filter === 'all') return members;
-    if (filter === 'payment_pending') return members.filter(m => m.pendingPayment != null);
+    if (filter === 'payment_pending') return members.filter(m => openPaymentsOf(m).length > 0);
     return members.filter(m => (m.accountStatus || 'active') === filter);
   })();
 
@@ -254,7 +288,7 @@ export default function MembersPage() {
     setQrExpiresAt(null);
     setQrError(null);
     // Check if member has active subscription
-    if (!member.subscription || member.subscription.status !== 'active') {
+    if (planOf(member)?.status !== 'active') {
       setQrError('Member has no active pass. QR code cannot be generated.');
       return;
     }
@@ -305,16 +339,47 @@ export default function MembersPage() {
         </select>
       ),
     },
-    { key: 'subscription', header: 'Subscription', sortable: false, cell: (m) => <span className="capitalize text-xs">{m.subscription?.tier || '—'}</span> },
+    {
+      key: 'subscription', header: 'Subscription', sortable: false,
+      cell: (m) => {
+        const plan = planOf(m);
+        const next = m.scheduledPlan;
+        const state = !plan ? null
+          : plan.status === 'active' ? (plan.expiresAt ? fill(t('admin.members.plan.activeUntil'), { date: formatDate(plan.expiresAt, locale) }) : null)
+          : plan.status === 'expired' ? fill(t('admin.members.plan.ended'), { date: formatDate(plan.expiresAt, locale) })
+          : plan.status === 'suspended' ? t('admin.members.plan.suspended')
+          : statusLabel(plan.status);
+        return (
+          <div className="text-xs" data-testid="member-plan">
+            <span className="capitalize">{plan ? planName(plan, t) : '—'}</span>
+            {state && <div className="text-[var(--color-fg-quaternary)]" data-testid="member-plan-state">{state}</div>}
+            {next && (
+              <div className="text-[var(--color-fg-quaternary)]" data-testid="member-plan-next">
+                {fill(t('admin.members.plan.next'), { plan: planName(next, t), date: formatDate(next.startsAt, locale) })}
+              </div>
+            )}
+          </div>
+        );
+      },
+    },
     {
       key: 'pendingPayment', header: 'Payment', sortable: false,
-      cell: (m) => m.pendingPayment ? (
+      cell: (m) => openPaymentsOf(m).length ? (
         <Button
           variant="link"
           onClick={(e) => { e.stopPropagation(); openPayments(m); }}
           className="h-auto px-0 text-xs font-normal text-[var(--color-warning-700)]"
         >
-          <Badge tone="warning">Pending</Badge>
+          <span className="flex flex-col items-start gap-0.5" data-testid="member-open-payments">
+            <Badge tone="warning">
+              {openPaymentsOf(m).length === 1 ? t('admin.members.open.one') : fill(t('admin.members.open.many'), { n: openPaymentsOf(m).length })}
+            </Badge>
+            {m.openPayments && (
+              <span className="text-[var(--color-fg-quaternary)]">
+                {[...new Set(m.openPayments.map(p => (p.productType && PRODUCT_KEYS[p.productType] ? t(PRODUCT_KEYS[p.productType]) : '—')))].join(', ')}
+              </span>
+            )}
+          </span>
         </Button>
       ) : (
         <Button
