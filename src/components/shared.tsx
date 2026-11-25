@@ -501,7 +501,8 @@ export function PageHeader({
         <h1 className="text-2xl font-bold leading-8 text-[var(--color-fg-primary)] sm:text-[1.75rem] sm:leading-[2.125rem]">{title}</h1>
         {description && <p className="mt-0.5 text-sm text-[var(--color-fg-quaternary)]">{description}</p>}
       </div>
-      {actions && <div className="flex items-center gap-3 shrink-0">{actions}</div>}
+      {/* Actions wrap on narrow screens instead of pushing the page sideways. */}
+      {actions && <div className="flex flex-wrap items-center gap-3 sm:shrink-0">{actions}</div>}
     </div>
   );
 }
