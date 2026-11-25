@@ -452,8 +452,8 @@ test.describe('Scan (M13, D6)', () => {
     await expect(result).not.toContainText('Visit #');
     await expect(page.getByTestId('scan-tier')).toHaveText('Premium');
     await expect(result).toBeInViewport();
-    // The role in the sidebar is a label, not "Gym_operator".
-    await expect(page.getByRole('complementary').getByTestId('shell-role')).toHaveText('Gym owner');
+    // The role (in the desktop top bar since Phase 2B S2) is a label, not "Gym_operator".
+    await expect(page.getByTestId('top-bar').getByTestId('shell-role')).toHaveText('Gym owner');
   });
 
   test('a new visit still shows its number; idle camera text has enough contrast; Swahili labels', async ({ page }) => {

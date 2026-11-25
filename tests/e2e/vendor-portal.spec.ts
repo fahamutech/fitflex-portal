@@ -615,7 +615,8 @@ test.describe('UAT fixes', () => {
     await tall(page.locator('aside').first().getByRole('link', { name: 'Dashboard' }));
     await tall(page.getByRole('button', { name: 'Refresh' }));
     await tall(page.getByRole('link', { name: 'AB12CD' }).first());
-    await tall(page.locator('aside').first().getByRole('button', { name: 'Sign out' }));
+    // Sign-out is in the desktop top bar since Phase 2B S2.
+    await tall(page.getByTestId('top-bar').getByRole('button', { name: 'Sign out' }));
   });
 
   test('D9: Back to orders returns focus to the row', async ({ page }) => {
@@ -729,7 +730,8 @@ test.describe('UAT re-check', () => {
     const tall = async (locator: ReturnType<Page['locator']>) => expect((await locator.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44);
     await tall(page.getByRole('button', { name: 'Adjust stock for Whey Protein' }));
     await tall(page.getByRole('link', { name: 'Stock history for Whey Protein' }));
-    await tall(page.locator('aside').first().getByTestId('locale-select'));
+    // The language select is in the desktop top bar since Phase 2B S2.
+    await tall(page.getByTestId('top-bar').getByTestId('locale-select'));
   });
 
   test('(6) Back from a deep-linked order focuses the orders heading', async ({ page }) => {

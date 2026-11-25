@@ -1,13 +1,15 @@
 'use client';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { useEffect, useRef, ReactNode, useState } from 'react';
+import { useEffect, useId, useMemo, useRef, ReactNode, useState } from 'react';
 import {
   LayoutDashboard,
   QrCode,
   ClipboardList,
   LogOut,
   ChevronRight,
+  ChevronDown,
+  Search,
   Menu,
   X,
   Settings,
@@ -198,7 +200,7 @@ function roleLabel(t: (key: MessageKey) => string, user: { userType?: string; po
   return user?.portalUser ? `${base} · ${t('shell.role.staffSuffix')}` : base;
 }
 
-const ADMIN_NAV: NavItem[] = [
+const ADMIN_NAV_ITEMS: NavItem[] = [
   { href: '/admin',               labelKey: 'admin.nav.overview',       icon: LayoutDashboard, groupKey: 'nav.group.platform' },
   { href: '/admin/gyms',          labelKey: 'admin.nav.gyms',           icon: Building2,       groupKey: 'nav.group.platform', aclScope: 'gyms' },
   { href: '/admin/owners',        labelKey: 'admin.nav.owners',         icon: UserCheck,       groupKey: 'nav.group.platform', aclScope: 'owners' },
@@ -261,6 +263,33 @@ const ADMIN_NAV: NavItem[] = [
   { href: '/admin/audit',         labelKey: 'auditLog.nav',             icon: ScrollText,      groupKey: 'nav.group.system',   aclScope: 'audit' },
 ];
 
+/*
+ * Phase 2B S2: the admin sidebar is grouped by the job being done, at most seven links a group.
+ * Only the grouping and the order change here: every href, scope, flag gate and label above stays as it
+ * is. A link that is not listed (one added later) falls into System, at the end.
+ */
+const ADMIN_GROUPS: Array<[groupKey: string, hrefs: string[]]> = [
+  ['nav.group.people',         ['/admin/members', '/admin/gyms', '/admin/owners', '/admin/trainers', '/admin/trainer-sessions', '/admin/vendors', '/admin/products']],
+  ['nav.group.verification',   ['/admin/kyc', '/admin/approvals', '/admin/account-recovery', '/admin/security-incidents']],
+  ['nav.group.money',          ['/admin/payments', '/admin/refunds', '/admin/payments-held', '/admin/settlements', '/admin/trainer-settlements', '/admin/vendor-settlements', '/admin/b2b-billing']],
+  ['nav.group.financeRecords', ['/admin/distributions', '/admin/book-keeping']],
+  ['nav.group.b2b',            ['/admin/corporate', '/admin/b2b', '/admin/b2b-ops', '/admin/b2b-analytics']],
+  ['nav.group.engagement',     ['/admin/challenges', '/admin/rewards', '/admin/events', '/admin/event-rewards', '/admin/exercises', '/admin/programmes', '/admin/communications']],
+  ['nav.group.promotionShop',  ['/admin/promotion-overview', '/admin/promotions', '/admin/promotion-campaigns', '/admin/shop-merch', '/admin/promotion-analytics', '/admin/promotion-limits']],
+  ['nav.group.trust',          ['/admin/moderation', '/admin/reviews', '/admin/social', '/admin/partner-media', '/admin/hero-images']],
+  ['nav.group.insights',       ['/admin/analytics', '/admin/kpi-targets']],
+  ['nav.group.system',         ['/admin/settings', '/admin/settlement-config', '/admin/tax-rates', '/admin/users', '/admin/audit']],
+];
+const ADMIN_PLACE = new Map<string, { groupKey: string; order: number }>();
+ADMIN_GROUPS.forEach(([groupKey, hrefs], g) => hrefs.forEach((href, n) => ADMIN_PLACE.set(href, { groupKey, order: g * 100 + n })));
+const adminOrder = (item: NavItem) => (item.href === '/admin' ? -1 : ADMIN_PLACE.get(item.href)?.order ?? 10_000);
+const ADMIN_NAV: NavItem[] = ADMIN_NAV_ITEMS
+  .map(item => (item.href === '/admin' ? { ...item, groupKey: undefined } : { ...item, groupKey: ADMIN_PLACE.get(item.href)?.groupKey ?? 'nav.group.system' }))
+  .sort((a, b) => adminOrder(a) - adminOrder(b));
+
+const isActivePath = (pathname: string, href: string) =>
+  ROOTS.has(href) ? pathname.replace(/\/$/, '') === href : (pathname === href || pathname.startsWith(href + '/'));
+
 /* ── SidebarLink ─────────────────────────────────────────── */
 function SidebarLink({
   href,
@@ -315,27 +344,13 @@ function resolveLabel(t: (key: any) => string, key: string): string {
   return resolved === key ? key.split('.').pop()?.replace(/([A-Z])/g, ' $1').trim() || key : resolved;
 }
 
-/* ── Sidebar content (shared by mobile drawer + desktop) ─── */
-function SidebarContent({
-  nav,
-  onLinkClick,
-}: {
-  nav: NavItem[];
-  onLinkClick?: () => void;
-}) {
-  const pathname = usePathname();
+/* ── Role switch (Identity V2): shared by the drawer footer and the desktop top bar ── */
+function usePersonaSwitch() {
   const router = useRouter();
-  const { t, user, signOut, locale, setLocale, switchablePersonas, switchPersona } = useApp();
-  const vendor = useVendor();
-  const organizer = useOrganizer();
-  const isVendor = VENDOR_USER_TYPES.has(user?.userType ?? '');
-  const isOrganizer = ORGANIZER_USER_TYPES.has(user?.userType ?? '');
-  const businessName = vendor.me?.businessName || t('vendor.shell.unnamed');
-  const organizerName = organizer.organizer?.name || t('organizer.shell.unnamed');
+  const { t, switchPersona } = useApp();
   const [switching, setSwitching] = useState(false);
   const [switchError, setSwitchError] = useState<string | null>(null);
-
-  // Identity V2: move this session onto another portal persona of the same Person.
+  // Move this session onto another portal persona of the same Person.
   async function onSwitchPersona(personaId: string) {
     if (!personaId) return;
     setSwitching(true); setSwitchError(null);
@@ -348,6 +363,290 @@ function SidebarContent({
       setSwitching(false);
     }
   }
+  return { switching, switchError, onSwitchPersona };
+}
+
+const personaLabel = (t: (key: MessageKey) => string, p: { userType?: string; approvalStatus?: string }) =>
+  `${p.userType === 'corporate_hr' ? t('nav.personaHr') : p.userType === 'gym_staff' ? t('nav.personaStaff') : p.userType === 'vendor' ? t('nav.personaVendor') : p.userType === 'vendor_staff' ? t('nav.personaVendorStaff') : t('nav.personaOwner')}${p.approvalStatus === 'pending_approval' ? ` · ${t('nav.personaPending')}` : ''}`;
+
+/* ── Sidebar links, flat or in collapsible groups ── */
+const NAV_GROUPS_KEY = 'ff.nav.groups';
+
+function NavList({ nav, collapsible, onLinkClick }: { nav: NavItem[]; collapsible: boolean; onLinkClick?: () => void }) {
+  const pathname = usePathname();
+  const { t } = useApp();
+  const baseId = useId();
+  // What the person opened or closed by hand; a group they never touched follows the current page.
+  const [manual, setManual] = useState<Record<string, boolean>>({});
+  const loaded = useRef(false);
+
+  const groups: string[] = [];
+  nav.forEach(item => { if (item.groupKey && !groups.includes(item.groupKey)) groups.push(item.groupKey); });
+  const ungrouped = nav.filter(item => !item.groupKey);
+  const activeGroup = nav.find(item => item.groupKey && isActivePath(pathname, item.href))?.groupKey;
+
+  useEffect(() => {
+    if (!collapsible) return;
+    let stored: Record<string, boolean> | null = null;
+    if (!loaded.current) {
+      loaded.current = true;
+      try {
+        const raw = JSON.parse(localStorage.getItem(NAV_GROUPS_KEY) || '{}');
+        stored = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+      } catch { stored = {}; }
+    }
+    // Arriving on a page always shows its group, even if it was closed by hand earlier.
+    setManual(prev => {
+      const next = stored ?? prev;
+      if (activeGroup && next[activeGroup] === false) {
+        const { [activeGroup]: _closed, ...rest } = next;
+        return rest;
+      }
+      return next;
+    });
+  }, [collapsible, activeGroup, pathname]);
+
+  const toggle = (groupKey: string, open: boolean) => {
+    const next = { ...manual, [groupKey]: !open };
+    setManual(next);
+    try { localStorage.setItem(NAV_GROUPS_KEY, JSON.stringify(next)); } catch { /* private window: the choice lasts for this visit */ }
+  };
+
+  const link = (item: NavItem) => (
+    <SidebarLink
+      key={item.href}
+      href={item.href}
+      label={resolveLabel(t, item.labelKey)}
+      icon={item.icon}
+      active={isActivePath(pathname, item.href)}
+      onClick={onLinkClick}
+      count={item.count ? { n: item.count.n, tone: item.count.tone, label: fmt(t(item.count.labelKey), { n: item.count.n }) } : undefined}
+    />
+  );
+
+  return (
+    <>
+      {ungrouped.map(link)}
+      {groups.map((groupKey, g) => {
+        const items = nav.filter(item => item.groupKey === groupKey);
+        const label = resolveLabel(t, groupKey);
+        if (!collapsible) {
+          return (
+            <div key={groupKey} className="mt-4">
+              <p className="mb-1 px-3 text-xs font-semibold uppercase tracking-wider text-[var(--color-gray-400)]">{label}</p>
+              {items.map(link)}
+            </div>
+          );
+        }
+        const open = manual[groupKey] ?? groupKey === activeGroup;
+        const waiting = items.reduce((sum, item) => sum + (item.count?.n ?? 0), 0);
+        const panelId = `${baseId}-group-${g}`;
+        return (
+          <div key={groupKey} className="mt-1" data-testid="nav-group" data-group={groupKey}>
+            <button
+              type="button"
+              aria-expanded={open}
+              aria-controls={panelId}
+              onClick={() => toggle(groupKey, open)}
+              className="flex min-h-11 w-full items-center gap-2 rounded-full px-3 text-left text-sm font-semibold text-white transition-colors hover:bg-[var(--color-sidebar-hover)]"
+            >
+              <span className="flex-1 truncate" title={label}>{label}</span>
+              {!open && waiting > 0 && (
+                <span aria-hidden="true" className="shrink-0 rounded-full bg-[var(--color-warning-100)] px-2 py-0.5 text-xs font-semibold tabular-nums text-[var(--color-warning-800)]">
+                  {waiting > 99 ? '99+' : waiting}
+                </span>
+              )}
+              {open
+                ? <ChevronDown aria-hidden="true" className="h-4 w-4 shrink-0 opacity-70" />
+                : <ChevronRight aria-hidden="true" className="h-4 w-4 shrink-0 opacity-70" />}
+            </button>
+            {/* Closed groups stay in the page (hidden), so "this link does not exist" still means no permission. */}
+            <div id={panelId} hidden={!open} className="pl-2">
+              {items.map(link)}
+            </div>
+          </div>
+        );
+      })}
+    </>
+  );
+}
+
+/* ── Page finder: type part of a page or group name and jump to it. Lists only links in this person's menu. ── */
+function PageFinder({ nav }: { nav: NavItem[] }) {
+  const { t } = useApp();
+  const router = useRouter();
+  const listId = useId();
+  const [query, setQuery] = useState('');
+  const [active, setActive] = useState(0);
+  const [open, setOpen] = useState(false);
+
+  const matches = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return [];
+    return nav
+      .map(item => ({ href: item.href, label: resolveLabel(t, item.labelKey), group: item.groupKey ? resolveLabel(t, item.groupKey) : '' }))
+      .filter(item => item.label.toLowerCase().includes(q) || item.group.toLowerCase().includes(q))
+      .slice(0, 8);
+  }, [query, nav, t]);
+
+  const go = (href: string) => { setQuery(''); setOpen(false); router.push(href); };
+  const showList = open && query.trim().length > 0;
+  const current = Math.min(active, Math.max(matches.length - 1, 0));
+
+  return (
+    <div className="relative w-full max-w-xs" data-testid="page-finder">
+      <Search aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--color-fg-quaternary)]" />
+      <input
+        type="text"
+        role="combobox"
+        aria-label={t('shell.finder.label')}
+        aria-expanded={showList}
+        aria-controls={listId}
+        aria-autocomplete="list"
+        aria-activedescendant={showList && matches.length ? `${listId}-${current}` : undefined}
+        placeholder={t('shell.finder.label')}
+        value={query}
+        onChange={e => { setQuery(e.target.value); setActive(0); setOpen(true); }}
+        onFocus={() => setOpen(true)}
+        onBlur={() => setOpen(false)}
+        onKeyDown={e => {
+          if (e.key === 'ArrowDown') { e.preventDefault(); setOpen(true); setActive(Math.min(current + 1, matches.length - 1)); }
+          else if (e.key === 'ArrowUp') { e.preventDefault(); setActive(Math.max(current - 1, 0)); }
+          else if (e.key === 'Enter' && showList && matches[current]) { e.preventDefault(); go(matches[current].href); }
+          else if (e.key === 'Escape') { setQuery(''); setOpen(false); }
+        }}
+        className="h-10 w-full rounded-full border border-[var(--color-border-input)] bg-[var(--color-bg-primary)] pl-9 pr-4 text-sm text-[var(--color-fg-primary)] placeholder:text-[var(--color-fg-quaternary)]"
+      />
+      <div id={listId} role="listbox" aria-label={t('shell.finder.label')} hidden={!showList}
+        className="absolute left-0 right-0 top-full z-30 mt-1 rounded-[var(--radius-md)] bg-[var(--color-bg-primary)] p-1 shadow-[var(--shadow-lg)]">
+        {matches.map((item, i) => (
+          <div
+            key={item.href}
+            id={`${listId}-${i}`}
+            role="option"
+            aria-selected={i === current}
+            // mousedown, not click: the input's blur would close the list before a click lands.
+            onMouseDown={e => { e.preventDefault(); go(item.href); }}
+            onMouseEnter={() => setActive(i)}
+            className={cn('flex min-h-11 cursor-pointer items-center justify-between gap-3 rounded-[var(--radius-sm)] px-3 text-sm', i === current ? 'bg-[var(--color-bg-tertiary)] text-[var(--color-fg-primary)]' : 'text-[var(--color-fg-secondary)]')}
+          >
+            <span className="truncate font-medium">{item.label}</span>
+            {item.group && <span className="shrink-0 text-xs text-[var(--color-fg-tertiary)]">{item.group}</span>}
+          </div>
+        ))}
+        {matches.length === 0 && <p role="status" className="px-3 py-2.5 text-sm text-[var(--color-fg-tertiary)]">{t('common.noResults')}</p>}
+      </div>
+    </div>
+  );
+}
+
+/* ── Desktop top bar: where am I, find a page, language, role, sign out ── */
+function TopBar({ nav }: { nav: NavItem[] }) {
+  const pathname = usePathname();
+  const router = useRouter();
+  const { t, user, signOut, locale, setLocale, switchablePersonas } = useApp();
+  const { switching, switchError, onSwitchPersona } = usePersonaSwitch();
+
+  // The link that owns this page: the longest href that matches, as the sidebar highlights it.
+  let here: NavItem | undefined;
+  for (const item of nav) {
+    if (isActivePath(pathname, item.href) || (!ROOTS.has(item.href) && pathname.startsWith(`${item.href}/`))) {
+      if (!here || item.href.length > here.href.length) here = item;
+    }
+  }
+  const name = (user as any)?.displayName || user?.email || user?.id || '—';
+
+  return (
+    <header data-testid="top-bar" className="hidden h-16 shrink-0 items-center gap-4 border-b border-[var(--color-border-canvas)] bg-[var(--color-bg-primary)] px-8 lg:flex print:!hidden">
+      {here && (
+        <nav aria-label={t('shell.breadcrumb')} className="min-w-0 shrink text-sm text-[var(--color-fg-tertiary)]">
+          <ol className="m-0 flex min-w-0 list-none items-center gap-1.5 p-0">
+            {here.groupKey && <li className="truncate">{resolveLabel(t, here.groupKey)}</li>}
+            {here.groupKey && <li aria-hidden="true">›</li>}
+            <li aria-current="page" className="truncate font-semibold text-[var(--color-fg-primary)]">{resolveLabel(t, here.labelKey)}</li>
+          </ol>
+        </nav>
+      )}
+      {nav.length > 8 && <PageFinder nav={nav} />}
+      <div className="flex-1" />
+
+      <div className="flex items-center gap-1 text-[var(--color-fg-tertiary)]">
+        <Globe aria-hidden="true" className="h-4 w-4" />
+        <select
+          data-testid="locale-select"
+          aria-label={t('common.language')}
+          value={locale}
+          onChange={e => setLocale(e.target.value as 'en' | 'sw')}
+          className="min-h-11 cursor-pointer rounded-full border-none bg-transparent px-1 text-sm font-medium text-[var(--color-fg-secondary)]"
+        >
+          <option value="en">English</option>
+          <option value="sw">Kiswahili</option>
+        </select>
+      </div>
+
+      {/* Identity V2: switch role, only when another portal persona exists */}
+      {switchablePersonas.length > 0 && (
+        <div data-testid="persona-switcher" className="min-w-0">
+          <select
+            id="persona-select-top"
+            data-testid="persona-select"
+            aria-label={t('nav.switchRole')}
+            disabled={switching}
+            value=""
+            onChange={e => onSwitchPersona(e.target.value)}
+            className="min-h-11 max-w-[12rem] cursor-pointer rounded-full border border-[var(--color-border-input)] bg-[var(--color-bg-primary)] px-3 text-sm font-medium text-[var(--color-fg-secondary)]"
+          >
+            <option value="" disabled>{t('nav.switchRole')}</option>
+            {switchablePersonas.map(p => <option key={p.id} value={p.id}>{personaLabel(t, p)}</option>)}
+          </select>
+          {switchError && <p className="mt-1 text-xs text-[var(--color-error-700)]" role="alert">{switchError}</p>}
+        </div>
+      )}
+
+      <div className="flex min-w-0 items-center gap-3">
+        <Avatar name={(user as any)?.displayName || user?.email || user?.id || 'User'} size="sm" />
+        <div className="min-w-0 max-w-[14rem]">
+          <p className="truncate text-sm font-semibold text-[var(--color-fg-primary)]" title={name}>{name}</p>
+          <p className="truncate text-xs text-[var(--color-fg-tertiary)]" data-testid="shell-role">{roleLabel(t, user)}</p>
+        </div>
+        <button
+          type="button"
+          onClick={() => { signOut(); router.replace('/login'); }}
+          className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-[var(--color-fg-tertiary)] transition-colors hover:bg-[var(--color-bg-tertiary)] hover:text-[var(--color-fg-primary)]"
+          title={t('nav.signout')}
+          aria-label={t('nav.signout')}
+        >
+          <LogOut aria-hidden="true" className="h-4 w-4" />
+        </button>
+      </div>
+    </header>
+  );
+}
+
+/* ── Sidebar content (shared by mobile drawer + desktop) ─── */
+function SidebarContent({
+  nav,
+  onLinkClick,
+  collapsible = false,
+  footer = true,
+}: {
+  nav: NavItem[];
+  onLinkClick?: () => void;
+  /** Admin: groups open and close; the one holding the current page opens by itself. */
+  collapsible?: boolean;
+  /** Language, role switch and sign-out. Off on desktop, where the top bar holds them. */
+  footer?: boolean;
+}) {
+  const pathname = usePathname();
+  const router = useRouter();
+  const { t, user, signOut, locale, setLocale, switchablePersonas, switchPersona } = useApp();
+  const vendor = useVendor();
+  const organizer = useOrganizer();
+  const isVendor = VENDOR_USER_TYPES.has(user?.userType ?? '');
+  const isOrganizer = ORGANIZER_USER_TYPES.has(user?.userType ?? '');
+  const businessName = vendor.me?.businessName || t('vendor.shell.unnamed');
+  const organizerName = organizer.organizer?.name || t('organizer.shell.unnamed');
+  const { switching, switchError, onSwitchPersona } = usePersonaSwitch();
 
   return (
     <div className="flex h-full flex-col">
@@ -378,45 +677,11 @@ function SidebarContent({
 
       {/* Nav items */}
       <nav aria-label={t('common.mainNavigation')} className="flex-1 overflow-y-auto px-3 py-4">
-        {(() => {
-          const groups: string[] = [];
-          nav.forEach(item => { if (item.groupKey && !groups.includes(item.groupKey)) groups.push(item.groupKey); });
-          const ungrouped = nav.filter(item => !item.groupKey);
-          return (
-            <>
-              {ungrouped.map(item => (
-                <SidebarLink
-                  key={item.href}
-                  href={item.href}
-                  label={resolveLabel(t, item.labelKey)}
-                  icon={item.icon}
-                  active={ROOTS.has(item.href) ? pathname.replace(/\/$/, '') === item.href : (pathname === item.href || pathname.startsWith(item.href + '/'))}
-                  onClick={onLinkClick}
-                  count={item.count ? { n: item.count.n, tone: item.count.tone, label: fmt(t(item.count.labelKey), { n: item.count.n }) } : undefined}
-                />
-              ))}
-              {groups.map(groupKey => (
-                <div key={groupKey} className="mt-4">
-                  <p className="mb-1 px-3 text-xs font-semibold uppercase tracking-wider text-[var(--color-gray-400)]">{resolveLabel(t, groupKey)}</p>
-                  {nav.filter(item => item.groupKey === groupKey).map(item => (
-                    <SidebarLink
-                      key={item.href}
-                      href={item.href}
-                      label={resolveLabel(t, item.labelKey)}
-                      icon={item.icon}
-                      active={ROOTS.has(item.href) ? pathname.replace(/\/$/, '') === item.href : (pathname === item.href || pathname.startsWith(item.href + '/'))}
-                      onClick={onLinkClick}
-                      count={item.count ? { n: item.count.n, tone: item.count.tone, label: fmt(t(item.count.labelKey), { n: item.count.n }) } : undefined}
-                    />
-                  ))}
-                </div>
-              ))}
-            </>
-          );
-        })()}
+        <NavList nav={nav} collapsible={collapsible} onLinkClick={onLinkClick} />
       </nav>
 
-      {/* Footer */}
+      {/* Footer (phone and tablet drawer). On desktop these controls are in the top bar. */}
+      {footer ? (
       <div className="shrink-0 px-3 py-4 border-t border-[var(--color-gray-800)] space-y-1">
         {/* Locale toggle */}
         <div className="flex items-center gap-2 px-3 py-2">
@@ -481,6 +746,9 @@ function SidebarContent({
           </button>
         </div>
       </div>
+      ) : isVendor && vendor.can('staff') ? (
+        <p className="shrink-0 border-t border-[var(--color-gray-800)] px-6 py-4 text-xs text-[var(--color-gray-400)]" data-testid="vendor-staff-in-app">{t('vendor.shell.staffInApp')}</p>
+      ) : null}
     </div>
   );
 }
@@ -760,24 +1028,13 @@ export function Shell({ children }: { children: ReactNode }) {
 
       {/* ── Desktop sidebar ── */}
       <aside className="hidden lg:flex lg:w-64 lg:flex-col lg:shrink-0 bg-[var(--color-sidebar-bg)] print:!hidden">
-        <SidebarContent nav={visibleNav} />
-      </aside>
-
-      {/* ── Mobile sidebar overlay ── */}
-      {mobileOpen && (
-        <div className="fixed inset-0 z-40 lg:hidden" onClick={() => { setMobileOpen(false); menuButtonRef.current?.focus(); }}>
-          <div className="absolute inset-0 bg-black/60" />
-        </div>
-      )}
-      <aside id="mobile-drawer" ref={drawerRef} inert={!mobileOpen} className={cn(
-        'fixed inset-y-0 left-0 z-50 w-72 bg-[var(--color-sidebar-bg)] transition-transform duration-200 lg:hidden',
-        mobileOpen ? 'translate-x-0' : '-translate-x-full',
-      )}>
-        <SidebarContent nav={visibleNav} onLinkClick={() => setMobileOpen(false)} />
+        <SidebarContent nav={visibleNav} collapsible={!!isAdminUser} footer={false} />
       </aside>
 
       {/* ── Main area ── */}
       <div className="flex flex-1 flex-col overflow-hidden print:block print:overflow-visible">
+
+        <TopBar nav={visibleNav} />
 
         {/* Mobile top bar */}
         <header className="flex h-14 shrink-0 items-center justify-between gap-3 border-b border-[var(--color-border-canvas)] bg-[var(--color-bg-primary)] px-4 lg:hidden print:hidden">
@@ -826,6 +1083,21 @@ export function Shell({ children }: { children: ReactNode }) {
         </main>
 
       </div>
+
+      {/* The drawer comes after the main area in the page so the top bar's language, role and sign-out
+          controls are the first of their kind; it is position: fixed, so where it sits here does not matter. */}
+      {/* ── Mobile sidebar overlay ── */}
+      {mobileOpen && (
+        <div className="fixed inset-0 z-40 lg:hidden" onClick={() => { setMobileOpen(false); menuButtonRef.current?.focus(); }}>
+          <div className="absolute inset-0 bg-black/60" />
+        </div>
+      )}
+      <aside id="mobile-drawer" ref={drawerRef} inert={!mobileOpen} className={cn(
+        'fixed inset-y-0 left-0 z-50 w-72 bg-[var(--color-sidebar-bg)] transition-transform duration-200 lg:hidden',
+        mobileOpen ? 'translate-x-0' : '-translate-x-full',
+      )}>
+        <SidebarContent nav={visibleNav} collapsible={!!isAdminUser} onLinkClick={() => setMobileOpen(false)} />
+      </aside>
     </div>
   );
 }

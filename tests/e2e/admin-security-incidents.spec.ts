@@ -402,11 +402,14 @@ test('staff without the scope neither see the nav item nor reach the page', asyn
   const calls = await setup(page, { id: 'staff-2', userType: 'admin', portalUser: true, aclPermissions: ['payments'], email: 'pay@fitflex.test' });
   // Their own start page first: next dev drops a redirect to a page it has not compiled yet.
   await page.goto('/admin');
+  // Phase 2B S2: sidebar groups start closed (only the current page's group is open). Open them all first.
+  for (const closed = page.locator('aside:not(#mobile-drawer) [data-testid="nav-group"] > button[aria-expanded="false"]'); await closed.count() > 0;) await closed.first().click();
   await expect(page.getByRole('link', { name: 'Payments' }).first()).toBeVisible();
   await page.goto('/admin/security-incidents');
   await expect(page).not.toHaveURL(/security-incidents/);
   await expect(page.getByRole('link', { name: 'Payments' }).first()).toBeVisible();
-  await expect(page.getByRole('link', { name: 'Security reports' })).toHaveCount(0);
+  // Hidden links count too: the link must not exist, open group or closed.
+  await expect(page.locator('a[href^="/admin/security-incidents"]')).toHaveCount(0);
   expect(calls).toHaveLength(0);
 });
 

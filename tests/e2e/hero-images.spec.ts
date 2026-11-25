@@ -104,8 +104,11 @@ test.describe('flags off', () => {
     await signInAs(page, SUPER_ADMIN);
     await mockHeroApi(page, s);
     await page.goto('/admin/');
+    // Phase 2B S2: sidebar groups start closed (only the current page's group is open). Open them all first.
+    for (const closed = page.locator('aside:not(#mobile-drawer) [data-testid="nav-group"] > button[aria-expanded="false"]'); await closed.count() > 0;) await closed.first().click();
     await expect(page.getByRole('link', { name: 'Exercises' })).toBeVisible();
     await expect(page.getByRole('link', { name: 'App photos' })).toHaveCount(0);
+    await expect(page.locator('a[href^="/admin/hero-images"]')).toHaveCount(0);
     await page.goto('/admin/hero-images/');
     await expect(page.getByText('404')).toBeVisible();
     await expect(page.getByTestId('hero-images-page')).toHaveCount(0);
