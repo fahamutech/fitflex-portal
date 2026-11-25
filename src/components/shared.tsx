@@ -4,6 +4,8 @@ import { cn } from '@/lib/cn';
 
 export { ToastProvider, useToast } from './ui/toast';
 export type { ToastApi, ToastOptions, ToastTone } from './ui/toast';
+export { Toolbar, FilterChip, Tabs, TabPanel, KeyValueList, FeatureCard, QueueCard, FormSection } from './ui/kit';
+export type { TabItem } from './ui/kit';
 
 /* ─────────────────────────────────────────────
    Button  —  Untitled UI style
@@ -12,10 +14,11 @@ type BtnVariant = 'primary' | 'secondary' | 'ghost' | 'destructive' | 'link';
 type BtnSize    = 'sm' | 'md' | 'lg';
 
 const btnVariants: Record<BtnVariant, string> = {
-  primary:     'bg-[var(--color-brand-600)] text-white border border-[var(--color-brand-600)] hover:bg-[var(--color-brand-700)] hover:border-[var(--color-brand-700)] shadow-[var(--shadow-xs)]',
-  secondary:   'bg-[var(--color-bg-primary)] text-[var(--color-fg-secondary)] border border-[var(--color-border-primary)] hover:bg-[var(--color-bg-secondary)] shadow-[var(--shadow-xs)]',
+  // Lime fill with forest text (11.5:1): the one main action of a view.
+  primary:     'bg-[var(--color-lime)] text-[var(--color-on-lime)] border border-[var(--color-lime)] hover:bg-[var(--color-lime-pressed)] hover:border-[var(--color-lime-pressed)]',
+  secondary:   'bg-[var(--color-bg-primary)] text-[var(--color-fg-primary)] border border-[var(--color-border-input)] hover:bg-[var(--color-bg-secondary)]',
   ghost:       'text-[var(--color-fg-secondary)] border border-transparent hover:bg-[var(--color-bg-tertiary)] hover:text-[var(--color-fg-primary)]',
-  destructive: 'bg-[var(--color-error-600)] text-white border border-[var(--color-error-600)] hover:bg-[var(--color-error-700)] shadow-[var(--shadow-xs)]',
+  destructive: 'bg-[var(--color-error-600)] text-white border border-[var(--color-error-600)] hover:bg-[var(--color-error-700)]',
   link:        'text-[var(--color-brand-700)] underline-offset-4 hover:underline border border-transparent p-0 h-auto',
 };
 
@@ -35,8 +38,9 @@ export const Button = forwardRef<
     disabled={disabled || loading}
     aria-busy={loading || rest['aria-busy'] || undefined}
     className={cn(
-      'inline-flex items-center justify-center font-semibold rounded-[var(--radius-lg)] transition-colors duration-100',
-      'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand-500)] focus-visible:ring-offset-2',
+      // Everything you press is a pill. Focus ring is forest so it shows on white, sage and next to lime.
+      'inline-flex items-center justify-center font-semibold rounded-full transition-colors duration-100',
+      'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-forest)] focus-visible:ring-offset-2',
       'disabled:cursor-not-allowed disabled:opacity-50',
       btnVariants[variant],
       btnSizes[size],
@@ -57,7 +61,8 @@ export function Card({ className, children, ...rest }: HTMLAttributes<HTMLDivEle
     <div
       {...rest}
       className={cn(
-        'rounded-[var(--radius-xl)] border border-[var(--color-border-canvas)] bg-[var(--color-bg-primary)] shadow-[var(--shadow-sm)]',
+        // No border: the soft shadow separates the card from the sage canvas (never both).
+        'rounded-[var(--radius-xl)] bg-[var(--color-bg-primary)] shadow-[var(--shadow-sm)]',
         className,
       )}
     >
@@ -493,10 +498,11 @@ export function PageHeader({
   return (
     <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between sm:gap-4 mb-6">
       <div>
-        <h1 className="text-xl font-semibold text-[var(--color-fg-primary)]">{title}</h1>
+        <h1 className="text-2xl font-bold leading-8 text-[var(--color-fg-primary)] sm:text-[1.75rem] sm:leading-[2.125rem]">{title}</h1>
         {description && <p className="mt-0.5 text-sm text-[var(--color-fg-quaternary)]">{description}</p>}
       </div>
-      {actions && <div className="flex items-center gap-3 shrink-0">{actions}</div>}
+      {/* Actions wrap on narrow screens instead of pushing the page sideways. */}
+      {actions && <div className="flex flex-wrap items-center gap-3 sm:shrink-0">{actions}</div>}
     </div>
   );
 }

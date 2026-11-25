@@ -92,10 +92,10 @@ export function SubscriptionTiersEditor({ tiers, setTiers, currency, savedKeys =
                   {err('key')}
                 </Td>
                 <Td>
-                  <Input size="sm" className="min-w-[6rem]" aria-label={t('tiers.col.label')} value={row.label} onChange={e => update(i, { label: e.target.value })} />
+                  <Input size="sm" className="min-w-[5rem]" aria-label={t('tiers.col.label')} value={row.label} onChange={e => update(i, { label: e.target.value })} />
                 </Td>
                 <Td>
-                  <Input size="sm" className="min-w-[6rem] text-right font-mono tabular-nums" type="number" min={0} step={1}
+                  <Input size="sm" className="min-w-[5rem] text-right font-mono tabular-nums" type="number" min={0} step={1}
                     aria-label={fillIn(t('tiers.col.price'), { currency: currencyLabel(currency) })} aria-invalid={!!errs.monthlyPrice}
                     value={Number.isFinite(Number(row.monthlyPrice)) ? row.monthlyPrice : ''}
                     onChange={e => update(i, { monthlyPrice: e.target.value === '' ? NaN : Number(e.target.value) })}
@@ -121,7 +121,7 @@ export function SubscriptionTiersEditor({ tiers, setTiers, currency, savedKeys =
                   {err('visits')}
                 </Td>
                 <Td>
-                  <Select size="sm" className="min-w-[16rem]" aria-label={t('tiers.col.gymAccess')} aria-invalid={!!errs.gymAccess}
+                  <Select size="sm" className="min-w-[18rem]" aria-label={t('tiers.col.gymAccess')} aria-invalid={!!errs.gymAccess}
                     value={gymAccessValid(row.gymAccess) ? row.gymAccess : ''} onChange={e => update(i, { gymAccess: e.target.value })}
                     data-testid={`tier-${i}-gym-access`}>
                     {!gymAccessValid(row.gymAccess) && <option value="">{t('tiers.gymAccess.choose')}</option>}
