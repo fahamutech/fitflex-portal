@@ -284,7 +284,7 @@ function SidebarLink({
       aria-current={active ? 'page' : undefined}
       aria-label={count ? count.label : undefined}
       className={cn(
-        'group flex min-h-11 items-center gap-3 rounded-[var(--radius-md)] px-3 py-2.5 text-sm font-medium transition-colors',
+        'group flex min-h-11 items-center gap-3 rounded-full px-3 py-2.5 text-sm font-medium transition-colors',
         active
           ? 'bg-[var(--color-sidebar-active)] text-[var(--color-sidebar-text-active)] font-semibold'
           : 'text-[var(--color-sidebar-text)] hover:bg-[var(--color-sidebar-hover)] hover:text-white',

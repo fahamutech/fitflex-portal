@@ -462,8 +462,8 @@ test.describe('Scan (M13, D6)', () => {
     await page.goto('/scan');
     const off = page.getByText('Kamera imezimwa');
     await expect(off).toBeVisible();
-    // gray-400 (#98a2b3) on gray-950: well above 4.5:1.
-    await expect(off.locator('xpath=..')).toHaveCSS('color', 'rgb(152, 162, 179)');
+    // gray-400 (#9aa59f since Phase 2B S1) on gray-950 (#0a211a): 6.5:1, above 4.5:1.
+    await expect(off.locator('xpath=..')).toHaveCSS('color', 'rgb(154, 165, 159)');
     for (const sw of ['Kamera', 'Kuweka kwa mkono', 'Wasilisha']) await expect(page.getByText(sw, { exact: true })).toBeVisible();
     await page.getByTestId('manual-token').fill('usr_1.abc.sig');
     await page.getByTestId('manual-submit').click();

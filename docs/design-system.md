@@ -1,5 +1,24 @@
 # FitFlex portal design system
 
+> **Phase 2B S1 (2026-11-25): the portal follows the FitFlex Design System (lime and forest).**
+> Where the sections below still describe the earlier green and Inter look, this note wins:
+>
+> - **Font:** Plus Jakarta Sans (`--font-jakarta`, loaded in `app/layout.tsx`), weights 400 to 800.
+> - **Brand ramp:** forest-based. `brand-600` is forest `#102d24` (white text 14.6:1); `brand-25` to
+>   `brand-200` are sage tints; `brand-300` to `brand-500` are mid greens for borders, rings and small fills.
+> - **Lime** (`--color-lime` `#d4ef68`, text on it `--color-on-lime`): a fill only. Primary buttons, the
+>   active sidebar item and at most one `FeatureCard` per page. Never text or an icon on a light ground.
+> - **Neutrals:** the `gray-*` ramp now carries the forest hue (`gray-500` is `#5b6b64`, `gray-900` is forest).
+> - **Canvas:** sage `#f3f5f0`. Cards are white with a soft shadow and no border.
+> - **Shape:** everything you press is a pill (`Button`, sidebar links, `FilterChip`, `Tabs`); controls
+>   12px (`--radius-md`), cards 20px (`--radius-xl`), feature card 24px (`--radius-2xl`).
+> - **Buttons:** `primary` is lime with forest text, one per view; `secondary` is white with a control edge;
+>   focus ring is forest.
+> - **New pieces** (`src/components/ui/kit.tsx`, exported from `shared`): `Toolbar`, `FilterChip`, `Tabs` +
+>   `TabPanel`, `KeyValueList`, `FeatureCard`, `QueueCard`, `FormSection`. They carry no strings of their own.
+> - **Not changed in S1:** status ramps (success, warning, error, info), chart colours set in page files,
+>   the PWA manifest colours.
+
 Tokens live in `app/globals.css` (`@theme`). Primitives live in `src/components/shared.tsx`
 (re-exporting `src/components/ui/*`). Import everything from `@/components/shared`. Use tokens
 through arbitrary values (`bg-[var(--color-brand-600)]`) and merge classes with `cn()` from `@/lib/cn`.

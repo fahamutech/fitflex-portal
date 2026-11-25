@@ -1,7 +1,8 @@
-import { Inter } from 'next/font/google';
+import { Plus_Jakarta_Sans } from 'next/font/google';
 import './globals.css';
 
-const inter = Inter({ subsets: ['latin'], display: 'swap', variable: '--font-inter' });
+// FitFlex Design System face (Phase 2B S1). Weights 400 to 800, as the system bundles.
+const jakarta = Plus_Jakarta_Sans({ subsets: ['latin'], weight: ['400', '500', '600', '700', '800'], display: 'swap', variable: '--font-jakarta' });
 import { Providers } from './providers';
 import { Shell } from '../src/components/Shell';
 
@@ -25,12 +26,12 @@ export const metadata = {
 };
 
 export const viewport = {
-  themeColor: '#101828',
+  themeColor: '#102d24',
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className={inter.variable} suppressHydrationWarning>
+    <html lang="en" className={jakarta.variable} suppressHydrationWarning>
       <head>
         {/* Set <html lang> before first paint for returning Swahili users; the
             provider keeps it in step afterwards. Static string, no user input. */}
