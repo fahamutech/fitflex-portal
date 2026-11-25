@@ -45,7 +45,7 @@ import {
 import { useApp } from '../../app/providers';
 import { ChangePasswordGate } from './change-password-gate';
 import { cn } from '@/lib/cn';
-import { ORGANIZER_USER_TYPES, VENDOR_USER_TYPES, type OrganizerRole, type OrganizerStatus, type VendorTools } from '@/lib/api';
+import { api, ORGANIZER_USER_TYPES, VENDOR_USER_TYPES, type OrganizerRole, type OrganizerStatus, type VendorTools } from '@/lib/api';
 import type { MessageKey } from '@/lib/i18n';
 import { fmt, VENDOR_AREAS, vendorAreaOpen } from '@/lib/vendor';
 import { Alert, Avatar, Badge, Button, Card, CardContent, SkeletonCard, useToast } from './shared';
@@ -342,6 +342,20 @@ function resolveLabel(t: (key: any) => string, key: string): string {
   const resolved = t(key);
   // If translation returns the key itself, fall back to a human-readable version
   return resolved === key ? key.split('.').pop()?.replace(/([A-Z])/g, ' $1').trim() || key : resolved;
+}
+
+/** Listings waiting for moderation (GET /admin/moderation/counts). 0 while loading, on any failure, or without the scope. */
+function useModerationPending(token: string | null | undefined, enabled: boolean): number {
+  const [pending, setPending] = useState(0);
+  useEffect(() => {
+    if (!enabled || !token) { setPending(0); return; }
+    let live = true;
+    api.moderationCounts(token)
+      .then(r => { if (live) setPending(Number(r?.counts?.pending) || 0); })
+      .catch(() => { if (live) setPending(0); });
+    return () => { live = false; };
+  }, [token, enabled]);
+  return pending;
 }
 
 /* ── Role switch (Identity V2): shared by the drawer footer and the desktop top bar ── */
@@ -772,6 +786,8 @@ export function Shell({ children }: { children: ReactNode }) {
   const isVendor      = !!token && VENDOR_USER_TYPES.has(user?.userType ?? '');
   const isOrganizer   = !!token && ORGANIZER_USER_TYPES.has(user?.userType ?? '');
   const adminEvents = useAdminEventsSummary(token, !!isAdminUser && hasPermission('events'));
+  // Phase 2B S3: listings waiting for moderation, from the light counts endpoint (one small request).
+  const moderationPending = useModerationPending(token, !!isAdminUser && (hasPermission('moderation') || hasPermission('moderation_decide')));
   const organizerOptions = useEventsOptions(isOrganizer && EVENTS_MODULE);
   const adminEventOptions = useEventsOptions(!!isAdminUser && EVENTS_MODULE);
   const eventRewardsOn = resultsOf(adminEventOptions).rewards;
@@ -804,6 +820,8 @@ export function Shell({ children }: { children: ReactNode }) {
         return scopesOf(item).some(hasPermission);   // portal staff: check ACL
       }).map(item => (item.href === '/admin/events' && adminEvents.submitted > 0
         ? { ...item, count: { n: adminEvents.submitted, labelKey: 'admin.nav.eventsCount' as MessageKey, tone: 'warning' as const } }
+        : item.href === '/admin/moderation' && moderationPending > 0
+        ? { ...item, count: { n: moderationPending, labelKey: 'admin.nav.moderationCount' as MessageKey, tone: 'warning' as const } }
         : item))
     : isOrgUser ? orgNav(user?.organizationRoles, corporateEvents)
     : isHr ? hrNav(corporateEvents)

@@ -1,4 +1,5 @@
 import { expect, request, test } from '@playwright/test';
+import { openAllNavGroups } from './helpers/nav';
 
 const API = process.env.FITFLEX_API_URL || 'http://localhost:3000';
 
@@ -50,7 +51,9 @@ test('gym image upload proxies through /storage and shows the returned URL', asy
   });
 
   await page.goto('/admin');
-  await page.getByRole('link', { name: 'Gyms' }).first().click();
+  // The overview no longer has a "Manage Gyms" shortcut (Phase 2B S3); use the sidebar link.
+  await openAllNavGroups(page);
+  await page.getByRole('link', { name: 'Gyms', exact: true }).first().click();
   await page.getByRole('button', { name: 'Create gym' }).click();
   await expect(page.getByRole('heading', { name: /Create gym/ })).toBeVisible();
 
