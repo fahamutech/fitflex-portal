@@ -1,4 +1,5 @@
 import { expect, test, type Page, type Request } from '@playwright/test';
+import { openAllNavGroups } from './helpers/nav';
 
 // Admin tax rates (S5 §7.3, maker ≠ checker) and the VAT registration section of a vendor's KYC case (§7.4),
 // against a mocked API. Network guard: every request outside localhost is aborted and recorded, for the whole
@@ -92,7 +93,7 @@ test.describe('tax rates', () => {
     const calls = await mockApi(page, { 'GET /admin/tax-rates': { json: { asOf: day(0), codes, rates: seed() } } });
     await page.goto('/admin/payments/');
     // Phase 2B S2: sidebar groups start closed (only the current page's group is open). Open them all first.
-    for (const closed = page.locator('aside:not(#mobile-drawer) [data-testid="nav-group"] > button[aria-expanded="false"]'); await closed.count() > 0;) await closed.first().click();
+    await openAllNavGroups(page);
     await page.getByRole('link', { name: 'Tax rates' }).click();
     await expect(page).toHaveURL(/\/admin\/tax-rates\/?$/);
     // The design-system Table names its scrollable region.

@@ -1,5 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import { messages } from '../../src/lib/i18n';
+import { openAllNavGroups } from './helpers/nav';
 import {
   autoPlate, checkFileBasics, checkFileSize, eatDateTime, PARTNER_MEDIA_ERROR_CODES, partnerMediaErrorText, reasonsFor, takedownReady,
 } from '../../src/lib/partner-media';
@@ -122,6 +123,7 @@ test.describe('flag off', () => {
     await signInAs(page, SUPER_ADMIN);
     await mockPartnerMediaApi(page, s);
     await page.goto('/admin/');
+    await openAllNavGroups(page);
     await expect(nav(page).getByRole('link', { name: 'Listing moderation' })).toBeVisible();
     await expect(nav(page).getByRole('link', { name: 'Partner photos' })).toHaveCount(0);
     await page.goto('/admin/partner-media/');

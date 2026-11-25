@@ -1,5 +1,6 @@
 import { expect, test, type Page, type Request } from '@playwright/test';
 import { deflateSync } from 'node:zlib';
+import { openAllNavGroups } from './helpers/nav';
 
 // Shop home banners (Phase 2 S1) against a mocked API: the admin merch queue (/admin/shop-merch: tabs, detail with
 // previews in both languages and themes, approve with the checklist, reject with a reason, own-item block, end,
@@ -136,6 +137,7 @@ test.describe('admin merch queue', () => {
     await signIn(page, SUPER);
     const calls = await mockApi(page, [['GET', /^\/admin\/shop-merch$/, () => ({ status: 404, json: { error: 'feature_disabled' } })]]);
     await page.goto('/admin/');
+    await openAllNavGroups(page);
     await expect(nav(page).getByRole('link', { name: 'Promotions', exact: true })).toBeVisible();
     await expect(nav(page).getByRole('link', { name: 'Banners & flash sales' })).toHaveCount(0);
     await page.goto('/admin/shop-merch/');
@@ -147,6 +149,7 @@ test.describe('admin merch queue', () => {
     await signIn(page, SUPER);
     const calls = await mockApi(page, adminRoutes(ITEMS()));
     await page.goto('/admin/');
+    await openAllNavGroups(page);
     await nav(page).getByRole('link', { name: 'Banners & flash sales' }).click();
     await expect(page).toHaveURL(/\/admin\/shop-merch\/?/);
     await expect(page.getByTestId('merch-count-requests')).toHaveText('3');

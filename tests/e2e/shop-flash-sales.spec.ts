@@ -1,4 +1,5 @@
 import { expect, test, type Page, type Request } from '@playwright/test';
+import { openAllNavGroups } from './helpers/nav';
 
 // Shop flash sales (Phase 2 S4) against a mocked API built to fitflex-functions docs/shop-flash-sales-api.md:
 // the admin merch queue (Flash sales kind and type filter, discount column, detail with price check / 14-day rule /
@@ -149,6 +150,7 @@ test.describe('admin: flash sales in the merch queue', () => {
     await signIn(page, SUPER);
     const calls = await mockApi(page, adminRoutes({ banners: 'off' }));
     await page.goto('/admin/');
+    await openAllNavGroups(page);
     await nav(page).getByRole('link', { name: 'Banners & flash sales' }).click();
     await expect(page.getByTestId('merch-row-fls_1')).toContainText('Whey Protein 1kg');
     await expect(page.getByTestId('merch-row-fls_1')).toContainText('Flash sale');

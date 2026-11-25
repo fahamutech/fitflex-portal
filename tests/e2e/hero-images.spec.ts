@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
 import { API, GIF, mockHeroApi, png, seedState, signInAs, staff, SUPER_ADMIN, type HeroState } from './helpers/hero-mock';
+import { openAllNavGroups } from './helpers/nav';
 
 // Admin "App photos" + the remote-capable login panel (design spec photo-hero-screens §36–§38,
 // AC-N1..N18; plan slice 5). The API is mocked (functions#216 contract); nothing signs in for real.
@@ -105,7 +106,7 @@ test.describe('flags off', () => {
     await mockHeroApi(page, s);
     await page.goto('/admin/');
     // Phase 2B S2: sidebar groups start closed (only the current page's group is open). Open them all first.
-    for (const closed = page.locator('aside:not(#mobile-drawer) [data-testid="nav-group"] > button[aria-expanded="false"]'); await closed.count() > 0;) await closed.first().click();
+    await openAllNavGroups(page);
     await expect(page.getByRole('link', { name: 'Exercises' })).toBeVisible();
     await expect(page.getByRole('link', { name: 'App photos' })).toHaveCount(0);
     await expect(page.locator('a[href^="/admin/hero-images"]')).toHaveCount(0);

@@ -276,7 +276,7 @@ const ADMIN_GROUPS: Array<[groupKey: string, hrefs: string[]]> = [
   ['nav.group.b2b',            ['/admin/corporate', '/admin/b2b', '/admin/b2b-ops', '/admin/b2b-analytics']],
   ['nav.group.engagement',     ['/admin/challenges', '/admin/rewards', '/admin/events', '/admin/event-rewards', '/admin/exercises', '/admin/programmes', '/admin/communications']],
   ['nav.group.promotionShop',  ['/admin/promotion-overview', '/admin/promotions', '/admin/promotion-campaigns', '/admin/shop-merch', '/admin/promotion-analytics', '/admin/promotion-limits']],
-  ['nav.group.trust',          ['/admin/moderation', '/admin/reviews', '/admin/social', '/admin/partner-media', '/admin/hero-images']],
+  ['nav.group.trust',          ['/admin/moderation', '/admin/partner-media', '/admin/reviews', '/admin/social', '/admin/hero-images']],
   ['nav.group.insights',       ['/admin/analytics', '/admin/kpi-targets']],
   ['nav.group.system',         ['/admin/settings', '/admin/settlement-config', '/admin/tax-rates', '/admin/users', '/admin/audit']],
 ];

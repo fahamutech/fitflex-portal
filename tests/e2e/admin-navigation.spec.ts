@@ -57,6 +57,7 @@ test.describe('admin sidebar groups', () => {
     await setup(page, superAdmin);
     await page.goto('/admin');
     const groups = sidebar(page).getByTestId('nav-group');
+    await expect(groups.first()).toBeVisible();
     const n = await groups.count();
     expect(n).toBeGreaterThanOrEqual(9);
     for (let i = 0; i < n; i++) expect(await groups.nth(i).getByRole('link', { includeHidden: true }).count()).toBeLessThanOrEqual(7);
