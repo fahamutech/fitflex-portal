@@ -1,4 +1,5 @@
 import { expect, request, test } from '@playwright/test';
+import { openAllNavGroups } from './helpers/nav';
 
 const API = process.env.FITFLEX_API_URL || 'http://localhost:3000';
 
@@ -26,6 +27,8 @@ test('admin portal exposes localized management console', async ({ page }) => {
 
   await page.goto('/admin');
   await expect(page.getByRole('heading', { name: 'Overview' })).toBeVisible();
+  // Phase 2B S2: sidebar groups start closed (only the current page's group is open). Open them all first.
+  await openAllNavGroups(page);
   await expect(page.getByRole('link', { name: 'Gyms' }).first()).toBeVisible();
   await expect(page.getByRole('link', { name: 'Owners' }).first()).toBeVisible();
   await expect(page.getByRole('link', { name: 'Trainers' }).first()).toBeVisible();
