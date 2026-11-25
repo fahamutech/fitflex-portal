@@ -73,7 +73,7 @@ export interface PayReply { state: PayState; reason?: string; paymentRequest?: P
 
 /** Error codes the member pages show. Sign-in codes come from the web check-in (same PIN sign-in, same EN/SW messages). */
 export type MemberCode = CheckinCode | 'not_member' | 'payment_already_pending' | 'no_active_pass' | 'invalid_phone' | 'network_required'
-  | 'invalid_bank' | 'invalid_account_number' | 'invalid_otp' | 'amount_over_bank_limit' | 'bank_attempts_exhausted' | 'provider_rejected'
+  | 'invalid_bank' | 'invalid_account_number' | 'invalid_otp' | 'amount_over_bank_limit' | 'bank_attempts_exhausted' | 'upgrade_plan_not_active' | 'upgrade_plan_not_found' | 'provider_rejected'
   | 'not_payable_this_way' | 'return_not_configured' | 'invalid_return_to' | 'invalid_language'
   | 'feature_disabled' | 'payment_not_pending' | 'too_many_attempts' | 'active_subscription_required'
   | 'slot_already_booked' | 'slot_in_past' | 'slot_not_available' | 'trainer_unavailable' | 'trainer_not_available_at_gym' | 'cannot_book_own_sessions'
@@ -85,7 +85,7 @@ export type MemberCode = CheckinCode | 'not_member' | 'payment_already_pending' 
 /** Codes with their own member.err.* message (src/lib/i18n-member.ts). */
 export const MEMBER_PASSTHROUGH: ReadonlySet<string> = new Set<string>(['payment_already_pending', 'no_active_pass',
   'invalid_phone', 'network_required', 'feature_disabled', 'payment_not_pending',
-  'invalid_bank', 'invalid_account_number', 'invalid_otp', 'amount_over_bank_limit', 'bank_attempts_exhausted', 'provider_rejected',
+  'invalid_bank', 'invalid_account_number', 'invalid_otp', 'amount_over_bank_limit', 'bank_attempts_exhausted', 'upgrade_plan_not_active', 'upgrade_plan_not_found', 'provider_rejected',
   'not_payable_this_way', 'return_not_configured', 'invalid_return_to', 'invalid_language',
   'active_subscription_required', 'slot_already_booked', 'slot_in_past', 'slot_not_available', 'trainer_unavailable',
   'trainer_not_available_at_gym', 'cannot_book_own_sessions', 'challenge_closed', 'challenge_paused', 'team_required', 'gym_required', 'not_your_gym', 'already_joined', 'not_joined',
